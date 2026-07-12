@@ -1,0 +1,29 @@
+{
+  "fixtureVersion": 1,
+  "sanitization": {"paths": "<fixture-root>", "content": "synthetic fixture text only", "providerCalls": false},
+  "environment": {"piVersion": "0.80.6", "architecture": "x86_64", "mode": "rpc", "sessionPersistence": true},
+  "observations": [
+    {"id": "startup-shutdown", "result": "pass", "evidence": "RPC accepted get_state and was terminated with SIGTERM after command completion."},
+    {"id": "durable-session-create", "result": "pass", "evidence": "get_state returned a persisted fixture sessionFile and sessionId."},
+    {"id": "session-listing", "result": "pass", "evidence": "SessionManager.list(fixtureCwd, fixtureSessionDir) returned two synthetic durable sessions with metadata fields id,path,cwd,name,messageCount."},
+    {"id": "session-reopen", "result": "pass", "evidence": "switch_session accepted a fixture session path."},
+    {"id": "messages-entries-tree", "result": "pass", "evidence": "get_messages, get_entries, and get_tree returned successful structured responses."},
+    {"id": "fork", "result": "pass", "evidence": "fork on synthetic user entry abc12345 returned cancelled:false."},
+    {"id": "clone", "result": "pass", "evidence": "clone on an independently opened synthetic one-message session returned cancelled:false."},
+    {"id": "session-name", "result": "pass", "evidence": "set_session_name succeeded; later get_state returned fixture-session."},
+    {"id": "export-empty", "result": "observed", "evidence": "export_html failed before an assistant conversation with: Nothing to export yet - start a conversation first."},
+    {"id": "delete-rpc", "result": "observed", "evidence": "delete_session returned success:false, error: Unknown command: delete_session. Upstream documents interactive picker deletion using trash when available."},
+    {"id": "missing-session", "result": "observed", "evidence": "switch_session to a nonexistent fixture path returned success:true, cancelled:false; adapter must prevalidate existence instead of treating RPC success as reopen proof."},
+    {"id": "corrupt-session", "result": "pass", "evidence": "switch_session to invalid JSONL returned success:false with a sanitized invalid-session error."},
+    {"id": "resource-discovery", "result": "pass", "evidence": "A CLI extension resources_discover hook emitted setStatus before normal command handling."},
+    {"id": "extension-ui", "result": "pass", "evidence": "Synthetic extension emitted and received responses for select, confirm, input, editor, notify, setStatus, setWidget, setTitle, and set_editor_text."}
+  ],
+  "responseShapes": {
+    "get_state": ["model", "thinkingLevel", "isStreaming", "isCompacting", "steeringMode", "followUpMode", "sessionFile", "sessionId", "autoCompactionEnabled", "messageCount", "pendingMessageCount"],
+    "extensionUiMethodsObserved": ["select", "confirm", "input", "editor", "notify", "setStatus", "setWidget", "setTitle", "set_editor_text"]
+  },
+  "contradictionsAndCorrections": [
+    {"affectedContract": "Pi session reopen", "evidence": "missing-session observation", "correction": "The bridge must check its stored Pi session reference exists and is a regular readable file before spawning/switching; Pi RPC success alone is insufficient."},
+    {"affectedContract": "Pi session deletion", "evidence": "delete-rpc observation", "correction": "M12 must implement deletion through a separately tested adapter path; it cannot map to a nonexistent Pi RPC delete command."}
+  ]
+}

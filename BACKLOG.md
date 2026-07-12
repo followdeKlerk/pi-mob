@@ -65,8 +65,8 @@ A task is Done when:
 
 | Checkpoint | Outcome | Depends on | Status |
 |---|---|---|---|
-| M0 | Specification and upstream contract freeze | — | ACTIVE |
-| M1 | Monorepo scaffold and CI foundations | M0 | PLANNED |
+| M0 | Specification and upstream contract freeze | — | DONE |
+| M1 | Monorepo scaffold and CI foundations | M0 | READY |
 | M2 | Protocol schemas and shared fixtures | M1 | PLANNED |
 | M3 | Real Pi RPC adapter proven | M2 | PLANNED |
 | M4 | Durable bridge core and replay streams | M2, M3 | PLANNED |
@@ -114,20 +114,20 @@ A task is Done when:
 
 ## Remaining executable evidence
 
-- [ ] **M0-18 P0 M** Create Pi compatibility manifest: repository commit, package integrity, executable SHA-256, and RPC/session/extension documentation hashes.
-- [ ] **M0-19 P0 M** Enumerate every pinned Pi command/event/resource mapping into schema metadata.
-- [ ] **M0-20 P0 M** Verify real Pi durable session listing, reopen, fork, clone, export, deletion/trash, corruption, and trust-resource discovery fixtures.
-- [ ] **M0-21 P0 S** Capture official Flutter archive checksum/ref for the actual development architecture.
-- [ ] **M0-22 P0 S** Record Bun revision/artifact checksum and supported bridge architecture target.
-- [ ] **M0-23 P0 M** Add documentation link, backlog/decision ID, normative-index, and protocol-catalogue consistency checks during M1.
+- [x] **M0-18 P0 M** Create Pi compatibility manifest: repository commit, package integrity, executable SHA-256, and RPC/session/extension documentation hashes.
+- [x] **M0-19 P0 M** Enumerate every pinned Pi command/event/resource mapping into schema metadata.
+- [x] **M0-20 P0 M** Verify real Pi durable session listing, reopen, fork, clone, export behaviour, deletion/trash availability, corruption, and trust-resource discovery fixtures. Missing session paths are prevalidated by the future adapter because Pi may create them on switch; Pi has no delete-session RPC command.
+- [x] **M0-21 P0 S** Capture official Flutter archive checksum/ref for the actual development architecture.
+- [x] **M0-22 P0 S** Record Bun revision/artifact checksum and supported bridge architecture target.
+- [ ] **M1-15 P0 M** Add documentation link, backlog/decision ID, normative-index, and protocol-catalogue consistency checks as part of the M1 scaffold and CI foundation.
 
 ## M0 exit criteria
 
-- [ ] Pi compatibility manifest is committed.
-- [ ] Real Pi session/resource assumptions have fixtures or documented corrections.
-- [ ] Flutter/Bun artifact evidence is recorded.
-- [ ] No executable evidence contradicts normative architecture.
-- [ ] M1 is marked READY and activated in `WORKING.md`.
+- [x] Pi compatibility manifest is committed.
+- [x] Real Pi session/resource assumptions have fixtures or documented corrections.
+- [x] Flutter/Bun artifact evidence is recorded.
+- [x] No executable evidence contradicts normative architecture after the documented Pi-adapter corrections.
+- [x] M1 is marked READY and activated in `WORKING.md`.
 
 **Evidence:** compatibility manifest, sanitized Pi fixture inventory, toolchain checksums, spec checks.
 
@@ -799,6 +799,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-Finish M0-18 through M0-22. Then mark M0 DONE, set M1 ACTIVE in this file and `WORKING.md`, and scaffold the repository.
+M0 is complete. M1 is READY; activate it in `WORKING.md` when beginning the monorepo scaffold.
 
 Do not start transcript polish, push notifications, session-tree UI, or plugin experimentation before M1/M2 exits.

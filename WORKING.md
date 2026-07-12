@@ -1,16 +1,16 @@
 # Working
 
-Status: specification closeout
+Status: M1 activation ready
 
 ## Current checkpoint
 
-**M0 — Specification and upstream contract freeze**
+**M1 — Monorepo scaffold and CI foundations**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Product, architecture, protocol, data, runtime, UX, security, testing, release, toolchain, and decision documents are now normative.
 
 ## Current objective
 
-Close the remaining evidence tasks in M0, then activate **M1 — Monorepo scaffold and CI foundations**.
+Activate the M1 monorepo scaffold and CI foundation work. M0 evidence is frozen in `docs/compatibility/`.
 
 ## M0 completed in the second audit
 
@@ -33,34 +33,18 @@ Close the remaining evidence tasks in M0, then activate **M1 — Monorepo scaffo
 - macOS bridge floor corrected to `13.0+`.
 - Compiled Bun release configured to disable automatic `.env` and `bunfig.toml` loading.
 
-## Remaining M0 evidence
+## M0 evidence retained
 
-These do not require more broad architecture design:
+- `docs/compatibility/pi-0.80.6.manifest.json`
+- `docs/compatibility/pi-0.80.6.catalogue.json`
+- `docs/compatibility/fixtures/pi-0.80.6/rpc-session-contract.json`
+- `docs/compatibility/toolchain-evidence-2026-07-12.json`
 
-1. Create an upstream compatibility manifest with Pi commit/package/executable/doc hashes.
-2. Enumerate final Pi command/event mapping from the pinned executable into schema metadata.
-3. Verify Pi durable session listing/deletion/trust-resource discovery against real fixtures.
-4. Capture official Flutter platform archive checksum/ref for the actual development architecture.
-5. During M1 scaffold, freeze actual Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK combinations after both release builds compile.
-6. Add automated Markdown link, backlog-ID, normative-index, and protocol-catalogue consistency checks.
+The real-Pi fixture found two adapter requirements: validate a stored session path before `switch_session` (a missing path may be created) and implement deletion through a separately tested adapter path (there is no `delete_session` RPC command).
 
 ## Immediate next actions
 
-### 1. Close M0 compatibility evidence
-
-Create a machine-readable or Markdown manifest containing:
-
-```text
-Pi repository and commit
-Pi package/version/integrity
-Pi executable SHA-256
-RPC/session/extension documentation hashes
-Flutter archive/ref/checksum
-Bun version/revision
-supported macOS architecture target
-```
-
-### 2. Activate M1
+### 1. Activate M1
 
 Create:
 
@@ -73,7 +57,7 @@ packages/protocol-fixtures
 scripts
 ```
 
-### 3. Make one root validation command
+### 2. Make one root validation command
 
 It must run:
 
@@ -87,7 +71,7 @@ Markdown/spec checks
 secret/dependency checks
 ```
 
-### 4. Prove cross-language fixture loading
+### 3. Prove cross-language fixture loading
 
 Before implementing bridge business logic or transcript UI:
 

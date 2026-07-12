@@ -7,7 +7,7 @@ updated_utc: 2026-07-12
 root: .
 managed_by: manual specification refresh; regenerate with /check after M1 scaffold
 vcs: git
-branch: main
+branch: m0-contract-freeze
 cache_scope: project-orientation
 ```
 
@@ -16,7 +16,7 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: specification closeout
+status: M1 activation ready
 shape: docs-only
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
@@ -33,19 +33,20 @@ No application scaffold, manifests, executable code, CI, or tests exist yet.
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M0 — Specification and upstream contract freeze
-objective: close executable/toolchain evidence, then activate M1 scaffold
-next_checkpoint: M1 — Monorepo scaffold and CI foundations
+checkpoint: M1 — Monorepo scaffold and CI foundations
+objective: create the monorepo scaffold and root validation command
+next_checkpoint: M2 — Protocol schemas and shared fixtures
 blockers: none requiring a product decision
 ```
 
-Remaining M0 evidence:
+M0 evidence retained:
 
-- pinned Pi compatibility manifest and real executable hashes,
-- final upstream command/event/resource-discovery mapping,
-- Flutter archive checksum for the actual development architecture,
-- actual Xcode/iOS and Android build-tool pins during M1,
-- automated documentation/schema consistency checks.
+- `docs/compatibility/pi-0.80.6.manifest.json`,
+- `docs/compatibility/pi-0.80.6.catalogue.json`,
+- sanitized real-Pi session/resource fixture inventory,
+- Flutter/Bun x64 artifact evidence.
+
+M1 still freezes Xcode/iOS and Android build pins and adds documentation/schema consistency checks.
 
 ## read first
 

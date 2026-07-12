@@ -1,0 +1,21 @@
+{
+  "schemaVersion": 1,
+  "verifiedAtUtc": "2026-07-12",
+  "host": {"os": "macOS 15.7.7 (24G720)", "architecture": "x86_64"},
+  "flutter": {
+    "version": "3.44.4", "channel": "stable", "frameworkRevision": "ad70ec4617166f1c38e5d2bfd388af71fda14f06", "dartVersion": "3.12.2",
+    "officialArchive": "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_3.44.4-stable.zip",
+    "officialArchiveSha256": "32bca4386121042e827ff2d90edbd7c7fb47c514fc04d5a87db6e3202dafde5d",
+    "officialManifest": "https://storage.googleapis.com/flutter_infra_release/releases/releases_macos.json",
+    "artifactArchitecture": "x64",
+    "checksumEvidence": "Publisher release manifest entry for Flutter 3.44.4 macOS x64."
+  },
+  "bun": {
+    "version": "1.3.14", "revision": "0d9b296af33f2b851fcbf4df3e9ec89751734ba4", "artifactArchitecture": "x64",
+    "officialArtifact": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/bun-darwin-x64.zip",
+    "officialChecksumManifest": "https://github.com/oven-sh/bun/releases/download/bun-v1.3.14/SHASUMS256.txt",
+    "officialArtifactSha256": "4183df3374623e5bab315c547cfa0974533cd457d86b73b639f7a87974cd6633",
+    "installedExecutableSha256": "ea2f223e94bb2f4bf3050895113c3cf346438f6fa0501c8532284e063f72f7a0",
+    "compiledExecutable": {"supported": true, "officialReference": "https://bun.com/docs/bundler/executables", "command": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile <fixture> <fixture.ts>", "observedOutput": {"runtime": "1.3.14", "revision": "0d9b296af33f2b851fcbf4df3e9ec89751734ba4", "arch": "x64", "fileKind": "Mach-O 64-bit executable x86_64", "sha256": "ee2ba534374c871435c7c7d69b6b2df9341cdd5009bbb12236827f2947266a81"}}
+  }
+}

@@ -16,7 +16,7 @@ Dart: 3.12.2 bundled with the selected Flutter SDK
 Rules:
 
 - Install from the official stable archive or verified Flutter release artifact.
-- Record the exact platform archive SHA-256 during M1 setup.
+- The M0 evidence file records the exact official macOS x64 archive SHA-256 used by this development host: [`compatibility/toolchain-evidence-2026-07-12.json`](compatibility/toolchain-evidence-2026-07-12.json).
 - Commit a version-manager/tool-version declaration.
 - CI and golden environments use the same Flutter/Dart pair.
 - Flutter 3.47 is scheduled for a later 2026 stable window and is not adopted automatically.
@@ -61,7 +61,7 @@ Sources:
 
 ```text
 macOS bridge minimum: macOS 13.0
-architectures to prove in M1/M7: arm64; x64 only if an Intel host/release requirement remains real
+actual M0 verification host: x86_64; artifact proven in M0: x64. arm64 remains a required M1/M7 release-artifact proof before it may be supported
 ```
 
 Reason:
@@ -149,6 +149,6 @@ No dependency/toolchain update is routine. A proposed update must:
 4. Preserve or explicitly migrate protocol/database/config compatibility.
 5. Include rollback classification.
 
-## 9. Remaining M0/M1 verification
+## 9. Remaining M1 verification
 
-The versions are selected. M1 still must capture platform-specific archive checksums, exact Xcode/iOS SDK, Android SDK/AGP/Gradle/JDK, and supported bridge architecture artifacts from the actual build hosts.
+M0 captured Flutter/Bun x64 artifact evidence for the actual development host in [`compatibility/toolchain-evidence-2026-07-12.json`](compatibility/toolchain-evidence-2026-07-12.json). M1 still freezes exact Xcode/iOS SDK, Android SDK/AGP/Gradle/JDK, and any additional supported bridge architecture artifacts after real release builds pass.
