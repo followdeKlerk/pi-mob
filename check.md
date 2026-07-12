@@ -1,115 +1,249 @@
 # PROJECT_CHECK_V2
 
 ## meta
-updated_utc: 2026-07-12T15:00:47Z
+
+```text
+updated_utc: 2026-07-12
 root: .
-managed_by: /check
+managed_by: manual specification refresh; regenerate with /check after M1 scaffold
 vcs: git
-head: 79cb2a868aa6
 branch: main
-worktree_fingerprint: e3b0c44298fc1c14
 cache_scope: project-orientation
+```
 
 ## project
+
+```text
 name: pi-mob
-purpose: Flutter mobile client that drives a remote Pi (coding agent) RPC instance over a user-controlled Tailscale network.
-status: research
+purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
+status: specification closeout
 shape: docs-only
-stack: Flutter; Dart; Material 3; Tailscale Serve (MagicDNS wss); Pi RPC (JSONL over WebSocket)
-package_manager: none
-workspace: single
+mobile: Flutter 3.44.4 / Dart 3.12.2
+bridge: Bun 1.3.14 / TypeScript / SQLite WAL
+host_floor: macOS 13.0+
+transport: Tailscale Serve HTTPS + one multiplexed WebSocket
+agent: @earendil-works/pi-coding-agent 0.80.6 via pi --mode rpc subprocess
+protocol: 1.0, host/session streams, decimal-string cursors
+```
 
-## active_work
-source: WORKING.md
-status: unknown
-objective: not recorded
-next:
-- Define the first product/research question for the Flutter application (per PLANNING.md `## Next`).
-blockers:
-- Product requirements undefined; first Flutter screens not yet selected.
-do_not_touch:
-- PLANNING.md is the single source of truth for research decisions; do not restructure it.
+No application scaffold, manifests, executable code, CI, or tests exist yet.
 
-## commands
-setup: unknown
-dev: unknown
-build: unknown
-test: unknown
-lint: unknown
-typecheck: unknown
-format: unknown
-other:
-- none recorded
+## active work
 
-## entrypoints
-- PLANNING.md :: sole repository file; research, design lookup map, decisions, and next steps
+Source: [`WORKING.md`](WORKING.md)
+
+```text
+checkpoint: M0 — Specification and upstream contract freeze
+objective: close executable/toolchain evidence, then activate M1 scaffold
+next_checkpoint: M1 — Monorepo scaffold and CI foundations
+blockers: none requiring a product decision
+```
+
+Remaining M0 evidence:
+
+- pinned Pi compatibility manifest and real executable hashes,
+- final upstream command/event/resource-discovery mapping,
+- Flutter archive checksum for the actual development architecture,
+- actual Xcode/iOS and Android build-tool pins during M1,
+- automated documentation/schema consistency checks.
+
+## read first
+
+1. [`README.md`](README.md)
+2. [`docs/PRODUCT.md`](docs/PRODUCT.md)
+3. [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md)
+4. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)
+5. [`docs/PROTOCOL.md`](docs/PROTOCOL.md)
+6. [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md)
+7. [`docs/RUNTIME.md`](docs/RUNTIME.md)
+8. [`docs/UX.md`](docs/UX.md)
+9. [`docs/SECURITY.md`](docs/SECURITY.md)
+10. [`docs/TESTING.md`](docs/TESTING.md)
+11. [`docs/RELEASE.md`](docs/RELEASE.md)
+12. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md)
+13. [`docs/DECISIONS.md`](docs/DECISIONS.md)
+14. [`BACKLOG.md`](BACKLOG.md)
+15. [`WORKING.md`](WORKING.md)
+16. [`PLANNING.md`](PLANNING.md) — historical research only
+
+Normative documents under `docs/`, `BACKLOG.md`, and current `WORKING.md` override contradictory historical text in `PLANNING.md`.
 
 ## architecture
-- PLANNING.md :: Flutter app + bridge over Tailscale Serve wss to a host running `pi --mode rpc`; no app-layer auth; bridge owns Pi lifecycle, cwd selection, session mapping, credentials, replay, extension-dialog routing; mobile owns presentation, drafts, gestures, local cursors, notifications
 
-## flows
-- Pair and connect :: scan QR from Pi `/pi-mob` extension → Flutter opens `wss://<bridge>.<tailnet>.ts.net/ws?session=<id>` via Tailscale Serve → bridge spawns `pi --mode rpc` per active mobile session
-- Resume session :: persist last entry ID locally → on reconnect call `get_state` then `get_entries(since)` → treat `agent_settled` (not `agent_end`) as idle boundary
-- Tool rendering :: generic built-in tools (read, bash, edit, write, grep, find, ls) rendered as cards; extension select/confirm/input/editor mapped to native sheets; built-in TUI slash commands not exposed as RPC
+```text
+Flutter mobile app
+  -> private Tailscale Serve HTTPS origin
+  -> one WebSocket per host
+       -> mandatory host stream
+       -> full foreground session stream
+       -> bounded background session summary streams
+  -> Bun/TypeScript bridge on loopback
+       -> SQLite/WAL durable commands/events/leases/queues/trust
+       -> process supervisor
+       -> one pi --mode rpc subprocess per active session
+```
 
-## contracts
-- Pi RPC framing: LF-split JSONL, strip trailing `\r`, optional command-ID correlation, never generic line readers (PLANNING.md `## Pi mapping / Integration contract`).
-- QR payload schema: `wss://<bridge>.<tailnet>.ts.net/ws?session=<id>`; bridge contract for final path/envelope is TBD.
-- Tailscale is the sole connection-security boundary; MagicDNS + HTTPS/Serve required; no Funnel (public).
-- Project trust: Pi resource-loading policy, not a sandbox; bridge must surface what would load before starting an unknown workspace.
-- Provider credentials/OAuth remain host-side; mobile client must never receive or persist them.
+Authority:
 
-## conventions
-- Flutter first; revisit only if requirements demand native integration unreachable via plugins/platform channels :: PLANNING.md `## Decisions`
-- Use Flutter built-in Material 3 widgets; no third-party UI library until justified :: PLANNING.md `## Decisions`
-- Add a source to the lookup map only when it covers a gap not already mapped :: PLANNING.md `## Decisions`
-- Consult the first listed source in the Flutter design lookup map before parallel research :: PLANNING.md `## Flutter design resource lookup`
-- Impeller is the default renderer (sole on iOS; Metal/Vulkan target on Android API 29+) :: PLANNING.md `## Phase-2 product research / 120 fps motion target`
-- Reasoning display uses three surfaces (reasoning container, per-tool card, final answer); wrap streaming bubble in `RepaintBoundary`; gate typewriter behind user setting (≥16 ms cadence) :: PLANNING.md `## Phase-2 product research / Reasoning/thinking display`
+- Host owns repositories, provider credentials, Pi sessions, command state, event journals, attachments, exports, and processes.
+- Mobile owns unsent drafts, preferences, and a bounded reconstructible event cache.
+- Pi durable session is canonical conversation history.
+- Bridge journal is canonical transport/control recovery history.
 
-## state
-stable:
-- Stack decision: Flutter + Dart for the mobile client
-- Design baseline: Material 3 via Flutter built-in widget catalog
-- Transport: Tailscale Serve + MagicDNS wss; one `pi --mode rpc` subprocess per active mobile session
-- Pairing: Pi extension `/pi-mob` command renders a QR with the bridge endpoint
-active:
-- Research-supported defaults awaiting owner confirmation (host topology, workspace selection UX, tool UX policy, background/notification policy, privacy defaults) — see PLANNING.md `## Research-supported defaults awaiting owner confirmation`
-- Open architecture decisions enumerated in PLANNING.md `## Architecture choices still open` (8 items)
-known_issues:
-- No code, manifests, tests, or CI exist yet; this is a docs-only repo
-- No git remote configured
-- Obsidian integration deferred; CVE in community `obsidian-local-rest-api` (GHSA-62gx-5q78-wrvx) — must not be used
+## key flows
 
-## documentation
-- PLANNING.md :: sole repo document; research findings, Flutter design lookup map, Pi integration contract, decisions, next steps
-- /Users/nathandekleerk/.pi/agent/AGENTS.md :: global durable agent rules (not in-repo)
+### Pair
 
-## navigation
-read_first:
-- PLANNING.md :: entire project context lives here until code lands
-task_map:
-- Mobile-stack rationale :: PLANNING.md `## Findings`
-- Flutter design lookup :: PLANNING.md `## Flutter design resource lookup`
-- Pi ↔ mobile integration :: PLANNING.md `## Pi mapping`
-- QR pairing + Tailscale :: PLANNING.md `## QR pairing and Tailscale connection`
-- Open decisions to confirm :: PLANNING.md `## Architecture choices still open`
-- Phase-2 research (reasoning UI, 120 fps, Obsidian) :: PLANNING.md `## Phase-2 product research`
-- Next concrete step :: PLANNING.md `## Next`
-ignore:
-- .git :: VCS internals
+```text
+host CLI/Pi extension renders non-secret host QR
+-> mobile confirms host/endpoint
+-> hello/version/capability handshake
+-> host stream subscription
+-> replay or snapshot
+-> host dashboard
+```
+
+### Prompt
+
+```text
+mobile commandId + leaseId
+-> bridge validates
+-> command/event acceptance transaction
+-> receipt
+-> one Pi dispatch
+-> normalized session events
+-> agent_settled maps to turn.settled
+```
+
+### Reconnect
+
+```text
+hello with expected host ID/generation
+-> subscription.set with cursor map
+-> per-stream current/replay/snapshot-required
+-> atomic snapshot if required
+-> post-baseline replay
+-> commands enabled after synchronization
+```
+
+### Follow-up
+
+```text
+running turn + explicit follow_up
+-> durable bridge-owned FIFO queue
+-> removable before dispatch
+-> dispatch after agent_settled
+```
+
+### Crash
+
+```text
+accepted but undispatched -> may dispatch once after recovery
+running at crash -> indeterminate; never automatic rerun
+```
+
+## locked decisions
+
+- Single human owner.
+- Tailscale is sole connection-authentication boundary.
+- Loopback bridge; no Funnel/public access.
+- Flutter/Dart mobile; Material 3 plus project token layer.
+- Bun/TypeScript bridge compiled standalone.
+- Bun 1.3.14 requires macOS 13+ host floor.
+- Compiled bridge disables automatic `.env` and `bunfig.toml` loading.
+- Current Pi source/package/version: `earendil-works/pi`, `@earendil-works/pi-coding-agent`, `0.80.6`.
+- Pi remains subprocess RPC boundary.
+- One WebSocket per host.
+- Host and session streams use decimal-string cursors.
+- One controller lease per session.
+- Durable command ID and semantic payload hash.
+- Running-at-crash is indeterminate.
+- One Pi process per active session; three active by default.
+- Durable bridge-owned follow-up queue; no offline auto-send.
+- Configured workspace roots; no general filesystem browser.
+- Explicit Pi project-resource trust.
+- Full and host-enforced Read-only modes; no sandbox claim.
+- HTTPS JPEG/PNG attachments and HTML exports.
+- Status-only best-effort push/Live Activity.
+- Private TestFlight/signed Android release first.
+
+## commands
+
+No commands exist yet. M1 must define at least:
+
+```text
+setup
+format
+lint/analyze
+typecheck
+unit test
+protocol fixture check
+all checks
+bridge dev/build
+mobile dev/build
+clean
+```
+
+## target entrypoints after M1
+
+```text
+apps/mobile/lib/main.dart
+packages/bridge/src/main.ts
+packages/pi-extension/src/index.ts
+packages/protocol-schema/src/index.ts
+packages/protocol-fixtures/
+```
 
 ## guardrails
-- Tailnet-only deployment; never expose bridge via Tailscale Funnel or public internet (PLANNING.md `## Runtime and security constraints`).
-- Provider credentials stay host-side; mobile must not store API keys or OAuth tokens.
-- QR extension must refuse loopback or wildcard hostnames — not phone-reachable.
-- `obsidian-local-rest-api` plugin must not be used (known path-traversal CVE).
-- Do not register `obsidian://` URI scheme (conflicts with official Obsidian app); use HTTPS Universal/App Links or a custom scheme.
-- Flutter source claims depend on pin of Flutter version and CI rendering environment for visual-regression goldens.
 
-## unknowns
-- Whether AGENTS.md or WORKING.md will be added at project root (none present today)
-- Whether the bridge will live in this repo or alongside Pi; not yet committed
-- Final WS path/envelope in QR payload; bridge contract TBD (PLANNING.md `## QR pairing and Tailscale connection`)
-- Process/session model, workspace policy, trust policy, tool UX policy, background policy, privacy defaults — all awaiting owner confirmation
-- Verified: no manifests, source dirs, tests, CI, or remote exist in this repo today (`ls`, `git status`, `git remote -v`)
+- Never expose bridge through Funnel or a non-loopback production listener.
+- Never store provider or push service credentials on mobile.
+- Never source interactive/login shell startup files for Pi RPC.
+- Never represent protocol cursors as JSON numbers.
+- Never acknowledge a mutating command before durable acceptance commits.
+- Never automatically repeat an action that was running during a crash.
+- Never auto-send a disconnected draft.
+- Never let mobile-only UI enforce Read-only policy.
+- Never claim workspace roots/read-only mode are an OS sandbox.
+- Never log transcript/source/secret content by default.
+- Never put transcript/path/tool content in default notifications.
+- Never add an unbounded queue, output, cache, log, or event buffer.
+- Never update Pi/Flutter/Bun/native plugins without compatibility review.
+
+## backlog navigation
+
+```text
+M0 specification/upstream freeze
+M1 scaffold/CI
+M2 protocol schemas/fixtures
+M3 real Pi adapter
+M4 durable bridge streams/idempotency
+M5 one-session end-to-end client
+M6 failure/process supervision
+M7 macOS install/Serve/pairing/doctor
+M8 workspace trust/read-only
+M9 transcript/tools/composer
+M10 models/context/retry/compaction/commands
+M11 multi-session/controller leases
+M12 tree/fork/clone/delete/restore
+M13 attachments/export/share
+M14 extension UI/durable queue
+M15 notifications/background
+M16 accessibility/performance/privacy hardening
+M17 signed personal MVP
+```
+
+Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.md).
+
+## known issues / intentionally incomplete
+
+- Docs-only repository; no executable validation yet.
+- Exact Flutter platform archive checksum not recorded yet.
+- Exact Xcode/iOS SDK and Android build toolchain not frozen until scaffold builds.
+- Real Pi compatibility manifest and sanitized session fixtures not yet committed.
+- Linux/Windows/Termux/public store/multi-user/sandbox/Obsidian are post-MVP.
+- `PLANNING.md` contains obsolete research statements and must not be treated as normative.
+
+## next action
+
+Close remaining M0 evidence, then scaffold M1. Do not begin polished UI or push work before shared protocol fixtures and the real Pi adapter are proven.
