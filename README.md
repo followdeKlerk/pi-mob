@@ -10,7 +10,7 @@ Current checkpoint: **M0 — specification and upstream contract freeze**.
 
 Next implementation checkpoint: **M1 — monorepo scaffold and CI foundations**.
 
-See [`BACKLOG.md`](BACKLOG.md) for the complete checkpoint plan.
+See [`BACKLOG.md`](BACKLOG.md) for the complete checkpoint plan and [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) for the final coverage review.
 
 ## What it does
 
@@ -60,9 +60,10 @@ The bridge binds to loopback only. Tailscale is the sole connection-authenticati
 10. [`docs/RELEASE.md`](docs/RELEASE.md) — build, distribution, install, update, rollback, and release evidence.
 11. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) — verified initial versions and platform floors.
 12. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision ledger and revisit conditions.
-13. [`BACKLOG.md`](BACKLOG.md) — achievable checkpoints M0–M17 and post-MVP work.
-14. [`WORKING.md`](WORKING.md) — current objective and immediate next actions.
-15. [`PLANNING.md`](PLANNING.md) — research history and earlier exploration.
+13. [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) — concern-by-concern coverage and remaining executable evidence.
+14. [`BACKLOG.md`](BACKLOG.md) — achievable checkpoints M0–M17 and post-MVP work.
+15. [`WORKING.md`](WORKING.md) — current objective and immediate next actions.
+16. [`PLANNING.md`](PLANNING.md) — research history and earlier exploration.
 
 Normative documents under `docs/`, `BACKLOG.md`, and current `WORKING.md` override contradictory historical text in `PLANNING.md`.
 
