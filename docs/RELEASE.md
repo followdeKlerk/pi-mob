@@ -2,376 +2,407 @@
 
 Status: normative for MVP.
 
-This document defines toolchain pinning, environments, CI, packaging, private distribution, installation, update, rollback, compatibility, and release evidence.
+This document defines environments, CI, packaging, private distribution, installation, update, rollback, compatibility, and release evidence. Exact baseline versions and source references are also recorded in [`TOOLCHAIN.md`](TOOLCHAIN.md).
 
 ## 1. Release channels
 
 ### Development
 
-- Local Flutter debug/profile builds.
-- Bridge run from source.
-- Fault injection allowed only behind explicit development/test build flag.
-- Manual endpoint entry supported.
-- Development database/config kept separate from release state.
+- Flutter debug/profile builds.
+- Bridge run from pinned source toolchain.
+- Separate development state/config.
+- Fault injection enabled only by explicit test/development build.
+- Manual endpoint entry available.
 
-### Internal
+### Internal release candidate
 
-- Signed bridge release candidate.
+- Compiled bridge artifact using production limits/config semantics.
 - iOS TestFlight build.
-- Signed Android release APK or private internal distribution.
-- Production protocol and migration behaviour.
-- Test push credentials/entitlements scoped to internal bundle IDs where possible.
+- Signed Android release APK/private internal distribution.
+- Real Pi, device, lifecycle, migration, and rollback evidence.
+- Test push credentials separated from stable credentials where possible.
 
 ### Stable personal release
 
-- Signed/notarized macOS bridge bundle or installer artifacts where practical.
+- Signed/notarized macOS bridge installer/artifacts where practical.
 - Private TestFlight or registered-device iOS distribution.
 - Signed Android release build.
 - No public App Store or Play Store listing required for MVP.
 
-## 2. Versioning
+## 2. Independent versions
 
-Components version independently:
+Track independently:
 
 ```text
-mobile app version
-bridge version
+mobile app semantic version
+bridge semantic version
 protocol major.minor
-Pi version/range
+Pi exact version/tested range
 bridge database schema version
 mobile database schema version
 configuration schema version
+release manifest version
 ```
 
-Use semantic versioning for mobile and bridge before `1.0.0`:
+Before `1.0.0`:
 
-- patch: fixes with no protocol/schema expansion,
-- minor: backward-compatible capability/schema additions,
-- major: incompatible product/protocol behaviour.
+- patch: compatible fixes,
+- minor: additive compatible features/capabilities,
+- major: incompatible application behaviour.
 
-Protocol has explicit major/minor independent from app versions.
+Protocol compatibility follows its own major/minor rules.
 
-## 3. Initial pins
+## 3. Frozen initial baseline
 
-Verified planning baseline on 2026-07-12:
+Verified/selected on 2026-07-12:
 
-- Flutter stable family: `3.44`.
-- Project pin currently selected: Flutter `3.44.4`, Dart `3.12.2`.
-- Pi package: `@earendil-works/pi-coding-agent` `0.80.6`.
-- Pi upstream repository: `earendil-works/pi`.
-- Protocol: `1.0` before implementation corrections are finalized; all v1 corrections land before code is released.
-- Android `minSdk`: 29 by deliberate product choice.
-- iOS deployment target: 16.1 for Live Activities.
+```text
+Flutter: 3.44.4 stable, release ref ad70ec4
+Dart: 3.12.2 bundled with selected Flutter
+Bun: 1.3.14 stable, release ref 0d9b296
+Pi: @earendil-works/pi-coding-agent 0.80.6 exact
+Pi upstream: earendil-works/pi
+Protocol: 1.0
+macOS bridge minimum: 13.0
+Android minSdk: 29
+ iOS deployment target: 16.1
+```
 
-The scaffold checkpoint must verify that every exact toolchain artifact exists and record its checksum/ref. A planning document is not sufficient proof of an installable pin.
+M1 still records platform archive checksums, exact Xcode/iOS SDK, Android compile/target SDK, AGP, Gradle, JDK, and supported bridge architecture artifacts after real builds pass.
 
-Bun is pinned to an exact stable version in `.tool-versions` or equivalent during scaffold. Do not use canary. Release builds compile a standalone executable so end users do not require a global Bun runtime. Bun's current platform requirements must be checked against the oldest supported host before freezing the pin.
+The earlier Catalina/macOS 10.15 bridge claim is obsolete: pinned Bun requires macOS 13 or later.
 
-## 4. Pin and update policy
+## 4. Deterministic Bun release build
 
-- Exact direct dependency versions.
+Release builds use a standalone executable so the user does not manage a global Bun runtime.
+
+Bun compiled executables currently auto-load nearby `.env` and `bunfig.toml` unless disabled. Production build MUST disable both:
+
+```text
+bun build --compile \
+  --no-compile-autoload-dotenv \
+  --no-compile-autoload-bunfig \
+  ...
+```
+
+Runtime configuration comes only from:
+
+- explicit versioned `config.toml`,
+- Pi's supported provider credential storage,
+- owner-approved Keychain/secrets files,
+- explicit allowlisted environment configuration.
+
+Release smoke tests prove an adjacent `.env` or `bunfig.toml` cannot alter bridge behaviour.
+
+## 5. Pin and dependency policy
+
+- Exact direct dependencies.
 - Committed lockfiles.
+- Pinned stable toolchains; no canary/floating latest.
 - No blind automated major updates.
-- Dependency update PRs include changelog/source review and applicable compatibility tests.
-- Pi updates require RPC, session, extension, and real-binary contract tests.
-- Flutter updates require Android/iOS build, golden, accessibility, lifecycle, and performance review.
-- Bun updates require compiled-binary, SQLite, WebSocket, subprocess, and macOS deployment smoke tests.
-- Native plugin updates require platform permission/entitlement review.
+- Dependency updates include source/changelog/security/license review.
+- Pi update requires RPC/session/extension/real-binary contract suite.
+- Flutter update requires build, golden, accessibility, lifecycle, and performance review.
+- Bun update requires compiled executable, autoload, SQLite, WebSocket, subprocess, and macOS smoke tests.
+- Native plugin update requires permission/entitlement/background/privacy review.
 
-Review cadence:
+Review before every release candidate, on major upstream change, and at least every three months during active development.
 
-- before each release candidate,
-- on any major component update,
-- when upstream announces breaking RPC/session/extension changes,
-- at least once every three months while actively developing.
+## 6. Required pin/build files in M1
 
-## 5. CI workflows
+```text
+.tool-versions or equivalent
+pubspec.lock
+bun.lock
+exact package.json versions
+Flutter/Dart version declaration
+protocol/schema generated-artifact manifest
+bridge build metadata generator
+release manifest schema
+```
 
-### Documentation/spec gate
+Build metadata records version, revision, source commit, protocol/schema versions, architecture, and artifact checksum.
 
-Before scaffold:
+## 7. CI workflows
 
-- Markdown link check.
-- Duplicate/backlog ID check.
-- Normative-document index check.
-- No unresolved `TBD` in a milestone marked Ready.
+### Documentation/spec
+
+- Markdown links.
+- Duplicate backlog/decision IDs.
+- Normative index.
+- Protocol command/event catalogue drift.
+- Generated schema/fixture drift.
+- No unresolved blocking `TBD` in Ready/Active checkpoint.
 
 ### Bridge
 
-- format, lint, and typecheck,
-- unit and property tests,
+- format/lint/typecheck,
+- unit/property/fuzz tests,
 - protocol fixtures,
-- SQLite migrations and upgrade fixtures,
-- real Pi contract suite where runner credentials allow,
-- compiled binary smoke test,
-- macOS arm64 and x64 build strategy or explicit architecture limitation,
-- secret and dependency scans.
+- SQLite migration/upgrade/restore fixtures,
+- real pinned Pi contract suite,
+- compiled executable smoke test,
+- adjacent `.env`/`bunfig.toml` non-autoload test,
+- macOS architecture artifact tests,
+- secret/dependency/license scans.
 
 ### Mobile
 
-- Dart format and analyze,
-- unit/widget tests,
-- protocol fixtures,
-- goldens in pinned environment,
-- integration test compile,
+- Dart format/analyze/unit/widget tests,
+- protocol fixture parity,
+- pinned-environment goldens,
+- integration test compile/run,
 - Android release build,
-- iOS build/signing check where CI credentials allow,
-- permission and privacy manifest checks.
+- iOS build/signing check where credentials permit,
+- permission/privacy/backup manifest checks.
 
 ### Cross-component
 
-- app/bridge protocol matrix,
-- reconnect/idempotency/fault suite,
-- snapshot/replay compatibility,
-- release fixture against pinned Pi,
-- generated schema drift check.
+- protocol compatibility matrix,
+- reconnect/idempotency/controller/queue fault suite,
+- replay/snapshot/generation compatibility,
+- real Pi release fixture,
+- install/update/rollback smoke suite.
 
-## 6. Branch and release policy
+## 8. Branch/checkpoint policy
 
-During early personal development:
+- `main` remains documentation-consistent and, after scaffold, buildable.
+- Use short-lived branches once code exists.
+- A backlog checkpoint lands only after its demo and exit criteria pass.
+- No long-lived `develop` branch required.
+- Tag executable checkpoints/releases after artifacts exist.
 
-- `main` remains buildable and documentation-consistent.
-- Use short-lived feature branches once code exists.
-- Milestone checkpoints merge only after their demo and exit gate pass.
-- Tag checkpoint releases as `checkpoint/mN-name` or use GitHub releases with corresponding semantic versions after executable artifacts exist.
-
-No long-lived develop branch is required.
-
-## 7. Bridge release artifact
-
-Release bundle contains:
+## 9. Bridge release bundle
 
 ```text
 pi-mob-bridge executable
 Pi extension package
 LaunchAgent template
-config template and schema documentation
+config template/schema
 migration metadata
-install script
-update script
-rollback script
-uninstall script
+install/update/rollback/uninstall scripts
 doctor command/help
-checksums
-release manifest
+checksums/release manifest
 license notices
+known issues/release notes
 ```
 
-Release manifest records:
+Manifest records:
 
-- bridge version and commit,
-- protocol version,
-- schema versions,
-- Bun version/revision used to compile,
-- supported host OS/architectures,
-- exact Pi version/range,
-- artifact SHA-256 checksums,
-- migration compatibility,
+- bridge/source/protocol/schema/config versions,
+- Flutter/Bun/Pi versions and relevant revisions,
+- supported macOS versions/architectures,
+- artifact SHA-256,
+- migration and rollback classification,
+- required capabilities,
 - known limitations.
 
-## 8. macOS installation
+## 10. macOS installation
 
-Installer workflow:
+Supported floor: macOS 13.0.
 
-1. Verify supported macOS and architecture.
-2. Verify Tailscale CLI/app visibility.
-3. Verify Pi executable and exact version.
-4. Choose/create application support directories with owner-only permissions.
-5. Generate stable `hostId`.
-6. Create versioned config.
-7. Capture/propose explicit PATH and allowlisted environment names.
+Installer:
+
+1. Verify OS and architecture.
+2. Verify Tailscale visibility/MagicDNS/Serve prerequisites.
+3. Verify exact Pi executable/version.
+4. Create owner-only application support/state/secrets/log directories.
+5. Generate stable host ID.
+6. Write versioned config.
+7. Propose explicit PATH and allowlisted environment names.
 8. Install Pi extension.
-9. Install LaunchAgent.
+9. Install user LaunchAgent.
 10. Start bridge and wait for readiness.
-11. Configure persistent Tailscale Serve to loopback.
+11. Configure persistent Serve to loopback.
 12. Run doctor.
 13. Display QR/manual endpoint.
 
-Installer never:
+Installer MUST NOT:
 
-- runs bridge as root,
-- configures Funnel,
-- copies the complete shell environment,
-- writes secrets into repository/config,
-- deletes an existing database without backup.
+- run bridge as root,
+- configure Funnel,
+- copy complete shell environment,
+- source interactive startup files,
+- write secrets to Git/config/normal logs,
+- delete or replace state without verified backup,
+- overwrite unrelated Serve routes.
 
-## 9. Environment setup
+## 11. Environment setup
 
-Because LaunchAgents do not behave like an interactive shell:
+LaunchAgents do not inherit the interactive terminal environment.
 
-- configure absolute Pi path,
-- configure explicit PATH,
-- default pass-through to safe variables such as locale and `SSH_AUTH_SOCK` only when present/approved,
-- use owner-only optional env file for project/tool variables,
-- prefer Pi's own credential storage for providers,
-- show variable names before capture,
-- never source `.zshrc`, `.bashrc`, or login profiles in the Pi RPC process.
+Configure:
 
-Doctor checks executable resolution for Pi and common configured toolchain paths without printing environment values.
+- absolute Pi path,
+- explicit PATH,
+- approved locale/`SSH_AUTH_SOCK` and other allowlisted names,
+- owner-only optional tool environment file,
+- Pi's own provider credential stores.
 
-## 10. Update
+Never launch Pi through `zsh -lc`, `bash -lc`, `.zshrc`, `.bashrc`, or a login shell. Doctor verifies executable resolution without printing values.
 
-Update is explicit and initiated on the host.
+## 12. Update
 
-1. Download/select verified release artifact.
-2. Verify checksum and manifest.
-3. Check compatibility with current Pi/config/schema.
+Host-initiated explicit flow:
+
+1. Select/download release.
+2. Verify checksum/signature/manifest.
+3. Check Pi/config/schema/platform compatibility.
 4. Run preflight doctor.
-5. Stop accepting commands and drain.
-6. Back up database/config.
+5. Drain/reject new commands.
+6. Back up database/config and retain old artifact.
 7. Stop LaunchAgent.
 8. Replace binary/extension/scripts.
-9. Run migrations.
-10. Start service and verify readiness.
-11. Verify Serve target.
-12. Retain previous artifact and backup for rollback.
+9. Run classified migrations.
+10. Start and verify readiness.
+11. Verify Serve target and doctor.
+12. Retain rollback material.
 
-The mobile app may display an update requirement but does not remotely update the bridge in MVP.
+Mobile may explain update requirement but cannot update bridge remotely in MVP.
 
-## 11. Rollback
+## 13. Rollback
 
-Rollback classes:
+Classify every release:
 
-- Binary-only: restore previous binary.
-- Reversible migration: run down migration and restore binary.
-- Restore-required: restore pre-update database/config backup and previous binary.
+- `binary_only`,
+- `reversible_migration`,
+- `restore_required`.
 
-Rollback must preserve or explicitly invalidate stream generation. If state moves backwards, increment `hostGeneration` and force mobile snapshots.
+Rollback restores corresponding artifact/state. If durable state moves backwards, increment `hostGeneration` so mobile discards stream caches and snapshots again.
 
-Never claim rollback support for a release whose migration is not classified/tested.
+Do not claim rollback until tested for that release.
 
-## 12. Uninstall
+## 14. Uninstall
 
-Offer separately:
+Offer explicit variants:
 
-- remove service/binary only and retain data,
-- remove service and bridge state,
-- full removal including extensions, exports, attachments, logs, and backups.
+1. Remove service/binary, retain bridge state.
+2. Remove service and bridge state.
+3. Full bridge removal including extension, attachments, exports, logs, and backups.
 
-Pi durable sessions are listed separately and are not deleted by default.
+Pi durable sessions are listed separately and retained by default. Remove only pi-mob-owned Serve configuration after target verification.
 
-Uninstall removes Tailscale Serve configuration created by pi-mob only after verifying ownership/target.
+## 15. iOS distribution
 
-## 13. Mobile distribution
+Initial path: TestFlight/private registered-device distribution.
 
-### iOS
+Before internal release:
 
-Initial path: TestFlight.
+- stable bundle ID,
+- signing team/profiles,
+- APNs and Live Activities configuration,
+- camera/photo/notification purpose strings,
+- privacy manifest,
+- backup/file-protection verification,
+- export-compliance/TestFlight privacy metadata,
+- real-device lifecycle/accessibility tests.
 
-Required before internal release:
+## 16. Android distribution
 
-- stable bundle identifier,
-- signing team and profiles,
-- APNs entitlement,
-- Live Activities entitlement/configuration,
-- camera/photo permission strings,
-- notification permission copy,
-- privacy manifest review,
-- export-compliance answers,
-- TestFlight data/privacy metadata.
+Initial path: signed release APK/private internal distribution.
 
-### Android
-
-Initial path: signed release APK or private internal app sharing.
-
-Required:
+Before internal release:
 
 - stable application ID,
-- release keystore stored outside repository,
-- notification permission/runtime handling,
-- foreground-service type/permission review,
-- camera/photo picker handling,
+- release keystore outside repository,
+- current target/compile SDK decision,
+- notification/foreground-service permission/type review,
+- camera/photo picker,
 - backup exclusion rules,
-- data safety documentation even when not publicly listed,
-- target SDK review at scaffold/release time.
+- data-safety documentation,
+- real-device lifecycle/accessibility tests.
 
-## 14. Push setup
+## 17. Push setup
 
-Push is optional/degraded until milestone C.
+Push is degraded/optional until M15.
 
 APNs:
 
-- token-based provider key,
-- team ID, key ID, topic,
+- token key, team ID, key ID, topic,
 - environment separation,
-- key stored host-side.
+- host-side protected credential.
 
 FCM:
 
-- HTTP v1 service account,
-- project/application registration,
-- credential stored host-side,
-- high-priority messages reserved for user-visible urgent status and still treated as best effort.
+- HTTP v1 service account/project registration,
+- host-side protected credential,
+- high priority only for user-visible urgent status,
+- still treated as best effort.
 
-Release evidence includes device tests; simulator-only push evidence is insufficient.
+Real-device evidence is required; simulator-only evidence is insufficient.
 
-## 15. Compatibility handshake and blocking
+## 18. Compatibility handshake
 
 Connection reports:
 
-- mobile version,
-- bridge version,
-- protocol major/minor,
-- host generation,
-- Pi version,
-- schema-derived capabilities.
+```text
+mobile version
+bridge version
+protocol major/minor
+host generation
+Pi version
+schema-derived capabilities and limits
+```
 
 Rules:
 
-- protocol major mismatch: refuse.
-- missing required capability: refuse affected workflow or connection as defined.
-- additive unknown event: ignore safely and diagnose.
-- Pi mismatch: bridge not ready for affected session start.
-- mobile too old: actionable update screen.
-- bridge too old: host update instructions.
+- protocol major mismatch: refuse,
+- missing required capability: refuse affected workflow/connection,
+- additive unknown optional event: ignore safely/diagnose,
+- Pi mismatch: bridge/session not ready,
+- mobile/bridge too old: actionable update UX,
+- state rollback/restore: new host generation and snapshots.
 
-## 16. Observability and release evidence
+## 19. Release evidence
 
-Every release candidate retains:
+Every candidate retains:
 
 - CI results,
 - protocol/schema diff,
-- migration test report,
+- migration/restore report,
 - real Pi contract report,
-- fault-injection report,
+- fault-injection matrix,
+- install/update/rollback report,
 - device matrix,
 - accessibility checklist,
-- performance measurements,
-- doctor output with redaction,
-- dependency/license report,
+- performance/resource measurements,
+- redacted doctor output,
+- dependency/license/security report,
 - known issues and rollback classification.
 
-No external analytics service is required for MVP. Local structured diagnostics are sufficient for one owner.
+No external analytics service is required for one-owner MVP.
 
-## 17. Release blockers
+## 20. Release blockers
 
 Block release for:
 
-- any duplicate-dispatch failure,
-- replay ordering or snapshot corruption,
-- database acceptance without durability,
-- secret/transcript leakage in logs or notifications,
-- production non-loopback listener,
-- Funnel configuration,
-- missing rollback classification,
+- duplicate dispatch,
+- replay/snapshot/generation corruption,
+- acceptance without durable commit,
+- controller dual ownership,
+- removed queue item dispatch,
+- automatic rerun of indeterminate action,
+- secret/transcript leakage in logs/notifications/artifacts,
+- non-loopback production listener or Funnel,
+- adjacent `.env`/`bunfig.toml` affecting compiled bridge,
 - incompatible Pi accepted as ready,
-- fault-injection endpoint in release build,
-- inaccessible critical actions,
-- unbounded memory/disk path,
-- unsigned/unverifiable release artifacts where signing is expected.
+- missing rollback classification,
+- release fault endpoint/control,
+- inaccessible critical action,
+- unbounded memory/disk/queue/output path,
+- unsupported/unsigned/unverifiable artifact.
 
-## 18. Upstream watch list
+## 21. Upstream watch list
 
-Monitor:
+Monitor without automatic adoption:
 
-- Pi repository/package ownership/name and RPC/session/extension docs,
-- Flutter stable releases and breaking changes,
-- Dart language/runtime,
-- Bun compiled executable and SQLite behaviour,
-- Tailscale Serve CLI/config semantics,
-- Android background/foreground service rules,
+- Pi repository/package and RPC/session/extension changes,
+- Flutter/Dart stable and breaking changes,
+- Bun runtime/compiled executable/SQLite/platform floors,
+- Tailscale Serve semantics,
+- Android foreground/background rules,
 - APNs/ActivityKit requirements,
-- FCM HTTP v1 and message-priority behaviour,
-- chosen Flutter plugins for Drift, QR, notifications, Live Activities, and app links.
+- FCM HTTP v1/priority behaviour,
+- selected Flutter native plugins.
 
-A watch-list change does not automatically trigger an update; it triggers backlog review.
+Any material change triggers backlog/decision review before update.
