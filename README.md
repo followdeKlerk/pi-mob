@@ -6,9 +6,9 @@ A private Flutter mobile control surface for Pi coding-agent sessions running on
 
 The product and architecture are specified deeply enough to begin implementation. The repository is still docs-first: no Flutter or bridge scaffold exists yet.
 
-Current checkpoint: **M0 — specification and upstream contract freeze**.
+Current checkpoint: **M1 — monorepo scaffold and CI foundations**.
 
-Next implementation checkpoint: **M1 — monorepo scaffold and CI foundations**.
+M0 compatibility and toolchain evidence is frozen in [`docs/compatibility/`](docs/compatibility/).
 
 See [`BACKLOG.md`](BACKLOG.md) for the complete checkpoint plan and [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) for the final coverage review.
 
