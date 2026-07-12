@@ -2,72 +2,70 @@
 
 Status: normative delivery plan.
 
-The backlog decomposes the MVP into independently demonstrable checkpoints. A checkpoint is complete only when its exit criteria and evidence pass; partial happy-path UI does not count.
+This backlog decomposes the MVP into independently demonstrable checkpoints. A checkpoint is complete only when its exit criteria and evidence pass; a partial happy path does not count.
 
-## How to use this backlog
+## Backlog conventions
 
 Statuses:
 
 ```text
-PLANNED   accepted but dependency not complete
+PLANNED   accepted, dependency not complete
 READY     dependencies and decisions complete
-ACTIVE    current implementation checkpoint
-BLOCKED   cannot proceed; blocker recorded
-DONE      exit criteria and evidence complete
-DEFERRED  intentionally outside current MVP
+ACTIVE    current checkpoint
+BLOCKED   blocker recorded
+DONE      demo, exit criteria, tests, and evidence complete
+DEFERRED  intentionally outside MVP
 ```
 
 Priorities:
 
 ```text
-P0 correctness/release blocker
+P0 correctness or release blocker
 P1 core MVP
-P2 valuable hardening or polish
+P2 hardening or polish
 P3 post-MVP
 ```
 
-Effort is relative only:
+Relative effort:
 
 ```text
-S focused change
-M multi-component change
-L checkpoint-sized change
+S focused task
+M multi-layer task
+L checkpoint-sized task
 ```
-
-Every task should land with tests and documentation appropriate to its layer.
 
 ## Global definition of ready
 
 A task is Ready when:
 
-- its parent checkpoint dependencies are Done,
-- required protocol/state shapes are documented,
-- no unresolved hard product choice blocks implementation,
+- dependencies are Done,
+- product/state/protocol behaviour exists,
 - failure behaviour is defined,
 - test approach is named,
-- external credentials/hardware required for the task are available or the task has a deterministic substitute.
+- required credentials/hardware exist or a deterministic substitute is defined,
+- no unresolved hard product decision blocks it.
 
 ## Global definition of done
 
 A task is Done when:
 
-- implementation matches normative docs,
+- implementation matches normative documents,
 - applicable format/lint/type/unit/fixture/integration checks pass,
 - state changes are durable and duplicate-safe,
-- reconnect/failure behaviour is covered,
-- logs are redacted,
-- accessibility semantics exist for user-facing work,
-- no unbounded storage/memory path is introduced,
+- reconnect/failure/controller behaviour is covered,
+- logs and diagnostics are redacted,
+- user-facing accessibility semantics exist,
+- storage/memory/output/queue limits are bounded,
 - documentation and backlog status are updated,
 - checkpoint evidence is retained.
 
 ---
 
-# MVP checkpoint map
+# Checkpoint map
 
 | Checkpoint | Outcome | Depends on | Status |
 |---|---|---|---|
-| M0 | Specification and upstream contract frozen | — | ACTIVE |
+| M0 | Specification and upstream contract freeze | — | ACTIVE |
 | M1 | Monorepo scaffold and CI foundations | M0 | PLANNED |
 | M2 | Protocol schemas and shared fixtures | M1 | PLANNED |
 | M3 | Real Pi RPC adapter proven | M2 | PLANNED |
@@ -77,519 +75,278 @@ A task is Done when:
 | M7 | macOS install, Serve pairing, and doctor | M6 | PLANNED |
 | M8 | Workspaces, trust, and read-only policy | M7 | PLANNED |
 | M9 | Production transcript, tools, and composer | M8 | PLANNED |
-| M10 | Models, context, retry, compaction, commands | M9 | PLANNED |
+| M10 | Models, context, retry, compaction, and commands | M9 | PLANNED |
 | M11 | Multi-session control and controller leases | M10 | PLANNED |
-| M12 | Session tree, fork, clone, delete, restore | M11 | PLANNED |
+| M12 | Session tree, fork, clone, delete, and restore | M11 | PLANNED |
 | M13 | Attachments, export, and OS sharing | M12 | PLANNED |
 | M14 | Extension UI and durable follow-up queue | M13 | PLANNED |
 | M15 | Notifications and background experience | M14 | PLANNED |
-| M16 | Accessibility, performance, privacy hardening | M15 | PLANNED |
-| M17 | Personal MVP release candidate | M16 | PLANNED |
+| M16 | Accessibility, performance, privacy, and operations hardening | M15 | PLANNED |
+| M17 | Signed personal MVP release candidate | M16 | PLANNED |
 
 ---
 
 # M0 — Specification and upstream contract freeze
 
-**Outcome:** The repository contains one consistent implementable specification and a verified dependency baseline.
+**Outcome:** One consistent implementable specification plus a verified dependency/upstream baseline.
 
-**Checkpoint demo:** A new contributor can explain the product, state ownership, protocol, failure semantics, and next task without relying on chat history.
+**Checkpoint demo:** A new contributor can explain product scope, authority, protocol, state machines, failure semantics, and the next implementation task without chat history.
 
-### M0.1 Normative document set
+## Completed specification work
 
-- **Priority:** P0
-- **Effort:** M
-- **Status:** ACTIVE
+- [x] **M0-01 P0 M** Product goals, journeys, requirements, non-goals, and success criteria.
+- [x] **M0-02 P0 L** Components, authority, one-host connection, host/session streams, leases, queues, and state machines.
+- [x] **M0-03 P0 L** Bridge-mobile protocol with decimal-string cursors, replay, atomic snapshots, commands, errors, limits, attachments, and exports.
+- [x] **M0-04 P0 L** Host/mobile data model, retention, backup, migrations, deletion, restore, purge, and repair.
+- [x] **M0-05 P1 L** Complete mobile information architecture, screens, interaction states, and accessibility rules.
+- [x] **M0-06 P0 L** Security/privacy threat model, controls, accepted risks, incidents, and review triggers.
+- [x] **M0-07 P0 M** Runtime/service/environment/process/storage/diagnostics contract.
+- [x] **M0-08 P0 M** Test strategy and deterministic failure matrix.
+- [x] **M0-09 P0 M** Build, private distribution, install, update, rollback, uninstall, and release evidence.
+- [x] **M0-10 P0 M** Architecture decision ledger.
+- [x] **M0-11 P0 L** M0–M17 checkpoint backlog plus cross-cutting and post-MVP work.
+- [x] **M0-12 P0 M** Final concern-by-concern specification coverage audit.
+- [x] **M0-13 P0 S** README, WORKING, defaults, testing, release, runtime, and check orientation reconciled.
+- [x] **M0-14 P0 S** Current Pi repository/package/version identified.
+- [x] **M0-15 P0 S** Flutter `3.44.4`, Bun `1.3.14`, Pi `0.80.6`, iOS 16.1, Android API 29 selected.
+- [x] **M0-16 P0 S** macOS bridge floor corrected to 13.0+.
+- [x] **M0-17 P0 S** Compiled Bun release requires automatic `.env`/`bunfig.toml` loading disabled.
 
-Tasks:
+## Remaining executable evidence
 
-- [x] Product goals, journeys, requirements, non-goals, and success criteria.
-- [x] System components, authority, streams, leases, queues, and state machines.
-- [x] Durable host/mobile data model, retention, backup, migration, deletion, and repair.
-- [x] Mobile screen and state specification.
-- [x] Security/privacy threat model and accepted risks.
-- [x] Build, distribution, update, rollback, and operational specification.
-- [x] Architecture decision ledger with review triggers.
-- [x] Checkpointed implementation backlog.
-- [ ] Correct bridge-mobile protocol to match architecture.
-- [ ] Reconcile README, WORKING, defaults, testing, and check snapshot.
+- [ ] **M0-18 P0 M** Create Pi compatibility manifest: repository commit, package integrity, executable SHA-256, and RPC/session/extension documentation hashes.
+- [ ] **M0-19 P0 M** Enumerate every pinned Pi command/event/resource mapping into schema metadata.
+- [ ] **M0-20 P0 M** Verify real Pi durable session listing, reopen, fork, clone, export, deletion/trash, corruption, and trust-resource discovery fixtures.
+- [ ] **M0-21 P0 S** Capture official Flutter archive checksum/ref for the actual development architecture.
+- [ ] **M0-22 P0 S** Record Bun revision/artifact checksum and supported bridge architecture target.
+- [ ] **M0-23 P0 M** Add documentation link, backlog/decision ID, normative-index, and protocol-catalogue consistency checks during M1.
 
-### M0.2 Upstream Pi compatibility audit
+## M0 exit criteria
 
-- **Priority:** P0
-- **Effort:** M
-- **Status:** ACTIVE
+- [ ] Pi compatibility manifest is committed.
+- [ ] Real Pi session/resource assumptions have fixtures or documented corrections.
+- [ ] Flutter/Bun artifact evidence is recorded.
+- [ ] No executable evidence contradicts normative architecture.
+- [ ] M1 is marked READY and activated in `WORKING.md`.
 
-Tasks:
-
-- [x] Identify current upstream repository `earendil-works/pi`.
-- [x] Identify current package `@earendil-works/pi-coding-agent`.
-- [x] Confirm initial version `0.80.6`.
-- [x] Review RPC command union and extension UI shapes.
-- [x] Confirm strict LF JSONL semantics.
-- [x] Confirm `agent_settled` idle semantics.
-- [x] Confirm tool-call extension hook can block policy violations.
-- [ ] Capture a permanent compatibility manifest containing upstream commit, package integrity, RPC docs hash, and tested executable hash.
-- [ ] Enumerate every Pi RPC command/event consumed by MVP and map it to bridge protocol.
-- [ ] Verify Pi durable session file discovery/listing/deletion behaviours against real fixtures.
-- [ ] Decide and document how project trust-bearing resources are enumerated using the pinned Pi implementation.
-
-### M0.3 Toolchain pin verification
-
-- **Priority:** P0
-- **Effort:** S
-- **Status:** READY
-
-Tasks:
-
-- [ ] Verify exact Flutter `3.44.4` archive artifact and Dart `3.12.2` pairing.
-- [ ] Select and record exact stable Bun version after macOS compatibility check.
-- [ ] Record Xcode, CocoaPods/SwiftPM, Android Gradle Plugin, Gradle, JDK, and Android SDK baselines during scaffold.
-- [ ] Add a `toolchain.lock.md` or machine-readable version file with sources/checksums where available.
-- [ ] Record supported macOS architecture(s) for the first bridge release.
-
-### M0 exit criteria
-
-- [ ] No contradictory normative statements remain.
-- [ ] Protocol v1 uses stream IDs and decimal-string cursors.
-- [ ] Every MVP capability appears in product, protocol/architecture, testing, and backlog.
-- [ ] Every unresolved item is either a backlog task or explicit post-MVP decision.
-- [ ] README points to the correct reading order.
-- [ ] `WORKING.md` names M1 as the next implementation checkpoint.
-- [ ] `check.md` reflects the current docs-first repository.
-
-**Evidence:** documentation link check, manual consistency checklist, upstream compatibility manifest draft.
+**Evidence:** compatibility manifest, sanitized Pi fixture inventory, toolchain checksums, spec checks.
 
 ---
 
 # M1 — Monorepo scaffold and CI foundations
 
-**Outcome:** Empty but buildable Flutter/TypeScript packages with pinned tools and mandatory checks.
+**Outcome:** Buildable empty Flutter/TypeScript packages with pinned tools and one root validation command.
 
-**Checkpoint demo:** One root command validates formatting, analysis/typechecking, unit placeholders, and shared fixture loading on both Dart and TypeScript.
+**Dependencies:** M0.
 
-### M1.1 Repository structure
+## Tasks
 
-- **Priority:** P0
-- **Effort:** M
-- **Status:** PLANNED
+- [ ] **M1-01 P0 M** Create `apps/mobile` Flutter app with iOS/Android deployment floors.
+- [ ] **M1-02 P0 M** Create `packages/bridge` Bun/TypeScript package with strict compiler settings.
+- [ ] **M1-03 P0 S** Create `packages/pi-extension`.
+- [ ] **M1-04 P0 S** Create `packages/protocol-schema`.
+- [ ] **M1-05 P0 S** Create `packages/protocol-fixtures`.
+- [ ] **M1-06 P0 M** Add root workspace/package configuration and exact lockfiles.
+- [ ] **M1-07 P0 S** Commit Flutter/Dart/Bun version declarations.
+- [ ] **M1-08 P0 M** Freeze actual Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK after release builds compile.
+- [ ] **M1-09 P0 M** Add root format, lint/analyze, typecheck, test, build, clean, and all-check commands.
+- [ ] **M1-10 P0 M** Add CI for bridge/mobile/docs/schema/secret/dependency/license checks.
+- [ ] **M1-11 P0 S** Add versioned config parser placeholder, separate dev/release state, and redaction-first logger interface.
+- [ ] **M1-12 P0 M** Compile Bun bridge smoke executable with `.env` and `bunfig.toml` autoload disabled.
+- [ ] **M1-13 P0 S** Prove release executable ignores adjacent hostile `.env`/`bunfig.toml`.
+- [ ] **M1-14 P0 S** Regenerate `check.md` from the real scaffold.
 
-Create:
+## Checkpoint demo
 
-```text
-apps/mobile
-packages/bridge
-packages/pi-extension
-packages/protocol-schema
-packages/protocol-fixtures
-scripts
-```
+A fresh checkout runs one root command that validates both languages and loads the same protocol fixture.
 
-Tasks:
+## Exit criteria
 
-- [ ] Root package/workspace configuration.
-- [ ] Flutter application with iOS/Android platforms and selected deployment floors.
-- [ ] Bun/TypeScript package with strict compiler settings.
-- [ ] Pi extension package.
-- [ ] Protocol schema and fixture packages.
-- [ ] Shared root commands for check, test, build, and clean.
-- [ ] `.editorconfig`, ignore files, line-ending policy, and generated-file policy.
-
-### M1.2 Quality gates
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] TypeScript formatter/linter/typecheck.
-- [ ] Dart format/analyze/test.
-- [ ] Markdown link and backlog-ID validation.
-- [ ] Secret scanning.
-- [ ] Dependency/license audit baseline.
-- [ ] CI cache strategy without caching secrets or mutable release output.
-- [ ] Branch protection/check names documented.
-
-### M1.3 Configuration foundations
-
-- **Priority:** P1
-- **Effort:** S
-
-Tasks:
-
-- [ ] Versioned TOML config parser/schema.
-- [ ] Separate development and release state directories.
-- [ ] Test-only fault flag impossible in release configuration.
-- [ ] Structured logger interface with redaction-first event fields.
-- [ ] Build/version metadata injection.
-
-### M1 exit criteria
-
-- [ ] Fresh checkout setup is documented and reproducible.
-- [ ] Root checks pass on macOS.
+- [ ] Fresh setup is reproducible and documented.
 - [ ] Flutter debug app launches.
-- [ ] Bridge hello-world executable runs from source and compiled form.
-- [ ] Protocol fixture is loaded and validated by Dart and TypeScript tests.
-- [ ] No real protocol or Pi execution is required yet.
+- [ ] Bridge runs from source and compiled form on supported macOS architecture.
+- [ ] Dart and TypeScript validate one shared fixture.
+- [ ] CI is green.
 
-**Evidence:** CI run, setup transcript, compiled bridge smoke artifact.
+**Evidence:** CI run, setup transcript, compiled artifact/checksum.
 
 ---
 
 # M2 — Protocol schemas and shared fixtures
 
-**Outcome:** Protocol v1 is executable as schemas/models with cross-language fixture parity.
+**Outcome:** Protocol v1 exists as executable schemas/models with Dart/TypeScript parity.
 
-**Checkpoint demo:** TypeScript and Dart independently accept every valid fixture, reject every invalid fixture, and produce semantically identical canonical envelopes.
+**Dependencies:** M1.
 
-### M2.1 Canonical schema package
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M2-01 P0 L** Define TypeBox envelope, handshake, capability, stream, subscription, snapshot, lease, command, event, error, attachment, and export schemas.
+- [ ] **M2-02 P0 M** Generate JSON Schema and command/event catalogue metadata.
+- [ ] **M2-03 P0 M** Implement immutable Dart discriminated union and validators.
+- [ ] **M2-04 P0 M** Implement arbitrary-precision decimal cursor comparison.
+- [ ] **M2-05 P0 M** Implement canonical semantic command serializer and SHA-256 input.
+- [ ] **M2-06 P0 L** Add valid fixture for every command/event/response/error.
+- [ ] **M2-07 P0 L** Add invalid/boundary/unknown optional/required-capability fixtures.
+- [ ] **M2-08 P0 M** Add host/session replay, gap, conflicting duplicate, and multipart snapshot fixtures.
+- [ ] **M2-09 P0 M** Add lease acquire/reclaim/takeover/expiry fixtures.
+- [ ] **M2-10 P0 M** Add command duplicate/conflict/indeterminate and queue fixtures.
+- [ ] **M2-11 P0 M** Add attachment/export/dialog/pagination boundary fixtures.
+- [ ] **M2-12 P0 S** Fail CI on generated schema/catalogue/fixture drift.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] TypeBox definitions for envelope, hello, capabilities, streams, subscriptions, leases, commands, events, snapshots, errors, attachments, and exports.
-- [ ] JSON Schema generation checked into or generated during CI.
-- [ ] Stable discriminated unions for all initial command/event types.
-- [ ] Required-capability declarations.
-- [ ] Decimal-string cursor validator and increment boundary tests.
-- [ ] RFC 3339 timestamp parser treating client time as informational.
-- [ ] Canonical semantic payload serializer/hash input.
+Dart and TypeScript accept all valid fixtures, reject all invalid fixtures, and produce identical canonical payload hashes.
 
-### M2.2 Dart protocol models
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Immutable Dart model union.
-- [ ] Unknown optional event representation.
-- [ ] Safe required-capability failure.
-- [ ] Cursor comparison/increment without numeric precision loss.
-- [ ] Stable error mapping to domain failures.
-
-### M2.3 Fixture corpus
-
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Valid fixture for every command/event.
-- [ ] Invalid fixture for every stable error family.
-- [ ] Major mismatch and additive minor examples.
-- [ ] Unknown optional fields/events.
-- [ ] Unknown required capability.
-- [ ] Host/session stream gap, duplicate, and snapshot examples.
-- [ ] Lease acquire/renew/takeover/loss examples.
-- [ ] Duplicate command same/different payload examples.
-- [ ] Queue add/remove/dispatch examples.
-- [ ] Maximum boundary payloads.
-- [ ] Golden canonical payload hashes.
-
-### M2.4 Protocol documentation validation
-
-- **Priority:** P1
-- **Effort:** S
-
-Tasks:
-
-- [ ] Generate command/event catalogue from schema metadata.
-- [ ] Fail CI when docs catalogue and schema drift.
-- [ ] Record protocol compatibility policy in generated artifacts.
-
-### M2 exit criteria
-
+- [ ] No cursor is a JSON number.
+- [ ] Every mutation declares lease/idempotency/recovery behaviour.
+- [ ] Every event declares host/session stream ownership.
 - [ ] Cross-language fixture suite passes.
-- [ ] No protocol cursor is represented as a JSON number.
-- [ ] Every mutating command declares lease/idempotency behaviour.
-- [ ] Every event declares host or session stream ownership.
 - [ ] Schema package contains no bridge business logic.
 
-**Evidence:** fixture matrix and generated schema diff.
+**Evidence:** fixture matrix and generated schema/catalogue.
 
 ---
 
 # M3 — Real Pi RPC adapter proven
 
-**Outcome:** A tested adapter controls pinned Pi and translates upstream behaviour without leaking upstream types into mobile protocol.
+**Outcome:** A strict tested adapter controls exact Pi `0.80.6` without leaking upstream shapes into mobile protocol.
 
-**Checkpoint demo:** A command-line harness starts real Pi, submits a deterministic provider-backed or controlled test prompt, captures streaming/tool/session events, and settles cleanly.
+**Dependencies:** M2.
 
-### M3.1 Strict JSONL transport
+## Tasks
 
-- **Priority:** P0
-- **Effort:** M
+- [ ] **M3-01 P0 M** Implement incremental LF JSONL splitter and bounded decoder.
+- [ ] **M3-02 P0 M** Add UTF-8/chunk/U+2028/U+2029/property/fuzz coverage.
+- [ ] **M3-03 P0 M** Implement response-ID correlation, stdin backpressure, timeout, and cancellation.
+- [ ] **M3-04 P0 M** Launch Pi directly with absolute executable, cwd, explicit PATH/env allowlist, process group, stdout/stderr separation.
+- [ ] **M3-05 P0 L** Map prompt/steer/follow-up/abort/new-session and lifecycle events.
+- [ ] **M3-06 P0 L** Map state/messages/entries/tree/model/thinking/modes/stats/commands.
+- [ ] **M3-07 P0 L** Map retry/compaction/session name/switch/fork/clone/export.
+- [ ] **M3-08 P0 L** Map built-in tools, parallel calls, errors, cancellation, and updates.
+- [ ] **M3-09 P0 L** Map interactive/presentation extension UI.
+- [ ] **M3-10 P0 M** Implement bounded redacted stderr diagnostics and process cleanup.
+- [ ] **M3-11 P0 L** Build sanitized real Pi session fixture corpus.
+- [ ] **M3-12 P0 M** Test missing/corrupt/incompatible sessions and extension-cancelled lifecycle operations.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] LF-only incremental splitter.
-- [ ] Trailing CR support.
-- [ ] UTF-8 split handling.
-- [ ] Multiple/partial records.
-- [ ] Bounded malformed-line diagnostics.
-- [ ] Backpressure-safe stdin writes.
-- [ ] Response ID correlation and timeout policy.
-- [ ] Property/fuzz tests including U+2028/U+2029.
+A CLI harness drives a real Pi process through a prompt/tool/session cycle and reaches `agent_settled`.
 
-### M3.2 Direct process launcher
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** M
+- [ ] Exact real Pi contract suite passes.
+- [ ] `agent_settled` is the only idle boundary.
+- [ ] Hostile shell startup files cannot corrupt RPC.
+- [ ] Adapter exports normalized domain types only.
+- [ ] Compatibility manifest contains exact executable and upstream evidence.
 
-Tasks:
-
-- [ ] Absolute executable and cwd.
-- [ ] Explicit PATH/environment allowlist.
-- [ ] No interactive/login shell.
-- [ ] Distinct process group.
-- [ ] Stdout protocol reservation and bounded stderr ring.
-- [ ] Clean shutdown, timeout, and forced group termination.
-
-### M3.3 Upstream command mapping
-
-- **Priority:** P0
-- **Effort:** L
-
-Map and test:
-
-- [ ] prompt, steer, follow_up, abort, new_session.
-- [ ] get_state, get_messages, get_entries, get_tree.
-- [ ] set/cycle/list model and thinking level.
-- [ ] steering/follow-up modes.
-- [ ] compact and auto-compaction.
-- [ ] auto-retry and abort-retry.
-- [ ] stats, commands, session name.
-- [ ] switch, fork, clone, fork messages.
-- [ ] export HTML.
-- [ ] extension UI requests/responses.
-- [ ] agent/turn/message/tool/retry/compaction/model events.
-
-### M3.4 Session fixture compatibility
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Create sanitized real Pi sessions with text/tool/fork/compaction/retry states.
-- [ ] Reopen and snapshot them.
-- [ ] Test missing/corrupt/incompatible session files.
-- [ ] Verify session naming, listing, switch, fork, clone, export, and deletion adapter assumptions.
-
-### M3 exit criteria
-
-- [ ] Real Pi `0.80.6` contract suite passes.
-- [ ] `agent_settled` is the only idle completion boundary.
-- [ ] Adapter exposes normalized domain events, not raw Pi types.
-- [ ] Pi startup cannot be corrupted by shell profile output.
-- [ ] Compatibility manifest includes exact tested upstream commit/executable.
-
-**Evidence:** sanitized RPC fixtures and real-binary contract report.
+**Evidence:** real-binary report and sanitized fixtures.
 
 ---
 
 # M4 — Durable bridge core and replay streams
 
-**Outcome:** The bridge durably accepts commands, journals host/session events, resumes cursors, and fails closed.
+**Outcome:** Bridge durably accepts commands, journals host/session streams, resumes cursors, and fails closed.
 
-**Checkpoint demo:** A local WebSocket test client submits a command, loses its acknowledgement, reconnects, resends, and observes one dispatch plus ordered replay.
+**Dependencies:** M2, M3.
 
-### M4.1 SQLite schema and migrations
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M4-01 P0 L** Implement SQLite schema/migrations/foreign keys/WAL/busy handling.
+- [ ] **M4-02 P0 M** Implement stable host ID and host generation.
+- [ ] **M4-03 P0 M** Implement `/healthz`, `/readyz`, and `/v1/ws` handshake/capabilities/limits.
+- [ ] **M4-04 P0 L** Implement host/session event streams and atomic cursor allocation.
+- [ ] **M4-05 P0 L** Implement subscriptions, replay, current state, and atomic multipart snapshots.
+- [ ] **M4-06 P0 M** Implement cursor ack, gap/conflict repair, and independent stream isolation.
+- [ ] **M4-07 P0 L** Implement durable command acceptance and semantic payload hashing.
+- [ ] **M4-08 P0 M** Implement duplicate current-state receipt and conflict rejection.
+- [ ] **M4-09 P0 M** Implement accepted-before-dispatch recovery and running-to-indeterminate recovery.
+- [ ] **M4-10 P0 M** Implement host/session command lanes.
+- [ ] **M4-11 P0 M** Implement controller lease persistence primitives.
+- [ ] **M4-12 P0 M** Implement size/rate/backpressure/slow-consumer handling.
+- [ ] **M4-13 P0 M** Add DB full/read-only/locked/corruption/backup/restore tests.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Implement entities/invariants from `docs/DATA_MODEL.md`.
-- [ ] WAL, foreign keys, busy timeout, transactions.
-- [ ] Migration framework and fixture databases.
-- [ ] Online backup and integrity-check primitives.
-- [ ] Database-full/read-only/corruption fault paths.
+A test client loses an accepted-command receipt, reconnects, resends, and observes one dispatch plus ordered replay.
 
-### M4.2 Handshake and connection generation
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] `/healthz`, `/readyz`, `/v1/ws`.
-- [ ] Hello version/capability negotiation.
-- [ ] Stable host ID and host generation.
-- [ ] Message/schema/size/rate validation.
-- [ ] Heartbeat, close codes, reconnect recommendations.
-
-### M4.3 Streams and subscriptions
-
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Mandatory host stream.
-- [ ] Session stream creation.
-- [ ] Atomic cursor allocation and persist-before-send.
-- [ ] `subscription.set` with cursor map.
-- [ ] Replay/current/snapshot-required outcomes.
-- [ ] Snapshot baseline reset.
-- [ ] Gap and duplicate handling.
-- [ ] Slow-consumer buffer limit and disconnect.
-
-### M4.4 Idempotent command journal
-
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Canonical semantic payload hash.
-- [ ] Acceptance transaction.
-- [ ] Duplicate same-payload lookup.
-- [ ] Different-payload conflict.
-- [ ] Accepted-before-dispatch recovery.
-- [ ] Running-at-crash indeterminate transition.
-- [ ] Per-host/per-session serialization lanes.
-
-### M4 exit criteria
-
-- [ ] No command acknowledges before durable acceptance.
-- [ ] Duplicate-resend suite proves one dispatch.
-- [ ] Host and session replay survive bridge restart.
-- [ ] Expired cursor snapshot replaces old stream atomically.
+- [ ] No acceptance without committed command/event.
+- [ ] Duplicate resend proves one dispatch.
+- [ ] Host/session replay survives bridge restart.
+- [ ] Expired cursor uses correct atomic snapshot baseline.
 - [ ] Database unavailable/full rejects new commands.
-- [ ] Logs contain no test prompt/output content by default.
 
-**Evidence:** bridge integration suite and database transition traces.
+**Evidence:** bridge integration and database-transition report.
 
 ---
 
 # M5 — One-session end-to-end diagnostic client
 
-**Outcome:** A plain Flutter client drives one real Pi session through the bridge and recovers after disconnect.
+**Outcome:** Plain Flutter client controls one real Pi session through bridge and recovers after disconnect/app restart.
 
-**Checkpoint demo:** On simulator or phone, manually connect, select one configured workspace, submit, stream, abort, disconnect, and resume.
+**Dependencies:** M4.
 
-### M5.1 Mobile transport/domain
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M5-01 P0 L** Implement mobile connection/handshake/synchronization state machine.
+- [ ] **M5-02 P0 M** Implement Drift schema/migrations for host/session/events/cursors/drafts.
+- [ ] **M5-03 P0 M** Implement ordered event reducer, deduplication, gaps, snapshots, host generation reset.
+- [ ] **M5-04 P0 M** Add manual endpoint and connection/version/readiness screen.
+- [ ] **M5-05 P0 M** Add one configured workspace/session flow.
+- [ ] **M5-06 P0 M** Add raw normalized transcript/event list.
+- [ ] **M5-07 P0 M** Add text draft, submit/receipt/error restoration, and abort.
+- [ ] **M5-08 P0 S** Disable offline send while retaining draft.
+- [ ] **M5-09 P0 M** Implement foreground reconnect and app process restart recovery.
+- [ ] **M5-10 P0 M** Run real prompt/abort/lost receipt/mid-stream disconnect proofs.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Host connection state machine.
-- [ ] Hello/subscription/resume.
-- [ ] Drift database and migrations.
-- [ ] Ordered event reducer/deduplication.
-- [ ] Host/session snapshots.
-- [ ] Draft persistence.
-- [ ] Immediate foreground reconnect.
+On simulator or phone: connect, submit to real Pi, stream, abort, disconnect, restart app, and reconcile without duplicate execution.
 
-### M5.2 Diagnostic UI
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** M
+- [ ] Real prompt completes and abort works.
+- [ ] Lost receipt produces one dispatch.
+- [ ] Replay reaches identical settled state.
+- [ ] Draft clears only after accepted/current receipt.
+- [ ] Offline draft never auto-sends.
 
-Tasks:
-
-- [ ] Manual endpoint entry.
-- [ ] Connection/version/readiness display.
-- [ ] One configured workspace/session.
-- [ ] Raw normalized event list.
-- [ ] Text composer and accepted state.
-- [ ] Abort.
-- [ ] Stale/disconnected banner.
-
-### M5.3 End-to-end proof
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Real bridge and Pi.
-- [ ] Real prompt completion.
-- [ ] Abort real turn.
-- [ ] Disconnect before acknowledgement and resend.
-- [ ] Disconnect during stream and replay.
-- [ ] App process restart and cache recovery.
-
-### M5 exit criteria
-
-- [ ] One real Flutter client completes and aborts a real Pi turn.
-- [ ] Lost acknowledgement produces one dispatch.
-- [ ] Ordered replay reaches the same settled transcript.
-- [ ] Draft is not cleared before acceptance.
-- [ ] Disconnected draft never auto-sends.
-
-**Evidence:** recorded demo and end-to-end test output.
+**Evidence:** recorded demo and end-to-end tests.
 
 ---
 
 # M6 — Failure recovery and process supervision
 
-**Outcome:** Process limits, crashes, host restart, slow clients, and storage failures produce correct durable states.
+**Outcome:** Pi/bridge/host/storage/network failures and resource limits produce truthful durable states.
 
-**Checkpoint demo:** Deterministic fault controls run the failure matrix and the app always shows settled, failed, or indeterminate truthfully.
+**Dependencies:** M5.
 
-### M6.1 Process supervisor
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M6-01 P0 L** Implement process state machine and process-group cleanup.
+- [ ] **M6-02 P0 M** Implement restart window/crash loop/manual retry.
+- [ ] **M6-03 P0 M** Implement active capacity and 30-minute eligible idle stop.
+- [ ] **M6-04 P0 M** Implement graceful host drain/shutdown/reboot restoration.
+- [ ] **M6-05 P0 L** Add test-only deterministic faults for receipt, dispatch, output pause, Pi/bridge kill, cursor, output, provider, DB, storage, notification, cleanup.
+- [ ] **M6-06 P0 M** Implement visible crash/indeterminate/crash-loop/provider interruption states.
+- [ ] **M6-07 P0 M** Implement oversized output truncation/digest metadata.
+- [ ] **M6-08 P0 M** Prove slow consumer disconnect/replay while Pi continues.
+- [ ] **M6-09 P0 S** Prove fault controls absent/unreachable in release build.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Process state machine.
-- [ ] Graceful/forced process-group cleanup.
-- [ ] Restart window and crash-loop threshold.
-- [ ] Three-process default capacity.
-- [ ] LRU eligible idle eviction.
-- [ ] 30-minute idle stop.
-- [ ] Lazy restore.
-- [ ] Host draining/shutdown.
+Run the deterministic P0 failure matrix; every case ends in settled, failed, aborted, or indeterminate truth without silent repetition.
 
-### M6.2 Fault injection
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** M
-
-Implement test-only faults:
-
-- [ ] close after acceptance,
-- [ ] pause output,
-- [ ] kill Pi after N events,
-- [ ] kill bridge after transition,
-- [ ] corrupt/expire cursor,
-- [ ] oversized output,
-- [ ] provider interruption,
-- [ ] database full,
-- [ ] attachment write failure,
-- [ ] notification rejection placeholder.
-
-### M6.3 Recovery UX states
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Pi crash idle/running.
-- [ ] Bridge crash accepted/running.
-- [ ] Host reboot.
-- [ ] Crash-loop/manual retry.
-- [ ] Slow-consumer reconnect.
-- [ ] Oversized output truncation.
-- [ ] Indeterminate inspection path.
-
-### M6 exit criteria
-
-- [ ] Entire P0 failure matrix passes deterministically.
-- [ ] No indeterminate action automatically repeats.
-- [ ] No running session is evicted for capacity.
-- [ ] Orphan/process cleanup diagnostics are bounded and redacted.
-- [ ] Release build cannot enable fault injection.
+- [ ] No indeterminate action auto-reruns.
+- [ ] No running/attention session is evicted.
+- [ ] Process cleanup and diagnostics are bounded/redacted.
+- [ ] Full failure matrix passes.
 
 **Evidence:** fault matrix report.
 
@@ -597,498 +354,238 @@ Tasks:
 
 # M7 — macOS install, Serve pairing, and doctor
 
-**Outcome:** A clean supported Mac can install, start, pair, diagnose, update, rollback, and uninstall the host bridge.
+**Outcome:** A clean macOS 13+ user installs, starts, pairs, diagnoses, updates, rolls back, and uninstalls bridge.
 
-**Checkpoint demo:** Fresh-user installation ends with a phone scanning a QR and opening a ready host dashboard.
+**Dependencies:** M6.
 
-### M7.1 Release packaging
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M7-01 P0 L** Produce supported architecture compiled release artifact/manifest/checksums/licenses.
+- [ ] **M7-02 P0 M** Install owner-only state/secrets/log directories and versioned config.
+- [ ] **M7-03 P0 M** Configure absolute Pi path, PATH, allowlisted environment, optional owner-only env file.
+- [ ] **M7-04 P0 M** Install user LaunchAgent and verify reboot lifecycle.
+- [ ] **M7-05 P0 L** Configure/verify persistent Tailscale Serve to loopback while preserving unrelated routes.
+- [ ] **M7-06 P0 M** Detect/reject Funnel/public/wildcard/plain-LAN endpoints.
+- [ ] **M7-07 P1 M** Implement QR in CLI/Pi extension and mobile camera scan.
+- [ ] **M7-08 P1 S** Implement manual endpoint and forget/re-pair recovery.
+- [ ] **M7-09 P0 L** Implement doctor versions/config/Serve/DB/backup/Pi/environment/process/storage/push checks.
+- [ ] **M7-10 P0 M** Implement redacted report.
+- [ ] **M7-11 P0 L** Implement explicit update/backup/migrate/verify/rollback flows.
+- [ ] **M7-12 P0 M** Implement uninstall retain-data/remove-state/full variants.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Compile bridge executable for supported architecture(s).
-- [ ] Release manifest/checksums/licenses.
-- [ ] LaunchAgent template.
-- [ ] Config template/schema.
-- [ ] Pi extension bundle.
-- [ ] Install/update/rollback/uninstall scripts.
+Fresh macOS 13+ account installs bridge, scans QR, opens ready host dashboard, then performs update/rollback/uninstall rehearsal.
 
-### M7.2 Environment capture/configuration
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** M
+- [ ] Fresh install/reboot/pair pass.
+- [ ] Compiled executable ignores adjacent `.env`/`bunfig.toml`.
+- [ ] Doctor identifies expected failures without secrets.
+- [ ] Rollback preserves or resets host generation correctly.
+- [ ] Uninstall preserves Pi sessions by default.
 
-Tasks:
-
-- [ ] Absolute Pi path verification.
-- [ ] Explicit PATH setup.
-- [ ] Allowlisted environment proposal.
-- [ ] Optional owner-only env file.
-- [ ] Owner-only state/secrets permissions.
-- [ ] Validate Pi/provider execution under LaunchAgent environment.
-
-### M7.3 Tailscale Serve
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Detect Tailscale/MagicDNS/HTTPS readiness.
-- [ ] Configure persistent Serve to loopback.
-- [ ] Detect/reject Funnel/public/wildcard/LAN targets.
-- [ ] Preserve unrelated Serve configuration.
-- [ ] Remove only pi-mob-owned configuration on uninstall.
-
-### M7.4 Pairing
-
-- **Priority:** P1
-- **Effort:** M
-
-Tasks:
-
-- [ ] Stable host ID/display name.
-- [ ] QR payload and rendering extension/CLI.
-- [ ] Camera scan.
-- [ ] Manual endpoint fallback.
-- [ ] Pair confirmation and compatibility UX.
-- [ ] Forget/re-pair behaviour.
-
-### M7.5 Doctor and maintenance
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Versions/config/schema.
-- [ ] Loopback/Serve.
-- [ ] DB integrity/backup age.
-- [ ] Pi executable/environment.
-- [ ] process/session/crash-loop state.
-- [ ] attachment/export paths.
-- [ ] notification degraded placeholder.
-- [ ] redacted copyable report.
-
-### M7 exit criteria
-
-- [ ] Fresh install and LaunchAgent restart pass.
-- [ ] Host reboot restores bridge and stopped session registry.
-- [ ] QR pair works through Tailscale Serve.
-- [ ] Update and tested rollback preserve host identity/state.
-- [ ] Uninstall variants behave as documented.
-
-**Evidence:** clean-machine install checklist and doctor output.
+**Evidence:** clean-machine checklist and doctor output.
 
 ---
 
 # M8 — Workspaces, trust, and read-only policy
 
-**Outcome:** The phone safely selects allowed workspaces, reviews Pi project resources, and enforces Full/Read-only policy host-side.
+**Outcome:** Mobile selects allowed roots, reviews Pi project resources, and host enforces Full/Read-only policy.
 
-**Checkpoint demo:** Select a new repository, approve displayed resources, run a Full turn, switch to Read-only, and observe mutating tools blocked.
+**Dependencies:** M7.
 
-### M8.1 Workspace roots and discovery
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M8-01 P0 M** Implement workspace root IDs/config/canonicalization.
+- [ ] **M8-02 P0 M** Implement recents and cancellable bounded-depth directory-name search.
+- [ ] **M8-03 P0 M** Reject symlink/path escapes and expose root-relative display paths.
+- [ ] **M8-04 P0 L** Implement pinned-Pi trust resource discovery/manifest/fingerprint/policy version.
+- [ ] **M8-05 P0 M** Implement approval/change invalidation persistence.
+- [ ] **M8-06 P0 L** Implement read-only host extension blocking write/edit/mutating bash/package/destructive/unknown tools.
+- [ ] **M8-07 P0 S** Snapshot policy at turn start.
+- [ ] **M8-08 P1 L** Build workspace picker, unavailable states, trust review, Full/Read-only choices, persistent indicator.
+- [ ] **M8-09 P0 M** Add traversal/symlink/trust/policy integration suite.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Root configuration/IDs/labels.
-- [ ] Canonicalization and symlink escape rejection.
-- [ ] Recents from sessions.
-- [ ] Incremental cancellable bounded-depth search.
-- [ ] Generated-directory exclusions.
-- [ ] Missing/moved/permission states.
-- [ ] Root-relative path exposure only.
+Approve a new repository, run Full mode, switch to Read-only, and observe host-side mutation denial.
 
-### M8.2 Trust fingerprint
-
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Pinned-Pi resource discovery implementation.
-- [ ] Relative manifest and content hashes.
-- [ ] Policy version.
-- [ ] Added/removed/changed diff.
-- [ ] Durable approval and invalidation.
-- [ ] New-process pause before changed resources load.
-
-### M8.3 Read-only extension policy
-
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Block write/edit.
-- [ ] Classify/block mutating bash.
-- [ ] Block package install and deletion paths covered by policy.
-- [ ] Allow read/grep/find/ls and safe state commands.
-- [ ] Turn policy snapshot.
-- [ ] Effective policy event/UI.
-- [ ] Unknown tool default policy decision and tests.
-
-### M8.4 Mobile UX
-
-- **Priority:** P1
-- **Effort:** M
-
-Tasks:
-
-- [ ] Recents/search picker.
-- [ ] Trust review/change screen.
-- [ ] Full vs Read-only choice.
-- [ ] Unavailable workspace recovery.
-- [ ] Persistent read-only indicator.
-
-### M8 exit criteria
+## Exit criteria
 
 - [ ] Picker cannot select outside roots.
-- [ ] Resource change triggers approval before process start.
-- [ ] Read-only mutation block is host-enforced and tested.
-- [ ] UI states do not claim sandbox protection.
+- [ ] Changed trust resources block new process start until approval.
+- [ ] Read-only mutation is host-enforced.
+- [ ] UI makes no sandbox claim.
 
-**Evidence:** traversal/trust/policy integration suite.
+**Evidence:** trust/path/policy report.
 
 ---
 
 # M9 — Production transcript, tools, and composer
 
-**Outcome:** The diagnostic UI becomes a polished, scalable, accessible agent transcript for one session.
+**Outcome:** Scalable accessible one-session agent transcript and reliable composer.
 
-**Checkpoint demo:** A long real session streams reasoning, parallel tools, output truncation, final answer, queue state, errors, and abort without scroll jank.
+**Dependencies:** M8.
 
-### M9.1 Transcript domain renderer
+## Tasks
 
-- **Priority:** P1
-- **Effort:** L
+- [ ] **M9-01 P1 L** Implement stable turn/item transcript domain model.
+- [ ] **M9-02 P1 M** Implement reasoning active/completed/absent states.
+- [ ] **M9-03 P1 L** Implement read/bash/edit/write/grep/find/ls tool cards.
+- [ ] **M9-04 P1 M** Implement parallel tool grouping and unknown generic tools.
+- [ ] **M9-05 P1 M** Implement tool errors/cancellation/truncation/large-output viewer.
+- [ ] **M9-06 P1 M** Implement Markdown final answer and safe selection/copy/link behaviour.
+- [ ] **M9-07 P1 M** Implement history paging, stable keys, anchor preservation, jump-to-latest.
+- [ ] **M9-08 P0 M** Isolate active streaming paint and profile 1,000 items.
+- [ ] **M9-09 P1 M** Implement multiline draft, accepted/error restoration, idle send, explicit steer/follow-up, observer/read-only/offline states.
+- [ ] **M9-10 P1 S** Implement accessible abort and significant-state announcements.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Stable turn/item model.
-- [ ] Reasoning/tool/final separation.
-- [ ] Streaming and completion reducers.
-- [ ] Unknown event/tool fallback.
-- [ ] Older-history paging.
-- [ ] Snapshot replacement without duplicate animations.
+A long real session streams reasoning and parallel tools, truncates huge output, remains scrollable, and preserves drafts across errors/reconnect.
 
-### M9.2 Tool cards
+## Exit criteria
 
-- **Priority:** P1
-- **Effort:** L
+- [ ] Real built-in tools render correctly.
+- [ ] Maximum output does not freeze UI.
+- [ ] Long-session performance target passes.
+- [ ] Text scale/reduced-motion baseline passes.
+- [ ] Unaccepted draft is never lost.
 
-Tasks:
-
-- [ ] read/bash/edit/write/grep/find/ls.
-- [ ] Parallel grouping.
-- [ ] duration/status/error/cancel/truncation.
-- [ ] Safe argument/result previews.
-- [ ] Unknown extension tool generic card.
-- [ ] Selection/copy and large-output virtualized viewer.
-
-### M9.3 Composer
-
-- **Priority:** P1
-- **Effort:** M
-
-Tasks:
-
-- [ ] Multiline draft.
-- [ ] Accepted/submitting/error restoration.
-- [ ] Idle Send.
-- [ ] Explicit Steer/Follow-up while running.
-- [ ] Offline disabled send.
-- [ ] Observer/read-only states.
-- [ ] Abort controls.
-
-### M9.4 Scrolling and rendering performance
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Near-bottom pinning.
-- [ ] Jump-to-latest.
-- [ ] Preserve anchor on history load.
-- [ ] Repaint isolation for active stream.
-- [ ] Stable keys and lazy construction.
-- [ ] 1,000-item test fixture/profile.
-
-### M9 exit criteria
-
-- [ ] Real built-in tool shapes render correctly.
-- [ ] Maximum tool chunks do not freeze UI.
-- [ ] Long-session scrolling passes performance target.
-- [ ] Text scaling/reduced-motion baseline passes.
-- [ ] Composer never loses an unaccepted draft.
-
-**Evidence:** profile traces, goldens, real session demo.
+**Evidence:** profile traces, goldens, device demo.
 
 ---
 
 # M10 — Models, context, retry, compaction, and commands
 
-**Outcome:** Mobile exposes Pi's useful session controls without attempting provider-account management.
+**Outcome:** Useful Pi controls exposed without mobile provider-account management.
 
-**Checkpoint demo:** Switch model/thinking while eligible, inspect stats, trigger compaction, observe retry, abort retry, and invoke a discovered skill/template/extension command.
+**Dependencies:** M9.
 
-### M10.1 Model and thinking
+## Tasks
 
-- **Priority:** P1
-- **Effort:** M
+- [ ] **M10-01 P1 M** List/configured model state and unavailable restored model UX.
+- [ ] **M10-02 P1 M** Model/thinking set with valid runtime-state restrictions.
+- [ ] **M10-03 P1 S** Session tokens/cost/context with unknown/null states and advisory thresholds.
+- [ ] **M10-04 P1 M** Auto-retry state, retry countdown/count, abort retry.
+- [ ] **M10-05 P1 M** Manual/auto compaction state and summary transition.
+- [ ] **M10-06 P1 M** Steering/follow-up mode state where supported.
+- [ ] **M10-07 P1 M** Discover/categorize/search/invoke skills, templates, extension commands.
+- [ ] **M10-08 P1 S** Exclude unsupported TUI-only commands.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Available model list/cache.
-- [ ] Active/restored/unavailable model states.
-- [ ] Supported thinking levels.
-- [ ] Safe command-state restrictions.
-- [ ] Model/thinking events and snapshots.
+Switch eligible model/thinking, inspect stats, trigger compaction/retry controls, and invoke discovered commands against real Pi.
 
-### M10.2 Stats and cost
+## Exit criteria
 
-- **Priority:** P1
-- **Effort:** S
+- [ ] Every control is durable and replayable.
+- [ ] Restored state matches Pi.
+- [ ] Unsupported/unavailable capabilities are explicit.
+- [ ] Retry/compaction cannot create false settled state.
 
-Tasks:
-
-- [ ] Token/cost/context display.
-- [ ] Unknown/null post-compaction states.
-- [ ] Advisory threshold UI only.
-- [ ] No spend-cap claims.
-
-### M10.3 Retry and compaction
-
-- **Priority:** P1
-- **Effort:** M
-
-Tasks:
-
-- [ ] Auto-retry/auto-compaction controls.
-- [ ] Retry wait/count/delay state.
-- [ ] Abort retry.
-- [ ] Manual compaction and summary transition.
-- [ ] Failure distinctions.
-
-### M10.4 Command palette
-
-- **Priority:** P1
-- **Effort:** M
-
-Tasks:
-
-- [ ] `get_commands` discovery.
-- [ ] Categorize skills/templates/extensions.
-- [ ] Search and argument/prompt entry.
-- [ ] Capability/change refresh.
-- [ ] Do not expose unsupported TUI-only commands.
-
-### M10 exit criteria
-
-- [ ] All controls round-trip through durable commands/events.
-- [ ] Restored session state matches Pi.
-- [ ] Unsupported model/thinking/capability is handled explicitly.
-- [ ] Retry/compaction does not cause false settled state.
-
-**Evidence:** real Pi control suite and mobile demo.
+**Evidence:** real Pi control suite.
 
 ---
 
 # M11 — Multi-session control and controller leases
 
-**Outcome:** Multiple durable sessions run/stop independently and one installation safely controls each session.
+**Outcome:** Three sessions run/stop independently through one socket and one installation safely controls each.
 
-**Checkpoint demo:** Run three sessions, observe all from one socket, switch foreground detail, hit capacity, idle-stop one, restore it, and take over control from a second app instance.
+**Dependencies:** M10.
 
-### M11.1 Host/session summaries
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M11-01 P0 L** Host stream session summary add/change/remove events.
+- [ ] **M11-02 P1 M** Paginated list/search/filter/sort/attention states.
+- [ ] **M11-03 P0 M** One full plus bounded summary subscriptions.
+- [ ] **M11-04 P0 L** Lease acquire/renew/reclaim/release/takeover/expiry/stale connection.
+- [ ] **M11-05 P0 M** DB uniqueness/race and multi-client stress tests.
+- [ ] **M11-06 P1 M** Observer/take-control/draft-preservation UX.
+- [ ] **M11-07 P0 M** Three-process capacity, eligible LRU eviction, no-victim error.
+- [ ] **M11-08 P0 M** Idle stop and lazy restore.
+- [ ] **M11-09 P1 M** Fast session switcher/subscription/cursor/background badges.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Host stream session summary events.
-- [ ] Paginated session list/search/filter.
-- [ ] Active/attention/stopped/deleted sorting.
-- [ ] Foreground and bounded background subscriptions.
-- [ ] Unread/attention reconciliation.
+Run three sessions, hit capacity, idle-stop/restore one, switch foreground detail, and explicitly take control from another app instance.
 
-### M11.2 Controller leases
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] One socket tracks all summaries.
+- [ ] Three sessions progress independently.
+- [ ] Dual controller cannot occur.
+- [ ] Capacity/eviction policy passes.
+- [ ] No cross-session event application.
 
-Tasks:
-
-- [ ] Acquire/renew/reclaim/release.
-- [ ] 45-second expiry and 60-second same-install grace.
-- [ ] Explicit takeover.
-- [ ] Stale connection rejection.
-- [ ] Database uniqueness/race tests.
-- [ ] Observer UI and draft preservation.
-
-### M11.3 Process capacity
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Three concurrent processes.
-- [ ] LRU idle eviction.
-- [ ] Host-capacity error with active summaries.
-- [ ] Never evict running/waiting/queued states.
-- [ ] Lazy stopped-session restore.
-
-### M11.4 Session switcher
-
-- **Priority:** P1
-- **Effort:** M
-
-Tasks:
-
-- [ ] Fast cached switch.
-- [ ] Subscription/cursor transition.
-- [ ] Current controller state.
-- [ ] Background completion badges.
-- [ ] Host/session snapshot fallback.
-
-### M11 exit criteria
-
-- [ ] One socket reliably tracks all active summaries.
-- [ ] Three sessions run independently.
-- [ ] Dual-client mutation race cannot produce dual controllers.
-- [ ] Capacity and idle eviction follow policy.
-- [ ] Switching never cross-applies events to another session.
-
-**Evidence:** multi-client/multi-session integration report.
+**Evidence:** multi-client/session report.
 
 ---
 
 # M12 — Session tree, fork, clone, delete, and restore
 
-**Outcome:** Durable session lifecycle and branching are complete and recoverable.
+**Outcome:** Branching and durable lifecycle are complete/recoverable.
 
-**Checkpoint demo:** Name a session, inspect tree, fork at a user entry, clone current branch, soft-delete, restore, and handle an extension-cancelled operation.
+**Dependencies:** M11.
 
-### M12.1 Session metadata/lifecycle
+## Tasks
 
-- **Priority:** P1
-- **Effort:** M
+- [ ] **M12-01 P1 M** Create/resume/name/details/lineage and fallback names.
+- [ ] **M12-02 P1 M** Normalize/lazily render session tree.
+- [ ] **M12-03 P1 M** Eligible fork-message selection/confirmation.
+- [ ] **M12-04 P1 M** Fork and extension-cancel handling.
+- [ ] **M12-05 P1 M** Clone and extension-cancel handling.
+- [ ] **M12-06 P0 M** Map/snapshot new session before navigation.
+- [ ] **M12-07 P0 L** Soft delete active-state/queue/process/Pi session handling.
+- [ ] **M12-08 P0 M** Seven-day restore and purge date UX.
+- [ ] **M12-09 P0 M** Partial `delete_failed` repair.
+- [ ] **M12-10 P0 M** Irreversible explicit purge and non-reused IDs.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Create/resume/name.
-- [ ] Stable generated fallback names.
-- [ ] Session details and parent lineage.
-- [ ] Corrupt/missing Pi session repair state.
+Name, inspect tree, fork, clone, soft-delete, restore, and exercise extension cancellation and partial-delete repair.
 
-### M12.2 Tree/fork/clone
+## Exit criteria
 
-- **Priority:** P1
-- **Effort:** L
-
-Tasks:
-
-- [ ] Tree normalization and lazy rendering.
-- [ ] Eligible fork-message list.
-- [ ] Fork confirmation and extension cancellation.
-- [ ] Clone and extension cancellation.
-- [ ] New-session mapping/snapshot before navigation.
-- [ ] Idempotent crash handling.
-
-### M12.3 Delete/restore/purge
-
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Active-turn/queue preconditions.
-- [ ] Soft delete and seven-day purge date.
-- [ ] Stop process and cancel queued follow-ups.
-- [ ] Pi session trash/delete adapter.
-- [ ] Restore.
-- [ ] Partial `delete_failed` repair.
-- [ ] Irreversible purge command/maintenance.
-
-### M12 exit criteria
-
-- [ ] Fork/clone produce correct durable branches.
-- [ ] Extension cancellation leaves original session unchanged.
+- [ ] Fork/clone branch correctness proven.
+- [ ] Cancellation leaves original unchanged.
 - [ ] Delete is recoverable for seven days.
 - [ ] Partial failure is visible/repairable.
-- [ ] IDs are never reused.
 
-**Evidence:** session lifecycle fixture matrix.
+**Evidence:** lifecycle fixture matrix.
 
 ---
 
 # M13 — Attachments, export, and OS sharing
 
-**Outcome:** Images and exports cross the private transport safely with bounded storage and explicit sharing.
+**Outcome:** Images and exports cross private transport safely with explicit bounded sharing.
 
-**Checkpoint demo:** Upload/retry an image prompt, expire an unused upload, export a session to HTML, and share through the OS sheet.
+**Dependencies:** M12.
 
-### M13.1 Mobile image pipeline
+## Tasks
 
-- **Priority:** P1
-- **Effort:** M
+- [ ] **M13-01 P1 M** Mobile JPEG/PNG picker, metadata strip, resize, count/byte validation.
+- [ ] **M13-02 P0 L** Multipart streaming upload, client upload idempotency, random private storage.
+- [ ] **M13-03 P0 M** Magic/decode/dimension/digest/malformed/decompression limits.
+- [ ] **M13-04 P0 M** Prompt attachment availability/reference/queue retention/cleanup.
+- [ ] **M13-05 P0 M** Pi image mapping only at dispatch boundary.
+- [ ] **M13-06 P1 M** Host-side Pi HTML export and opaque export ID.
+- [ ] **M13-07 P1 M** Private bounded download/expiry/content-disposition.
+- [ ] **M13-08 P1 M** Mobile progress/download/OS share and privacy warning.
+- [ ] **M13-09 P0 S** Prove no public URL generation.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Photo picker permissions/UX.
-- [ ] JPEG/PNG conversion.
-- [ ] Metadata stripping.
-- [ ] 2048-pixel resize.
-- [ ] Byte/count validation.
-- [ ] Local retry state and cleanup.
+Retry an image upload, complete image prompt, expire an orphan, export HTML, and invoke platform share sheet.
 
-### M13.2 Host attachment service
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Multipart upload streaming/limits.
-- [ ] Upload ID idempotency.
-- [ ] Magic/decode/dimension checks.
-- [ ] Random private storage.
-- [ ] SHA-256 and opaque ID.
-- [ ] Reference retention and cleanup.
-- [ ] Prompt preacceptance validation.
-- [ ] Pi base64 image mapping only at dispatch boundary.
-
-### M13.3 Export/download/share
-
-- **Priority:** P1
-- **Effort:** M
-
-Tasks:
-
-- [ ] Host-side Pi HTML export.
-- [ ] Opaque export IDs.
-- [ ] Bounded private download endpoint.
-- [ ] 24-hour expiry.
-- [ ] Mobile progress/download.
-- [ ] OS share sheet and privacy warning.
-- [ ] No public URL generation.
-
-### M13 exit criteria
-
-- [ ] Malformed/decompression-bomb fixtures reject safely.
-- [ ] Duplicate upload does not duplicate storage.
-- [ ] Referenced attachment survives queue delay.
-- [ ] Expired attachments/exports are unavailable and cleaned.
-- [ ] Sharing is always explicit.
+- [ ] Malformed/oversized image fixtures reject safely.
+- [ ] Retry does not duplicate storage.
+- [ ] Queue-retained attachment survives.
+- [ ] Expired IDs are unavailable/cleaned.
+- [ ] Sharing is explicit.
 
 **Evidence:** attachment security suite and device share demo.
 
@@ -1096,413 +593,212 @@ Tasks:
 
 # M14 — Extension UI and durable follow-up queue
 
-**Outcome:** Pi can request user interaction reliably across mobile disconnects, and follow-up work is inspectable/removable before dispatch.
+**Outcome:** User interaction survives disconnects and queued work is inspectable/removable before dispatch.
 
-**Checkpoint demo:** Queue/remove prompts and answer select/confirm/input/editor dialogs after a reconnect; allow one to expire without an invented response.
+**Dependencies:** M13.
 
-### M14.1 Durable queue
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M14-01 P0 L** Durable FIFO queue state, positions, events, max ten.
+- [ ] **M14-02 P0 M** Add/remove/clear/dispatch transitions and attachment references.
+- [ ] **M14-03 P0 M** Queue restart recovery and settle-triggered dispatch.
+- [ ] **M14-04 P1 M** Queue UI/remove/clear; reorder only if fully transactional.
+- [ ] **M14-05 P0 L** Persist select/confirm/input/editor requests and upstream mapping.
+- [ ] **M14-06 P0 M** Normalize notify/status/widget/title/editor prefill.
+- [ ] **M14-07 P0 M** Expiry/cancel/orphan/reconnect replay/duplicate response.
+- [ ] **M14-08 P1 L** Native sheets with focus/keyboard/accessibility.
+- [ ] **M14-09 P1 S** Preserve expired typed input locally for copy; never send it.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Queue table/state machine.
-- [ ] FIFO positions and events.
-- [ ] Add/remove/clear commands.
-- [ ] Attachment reference retention.
-- [ ] Dispatch only after settled eligibility.
-- [ ] Accepted/restart recovery.
-- [ ] Queue-full semantics.
-- [ ] Optional reorder only if transactionally complete.
+Queue/remove prompts and answer dialogs after reconnect; let one expire without any invented response.
 
-### M14.2 Extension dialog persistence
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] Queue survives restart.
+- [ ] Removed item never dispatches.
+- [ ] Valid dialog replays after disconnect.
+- [ ] Expired dialog gets no default.
+- [ ] Accessibility focus passes.
 
-Tasks:
-
-- [ ] Persist upstream request mapping.
-- [ ] select/confirm/input/editor.
-- [ ] notify/status/widget/title/editor-prefill.
-- [ ] expiry/cancel/orphan state.
-- [ ] Duplicate-safe response.
-- [ ] Reconnect replay.
-- [ ] Process crash/abort cleanup.
-
-### M14.3 Mobile queue/dialog UX
-
-- **Priority:** P1
-- **Effort:** L
-
-Tasks:
-
-- [ ] Queue screen and remove/clear confirmations.
-- [ ] Native modal sheets and focus/keyboard handling.
-- [ ] Expiry presentation.
-- [ ] Typed text preservation after expiry for copying.
-- [ ] Bounded extension widgets/status.
-
-### M14 exit criteria
-
-- [ ] Queue survives bridge restart.
-- [ ] Removed item is never dispatched.
-- [ ] Dialog survives phone disconnect until expiry.
-- [ ] Expired dialog never receives default input.
-- [ ] Accessibility focus is correct.
-
-**Evidence:** queue/dialog crash/reconnect matrix.
+**Evidence:** queue/dialog fault matrix.
 
 ---
 
 # M15 — Notifications and background experience
 
-**Outcome:** The host continues work and the phone receives privacy-preserving best-effort status while always reconciling on foreground.
+**Outcome:** Host continues work and phone receives privacy-preserving best-effort status with authoritative foreground reconciliation.
 
-**Checkpoint demo:** Lock/background both platforms during a turn; receive settled/attention/error state; open into reconciled session; exercise Live Activity and Android foreground mode.
+**Dependencies:** M14.
 
-### M15.1 Device registration and providers
+## Tasks
 
-- **Priority:** P1
-- **Effort:** L
+- [ ] **M15-01 P1 M** Device installation/token register/replace/unregister and permanent rejection cleanup.
+- [ ] **M15-02 P1 M** Host APNs token authentication adapter.
+- [ ] **M15-03 P1 M** Host FCM HTTP v1 adapter.
+- [ ] **M15-04 P0 M** Settled/failed/indeterminate/attention/crash-loop status policy.
+- [ ] **M15-05 P0 S** Status-only/default-generic payload allowlist.
+- [ ] **M15-06 P1 M** Coalescing/rate limiting/stale deep-link reconciliation.
+- [ ] **M15-07 P1 L** iOS permission, APNs, Live Activity start/update/end/stale cleanup.
+- [ ] **M15-08 P1 L** Android permission/channel, FCM, user-enabled foreground service started while visible.
+- [ ] **M15-09 P0 S** No mutating notification actions.
+- [ ] **M15-10 P0 M** Prove push/network failure never blocks Pi and foreground reconciliation works.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Installation/token registration/replacement.
-- [ ] APNs token auth.
-- [ ] FCM HTTP v1.
-- [ ] Key/credential host storage.
-- [ ] Permanent invalid-token cleanup.
-- [ ] Provider redacted diagnostics.
+Lock/background real iOS and Android devices during turns/dialogs, receive status, open into reconciled state, and exercise Live Activity/foreground service.
 
-### M15.2 Notification policy
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Settled/failed/indeterminate/attention/crash-loop only.
-- [ ] Status-only/default generic payloads.
-- [ ] Coalescing and rate limiting.
-- [ ] Stale deep-link reconciliation.
-- [ ] No mutating notification actions.
-- [ ] Host-offline/public-internet-unavailable behaviour.
-
-### M15.3 iOS
-
-- **Priority:** P1
-- **Effort:** L
-
-Tasks:
-
-- [ ] Notification permission/registration.
-- [ ] APNs environment/topic.
-- [ ] ActivityKit attributes/content state.
-- [ ] Start/update/end lifecycle.
-- [ ] App/host crash and stale activity cleanup.
-- [ ] Foreground reconnect.
-
-### M15.4 Android
-
-- **Priority:** P1
-- **Effort:** L
-
-Tasks:
-
-- [ ] Notification permission/channels.
-- [ ] FCM foreground/background handling.
-- [ ] User-enabled foreground service started while visible.
-- [ ] Service notification and stop controls.
-- [ ] Wi-Fi/cellular/lock lifecycle.
-- [ ] Treat high-priority FCM as best effort.
-
-### M15 exit criteria
-
-- [ ] Real-device APNs and FCM tests pass.
-- [ ] No transcript/path content appears by default.
-- [ ] Opening stale notification shows current bridge truth.
-- [ ] Product copy makes no guaranteed socket/push claim.
-- [ ] Agent work is unaffected when push is degraded.
+- [ ] Real APNs/FCM device tests pass.
+- [ ] No transcript/path/tool content appears by default.
+- [ ] Stale notification never appears as current truth.
+- [ ] No guaranteed socket/push claim.
+- [ ] Agent use survives push degradation.
 
 **Evidence:** real-device lifecycle matrix.
 
 ---
 
-# M16 — Accessibility, performance, privacy, and operational hardening
+# M16 — Accessibility, performance, privacy, and operations hardening
 
-**Outcome:** Complete MVP behaviour meets release-quality nonfunctional gates.
+**Outcome:** Full MVP meets release-quality nonfunctional gates.
 
-**Checkpoint demo:** Run full user journey with screen readers, 200% text, reduced motion, long sessions, network changes, backup/restore, and redacted diagnostics.
+**Dependencies:** M15.
 
-### M16.1 Accessibility
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M16-01 P0 L** VoiceOver/TalkBack primary journeys.
+- [ ] **M16-02 P0 M** Switch/keyboard/Voice Control critical actions.
+- [ ] **M16-03 P0 M** 200% text, reduced motion, contrast, focus, non-colour status.
+- [ ] **M16-04 P0 L** Streaming/scroll/tool output/multi-session performance profiling.
+- [ ] **M16-05 P0 M** Memory/file descriptor/disk/reconnect/session soak.
+- [ ] **M16-06 P0 M** Mobile cache/journal/log/attachment/export retention bounds.
+- [ ] **M16-07 P0 M** Mobile backup exclusions/app-switcher snapshot review.
+- [ ] **M16-08 P0 M** Log/diagnostic/notification/artifact secret-content tests.
+- [ ] **M16-09 P0 M** Traversal/symlink race/lease/idempotency concurrency stress.
+- [ ] **M16-10 P0 L** Daily backup/restore/host generation/retention/repair.
+- [ ] **M16-11 P0 M** Lost-phone token removal and incident procedures.
+- [ ] **M16-12 P0 L** Update/rollback rehearsal and clean-host recovery.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] VoiceOver and TalkBack audit.
-- [ ] Switch/keyboard/Voice Control critical actions.
-- [ ] 200% text scale.
-- [ ] Reduced motion.
-- [ ] Contrast and non-colour status.
-- [ ] Dialog focus restore.
-- [ ] Streaming transition announcements only.
+Complete full journey with screen readers, 200% text, reduced motion, long sessions, network transitions, backup/restore, and redacted diagnostics.
 
-### M16.2 Performance and resource limits
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Streaming build/raster measurements.
-- [ ] 1,000-item history.
-- [ ] Maximum tool output/chunk rate.
-- [ ] Six subscribed session summaries.
-- [ ] Mobile cache/disk LRU.
-- [ ] Bridge journal retention.
-- [ ] Memory and file-descriptor soak.
-- [ ] 60/90/120 Hz frame pacing where available.
-
-### M16.3 Privacy/security
-
-- **Priority:** P0
-- **Effort:** L
-
-Tasks:
-
-- [ ] Mobile backup exclusions.
-- [ ] App-switcher snapshot review.
-- [ ] Log/diagnostic allowlist tests.
-- [ ] Notification payload inspection.
-- [ ] Secrets/artifact scans.
-- [ ] Traversal/symlink race tests.
-- [ ] Lease/idempotency concurrency stress.
-- [ ] Release build fault-endpoint absence.
-
-### M16.4 Operations and recovery
-
-- **Priority:** P0
-- **Effort:** M
-
-Tasks:
-
-- [ ] Daily online backups/latest three.
-- [ ] Restore and host-generation reset.
-- [ ] Retention/cleanup resumability.
-- [ ] Corrupt/missing session repair UX.
-- [ ] Lost-phone token removal CLI.
-- [ ] Update/rollback rehearsal.
-- [ ] Host reboot and Tailscale recovery.
-
-### M16 exit criteria
-
-- [ ] All accessibility gates pass on representative devices.
-- [ ] No performance budget violation or unbounded buffer remains.
+- [ ] Accessibility gates pass on representative devices.
+- [ ] No performance/resource-bound failure remains.
 - [ ] Privacy/security release gates pass.
-- [ ] Backup/restore/update/rollback are demonstrated.
-- [ ] Known limitations are documented.
+- [ ] Backup/restore/update/rollback demonstrated.
+- [ ] Known limitations documented.
 
-**Evidence:** hardening report and release evidence bundle.
+**Evidence:** hardening/recovery report.
 
 ---
 
-# M17 — Personal MVP release candidate
+# M17 — Signed personal MVP release candidate
 
-**Outcome:** A signed private release installs cleanly and satisfies every product success criterion.
+**Outcome:** Signed private release satisfies every product success criterion from clean host/phone installations.
 
-**Checkpoint demo:** Start from clean host and phone installations and complete the twelve success scenarios in `docs/PRODUCT.md`.
+**Dependencies:** M16.
 
-### M17.1 Release preparation
+## Tasks
 
-- **Priority:** P0
-- **Effort:** L
+- [ ] **M17-01 P0 M** Freeze compatible versions/schemas and release manifest.
+- [ ] **M17-02 P0 M** Produce signed/checksummed bridge artifact and installer.
+- [ ] **M17-03 P0 M** Produce TestFlight iOS build.
+- [ ] **M17-04 P0 M** Produce signed Android release build.
+- [ ] **M17-05 P0 S** Complete privacy/permission/distribution metadata.
+- [ ] **M17-06 P0 S** Publish install/update/rollback/uninstall/known-issues docs.
+- [ ] **M17-07 P0 L** Run all twelve PRODUCT success scenarios.
+- [ ] **M17-08 P0 M** Retain CI/protocol/migration/Pi/fault/device/accessibility/performance/security evidence.
+- [ ] **M17-09 P0 S** Mark every P0/P1 MVP item Done or explicitly Deferred with owner decision.
+- [ ] **M17-10 P0 S** Tag/release checkpoint and retain rollback artifact.
 
-Tasks:
+## Checkpoint demo
 
-- [ ] Freeze compatible versions and schemas.
-- [ ] Produce signed/checksummed bridge artifact.
-- [ ] Produce TestFlight iOS build.
-- [ ] Produce signed Android release build.
-- [ ] Privacy/permission metadata.
-- [ ] Release notes and known issues.
-- [ ] Install/update/rollback/uninstall documentation.
+From clean host and phone, complete the full acceptance suite without development tools.
 
-### M17.2 Acceptance suite
+## Exit criteria
 
-- **Priority:** P0
-- **Effort:** L
-
-Prove:
-
-- [ ] fresh pairing/doctor,
-- [ ] trusted task start,
-- [ ] lost-ack duplicate safety,
-- [ ] Wi-Fi/cellular replay,
-- [ ] lock/background completion,
-- [ ] extension dialog reconnect,
-- [ ] three-session capacity/idle restore,
-- [ ] fork/clone,
-- [ ] image prompt,
-- [ ] export/share,
-- [ ] crash/database/cursor failures,
-- [ ] accessibility/privacy/install gates.
-
-### M17.3 Release record
-
-- **Priority:** P0
-- **Effort:** S
-
-Tasks:
-
-- [ ] Release manifest and checksums.
-- [ ] CI/device/fault/accessibility/performance reports.
-- [ ] Rollback classification.
-- [ ] Backlog MVP tasks marked Done/Deferred with reasons.
-- [ ] Tag/release checkpoint.
-
-### M17 exit criteria
-
-- [ ] All P0/P1 MVP tasks are Done or explicitly Deferred with owner decision.
-- [ ] No release blocker in `docs/RELEASE.md` remains.
+- [ ] No release blocker in `docs/RELEASE.md`.
+- [ ] All P0/P1 MVP work is Done or explicitly Deferred.
 - [ ] Clean install and acceptance suite pass.
-- [ ] Owner can operate and recover the system without development tools.
+- [ ] Owner can operate, diagnose, recover, update, and rollback system.
+
+**Evidence:** signed release evidence bundle.
 
 ---
 
-# Cross-cutting recurring backlog
+# Cross-cutting recurring work
 
-These are not separate milestones; apply whenever relevant.
+Apply whenever relevant.
 
 ## C-01 Documentation consistency — P0
 
-- [ ] Update normative docs with behavioural changes.
-- [ ] Generate schema catalogue.
-- [ ] Keep `WORKING.md` current.
-- [ ] Regenerate `check.md` after structure/commands change.
-- [ ] Record decisions with review triggers.
+- Update normative docs with behaviour changes.
+- Generate protocol catalogue from schemas.
+- Keep `WORKING.md`, backlog, decisions, and `check.md` current.
+- Do not let historical `PLANNING.md` override normative rules.
 
 ## C-02 Upstream compatibility — P0
 
-- [ ] Re-run real Pi contract suite on proposed update.
-- [ ] Review RPC/session/extension diffs.
-- [ ] Update fixtures/manifest only after passing.
-- [ ] Keep exact tested boundary versions.
+- Review Pi RPC/session/extension changes.
+- Run real contract suite on proposed update.
+- Update manifest/fixtures only after passing.
+- Keep exact tested boundaries.
 
-## C-03 Dependency/supply chain — P0
+## C-03 Supply chain — P0
 
-- [ ] Exact pins and lockfile review.
-- [ ] License/security scan.
-- [ ] No unreviewed lifecycle scripts/native binaries.
-- [ ] Release checksum/signing record.
+- Exact pins/lockfiles.
+- Security/license/lifecycle script/native binary review.
+- Verified release checksums/signing metadata.
+- No automatic dependency/toolchain adoption.
 
-## C-04 Privacy and logging — P0
+## C-04 Privacy/logging — P0
 
-- [ ] New fields receive privacy classification.
-- [ ] Logs remain metadata-only.
-- [ ] Notifications remain status-only by default.
-- [ ] Diagnostics use explicit allowlist.
+- Classify every new field.
+- Keep logs/diagnostics metadata-only.
+- Keep notifications status-only by default.
+- Use explicit allowlists for reports/artifacts.
 
 ## C-05 Accessibility — P0
 
-- [ ] Semantic labels/states/actions.
-- [ ] Focus and keyboard handling.
-- [ ] Text scaling/reduced motion/contrast.
-- [ ] Real screen-reader check for new critical flows.
+- Semantics/state/actions/focus.
+- Text scale/reduced motion/contrast.
+- Real screen-reader checks for new critical flows.
 
-## C-06 Performance and bounds — P0
+## C-06 Performance/bounds — P0
 
-- [ ] Define limits before adding queues/caches/output.
-- [ ] Add boundary/soak test.
-- [ ] Measure transcript and transport hot paths.
-- [ ] Avoid background work that violates platform policy.
+- Define limit before adding queue/cache/output.
+- Add boundary/soak tests.
+- Measure transcript/transport/storage hot paths.
+- Respect platform background policy.
 
 ---
 
 # Post-MVP backlog
 
-These are deliberately deferred and do not block M17.
+All are DEFERRED and do not block M17.
 
-## P3-01 Linux host service
-
-- systemd user unit,
-- Linux paths/secrets/service lifecycle,
-- release artifacts and install/rollback,
-- real compatibility matrix.
-
-## P3-02 Windows host service
-
-- Windows service/task strategy,
-- Job Objects for child cleanup,
-- environment/credential integration,
-- installer and signing.
-
-## P3-03 Sandbox profiles
-
-- Gondolin/OpenShell/container integration research,
-- policy selection per workspace/session,
-- host/provider credential boundary,
-- performance and path mapping.
-
-## P3-04 Confirmation policy mode
-
-- optional Ask mode for selected tools/classes,
-- duplicate-safe mobile approvals,
-- timeout/disconnect semantics,
-- no simplistic command-text security claims.
-
-## P3-05 Multi-user/shared bridge
-
-Requires new authentication, authorization, tenancy, audit, privacy, and controller design before implementation.
-
-## P3-06 Public internet access
-
-Requires independent identity, authorization, rate limiting, abuse controls, TLS/service hardening, and security review. Tailscale Funnel alone is not an acceptable implementation plan.
-
-## P3-07 Public share links
-
-- explicit publication service,
-- revocation/expiry/access control,
-- content review/redaction,
-- abuse/privacy model.
-
-## P3-08 Obsidian/stored notes
-
-- Markdown source of truth,
-- selected vault access,
-- sync/conflict model,
-- no vulnerable local REST plugin dependency.
-
-## P3-09 Android Termux mode
-
-- on-device Pi lifecycle,
-- storage/provider credentials,
-- background restrictions,
-- parity limitations.
-
-## P3-10 Mobile code/file viewer enhancements
-
-Read-only diff/file navigation may be explored without turning the product into a full IDE or terminal.
-
-## P3-11 Automatic signed updater
-
-Only after signed manifests, transactional install, migration rollback, channel control, and recovery are proven.
-
-## P3-12 Public app-store launch
-
-- external user onboarding/support,
-- privacy policies and disclosures,
-- analytics/crash reporting decision,
-- authentication/threat-model review,
-- store review/metadata/compliance.
+- **P3-01 Linux host:** `systemd --user`, Linux paths/secrets/install/rollback/artifacts.
+- **P3-02 Windows host:** service/task strategy, Job Objects, installer/signing.
+- **P3-03 Sandbox profiles:** Gondolin/OpenShell/container research and per-session selection.
+- **P3-04 Confirmation policy:** optional Ask mode with durable mobile approvals/timeouts.
+- **P3-05 Multi-user bridge:** new authentication, authorization, tenancy, audit, privacy, controller design.
+- **P3-06 Public internet:** identity, authorization, abuse/rate/TLS/security design; Funnel alone is not a plan.
+- **P3-07 Public share links:** publication, access, revocation, expiry, content/privacy model.
+- **P3-08 Obsidian/stored notes:** Markdown authority, vault access, sync/conflict model.
+- **P3-09 Android Termux:** on-device lifecycle/storage/credentials/background/parity.
+- **P3-10 Read-only file/diff viewer enhancements:** without becoming terminal/IDE.
+- **P3-11 Automatic signed updater:** transactional install/migration/rollback/channel/recovery.
+- **P3-12 Public app-store launch:** external onboarding/support/privacy/analytics/auth/store compliance.
 
 ---
 
-# Immediate next checkpoint
+# Immediate next action
 
-After M0 closes, activate **M1 — Monorepo scaffold and CI foundations**.
+Finish M0-18 through M0-22. Then mark M0 DONE, set M1 ACTIVE in this file and `WORKING.md`, and scaffold the repository.
 
-The first implementation action is repository scaffolding and shared fixture loading, not transcript polish or notification work.
+Do not start transcript polish, push notifications, session-tree UI, or plugin experimentation before M1/M2 exits.
