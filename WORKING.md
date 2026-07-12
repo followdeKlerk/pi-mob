@@ -1,30 +1,66 @@
 # Working
 
-Status: ready to scaffold
+Status: specification closeout
+
+## Current checkpoint
+
+**M0 — Specification and upstream contract freeze**
+
+The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Product, architecture, protocol, data, runtime, UX, security, testing, release, toolchain, and decision documents are now normative.
 
 ## Current objective
 
-Build **MVP Slice A: reliable core loop** before implementing polished session management or background notifications.
+Close the remaining evidence tasks in M0, then activate **M1 — Monorepo scaffold and CI foundations**.
 
-The first proof must establish that a Flutter client can submit one prompt to a real Pi RPC process through the bridge, lose connectivity, reconnect, and recover without executing the prompt twice.
+## M0 completed in the second audit
 
-## Decisions already locked
+- Product contract and success criteria.
+- System authority and component boundaries.
+- One host WebSocket with host/session streams.
+- Decimal-string replay cursors.
+- Atomic snapshot and post-baseline replay.
+- Controller lease concurrency model.
+- Durable command identity and indeterminate crash rules.
+- Bridge-owned follow-up queue and no offline auto-send.
+- Full host/mobile data model, retention, backup, migration, deletion, and repair.
+- Complete mobile screen/state/accessibility specification.
+- Security/privacy threat model preserving Tailscale-only authentication.
+- Release/install/update/rollback/private-distribution specification.
+- Decision ledger.
+- M0–M17 checkpointed backlog.
+- Current upstream Pi repository/package/version identification.
+- Flutter `3.44.4` and Bun `1.3.14` selection.
+- macOS bridge floor corrected to `13.0+`.
+- Compiled Bun release configured to disable automatic `.env` and `bunfig.toml` loading.
 
-- Flutter/Dart mobile client.
-- Bun/TypeScript bridge in this repository.
-- macOS host support first.
-- Tailscale Serve to a loopback-only bridge.
-- Tailscale is the sole connection-authentication boundary for the initial single-user application.
-- One Pi RPC subprocess per active session.
-- SQLite/WAL bridge state.
-- Client-generated command IDs and duplicate-safe bridge dispatch.
-- Running commands become indeterminate after a process/host crash and are not automatically repeated.
-- Trusted workspaces execute normally after one approval; read-only mode remains available.
-- Concurrent sessions remain an MVP requirement, delivered after the core loop is proven.
+## Remaining M0 evidence
 
-## Ordered next work
+These do not require more broad architecture design:
 
-### 1. Scaffold repository
+1. Create an upstream compatibility manifest with Pi commit/package/executable/doc hashes.
+2. Enumerate final Pi command/event mapping from the pinned executable into schema metadata.
+3. Verify Pi durable session listing/deletion/trust-resource discovery against real fixtures.
+4. Capture official Flutter platform archive checksum/ref for the actual development architecture.
+5. During M1 scaffold, freeze actual Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK combinations after both release builds compile.
+6. Add automated Markdown link, backlog-ID, normative-index, and protocol-catalogue consistency checks.
+
+## Immediate next actions
+
+### 1. Close M0 compatibility evidence
+
+Create a machine-readable or Markdown manifest containing:
+
+```text
+Pi repository and commit
+Pi package/version/integrity
+Pi executable SHA-256
+RPC/session/extension documentation hashes
+Flutter archive/ref/checksum
+Bun version/revision
+supported macOS architecture target
+```
+
+### 2. Activate M1
 
 Create:
 
@@ -32,105 +68,48 @@ Create:
 apps/mobile
 packages/bridge
 packages/pi-extension
+packages/protocol-schema
 packages/protocol-fixtures
+scripts
 ```
 
-Add pinned tool versions, root commands, formatting, linting, typechecking, and test configuration.
+### 3. Make one root validation command
 
-### 2. Implement protocol models first
+It must run:
 
-- TypeScript envelope schemas.
-- Dart envelope models.
-- Shared JSON fixtures.
-- Handshake and version negotiation.
-- Stable errors.
-- Command IDs, payload hashes, and state transitions.
+```text
+format
+lint/analyze
+typecheck
+unit placeholders
+shared fixture validation
+Markdown/spec checks
+secret/dependency checks
+```
 
-Do not start transcript polish before both languages consume the same fixtures.
+### 4. Prove cross-language fixture loading
 
-### 3. Implement Pi JSONL adapter
+Before implementing bridge business logic or transcript UI:
 
-- Strict LF framing.
-- Trailing CR removal.
-- Chunk and Unicode handling.
-- Optional Pi command-ID correlation.
-- Real Pi contract test against version 0.80.6.
-- Normalization of minimum events required for text prompts, streaming, tools, abort, and settled state.
+- TypeScript validates one generated protocol fixture.
+- Dart decodes the same fixture into its immutable model.
+- CI proves both agree.
 
-### 4. Implement bridge persistence
+## Do not start yet
 
-- SQLite migrations.
-- Sessions, commands, events, and cursors.
-- Persist-before-send event journal.
-- Command acceptance transaction.
-- Duplicate command lookup.
-- Expired-cursor snapshot path.
+Until M1/M2 exit:
 
-### 5. Implement one-session bridge
+- polished transcript UI,
+- push notifications,
+- session tree UI,
+- attachment UI,
+- Live Activities,
+- general plugin experimentation.
 
-- Loopback HTTP server.
-- `/healthz`, `/readyz`, and `/v1/ws`.
-- One Pi subprocess.
-- Prompt submit.
-- Streaming events.
-- Abort.
-- Heartbeats and reconnect.
-- Deliberate crash/failure injection in tests.
-
-### 6. Implement diagnostic Flutter client
-
-- Manual endpoint entry before QR polish.
-- Connect and handshake.
-- One hard-coded or recent workspace.
-- Submit text.
-- Display normalized raw event states.
-- Abort.
-- Persist cursor and draft.
-- Reconnect and replay.
-
-The first client is allowed to be visually plain.
-
-### 7. Prove Slice A failure cases
-
-Required demonstrations:
-
-- Disconnect before acknowledgement; resend same command ID; one execution.
-- Disconnect during streaming; ordered replay.
-- Kill bridge after acceptance but before dispatch; one execution after recovery.
-- Kill bridge while Pi is running; mark indeterminate without rerun.
-- Kill Pi while running; mark indeterminate and restore session idle.
-- Expire cursor; restore through snapshot.
-- Oversized output; truncate without bridge failure.
-
-### 8. Add macOS service packaging
-
-- Compiled bridge executable.
-- LaunchAgent.
-- Versioned TOML config.
-- Tailscale Serve setup/check.
-- `pi-mob doctor`.
-- Install, update, rollback, and uninstall scripts.
-
-### 9. Regenerate project orientation
-
-Run `/check` after the scaffold lands so `check.md` reflects the real package structure and commands. Do not manually preserve its current docs-only snapshot.
-
-## Slice A exit condition
-
-Slice A is complete only when a real phone or simulator drives a real Pi session and the reconnect/idempotency integration suite passes.
-
-## Not part of the first coding pass
-
-These remain MVP work but do not block Slice A:
-
-- Full session switcher and concurrent-process UI.
-- Fork, clone, tree, export, and sharing.
-- Model/thinking settings polish.
-- Extension dialog sheets.
-- Image attachments.
-- APNs, FCM, Live Activity, and Android foreground service.
-- Final visual system and high-refresh tuning.
+The next engineering risk is schema/build drift, not visual design.
 
 ## Blockers
 
-None. The next action is repository scaffolding, not further broad market research.
+None requiring a new product decision.
+
+The only remaining M0 work is evidence collection and executable contract verification. If a real Pi/toolchain test contradicts a normative assumption, record the contradiction and update the relevant decision before coding around it.
