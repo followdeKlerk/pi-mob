@@ -1,7 +1,7 @@
 # Planning
 
 Status: research
-Scope: Market research and planning for `pi-mob`; research direction is user-led.
+Scope: Market research and planning for `pi-mob`; 
 
 ## Research questions
 
@@ -156,12 +156,20 @@ Primary Pi sources: installed Pi `README.md`; `docs/rpc.md`, `docs/security.md`,
 
 1. Host topology: paired LAN host, private tunnel, remote host, or Android-only Termux mode.
 2. Private connection endpoint: direct Tailscale address with app TLS handling, or Tailscale Serve plus a MagicDNS `wss://` endpoint.
-3. Process/session model: one Pi RPC process per active mobile session, or a bridge strategy based on session switching.
+3. Process/session model: one Pi RPC process per active mobile session, or a bridge strategy based on session switching. **Resolved 2026-07-12:** N concurrent sessions from MVP day one; one `pi --mode rpc` subprocess per active session; mobile UI includes a session switcher. Session browsing, switch, fork, clone, tree, labels, export, and sharing all move from Phase 2 into MVP.
 4. Workspace policy: how a phone can discover/select host directories for its selected host workspace.
 5. Trust policy: explicit per-project approve/deny flow versus curated pre-trusted workspaces.
 6. Tool UX policy: how host `bash` and write/edit execution are represented and confirmed in the mobile UI.
-7. Background policy: continue work while the app is backgrounded, then notify; or pause/disconnect deliberately.
+7. Background policy: continue work while the app is backgrounded, then notify; or pause/disconnect deliberately. **Resolved 2026-07-12:** Server-side keep-alive plus Live Activity. The bridge keeps `pi --mode rpc` running and buffers entries while the phone is backgrounded or locked; iOS Live Activity (16.1+) shows active agent status; APNs push on settle/error/attention-needed events. Android uses an FCM high-priority message plus a foreground service for sustained connectivity.
 8. Privacy defaults: telemetry/update checks, local session mirror/retention, cost guardrails, and share/export consent.
+
+## Bridge location
+
+**Resolved 2026-07-12:** The bridge lives in this `pi-mob` repo as a sibling package to `lib/` (Flutter app + bridge in one repo). The repo is therefore polyglot: Dart/Flutter for the mobile app, and a host-side daemon for the bridge. The bridge speaks `pi --mode rpc` over stdin/stdout JSONL and exposes that over WebSocket via Tailscale Serve.
+
+## Runtime and security constraints (additions)
+
+- **No device-level biometric gate.** pi-mob does not require FaceID, Touch ID, passcode, or Android BiometricPrompt on app launch or on session resume. The Tailscale network is the sole authentication boundary by deliberate product decision; this is not an oversight. The doc does not protect against a stolen unlocked phone, a malicious Tailscale node on the tailnet, or screenshots of agent output hitting iCloud/Google Photos.
 
 ### Research-supported defaults awaiting owner confirmation
 
@@ -272,6 +280,55 @@ Primary sources:
 - Treat the user-controlled Tailscale network as pi-mob's sole connection security boundary; do not add application-layer authentication.
 - Prefer Tailscale Serve plus a MagicDNS `wss://` bridge endpoint; do not use public Tailscale Funnel.
 - Prioritize aggressive connectivity: persistent host execution, foreground WebSocket heartbeats, Android foreground-service support, iOS push/Live Activity updates, and immediate cursor-based replay after every reconnect.
+
+## Compatibility matrix
+
+Pinned 2026-07-12 to avoid version clashes between moving parts. Re-evaluate on any major version bump.
+
+- **Flutter:** 3.44.4 stable (Dart 3.12.2, DevTools 2.57.0).
+- **Pi:** 0.80.6 (pinned). Pin to a Pi version range when the bridge ships; the bridge must speak the RPC schema of the pinned Pi.
+- **iOS deployment target:** 16.1 floor. Forced by Live Activities (`live_activities` plugin requires iOS 16.1+; push-to-start adds 17.2). Flutter 3.44 supports iOS 13+, so 16.1 is a deliberate raise, not a regression. CI-tested on iOS 18 (Flutter's CI-tested floor).
+- **Android `minSdk`:** 29 (Android 10). Forced by Impeller-by-default on Android (Metal/Vulkan target requires API 29+); Flutter 3.44 supports API 24+, so 29 is a deliberate raise. Live Activities plugin itself supports API 24+ but Impeller is the constraint that matters.
+- **Xcode:** 15 minimum, 16 recommended (Flutter 3.44 requirement).
+- **macOS dev host:** Catalina (10.15) through Tahoe (26) per Flutter 3.44; CI-tested Sequoia (15). The bridge host must run a Tailscale-supported platform.
+
+## Failure-mode UX matrix
+
+Added 2026-07-12. Rows are conditions the user will hit; columns are what the app does about them. Each row must be exercised by an integration test before MVP ships.
+
+| Failure | Detection | UX | Recovery |
+|---|---|---|---|
+| Network drop mid-turn | WebSocket close frame; heartbeat miss | Inline banner; current tool card marks `interrupted`; Live Activity stays live on iOS via push | On reconnect, `get_state` then `get_entries(since: lastEntryId)`; replay missing entries; treat `agent_settled` as idle |
+| Host asleep / unreachable | TCP connect timeout to `wss://<bridge>` | Full-screen "host unreachable" with last-seen timestamp and Retry | Reconnect on app foreground; no auto-retry spam (exponential backoff: 2s, 8s, 30s, 2m, 10m, capped) |
+| `pi --mode rpc` crash mid-turn | Subprocess exit; stderr captured by bridge | Tool card marks `crashed` with last stderr tail; Live Activity ends | Bridge auto-restarts the subprocess against the same session cwd and entry cursor; replay via `get_entries(since)` |
+| Oversized tool output (>5 MB raw) | Bridge truncates with a marker; streaming chunk budget | Collapsed tool card by default with a size pill ("4.2 MB, truncated"); tap to expand in a viewer with virtualized scroll | Show full output is host-only; mobile never fetches raw output >5 MB inline |
+| Auth/permission denied | Bridge returns `permission_denied` event; or extension dialog routed back to mobile | Native sheet with the extension's prompt; user choice posts back to bridge | All such prompts are non-blocking on the turn; turn resumes on user choice or times out after 5 min |
+| Backgrounded mid-turn | iOS app backgrounded; Android app to background | Host keeps Pi running; iOS Live Activity shows status; Android foreground service notification | On foreground, replay via `get_entries(since)`; no user action needed |
+| Provider stream interrupted | Bridge sees EOF or 5xx mid-stream from LLM provider | Inline "provider interrupted" badge on the assistant turn; retry affordance | Distinguish length / provider / tool / extension / compaction failures; retry button visible; abort also visible |
+
+## Future actions (post 2026-07-12 review)
+
+Owner-confirmed open decisions still requiring explicit research or product call before MVP code lands:
+
+- **Host topology (item 1):** Decide paired-LAN-host vs always-on private host (e.g. Mac mini) vs remote host vs Android Termux. Defer Termux to a power-user phase because it lacks iOS parity and is constrained by Android background execution.
+- **Private connection endpoint (item 2):** Confirm Tailscale Serve + MagicDNS `wss://` is the production endpoint; document the bridge's loopback bind and the Serve config (HTTPS certs, Funnel explicitly disabled).
+- **Workspace policy (item 4):** Commit to "recent sessions/folders primary, search-first host-folder selection secondary." Do not recreate a full terminal filesystem browser; no new workspace index initially.
+- **Trust policy (item 5):** Surface Pi's project-resource decision before starting an unknown workspace with trust-bearing resources. This is Pi resource-loading behavior, not an additional connection-security layer.
+- **Tool UX policy (item 6):** All tool activity visible in transcript cards. Decide whether to confirm writes/non-read-only shell commands, block sensitive paths, or ship a read-only mode. Implement via a host extension using Pi's existing extension-UI protocol.
+- **Privacy defaults (item 8):** Confirm host defaults: `PI_OFFLINE=1`, telemetry off, version checks off. Keep Pi's auto-compaction/retry defaults. Expose `get_session_stats` cost/context state; show advisory thresholds rather than claiming a spend cap. Provider credentials host-only.
+
+Engineering tasks derived from this review:
+
+- Bridge language: default to Bun/TS to share Pi's ecosystem unless product pushes back. Lock the decision when the first bridge scaffold is created.
+- Bridge must speak the RPC schema of pinned Pi 0.80.6; add a contract test that runs against a real `pi --mode rpc` process, plus property-based fuzzing on the JSONL line splitter.
+- Define reconnect policy concretely: heartbeat interval, exponential backoff curve, jitter, max retry window. iOS needs explicit handling.
+- Define message-size, backpressure, and rate-limit policy for the WebSocket transport. Maximum single record, behavior on oversized output (see Failure-mode UX matrix).
+- Draw the extension-dialog mapping table: which Pi extension UI types map to which iOS UISheetPresentationController detents / Android Material modal sheets, with focus management and keyboard avoidance.
+- Decide subagent rendering: parallel tool-call cards nest vs flatten vs parallel progress bar.
+- Set accessibility bar: TalkBack labels on every tool card, Dynamic Type at 200%, Switch Control, Voice Control.
+- Define local session mirror retention on the phone (indefinite / rolling 30 days / user-managed) and the deletion path (per-session, full uninstall).
+- Define store-metadata readiness: iOS `PrivacyInfo.xcprivacy`, Android data safety form, permission rationale strings.
+- Define compatibility-matrix review cadence (re-evaluate on any Flutter or Pi major version bump).
 
 ## Next
 
