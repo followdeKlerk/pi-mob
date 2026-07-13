@@ -10,9 +10,11 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "bun test"
+    "test": "bun test",
+    "generate": "bun run cmd/generate.ts"
   },
   "devDependencies": {
-    "@pi-mob/typescript-config": "workspace:*"
+    "@pi-mob/typescript-config": "workspace:*",
+    "@pi-mob/protocol-schema": "workspace:*"
   }
 }

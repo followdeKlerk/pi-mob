@@ -1,17 +1,13 @@
-# pi_mob
+# pi_mob mobile
 
-A new Flutter project.
+Flutter mobile client for pi-mob.
 
-## Getting Started
+At M2 this package contains the mobile shell and immutable protocol `1.0` discriminated union/validators. Its tests consume the canonical shared corpus from `packages/protocol-fixtures/corpus/` and prove Dart/TypeScript validation, cursor, scenario, round-trip, and semantic-hash parity.
 
-This project is a starting point for a Flutter application.
+```sh
+flutter pub get
+flutter analyze
+flutter test
+```
 
-A few resources to get you started if this is your first Flutter project:
-
-- [Learn Flutter](https://docs.flutter.dev/get-started/learn-flutter)
-- [Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Flutter learning resources](https://docs.flutter.dev/reference/learning-resources)
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+Connection, persistence, and diagnostic client behavior begin in M5 after the Pi adapter and durable bridge checkpoints are proven.

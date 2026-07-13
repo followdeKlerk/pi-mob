@@ -1,11 +1,5 @@
 #!/usr/bin/env bun
-/**
- * Generate the protocol schema artefacts.
- *
- * M1 only emits a stub schema-manifest.json that the schema:check step can
- * compare against. The real TypeBox envelope generator, JSON Schema emitter,
- * and command/event catalogue land with M2.
- */
+/** Generate deterministic protocol schemas and catalogue artefacts. */
 
 import { spawnSync } from "node:child_process";
 

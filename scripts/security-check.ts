@@ -30,6 +30,7 @@ const ALLOWLIST = new Set([
   ".dart_tool",
   "build",
   ".neuralmemory",
+  ".omx",
   ".tmp",
   ".bun-install",
   ".bun-cache",

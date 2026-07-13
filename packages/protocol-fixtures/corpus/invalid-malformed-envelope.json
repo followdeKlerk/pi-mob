@@ -1,0 +1,8 @@
+{
+  "name": "invalid-malformed-envelope",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "cursor": "1"
+  }
+}

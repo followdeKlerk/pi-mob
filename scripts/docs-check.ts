@@ -13,10 +13,19 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
+import { COMMAND_TYPES, ERROR_CODES, EVENT_TYPES } from "../packages/protocol-schema/src/index.ts";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 
-const TARGETS = ["BACKLOG.md", "WORKING.md", "check.md", "docs"];
+const TARGETS = [
+  "README.md",
+  "BACKLOG.md",
+  "WORKING.md",
+  "M1-SUMMARY.md",
+  "M2-SUMMARY.md",
+  "check.md",
+  "docs",
+];
 
 interface LinkIssue {
   readonly file: string;
@@ -92,10 +101,11 @@ function validateLinks(): LinkIssue[] {
 
 function validateBacklogIds(): string[] {
   const text = readFileSync(join(ROOT, "BACKLOG.md"), "utf8");
-  const idPattern = /\bM\d{1,2}-\d{2}\b/g;
+  const idPattern = /^- \[[ x]\] \*\*(M\d{1,2}-\d{2})\b/gm;
   const seen = new Map<string, number>();
   for (const m of text.matchAll(idPattern)) {
-    const id = m[0];
+    const id = m[1];
+    if (!id) continue;
     seen.set(id, (seen.get(id) ?? 0) + 1);
   }
   const dupes: string[] = [];
@@ -124,6 +134,44 @@ function validateNormativeIndex(): string[] {
   return missing;
 }
 
+function protocolSection(document: string, number: number): string {
+  const start = document.indexOf(`## ${number}. `);
+  if (start < 0) throw new Error(`protocol section ${number} missing`);
+  const end = document.indexOf(`\n## ${number + 1}. `, start);
+  return document.slice(start, end < 0 ? undefined : end);
+}
+
+function fencedIdentifiers(section: string): string[][] {
+  return [...section.matchAll(/```text\n([\s\S]*?)\n```/g)].map((match) =>
+    (match[1] ?? "").split("\n").map((value) => value.trim()).filter((value) => /^[a-z][a-z0-9_.]*$/.test(value)),
+  );
+}
+
+function compareCatalogue(label: string, documented: readonly string[], canonical: readonly string[]): string[] {
+  const actual = new Set(documented);
+  const expected = new Set(canonical);
+  const missing = [...expected].filter((value) => !actual.has(value)).sort();
+  const extra = [...actual].filter((value) => !expected.has(value)).sort();
+  return missing.length === 0 && extra.length === 0
+    ? []
+    : [`${label} drift (missing: ${missing.join(", ") || "none"}; extra: ${extra.join(", ") || "none"})`];
+}
+
+function validateProtocolCatalogue(): string[] {
+  const document = readFileSync(join(ROOT, "docs", "PROTOCOL.md"), "utf8");
+  const commandBlocks = fencedIdentifiers(protocolSection(document, 13));
+  const documentedCommands = commandBlocks.slice(1).flat(); // first block is non-durable control requests
+  const documentedEvents = [...new Set(fencedIdentifiers(protocolSection(document, 14)).flat())];
+  const errorSection = protocolSection(document, 21);
+  const stableCodes = errorSection.slice(errorSection.indexOf("Initial stable codes:"));
+  const documentedErrors = fencedIdentifiers(stableCodes)[0] ?? [];
+  return [
+    ...compareCatalogue("command catalogue", documentedCommands, COMMAND_TYPES),
+    ...compareCatalogue("event catalogue", documentedEvents, EVENT_TYPES),
+    ...compareCatalogue("error catalogue", documentedErrors, ERROR_CODES),
+  ];
+}
+
 function main(): number {
   let code = 0;
   for (const issue of validateLinks()) {
@@ -138,6 +186,10 @@ function main(): number {
   }
   for (const missing of validateNormativeIndex()) {
     process.stderr.write(`docs:check index: ${missing}\n`);
+    code = 1;
+  }
+  for (const drift of validateProtocolCatalogue()) {
+    process.stderr.write(`docs:check protocol: ${drift}\n`);
     code = 1;
   }
   if (code === 0) process.stdout.write("docs:check ok\n");

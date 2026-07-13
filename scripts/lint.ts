@@ -2,18 +2,17 @@
 /**
  * Root lint orchestrator.
  *
- * M1 runs `tsc --noEmit` in strict mode across the workspace and shells out
- * to `dart analyze` when the Flutter Dart SDK is available. The script is
- * resilient: a missing/unusable Dart SDK only emits a warning; missing
- * TypeScript is a failure.
+ * Runs strict TypeScript checks for scripts and Dart analysis for mobile.
+ * Both toolchains are required by the cross-language checkpoint gate.
  */
 
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-
-const DART_SDK = "/usr/local/share/flutter/bin/cache/dart-sdk/bin/dart";
+const TSC = join(ROOT, "node_modules", ".bin", "tsc");
+const DART = Bun.which("dart") ?? Bun.which("flutter")?.replace(/\/flutter$/, "/cache/dart-sdk/bin/dart");
 
 interface Step {
   readonly label: string;
@@ -23,19 +22,22 @@ interface Step {
 }
 
 function buildSteps(): Step[] {
-  return [
+  const steps: Step[] = [
     {
       label: "tsc --noEmit (scripts)",
-      cmd: ["/Users/nathandekleerk/github/pi-mob/node_modules/.bin/tsc", "--noEmit", "--project", "scripts/tsconfig.json"],
+      cmd: [TSC, "--noEmit", "--project", "scripts/tsconfig.json"],
       optional: false,
     },
-    {
-      label: "dart analyze",
-      cmd: [DART_SDK, "analyze"],
-      cwd: "apps/mobile",
-      optional: true,
-    },
   ];
+  if (DART && existsSync(DART)) {
+    steps.push({
+      label: "dart analyze",
+      cmd: [DART, "analyze"],
+      cwd: "apps/mobile",
+      optional: false,
+    });
+  }
+  return steps;
 }
 
 function run(step: Step): number {
@@ -43,12 +45,12 @@ function run(step: Step): number {
   const result = spawnSync(step.cmd[0]!, step.cmd.slice(1), {
     cwd: step.cwd ? `${ROOT}/${step.cwd}` : ROOT,
     stdio: "inherit",
+    timeout: 60_000,
   });
   const code = result.status ?? 1;
   if (code !== 0) {
-    if (step.optional) {
-      process.stderr.write(`<== ${step.label} unavailable (skipped)\n`);
-      return 0;
+    if (result.error || result.signal === "SIGTERM") {
+      process.stderr.write(`<== ${step.label} unavailable: SDK command did not become runnable within 60 seconds\n`);
     }
     return code;
   }
@@ -56,11 +58,11 @@ function run(step: Step): number {
 }
 
 function main(): number {
+  if (!DART || !existsSync(DART)) {
+    process.stderr.write("dart analyze unavailable: Flutter Dart SDK is required\n");
+    return 1;
+  }
   for (const step of buildSteps()) {
-    if (step.cmd[0] === DART_SDK && !existsSync(DART_SDK)) {
-      process.stderr.write(`<== ${step.label}: dart SDK not installed (skipped)\n`);
-      continue;
-    }
     const code = run(step);
     if (code !== 0) return code;
   }

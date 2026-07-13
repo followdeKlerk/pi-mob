@@ -1,0 +1,43 @@
+{
+  "additionalProperties": true,
+  "properties": {
+    "streams": {
+      "items": {
+        "additionalProperties": true,
+        "properties": {
+          "afterCursor": {
+            "pattern": "^(0|[1-9][0-9]*)$",
+            "type": "string"
+          },
+          "detail": {
+            "anyOf": [
+              {
+                "const": "full",
+                "type": "string"
+              },
+              {
+                "const": "summary",
+                "type": "string"
+              }
+            ]
+          },
+          "streamId": {
+            "pattern": "^(host|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+            "type": "string"
+          }
+        },
+        "required": [
+          "streamId",
+          "detail"
+        ],
+        "type": "object"
+      },
+      "minItems": 1,
+      "type": "array"
+    }
+  },
+  "required": [
+    "streams"
+  ],
+  "type": "object"
+}

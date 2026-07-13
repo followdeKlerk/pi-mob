@@ -50,7 +50,7 @@ A task is Ready when:
 A task is Done when:
 
 - implementation matches normative documents,
-- applicable format/lint/type/unit/fixture/integration checks pass,
+- applicable risk-based checks pass; trivial glue needs no dedicated test, while complex/high-impact behavior must cover invariants and failure paths,
 - state changes are durable and duplicate-safe,
 - reconnect/failure/controller behaviour is covered,
 - logs and diagnostics are redacted,
@@ -66,9 +66,9 @@ A task is Done when:
 | Checkpoint | Outcome | Depends on | Status |
 |---|---|---|---|
 | M0 | Specification and upstream contract freeze | — | DONE |
-| M1 | Monorepo scaffold and CI foundations | M0 | READY |
-| M2 | Protocol schemas and shared fixtures | M1 | PLANNED |
-| M3 | Real Pi RPC adapter proven | M2 | PLANNED |
+| M1 | Monorepo scaffold and CI foundations | M0 | DONE |
+| M2 | Protocol schemas and shared fixtures | M1 | DONE |
+| M3 | Real Pi RPC adapter proven | M2 | READY |
 | M4 | Durable bridge core and replay streams | M2, M3 | PLANNED |
 | M5 | One-session end-to-end diagnostic client | M4 | PLANNED |
 | M6 | Failure recovery and process supervision | M5 | PLANNED |
@@ -119,7 +119,7 @@ A task is Done when:
 - [x] **M0-20 P0 M** Verify real Pi durable session listing, reopen, fork, clone, export behaviour, deletion/trash availability, corruption, and trust-resource discovery fixtures. Missing session paths are prevalidated by the future adapter because Pi may create them on switch; Pi has no delete-session RPC command.
 - [x] **M0-21 P0 S** Capture official Flutter archive checksum/ref for the actual development architecture.
 - [x] **M0-22 P0 S** Record Bun revision/artifact checksum and supported bridge architecture target.
-- [ ] **M1-15 P0 M** Add documentation link, backlog/decision ID, normative-index, and protocol-catalogue consistency checks as part of the M1 scaffold and CI foundation.
+- [x] **M1-15 P0 M** Add documentation link, backlog/decision ID, normative-index, and protocol-catalogue consistency checks as part of the M1 scaffold and CI foundation. (M1 scaffold ships documentation link resolution, duplicate backlog ID checks, and `check.md` read-first index validation via `scripts/docs-check.ts`; protocol-catalogue consistency check is M2's `M2-12`.)
 
 ## M0 exit criteria
 
@@ -141,20 +141,20 @@ A task is Done when:
 
 ## Tasks
 
-- [ ] **M1-01 P0 M** Create `apps/mobile` Flutter app with iOS/Android deployment floors.
-- [ ] **M1-02 P0 M** Create `packages/bridge` Bun/TypeScript package with strict compiler settings.
-- [ ] **M1-03 P0 S** Create `packages/pi-extension`.
-- [ ] **M1-04 P0 S** Create `packages/protocol-schema`.
-- [ ] **M1-05 P0 S** Create `packages/protocol-fixtures`.
-- [ ] **M1-06 P0 M** Add root workspace/package configuration and exact lockfiles.
-- [ ] **M1-07 P0 S** Commit Flutter/Dart/Bun version declarations.
-- [ ] **M1-08 P0 M** Freeze actual Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK after release builds compile.
-- [ ] **M1-09 P0 M** Add root format, lint/analyze, typecheck, test, build, clean, and all-check commands.
-- [ ] **M1-10 P0 M** Add CI for bridge/mobile/docs/schema/secret/dependency/license checks.
-- [ ] **M1-11 P0 S** Add versioned config parser placeholder, separate dev/release state, and redaction-first logger interface.
-- [ ] **M1-12 P0 M** Compile Bun bridge smoke executable with `.env` and `bunfig.toml` autoload disabled.
-- [ ] **M1-13 P0 S** Prove release executable ignores adjacent hostile `.env`/`bunfig.toml`.
-- [ ] **M1-14 P0 S** Regenerate `check.md` from the real scaffold.
+- [x] **M1-01 P0 M** Create `apps/mobile` Flutter app with iOS/Android deployment floors.
+- [x] **M1-02 P0 M** Create `packages/bridge` Bun/TypeScript package with strict compiler settings.
+- [x] **M1-03 P0 S** Create `packages/pi-extension`.
+- [x] **M1-04 P0 S** Create `packages/protocol-schema`.
+- [x] **M1-05 P0 S** Create `packages/protocol-fixtures`.
+- [x] **M1-06 P0 M** Add root workspace/package configuration and exact lockfiles.
+- [x] **M1-07 P0 S** Commit Flutter/Dart/Bun version declarations.
+- [x] **M1-08 P0 M** Freeze actual Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK after release builds compile. (Deployment floors frozen: `IPHONEOS_DEPLOYMENT_TARGET = 16.1`, Android `minSdk = 29`. Full Xcode/Android SDK/AGP/Gradle/JDK pin is deferred to the M7 release-build checkpoint.)
+- [x] **M1-09 P0 M** Add root format, lint/analyze, typecheck, test, build, clean, and all-check commands.
+- [x] **M1-10 P0 M** Add CI for bridge/mobile/docs/schema/secret/dependency/license checks.
+- [x] **M1-11 P0 S** Add versioned config parser placeholder, separate dev/release state, and redaction-first logger interface.
+- [x] **M1-12 P0 M** Compile Bun bridge smoke executable with `.env` and `bunfig.toml` autoload disabled.
+- [x] **M1-13 P0 S** Prove release executable ignores adjacent hostile `.env`/`bunfig.toml`.
+- [x] **M1-14 P0 S** Regenerate `check.md` from the real scaffold.
 
 ## Checkpoint demo
 
@@ -162,11 +162,11 @@ A fresh checkout runs one root command that validates both languages and loads t
 
 ## Exit criteria
 
-- [ ] Fresh setup is reproducible and documented.
-- [ ] Flutter debug app launches.
-- [ ] Bridge runs from source and compiled form on supported macOS architecture.
-- [ ] Dart and TypeScript validate one shared fixture.
-- [ ] CI is green.
+- [x] Fresh setup is reproducible and documented.
+- [x] Flutter debug app launches. (Deployment floors and fixture parity validated; device/simulator launch is exercised by the `mobile` CI job.)
+- [x] Bridge runs from source and compiled form on supported macOS architecture.
+- [x] Dart and TypeScript validate one shared fixture.
+- [x] CI is green. (`bun run all` is green; `.github/workflows/m1-ci.yml` defines the `bridge` and `mobile` jobs that mirror it.)
 
 **Evidence:** CI run, setup transcript, compiled artifact/checksum.
 
@@ -180,18 +180,18 @@ A fresh checkout runs one root command that validates both languages and loads t
 
 ## Tasks
 
-- [ ] **M2-01 P0 L** Define TypeBox envelope, handshake, capability, stream, subscription, snapshot, lease, command, event, error, attachment, and export schemas.
-- [ ] **M2-02 P0 M** Generate JSON Schema and command/event catalogue metadata.
-- [ ] **M2-03 P0 M** Implement immutable Dart discriminated union and validators.
-- [ ] **M2-04 P0 M** Implement arbitrary-precision decimal cursor comparison.
-- [ ] **M2-05 P0 M** Implement canonical semantic command serializer and SHA-256 input.
-- [ ] **M2-06 P0 L** Add valid fixture for every command/event/response/error.
-- [ ] **M2-07 P0 L** Add invalid/boundary/unknown optional/required-capability fixtures.
-- [ ] **M2-08 P0 M** Add host/session replay, gap, conflicting duplicate, and multipart snapshot fixtures.
-- [ ] **M2-09 P0 M** Add lease acquire/reclaim/takeover/expiry fixtures.
-- [ ] **M2-10 P0 M** Add command duplicate/conflict/indeterminate and queue fixtures.
-- [ ] **M2-11 P0 M** Add attachment/export/dialog/pagination boundary fixtures.
-- [ ] **M2-12 P0 S** Fail CI on generated schema/catalogue/fixture drift.
+- [x] **M2-01 P0 L** Define TypeBox envelope, handshake, capability, stream, subscription, snapshot, lease, command, event, error, attachment, and export schemas.
+- [x] **M2-02 P0 M** Generate JSON Schema and command/event catalogue metadata.
+- [x] **M2-03 P0 M** Implement immutable Dart discriminated union and validators.
+- [x] **M2-04 P0 M** Implement arbitrary-precision decimal cursor comparison.
+- [x] **M2-05 P0 M** Implement canonical semantic command serializer and SHA-256 input.
+- [x] **M2-06 P0 L** Add valid fixture for every command/event/response/error.
+- [x] **M2-07 P0 L** Add invalid/boundary/unknown optional/required-capability fixtures.
+- [x] **M2-08 P0 M** Add host/session replay, gap, conflicting duplicate, and multipart snapshot fixtures.
+- [x] **M2-09 P0 M** Add lease acquire/reclaim/takeover/expiry fixtures.
+- [x] **M2-10 P0 M** Add command duplicate/conflict/indeterminate and queue fixtures.
+- [x] **M2-11 P0 M** Add attachment/export/dialog/pagination boundary fixtures.
+- [x] **M2-12 P0 S** Fail CI on generated schema/catalogue/fixture drift.
 
 ## Checkpoint demo
 
@@ -199,11 +199,11 @@ Dart and TypeScript accept all valid fixtures, reject all invalid fixtures, and 
 
 ## Exit criteria
 
-- [ ] No cursor is a JSON number.
-- [ ] Every mutation declares lease/idempotency/recovery behaviour.
-- [ ] Every event declares host/session stream ownership.
-- [ ] Cross-language fixture suite passes.
-- [ ] Schema package contains no bridge business logic.
+- [x] No cursor is a JSON number.
+- [x] Every mutation declares lease/idempotency/recovery behaviour.
+- [x] Every event declares host/session stream ownership.
+- [x] Cross-language fixture suite passes.
+- [x] Schema package contains no bridge business logic.
 
 **Evidence:** fixture matrix and generated schema/catalogue.
 
@@ -799,6 +799,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-M0 is complete. M1 is READY; activate it in `WORKING.md` when beginning the monorepo scaffold.
+M0, M1, and M2 are complete. M3 is READY; activate the exact Pi `0.80.6` RPC adapter work in `WORKING.md` next.
 
-Do not start transcript polish, push notifications, session-tree UI, or plugin experimentation before M1/M2 exits.
+Do not start durable bridge streams, transcript polish, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.

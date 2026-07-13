@@ -16,11 +16,7 @@ class PiMobM1Scaffold extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       title: 'pi-mob M1 scaffold',
-      home: Scaffold(
-        body: Center(
-          child: Text('pi-mob M1 scaffold'),
-        ),
-      ),
+      home: Scaffold(body: Center(child: Text('pi-mob M1 scaffold'))),
     );
   }
 }

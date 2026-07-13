@@ -1,4 +1,4 @@
-name: M1 CI
+name: M2 CI
 
 on:
   push:
@@ -33,10 +33,23 @@ jobs:
           bun --version
           bun --revision
 
-      - name: Install dependencies
-        run: bun install --frozen-lockfile
+      - name: Install Flutter (3.44.4 stable)
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_3.44.4-stable.zip" \
+            -o /tmp/flutter.zip
+          echo "32bca4386121042e827ff2d90edbd7c7fb47c514fc04d5a87db6e3202dafde5d  /tmp/flutter.zip" | sha256sum -c -
+          sudo mkdir -p /opt
+          sudo unzip -q /tmp/flutter.zip -d /opt
+          echo "/opt/flutter/bin" >> "$GITHUB_PATH"
+          /opt/flutter/bin/flutter --version
 
-      - name: Run M1 validation
+      - name: Install dependencies
+        run: |
+          bun install --frozen-lockfile
+          cd apps/mobile && /opt/flutter/bin/flutter pub get
+
+      - name: Run M2 validation
         run: bun run all
 
   mobile:
@@ -67,7 +80,7 @@ jobs:
           sudo mkdir -p /opt
           sudo unzip -q /tmp/flutter.zip -d /opt
           echo "/opt/flutter/bin" >> "$GITHUB_PATH"
-          flutter --version
+          /opt/flutter/bin/flutter --version
 
       - name: Validate mobile deployment floors
         run: |

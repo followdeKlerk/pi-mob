@@ -10,6 +10,7 @@ dependencies:
   flutter:
     sdk: flutter
   cupertino_icons: 1.0.9
+  unorm_dart: 0.3.2
 
 dev_dependencies:
   flutter_test:
@@ -18,8 +19,3 @@ dev_dependencies:
 
 flutter:
   uses-material-design: true
-  # The shared protocol-fixtures corpus is the single source of truth for both
-  # the Dart and TypeScript test suites. The relative path below keeps the
-  # bytes identical without copying the file.
-  assets:
-    - ../../packages/protocol-fixtures/corpus/

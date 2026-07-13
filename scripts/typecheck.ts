@@ -11,7 +11,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const TSC = "/Users/nathandekleerk/github/pi-mob/node_modules/.bin/tsc";
+const TSC = join(ROOT, "node_modules", ".bin", "tsc");
 
 function packageDirs(): string[] {
   const packagesDir = join(ROOT, "packages");

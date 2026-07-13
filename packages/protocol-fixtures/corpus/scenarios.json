@@ -1,0 +1,373 @@
+[
+  {
+    "name": "pairing-valid-invalid",
+    "steps": [
+      {
+        "fixture": "scenario-pairing-accept.json",
+        "action": "pairing.accept",
+        "expect": "paired"
+      },
+      {
+        "fixture": "scenario-pairing-reject-invalid.json",
+        "action": "pairing.reject_invalid",
+        "expect": "rejected"
+      }
+    ],
+    "outcome": "rejected"
+  },
+  {
+    "name": "hello-mismatch-generation",
+    "steps": [
+      {
+        "fixture": "scenario-hello-accept.json",
+        "action": "hello.accept",
+        "expect": "connected"
+      },
+      {
+        "fixture": "scenario-hello-generation-changed.json",
+        "action": "hello.generation_changed",
+        "expect": "snapshot_required"
+      }
+    ],
+    "outcome": "snapshot_required"
+  },
+  {
+    "name": "replay-gap-conflicting-duplicate",
+    "steps": [
+      {
+        "fixture": "scenario-stream-apply.json",
+        "action": "stream.apply",
+        "expect": "contiguous"
+      },
+      {
+        "fixture": "scenario-stream-gap.json",
+        "action": "stream.gap",
+        "expect": "paused"
+      },
+      {
+        "fixture": "scenario-stream-conflicting-duplicate.json",
+        "action": "stream.conflicting_duplicate",
+        "expect": "snapshot_required"
+      }
+    ],
+    "outcome": "snapshot_required"
+  },
+  {
+    "name": "multipart-snapshot-post-baseline",
+    "steps": [
+      {
+        "fixture": "scenario-snapshot-begin.json",
+        "action": "snapshot.begin",
+        "expect": "receiving"
+      },
+      {
+        "fixture": "scenario-snapshot-part-one.json",
+        "action": "snapshot.part_one",
+        "expect": "part_one"
+      },
+      {
+        "fixture": "scenario-snapshot-part-two.json",
+        "action": "snapshot.part_two",
+        "expect": "part_two"
+      },
+      {
+        "fixture": "scenario-snapshot-end.json",
+        "action": "snapshot.end",
+        "expect": "snapshot_complete"
+      },
+      {
+        "fixture": "scenario-snapshot-post-baseline.json",
+        "action": "snapshot.post_baseline",
+        "expect": "post_baseline_replayed"
+      },
+      {
+        "fixture": "scenario-snapshot-sync.json",
+        "action": "snapshot.sync",
+        "expect": "synced"
+      }
+    ],
+    "outcome": "synced"
+  },
+  {
+    "name": "controller-reclaim-takeover-expiry-stale",
+    "steps": [
+      {
+        "fixture": "scenario-controller-acquire.json",
+        "action": "controller.acquire",
+        "expect": "controlled"
+      },
+      {
+        "fixture": "scenario-controller-disconnect.json",
+        "action": "controller.disconnect",
+        "expect": "reclaimable"
+      },
+      {
+        "fixture": "scenario-controller-reclaim.json",
+        "action": "controller.reclaim",
+        "expect": "controlled"
+      },
+      {
+        "fixture": "scenario-controller-takeover.json",
+        "action": "controller.takeover",
+        "expect": "revoked"
+      },
+      {
+        "fixture": "scenario-controller-expire.json",
+        "action": "controller.expire",
+        "expect": "expired"
+      },
+      {
+        "fixture": "scenario-controller-stale-mutation.json",
+        "action": "controller.stale_mutation",
+        "expect": "stale_controller"
+      }
+    ],
+    "outcome": "stale_controller"
+  },
+  {
+    "name": "command-conflict-restart-indeterminate",
+    "steps": [
+      {
+        "fixture": "scenario-command-accept.json",
+        "action": "command.accept",
+        "expect": "accepted"
+      },
+      {
+        "fixture": "scenario-command-duplicate.json",
+        "action": "command.duplicate",
+        "expect": "duplicate_no_dispatch"
+      },
+      {
+        "fixture": "scenario-command-conflict.json",
+        "action": "command.conflict",
+        "expect": "idempotency_conflict"
+      },
+      {
+        "fixture": "scenario-command-accept-recoverable.json",
+        "action": "command.accept_recoverable",
+        "expect": "accepted_undispatched"
+      },
+      {
+        "fixture": "scenario-command-restart.json",
+        "action": "command.restart",
+        "expect": "dispatch_once"
+      },
+      {
+        "fixture": "scenario-command-running.json",
+        "action": "command.running",
+        "expect": "running"
+      },
+      {
+        "fixture": "scenario-command-crash.json",
+        "action": "command.crash",
+        "expect": "indeterminate"
+      },
+      {
+        "fixture": "scenario-command-resend.json",
+        "action": "command.resend",
+        "expect": "no_redispatch"
+      }
+    ],
+    "outcome": "no_redispatch"
+  },
+  {
+    "name": "prompt-immediate-steer-follow-up-queue",
+    "steps": [
+      {
+        "fixture": "scenario-prompt-immediate.json",
+        "action": "prompt.immediate",
+        "expect": "immediate_dispatched"
+      },
+      {
+        "fixture": "scenario-prompt-steer.json",
+        "action": "prompt.steer",
+        "expect": "steered"
+      },
+      {
+        "fixture": "scenario-prompt-follow-up.json",
+        "action": "prompt.follow_up",
+        "expect": "queued"
+      },
+      {
+        "fixture": "scenario-queue-restart.json",
+        "action": "queue.restart",
+        "expect": "queue_recovered"
+      },
+      {
+        "fixture": "scenario-queue-remove.json",
+        "action": "queue.remove",
+        "expect": "removed"
+      },
+      {
+        "fixture": "scenario-queue-add.json",
+        "action": "queue.add",
+        "expect": "queued_again"
+      },
+      {
+        "fixture": "scenario-queue-clear.json",
+        "action": "queue.clear",
+        "expect": "empty"
+      },
+      {
+        "fixture": "scenario-queue-fill.json",
+        "action": "queue.fill",
+        "expect": "full"
+      },
+      {
+        "fixture": "scenario-queue-overflow.json",
+        "action": "queue.overflow",
+        "expect": "queue_full"
+      }
+    ],
+    "outcome": "queue_full"
+  },
+  {
+    "name": "attachment-retry-conflict-expiry-malformed-oversized",
+    "steps": [
+      {
+        "fixture": "scenario-attachment-upload.json",
+        "action": "attachment.upload",
+        "expect": "stored"
+      },
+      {
+        "fixture": "scenario-attachment-retry.json",
+        "action": "attachment.retry",
+        "expect": "deduplicated"
+      },
+      {
+        "fixture": "scenario-attachment-conflict.json",
+        "action": "attachment.conflict",
+        "expect": "idempotency_conflict"
+      },
+      {
+        "fixture": "scenario-attachment-replace.json",
+        "action": "attachment.replace",
+        "expect": "stored_again"
+      },
+      {
+        "fixture": "scenario-attachment-expire.json",
+        "action": "attachment.expire",
+        "expect": "expired"
+      },
+      {
+        "fixture": "scenario-attachment-reference.json",
+        "action": "attachment.reference",
+        "expect": "attachment_unavailable"
+      },
+      {
+        "fixture": "scenario-attachment-malformed.json",
+        "action": "attachment.malformed",
+        "expect": "malformed_rejected"
+      },
+      {
+        "fixture": "scenario-attachment-oversized.json",
+        "action": "attachment.oversized",
+        "expect": "payload_too_large"
+      }
+    ],
+    "outcome": "payload_too_large"
+  },
+  {
+    "name": "export-dialog-pagination",
+    "steps": [
+      {
+        "fixture": "scenario-export-complete.json",
+        "action": "export.complete",
+        "expect": "export_ready"
+      },
+      {
+        "fixture": "scenario-export-expire.json",
+        "action": "export.expire",
+        "expect": "export_expired"
+      },
+      {
+        "fixture": "scenario-export-delete.json",
+        "action": "export.delete",
+        "expect": "export_unavailable"
+      },
+      {
+        "fixture": "scenario-dialog-open.json",
+        "action": "dialog.open",
+        "expect": "dialog_pending"
+      },
+      {
+        "fixture": "scenario-dialog-reconnect.json",
+        "action": "dialog.reconnect",
+        "expect": "dialog_replayed"
+      },
+      {
+        "fixture": "scenario-dialog-timeout.json",
+        "action": "dialog.timeout",
+        "expect": "dialog_expired"
+      },
+      {
+        "fixture": "scenario-dialog-duplicate-response.json",
+        "action": "dialog.duplicate_response",
+        "expect": "invalid_state"
+      },
+      {
+        "fixture": "scenario-pagination-first.json",
+        "action": "pagination.first",
+        "expect": "page_loaded"
+      },
+      {
+        "fixture": "scenario-pagination-revision-changed.json",
+        "action": "pagination.revision_changed",
+        "expect": "refresh_required"
+      }
+    ],
+    "outcome": "refresh_required"
+  },
+  {
+    "name": "oversized-slow-consumer-pi-db",
+    "steps": [
+      {
+        "fixture": "scenario-failure-oversized-json.json",
+        "action": "failure.oversized_json",
+        "expect": "payload_too_large"
+      },
+      {
+        "fixture": "scenario-failure-slow-consumer.json",
+        "action": "failure.slow_consumer",
+        "expect": "slow_consumer"
+      },
+      {
+        "fixture": "scenario-failure-host-draining.json",
+        "action": "failure.host_draining",
+        "expect": "host_draining"
+      },
+      {
+        "fixture": "scenario-failure-pi-mismatch.json",
+        "action": "failure.pi_mismatch",
+        "expect": "pi_version_mismatch"
+      },
+      {
+        "fixture": "scenario-failure-database-unavailable.json",
+        "action": "failure.database_unavailable",
+        "expect": "database_unavailable"
+      },
+      {
+        "fixture": "scenario-failure-storage-full.json",
+        "action": "failure.storage_full",
+        "expect": "storage_full"
+      }
+    ],
+    "outcome": "storage_full"
+  },
+  {
+    "name": "unknown-optional-required-capability",
+    "steps": [
+      {
+        "fixture": "future-optional-event.json",
+        "action": "capability.optional_event",
+        "expect": "retained_optional"
+      },
+      {
+        "fixture": "future-required-capability-event.json",
+        "action": "capability.required_unknown",
+        "expect": "unsupported_capability"
+      }
+    ],
+    "outcome": "unsupported_capability"
+  }
+]

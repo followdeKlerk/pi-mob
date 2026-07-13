@@ -1,0 +1,27 @@
+{
+  "artifacts": [
+    "attachment.schema.json",
+    "capability.schema.json",
+    "command-catalogue.json",
+    "command.schema.json",
+    "control.schema.json",
+    "decimal-cursor.schema.json",
+    "envelope.schema.json",
+    "error-codes.json",
+    "error.schema.json",
+    "event-catalogue.json",
+    "event.schema.json",
+    "export.schema.json",
+    "hello.schema.json",
+    "lease.schema.json",
+    "pairing.schema.json",
+    "response.schema.json",
+    "snapshot.schema.json",
+    "stream.schema.json",
+    "subscription.schema.json",
+    "schema-manifest.json"
+  ],
+  "generatedAtUtc": "2026-07-12T00:00:00.000Z",
+  "protocolVersion": "1.0",
+  "schemaVersion": 1
+}

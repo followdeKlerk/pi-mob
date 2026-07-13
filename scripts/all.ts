@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
 /**
- * Top-level M1 validation entrypoint.
+ * Top-level checkpoint validation entrypoint.
  *
  * Runs every static, fixture, documentation, security, dependency, schema
  * drift, unit, and Bun-compiled-bridge check. Exits non-zero when any
- * individual step fails. Flutter checks are optional and skipped when the
- * SDK is not runnable on the host.
+ * individual step fails. Flutter/Dart are required for cross-language parity.
  */
 
 import { spawnSync } from "node:child_process";

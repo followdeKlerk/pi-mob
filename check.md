@@ -5,9 +5,9 @@
 ```text
 updated_utc: 2026-07-12
 root: .
-managed_by: manual specification refresh; regenerate with /check after M1 scaffold
+managed_by: regenerate with /check after each scaffold milestone
 vcs: git
-branch: m0-contract-freeze
+branch: m1-m2-scaffold
 cache_scope: project-orientation
 ```
 
@@ -16,8 +16,8 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M1 activation ready
-shape: docs-only
+status: M0–M2 done; M3 activation ready
+shape: monorepo scaffold (M1); workspace, packages, scripts, CI, and compiled bridge smoke executable present
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
 host_floor: macOS 13.0+
@@ -26,16 +26,14 @@ agent: @earendil-works/pi-coding-agent 0.80.6 via pi --mode rpc subprocess
 protocol: 1.0, host/session streams, decimal-string cursors
 ```
 
-No application scaffold, manifests, executable code, CI, or tests exist yet.
-
 ## active work
 
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M1 — Monorepo scaffold and CI foundations
-objective: create the monorepo scaffold and root validation command
-next_checkpoint: M2 — Protocol schemas and shared fixtures
+checkpoint: M3 — Real Pi RPC adapter proven
+objective: prove a strict normalized adapter against exact Pi 0.80.6
+next_checkpoint: M4 — Durable bridge core and replay streams
 blockers: none requiring a product decision
 ```
 
@@ -46,7 +44,7 @@ M0 evidence retained:
 - sanitized real-Pi session/resource fixture inventory,
 - Flutter/Bun x64 artifact evidence.
 
-M1 still freezes Xcode/iOS and Android build pins and adds documentation/schema consistency checks.
+M1 shipped the workspace, packages, scripts, CI, and compiled `bridge-smoke` (`M1-SUMMARY.md`). M2 shipped executable schemas, generated catalogues, immutable Dart models, 245 manifest fixtures, payload-validated recovery scenarios, shared semantic hashes, and drift gates (`M2-SUMMARY.md`). Full native release toolchain pinning remains deferred to M7.
 
 ## read first
 
@@ -64,8 +62,9 @@ M1 still freezes Xcode/iOS and Android build pins and adds documentation/schema 
 12. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md)
 13. [`docs/DECISIONS.md`](docs/DECISIONS.md)
 14. [`BACKLOG.md`](BACKLOG.md)
-15. [`WORKING.md`](WORKING.md)
-16. [`PLANNING.md`](PLANNING.md) — historical research only
+15. [`M2-SUMMARY.md`](M2-SUMMARY.md)
+16. [`WORKING.md`](WORKING.md)
+17. [`PLANNING.md`](PLANNING.md) — historical research only
 
 Normative documents under `docs/`, `BACKLOG.md`, and current `WORKING.md` override contradictory historical text in `PLANNING.md`.
 
@@ -170,26 +169,30 @@ running at crash -> indeterminate; never automatic rerun
 
 ## commands
 
-No commands exist yet. M1 must define at least:
+Root validation pipeline (`bun run all`, defined by M1):
 
 ```text
 setup
 format
 lint/analyze
 typecheck
-unit test
-protocol fixture check
-all checks
-bridge dev/build
-mobile dev/build
+fixtures:check
+schema:generate
+schema:check
+docs:check
+security:check
+deps:check
+test
+build
 clean
+all
 ```
 
 ## target entrypoints after M1
 
 ```text
 apps/mobile/lib/main.dart
-packages/bridge/src/main.ts
+packages/bridge/src/smoke.ts
 packages/pi-extension/src/index.ts
 packages/protocol-schema/src/index.ts
 packages/protocol-fixtures/
@@ -238,13 +241,12 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## known issues / intentionally incomplete
 
-- Docs-only repository; no executable validation yet.
-- Exact Flutter platform archive checksum not recorded yet.
-- Exact Xcode/iOS SDK and Android build toolchain not frozen until scaffold builds.
-- Real Pi compatibility manifest and sanitized session fixtures not yet committed.
+- The real Pi adapter, durable bridge, and mobile product behavior begin at M3/M4/M5; M2 contains protocol contracts only.
+- Exact Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK pin is deferred to the M7 release-build checkpoint.
+- No real Xcode/Android release build in CI yet; M1 validates the iOS/Android deployment floors and runs `flutter analyze` plus the Dart fixture parity test.
 - Linux/Windows/Termux/public store/multi-user/sandbox/Obsidian are post-MVP.
 - `PLANNING.md` contains obsolete research statements and must not be treated as normative.
 
 ## next action
 
-Close remaining M0 evidence, then scaffold M1. Do not begin polished UI or push work before shared protocol fixtures and the real Pi adapter are proven.
+Activate M3: prove the exact Pi `0.80.6` RPC adapter behind normalized domain types. Do not begin M4 durable bridge streams or later UI/push work before the real adapter contract is proven.

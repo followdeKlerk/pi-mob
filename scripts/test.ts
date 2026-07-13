@@ -10,6 +10,7 @@ import { existsSync, readdirSync, statSync } from "node:fs";
 import { join } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
+const FLUTTER = Bun.which("flutter");
 
 function packageTestDirs(): string[] {
   const packagesDir = join(ROOT, "packages");
@@ -30,7 +31,9 @@ function run(label: string, cmd: readonly string[], cwd?: string): number {
   const result = spawnSync(cmd[0]!, cmd.slice(1), {
     cwd: cwd ?? ROOT,
     stdio: "inherit",
+    timeout: 60_000,
   });
+  if (result.signal === "SIGTERM") process.stderr.write(`==> ${label} unavailable: SDK command did not become runnable within 60 seconds\n`);
   return result.status ?? 1;
 }
 
@@ -42,6 +45,13 @@ function main(): number {
     }
     const code = run(`bun test (${dir})`, ["bun", "test"], dir);
     if (code !== 0) return code;
+  }
+  if (FLUTTER && existsSync(FLUTTER)) {
+    const mobile = run("flutter test (apps/mobile)", [FLUTTER, "test"], `${ROOT}/apps/mobile`);
+    if (mobile !== 0) return mobile;
+  } else {
+    process.stderr.write("flutter test unavailable: Flutter SDK is not installed\n");
+    return 1;
   }
   process.stdout.write("test ok\n");
   return 0;

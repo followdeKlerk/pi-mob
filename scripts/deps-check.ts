@@ -67,7 +67,8 @@ function checkManifest(manifestPath: string): string[] {
 function loadLockfile(): BunLock | null {
   const lockfile = join(ROOT, "bun.lock");
   if (!existsSync(lockfile)) return null;
-  return JSON.parse(readFileSync(lockfile, "utf8")) as BunLock;
+  const text = readFileSync(lockfile, "utf8").replace(/,(\s*[}\]])/g, "$1");
+  return JSON.parse(text) as BunLock;
 }
 
 function checkLockfile(lock: BunLock | null): string[] {

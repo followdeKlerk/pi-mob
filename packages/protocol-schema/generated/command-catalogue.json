@@ -1,0 +1,870 @@
+[
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": false,
+    "scope": "host-or-session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "controller.acquire"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": false,
+    "scope": "host-or-session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "controller.takeover"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": false,
+    "scope": "host-or-session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "controller.release"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "host",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "host.display_name.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "host",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "workspace.trust.approve"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "host",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "notification.device.register"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "host",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "notification.device.unregister"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": false,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.create"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.activate"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.stop"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.rename"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.policy.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.delete"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.restore"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.purge"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.fork"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.clone"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "session.export"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "prompt.submit"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "turn.abort"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "queue.remove"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "queue.clear"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "model.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "thinking.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "steering_mode.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "follow_up_mode.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "compaction.start"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "compaction.auto.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "retry.auto.set"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "retry.abort"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "extension.respond"
+  }
+]

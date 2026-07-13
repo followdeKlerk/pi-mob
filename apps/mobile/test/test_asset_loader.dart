@@ -7,10 +7,7 @@ import 'dart:io';
 /// TypeScript suites consume the exact same bytes.
 class TestAssetLoader {
   static Future<String> loadString(String relativePath) async {
-    final candidates = <String>[
-      relativePath,
-      '../../$relativePath',
-    ];
+    final candidates = <String>[relativePath, '../../$relativePath'];
     for (final candidate in candidates) {
       final file = File(candidate);
       if (file.existsSync()) {

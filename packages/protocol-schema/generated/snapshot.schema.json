@@ -1,0 +1,76 @@
+{
+  "$id": "pi-mob/protocol/snapshot",
+  "anyOf": [
+    {
+      "additionalProperties": true,
+      "properties": {
+        "baselineCursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "snapshotId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^(host|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "snapshotId",
+        "streamId",
+        "baselineCursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "items": {
+          "items": {
+            "additionalProperties": true,
+            "properties": {},
+            "type": "object"
+          },
+          "type": "array"
+        },
+        "part": {
+          "minimum": 0,
+          "type": "integer"
+        },
+        "snapshotId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "snapshotId",
+        "part",
+        "items"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "partCount": {
+          "minimum": 1,
+          "type": "integer"
+        },
+        "snapshotId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        }
+      },
+      "required": [
+        "snapshotId",
+        "partCount"
+      ],
+      "type": "object"
+    }
+  ]
+}

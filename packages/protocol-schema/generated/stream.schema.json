@@ -1,0 +1,19 @@
+{
+  "$id": "pi-mob/protocol/stream",
+  "additionalProperties": true,
+  "properties": {
+    "cursor": {
+      "pattern": "^(0|[1-9][0-9]*)$",
+      "type": "string"
+    },
+    "streamId": {
+      "pattern": "^(host|session):[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "type": "string"
+    }
+  },
+  "required": [
+    "streamId",
+    "cursor"
+  ],
+  "type": "object"
+}

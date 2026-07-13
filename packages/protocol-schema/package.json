@@ -14,6 +14,9 @@
     "test": "bun test",
     "generate": "bun run cmd/generate.ts"
   },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.52"
+  },
   "devDependencies": {
     "@pi-mob/typescript-config": "workspace:*"
   }

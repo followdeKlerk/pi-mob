@@ -1,9 +1,13 @@
 # @pi-mob/protocol-fixtures
 
-Reserved protocol fixture corpus. M1 ships the valid/invalid `hello`
-envelope pair that Dart and TypeScript both decode. M2 expands the
-corpus to every declared command/event/response/error plus boundary,
-replay, lease, idempotency, queue, attachment, export, and dialog
-fixtures. The Flutter app's `immutable protocol fixture decoder test`
-lives at `apps/mobile/test/protocol_fixture_test.dart` and consumes the
-same JSON file.
+Generated shared protocol `1.0` fixture corpus consumed directly by both TypeScript and Dart.
+
+The corpus covers every declared command, event, response, and stable error, plus invalid envelopes, protocol/capability boundaries, replay/snapshot recovery, controller leases, command idempotency/crash recovery, queues, attachments, exports, dialogs, pagination, and semantic-hash goldens.
+
+```sh
+bun run --cwd packages/protocol-fixtures test
+bun run --cwd packages/protocol-fixtures generate
+bun run fixtures:check
+```
+
+`fixtures:check` regenerates into a temporary directory and fails on any byte-level corpus drift. Flutter tests load the canonical repository files directly; no copied mobile fixture corpus is committed.

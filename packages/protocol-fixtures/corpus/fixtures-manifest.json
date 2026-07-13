@@ -1,0 +1,1227 @@
+[
+  {
+    "file": "attachment-boundary.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "attachment-response-valid.json",
+    "valid": true,
+    "kind": "attachment"
+  },
+  {
+    "file": "command-compaction-auto-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-compaction-start-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-controller-acquire-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-controller-release-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-controller-takeover-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-duplicate.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "command-extension-respond-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-follow_up_mode-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-host-display_name-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-indeterminate.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "command-metadata-retry.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-model-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-notification-device-register-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-notification-device-unregister-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-prompt-submit-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-queue-clear-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-queue-remove-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-retry-abort-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-retry-auto-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-semantic-conflict.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "command-session-activate-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-clone-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-create-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-delete-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-export-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-fork-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-policy-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-purge-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-rename-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-restore-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-session-stop-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-steering_mode-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-thinking-set-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-turn-abort-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-workspace-trust-approve-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "control-command-current-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-controller-renew-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-cursor-ack-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-host-snapshot-request-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-model-list-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-session-history-page-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-session-list-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-session-snapshot-request-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-subscription-set-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-workspace-list-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-workspace-search-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "dialog-expiry.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "error-attachment-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-command-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-controller-conflict-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-controller-required-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-crash-loop-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-cursor-invalid-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-database-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-export-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-host-capacity-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-host-draining-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-host-identity-mismatch-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-host-not-ready-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-idempotency-conflict-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-internal-error-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-invalid-message-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-invalid-state-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-migration-required-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-payload-too-large-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-permission-denied-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-pi-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-pi-version-mismatch-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-provider-interrupted-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-queue-full-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-queue-item-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-rate-limited-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-session-deleted-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-session-incompatible-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-session-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-session-repair-required-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-slow-consumer-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-snapshot-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-stale-connection-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-stale-controller-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-storage-full-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-stream-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-unsupported-capability-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-unsupported-protocol-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-workspace-not-allowed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-workspace-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-workspace-trust-required-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-workspace-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "event-assistant-completed-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-assistant-delta-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-assistant-started-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-command-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-compaction-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-context-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-controller-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-error-event-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-extension-dialog-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-extension-editor_prefill-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-extension-notify-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-extension-status-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-extension-title-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-extension-widget-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-host-backup_state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-host-capacity-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-host-compatibility-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-host-degraded-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-host-draining-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-host-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-model-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-notification-capability-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-queue-snapshot-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-reasoning-completed-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-reasoning-delta-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-reasoning-started-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-retry-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-session-metadata-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-session-policy-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-session-removed-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-session-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-session-summary-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-tool-cancelled-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-tool-completed-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-tool-failed-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-tool-output-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-tool-started-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-aborted-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-accepted-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-compacting-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-failed-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-indeterminate-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-queued-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-retrying-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-settled-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-started-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-turn-waiting_for_input-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-unknown-optional-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-workspace-summary-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-workspace-trust_state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "export-boundary.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "export-metadata-valid.json",
+    "valid": true,
+    "kind": "export"
+  },
+  {
+    "file": "future-optional-event.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "future-required-capability-event.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "future-required-event.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "hello-host-mismatch.json",
+    "valid": true,
+    "kind": "hello"
+  },
+  {
+    "file": "hello-major-mismatch.json",
+    "valid": false,
+    "kind": "hello"
+  },
+  {
+    "file": "hello-valid.json",
+    "valid": true,
+    "kind": "hello"
+  },
+  {
+    "file": "invalid-attachment-oversized.json",
+    "valid": false,
+    "kind": "attachment"
+  },
+  {
+    "file": "invalid-command-optional-field-type.json",
+    "valid": false,
+    "kind": "command"
+  },
+  {
+    "file": "invalid-command-state-missing-error-code.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-cursor-json-number.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-malformed-envelope.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-missing-payload.json",
+    "valid": false,
+    "kind": "response"
+  },
+  {
+    "file": "invalid-negative-protocol-minor.json",
+    "valid": false,
+    "kind": "hello"
+  },
+  {
+    "file": "invalid-optional-event-type.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-page-size-101.json",
+    "valid": false,
+    "kind": "control"
+  },
+  {
+    "file": "invalid-queue-overflow.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-response-page-token-type.json",
+    "valid": false,
+    "kind": "response"
+  },
+  {
+    "file": "invalid-unknown-required-capability.json",
+    "valid": false,
+    "kind": "hello"
+  },
+  {
+    "file": "invalid-uppercase-uuid.json",
+    "valid": false,
+    "kind": "command"
+  },
+  {
+    "file": "lease-takeover.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "pagination-boundary.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "pairing-invalid-http.json",
+    "valid": false,
+    "kind": "pairing"
+  },
+  {
+    "file": "pairing-valid.json",
+    "valid": true,
+    "kind": "pairing"
+  },
+  {
+    "file": "queue-restart.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "response-command-current-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-command-receipt-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-hello-accepted-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-model-list-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-session-history-page-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-session-list-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-stream-snapshot-begin-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-stream-snapshot-end-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-stream-snapshot-part-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-stream-sync-complete-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-subscription-accepted-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-workspace-list-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-workspace-search-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-attachment-conflict.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-attachment-expire.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-attachment-malformed.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-attachment-oversized.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-attachment-reference.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-attachment-replace.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-attachment-retry.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-attachment-upload.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-command-accept-recoverable.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-command-accept.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-command-conflict.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-command-crash.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-command-duplicate.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-command-resend.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-command-restart.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-command-running.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-controller-acquire.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-controller-disconnect.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-controller-expire.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-controller-reclaim.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-controller-stale-mutation.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-controller-takeover.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-dialog-duplicate-response.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-dialog-open.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-dialog-reconnect.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-dialog-timeout.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-export-complete.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-export-delete.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-export-expire.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-failure-database-unavailable.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-failure-host-draining.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-failure-oversized-json.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-failure-pi-mismatch.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-failure-slow-consumer.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-failure-storage-full.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-hello-accept.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-hello-generation-changed.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-pagination-first.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-pagination-revision-changed.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-pairing-accept.json",
+    "valid": true,
+    "kind": "pairing"
+  },
+  {
+    "file": "scenario-pairing-reject-invalid.json",
+    "valid": false,
+    "kind": "pairing"
+  },
+  {
+    "file": "scenario-prompt-follow-up.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-prompt-immediate.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-prompt-steer.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-queue-add.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-queue-clear.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-queue-fill.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-queue-overflow.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "scenario-queue-remove.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "scenario-queue-restart.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-snapshot-begin.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-snapshot-end.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-snapshot-part-one.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-snapshot-part-two.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-snapshot-post-baseline.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-snapshot-sync.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "scenario-stream-apply.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-stream-conflicting-duplicate.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "scenario-stream-gap.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "snapshot-failure.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "snapshot-multipart.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "stream-duplicate-conflict.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "stream-expired-cursor.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "stream-replay-gap.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "tool-output-event-boundary.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "tool-output-retained-boundary.json",
+    "valid": true,
+    "kind": "event"
+  }
+]

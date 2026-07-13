@@ -1,0 +1,73 @@
+[
+  {
+    "name": "metadata-excluded",
+    "messages": [
+      {
+        "protocol": {
+          "major": 1,
+          "minor": 0
+        },
+        "messageId": "11111111-1111-4111-8111-111111111111",
+        "sentAt": "2026-07-12T00:00:00.000Z",
+        "payload": {
+          "sessionId": "66666666-6666-4666-8666-666666666666",
+          "name": "fixture"
+        },
+        "requestId": "22222222-2222-4222-8222-222222222222",
+        "connectionId": "55555555-5555-4555-8555-555555555555",
+        "commandId": "33333333-3333-4333-8333-333333333333",
+        "leaseId": "77777777-7777-4777-8777-777777777777",
+        "type": "session.rename"
+      },
+      {
+        "protocol": {
+          "major": 1,
+          "minor": 0
+        },
+        "messageId": "44444444-4444-4444-8444-444444444444",
+        "sentAt": "2026-07-12T01:00:00.000Z",
+        "payload": {
+          "name": "fixture",
+          "sessionId": "66666666-6666-4666-8666-666666666666"
+        },
+        "requestId": "44444444-4444-4444-8444-444444444444",
+        "connectionId": "44444444-4444-4444-8444-444444444444",
+        "commandId": "33333333-3333-4333-8333-333333333333",
+        "leaseId": "44444444-4444-4444-8444-444444444444",
+        "type": "session.rename",
+        "retryMetadata": {
+          "attempt": 4
+        }
+      }
+    ],
+    "canonical": "{\"payload\":{\"name\":\"fixture\",\"sessionId\":\"66666666-6666-4666-8666-666666666666\"},\"type\":\"session.rename\"}",
+    "sha256": "2c41e095cbd79ce924da6ca3fe3f03754f5fa72bedb831e90287d346d0ddb252"
+  },
+  {
+    "name": "unicode-nfc-and-key-order",
+    "semanticCommands": [
+      {
+        "type": "session.rename",
+        "payload": {
+          "z": "café",
+          "a": [
+            true,
+            null
+          ]
+        }
+      },
+      {
+        "payload": {
+          "a": [
+            true,
+            null
+          ],
+          "z": "café"
+        },
+        "type": "session.rename"
+      }
+    ],
+    "canonical": "{\"payload\":{\"a\":[true,null],\"z\":\"café\"},\"type\":\"session.rename\"}",
+    "sha256": "61a4c2925392bd0ca42625e716e0af099c8028131e9860701172549a99689c35"
+  }
+]

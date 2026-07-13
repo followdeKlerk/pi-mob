@@ -15,6 +15,20 @@ Status: normative MVP release requirements.
 - Preserve privacy in fixtures, logs, screenshots, and CI artifacts.
 - No release gate depends solely on a simulator when platform lifecycle/push behaviour is involved.
 
+### Proportional testing and test cap
+
+Testing effort is risk-based, not line-count- or coverage-target-based.
+
+- **Trivial code needs no dedicated test** when it is declarative or mechanically obvious, has no branching or state transition, and failure is already caught by compilation, static analysis, schema validation, or an existing higher-level test. Examples include constants, simple field forwarding, generated boilerplate, and passive manifest wiring.
+- **Non-trivial code requires focused tests** when it contains branching, parsing, normalization, state, concurrency, persistence, protocol behavior, security/privacy policy, recovery, platform integration, or external side effects.
+- **Complex or high-impact code must test invariants and failure paths**, not merely the happy path. This includes command identity, leases, replay/snapshots, crash recovery, filesystem/process boundaries, migrations, and read-only enforcement.
+- Add the smallest test set that proves the behavior. Prefer one table/property/integration test over many near-duplicate examples.
+- Do not add tests solely to increase coverage percentages, mirror implementation details, test language/framework behavior, or re-prove an invariant already covered at a more appropriate layer.
+- When an existing test already detects the realistic regression, extend it rather than creating another test file.
+- Generated command/event fixture matrices remain appropriate because they prove contract exhaustiveness; ordinary trivial code does not inherit that requirement.
+
+The detailed required matrices below apply where their named risk or checkpoint feature exists. They are not a mandate to test unrelated trivial glue.
+
 ## 2. Static and repository checks
 
 Every applicable pull request/checkpoint runs:

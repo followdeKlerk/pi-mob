@@ -4,17 +4,16 @@
  *
  * Regenerates the schema artefacts in a tmpdir (with a fixed timestamp so
  * the comparison is byte-stable) and diffs them against the checked-in
- * copies. Fails CI when the diff is non-empty. The real M2 generator lands
- * later; this placeholder only validates the deterministic-emit invariant.
+ * copies. Fails CI when any generated schema or catalogue differs.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { spawnSync } from "node:child_process";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const TARGET = `${ROOT}/packages/protocol-schema/generated/schema-manifest.json`;
+const TARGET_DIR = `${ROOT}/packages/protocol-schema/generated`;
 const FIXED_TS = "2026-07-12T00:00:00.000Z";
 
 function regenerate(into: string): void {
@@ -36,12 +35,17 @@ function main(): number {
   const tmp = mkdtempSync(join(tmpdir(), "schema-check-"));
   try {
     regenerate(tmp);
-    const a = readFileSync(TARGET, "utf8");
-    const b = readFileSync(join(tmp, "schema-manifest.json"), "utf8");
-    if (a !== b) {
+    const expected = readdirSync(TARGET_DIR).sort();
+    const actual = readdirSync(tmp).sort();
+    if (expected.join("\n") !== actual.join("\n")) {
       process.stderr.write("schema drift detected; run bun run schema:generate\n");
-      process.stderr.write(`--- checked-in\n${a}\n--- regenerated\n${b}\n`);
       return 1;
+    }
+    for (const file of expected) {
+      if (readFileSync(join(TARGET_DIR, file), "utf8") !== readFileSync(join(tmp, file), "utf8")) {
+        process.stderr.write(`schema drift detected in ${file}; run bun run schema:generate\n`);
+        return 1;
+      }
     }
     process.stdout.write("schema:check ok\n");
     return 0;
