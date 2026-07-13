@@ -4,11 +4,11 @@ A private Flutter mobile control surface for Pi coding-agent sessions running on
 
 ## Status
 
-The product and architecture are implemented checkpoint by checkpoint. M1 delivered the scaffold, M2 the executable cross-language protocol, and M3 the strict normalized adapter proven against exact Pi `0.80.6`.
+The product and architecture are implemented checkpoint by checkpoint. M1 delivered the scaffold, M2 the executable cross-language protocol, M3 the exact Pi adapter, and M4 the durable loopback bridge with replay/recovery.
 
-Current checkpoint: **M4 — durable bridge core and replay streams** (ready to activate).
+Current checkpoint: **M5 — one-session end-to-end diagnostic client** (ready to activate).
 
-M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), and [`M3-SUMMARY.md`](M3-SUMMARY.md).
+M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), [`M3-SUMMARY.md`](M3-SUMMARY.md), and [`M4-SUMMARY.md`](M4-SUMMARY.md).
 
 See [`BACKLOG.md`](BACKLOG.md) for the complete checkpoint plan and [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) for the final coverage review.
 

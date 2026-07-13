@@ -24,6 +24,7 @@ const TARGETS = [
   "M1-SUMMARY.md",
   "M2-SUMMARY.md",
   "M3-SUMMARY.md",
+  "M4-SUMMARY.md",
   "check.md",
   "docs",
 ];

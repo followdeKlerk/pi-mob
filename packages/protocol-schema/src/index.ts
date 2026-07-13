@@ -82,7 +82,7 @@ export interface CommandMetadata {
 }
 
 const controllerCommands = new Set<CommandType>(["controller.acquire", "controller.takeover", "controller.release"]);
-const hostCommands = new Set<CommandType>(["controller.acquire", "controller.takeover", "controller.release", "host.display_name.set", "workspace.trust.approve", "notification.device.register", "notification.device.unregister"]);
+const hostCommands = new Set<CommandType>(["controller.acquire", "controller.takeover", "controller.release", "host.display_name.set", "workspace.trust.approve", "notification.device.register", "notification.device.unregister", "session.create"]);
 const leaseFreeCommands = new Set<CommandType>([...controllerCommands, "session.create"]);
 
 export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map((type) => ({

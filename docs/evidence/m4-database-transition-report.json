@@ -1,0 +1,44 @@
+{
+  "schemaVersion": 1,
+  "verifiedAtUtc": "2026-07-13",
+  "checkpoint": "M4",
+  "database": {
+    "engine": "Bun SQLite",
+    "foreignKeys": true,
+    "journalMode": "wal",
+    "synchronous": "full",
+    "busyTimeoutMs": 1000,
+    "migrationChecksummed": true,
+    "integrityCheck": true
+  },
+  "provenTransitions": [
+    "command acceptance and command.state event commit atomically",
+    "same command ID and semantic hash returns current duplicate receipt",
+    "same command ID and changed semantic hash rejects without dispatch",
+    "accepted command resumes once after restart",
+    "dispatched or running command becomes indeterminate after restart",
+    "host and session lanes serialize independently",
+    "decimal string cursor allocation above JavaScript safe integer",
+    "host and session replay survives database reopen",
+    "expired and ahead cursors use multipart snapshot baseline",
+    "post-baseline replay precedes sync completion",
+    "controller acquire, renew, reconnect reclaim, takeover, release, and expiry persist",
+    "lease conflict and unauthorized release produce no accepted command or event",
+    "locked, full, read-only, and corrupt storage fail closed",
+    "registered checksummed online backup restores and increments host generation",
+    "lost receipt reconnect and resend dispatches exactly once"
+  ],
+  "transport": {
+    "loopbackOnly": true,
+    "compression": false,
+    "maxJsonBytes": 1048576,
+    "maxOutboundBytes": 8388608,
+    "controlRatePerSecond": 10,
+    "controlBurst": 20,
+    "realBlockedSlowConsumerClosed": true
+  },
+  "evidenceCommands": [
+    "bun test packages/bridge/test/m4-store.test.ts packages/bridge/test/m4-domain.test.ts packages/bridge/test/m4-server.test.ts packages/bridge/test/m4-demo.test.ts",
+    "bun run all"
+  ]
+}

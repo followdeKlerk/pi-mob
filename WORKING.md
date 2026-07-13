@@ -1,51 +1,49 @@
 # Working
 
-Status: M3 done; M4 activation ready
+Status: M4 done; M5 activation ready
 
 ## Current checkpoint
 
-**M4 — Durable bridge core and replay streams**
+**M5 — One-session end-to-end diagnostic client**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
-Build the durable loopback bridge core against the normalized exact-Pi adapter proven in M3. Completed checkpoint evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), and [`M3-SUMMARY.md`](M3-SUMMARY.md).
+Build the plain one-session Flutter diagnostic client against the durable bridge proven in M4. Completed checkpoint evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), [`M3-SUMMARY.md`](M3-SUMMARY.md), and [`M4-SUMMARY.md`](M4-SUMMARY.md).
 
 ## Completed foundation
 
-- **M0:** specification, product/architecture decisions, and exact upstream/toolchain freeze.
-- **M1:** monorepo scaffold, root validation, CI, config/logger boundaries, and compiled bridge smoke.
+- **M0:** product/architecture contracts and exact upstream/toolchain freeze.
+- **M1:** monorepo scaffold, validation/CI, safe config/logger boundaries, and compiled bridge smoke.
 - **M2:** executable protocol schemas, immutable Dart models, shared fixtures/hashes, and drift gates.
-- **M3:** strict Pi `0.80.6` JSONL subprocess transport, normalized command/event adapter, real deterministic prompt/tool/session harness, and compatibility evidence.
+- **M3:** exact Pi `0.80.6` JSONL subprocess adapter and deterministic real prompt/tool/session proof.
+- **M4:** durable SQLite commands/events/leases, loopback WebSocket handshake, replay/current/snapshots, restart recovery, limits/backpressure, and lost-receipt one-dispatch proof.
 
 ## Immediate next actions
 
-### 1. Durable SQLite foundation
+### 1. Mobile durable connection state
 
-- Schema/migrations with foreign keys, WAL, busy handling, integrity checks, stable host identity/generation, sessions, streams/events, commands, cursors, and leases.
-- Atomic decimal-string stream cursor allocation and replay ordering.
-- Database unavailable/full/read-only/locked/corrupt and backup/restore behavior.
+- Drift schema/migrations for host, session, events, cursors, and drafts.
+- Hello/subscription synchronization state machine with host-generation reset.
+- Ordered reducer with deduplication, gaps, replay, and atomic snapshots.
 
-### 2. Stream synchronization
+### 2. One-session diagnostic flow
 
-- Loopback `/healthz`, `/readyz`, and `/v1/ws` handshake.
-- Host/session subscriptions, replay/current/snapshot-required modes, multipart atomic snapshots, cursor acknowledgements, and independent stream repair.
-- Bounded messages, rate limits, backpressure, and slow-consumer handling.
+- Manual endpoint/readiness screen and one configured workspace/session.
+- Raw normalized event/transcript list.
+- Draft, submit/current receipt reconciliation, error restoration, abort, and disabled offline send.
 
-### 3. Durable command semantics
+### 3. End-to-end recovery proof
 
-- One transaction for accepted command plus `command.state` event before receipt.
-- Semantic-hash duplicate/current receipt and conflict rejection.
-- Accepted-before-dispatch recovery, dispatched/running-to-indeterminate recovery, host/session lanes, and persisted controller lease primitives.
-
-## M4 checkpoint proof
-
-A client loses an accepted-command receipt, reconnects, resends, and observes one adapter dispatch plus ordered replay. Restart preserves host/session streams; expired cursors use an atomic snapshot baseline; unavailable/full storage rejects before acceptance.
+- Real Pi prompt completion and abort.
+- Lost receipt with one dispatch.
+- Foreground disconnect/replay and mobile process restart to identical settled state.
+- Draft clears only after accepted/current receipt and never auto-sends after reconnect.
 
 ## Do not start yet
 
-Until M4 exits: mobile connection/persistence work (M5), polished transcript UI, failure supervisor expansion, install/pairing, push notifications, and later product surfaces.
+Until M5 exits: polished transcript/tool UI, broad process-supervisor work, install/pairing, trust/read-only UX, multi-session control, attachments, notifications, and later product surfaces.
 
 ## Blockers
 

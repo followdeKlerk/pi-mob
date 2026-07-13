@@ -210,7 +210,7 @@
     "requiredCapability": "commands.v1",
     "requiresCommandId": true,
     "requiresLeaseId": false,
-    "scope": "session",
+    "scope": "host",
     "semanticHashFields": [
       "type",
       "payload"

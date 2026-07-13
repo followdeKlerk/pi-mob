@@ -69,8 +69,8 @@ A task is Done when:
 | M1 | Monorepo scaffold and CI foundations | M0 | DONE |
 | M2 | Protocol schemas and shared fixtures | M1 | DONE |
 | M3 | Real Pi RPC adapter proven | M2 | DONE |
-| M4 | Durable bridge core and replay streams | M2, M3 | READY |
-| M5 | One-session end-to-end diagnostic client | M4 | PLANNED |
+| M4 | Durable bridge core and replay streams | M2, M3 | DONE |
+| M5 | One-session end-to-end diagnostic client | M4 | READY |
 | M6 | Failure recovery and process supervision | M5 | PLANNED |
 | M7 | macOS install, Serve pairing, and doctor | M6 | PLANNED |
 | M8 | Workspaces, trust, and read-only policy | M7 | PLANNED |
@@ -254,19 +254,19 @@ A CLI harness drives a real Pi process through a prompt/tool/session cycle and r
 
 ## Tasks
 
-- [ ] **M4-01 P0 L** Implement SQLite schema/migrations/foreign keys/WAL/busy handling.
-- [ ] **M4-02 P0 M** Implement stable host ID and host generation.
-- [ ] **M4-03 P0 M** Implement `/healthz`, `/readyz`, and `/v1/ws` handshake/capabilities/limits.
-- [ ] **M4-04 P0 L** Implement host/session event streams and atomic cursor allocation.
-- [ ] **M4-05 P0 L** Implement subscriptions, replay, current state, and atomic multipart snapshots.
-- [ ] **M4-06 P0 M** Implement cursor ack, gap/conflict repair, and independent stream isolation.
-- [ ] **M4-07 P0 L** Implement durable command acceptance and semantic payload hashing.
-- [ ] **M4-08 P0 M** Implement duplicate current-state receipt and conflict rejection.
-- [ ] **M4-09 P0 M** Implement accepted-before-dispatch recovery and running-to-indeterminate recovery.
-- [ ] **M4-10 P0 M** Implement host/session command lanes.
-- [ ] **M4-11 P0 M** Implement controller lease persistence primitives.
-- [ ] **M4-12 P0 M** Implement size/rate/backpressure/slow-consumer handling.
-- [ ] **M4-13 P0 M** Add DB full/read-only/locked/corruption/backup/restore tests.
+- [x] **M4-01 P0 L** Implement SQLite schema/migrations/foreign keys/WAL/busy handling.
+- [x] **M4-02 P0 M** Implement stable host ID and host generation.
+- [x] **M4-03 P0 M** Implement `/healthz`, `/readyz`, and `/v1/ws` handshake/capabilities/limits.
+- [x] **M4-04 P0 L** Implement host/session event streams and atomic cursor allocation.
+- [x] **M4-05 P0 L** Implement subscriptions, replay, current state, and atomic multipart snapshots.
+- [x] **M4-06 P0 M** Implement cursor ack, gap/conflict repair, and independent stream isolation.
+- [x] **M4-07 P0 L** Implement durable command acceptance and semantic payload hashing.
+- [x] **M4-08 P0 M** Implement duplicate current-state receipt and conflict rejection.
+- [x] **M4-09 P0 M** Implement accepted-before-dispatch recovery and running-to-indeterminate recovery.
+- [x] **M4-10 P0 M** Implement host/session command lanes.
+- [x] **M4-11 P0 M** Implement controller lease persistence primitives.
+- [x] **M4-12 P0 M** Implement size/rate/backpressure/slow-consumer handling.
+- [x] **M4-13 P0 M** Add DB full/read-only/locked/corruption/backup/restore tests.
 
 ## Checkpoint demo
 
@@ -274,11 +274,11 @@ A test client loses an accepted-command receipt, reconnects, resends, and observ
 
 ## Exit criteria
 
-- [ ] No acceptance without committed command/event.
-- [ ] Duplicate resend proves one dispatch.
-- [ ] Host/session replay survives bridge restart.
-- [ ] Expired cursor uses correct atomic snapshot baseline.
-- [ ] Database unavailable/full rejects new commands.
+- [x] No acceptance without committed command/event.
+- [x] Duplicate resend proves one dispatch.
+- [x] Host/session replay survives bridge restart.
+- [x] Expired cursor uses correct atomic snapshot baseline.
+- [x] Database unavailable/full rejects new commands.
 
 **Evidence:** bridge integration and database-transition report.
 
@@ -799,6 +799,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-M0 through M3 are complete. M4 is READY; activate the durable bridge core and replay-stream work in `WORKING.md` next.
+M0 through M4 are complete. M5 is READY; activate the one-session Flutter diagnostic client in `WORKING.md` next.
 
-Do not start M5 mobile behavior, transcript polish, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.
+Do not start transcript polish, multi-session behavior, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.
