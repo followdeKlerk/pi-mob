@@ -418,6 +418,84 @@ void main() {
     },
   );
 
+  test(
+    'M6 failure states and truncation stay visible without automatic retry',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      await coordinator.updateDraft('Do not repeat');
+      await coordinator.submitPrompt();
+      final promptCount = socket.sent
+          .where((message) => message['type'] == 'prompt.submit')
+          .length;
+      final commandId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'prompt.submit',
+              )['commandId']
+              as String;
+
+      socket.server(
+        event(
+          type: 'command.state',
+          streamId: 'session:$sessionId',
+          cursor: '2',
+          eventId: '14141414-1414-4414-8414-141414141414',
+          payload: {
+            'sessionId': sessionId,
+            'commandId': commandId,
+            'commandType': 'prompt.submit',
+            'state': 'indeterminate',
+            'errorCode': null,
+          },
+        ),
+      );
+      socket.server(
+        event(
+          type: 'turn.indeterminate',
+          streamId: 'session:$sessionId',
+          cursor: '3',
+          eventId: '15151515-1515-4515-8515-151515151515',
+          payload: {'sessionId': sessionId, 'reason': 'pi_exit'},
+        ),
+      );
+      socket.server(
+        event(
+          type: 'tool.output',
+          streamId: 'session:$sessionId',
+          cursor: '4',
+          eventId: '16161616-1616-4616-8616-161616161616',
+          payload: {
+            'sessionId': sessionId,
+            'toolCallId': '17171717-1717-4717-8717-171717171717',
+            'retainedBytes': 5242880,
+            'totalBytes': 6291456,
+            'isTruncated': true,
+            'digest':
+                'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          },
+        ),
+      );
+      await eventually(() => coordinator.toolOutputNotices.isNotEmpty);
+      expect(coordinator.sessions.single.runtimeState, 'indeterminate');
+      expect(coordinator.pendingState, 'indeterminate');
+      expect(coordinator.draft, 'Do not repeat');
+      expect(coordinator.toolOutputNotices.single.totalBytes, 6291456);
+      expect(coordinator.canRetrySession, isTrue);
+      await coordinator.retrySession();
+      expect(
+        socket.sent.any((message) => message['type'] == 'session.activate'),
+        isTrue,
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 20));
+      expect(
+        socket.sent
+            .where((message) => message['type'] == 'prompt.submit')
+            .length,
+        promptCount,
+      );
+    },
+  );
+
   test('receipt below accepted preserves pending command and draft', () async {
     await makeReady(coordinator, transport);
     final socket = transport.sockets.single;

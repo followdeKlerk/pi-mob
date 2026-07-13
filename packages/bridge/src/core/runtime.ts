@@ -95,10 +95,18 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       const duplicate = this.commands.submit({ commandId, type, payload, scopeKey: existing.scopeKey, streamId: existing.streamId });
       return { state: duplicate.receipt.state, duplicate: true };
     }
+    const admission = this.options.adapter.admission?.();
+    if (admission && !admission.accepting) {
+      throw new RuntimeProtocolError(admission.reason === "host_draining" ? "host_draining" : "host_not_ready", "host is not accepting commands");
+    }
     const requestedSession = typeof payload.sessionId === "string" ? payload.sessionId : null;
     const sessionId = metadata.scope === "session" ? requestedSession : metadata.scope === "host-or-session" && payload.scope === "session" ? requestedSession : null;
     if ((metadata.scope === "session" || payload.scope === "session") && !sessionId) throw new RuntimeProtocolError("session_not_found", "session ID is required");
     if (sessionId && !this.options.store.sessionExists(sessionId)) throw new RuntimeProtocolError("session_not_found", "session does not exist");
+    if (sessionId && type === "prompt.submit" &&
+        this.options.store.sessionState(sessionId)?.runtimeState === "indeterminate") {
+      throw new RuntimeProtocolError("invalid_state", "indeterminate session requires explicit activation");
+    }
     const identity = this.identity(); const streamId = sessionId ? `session:${sessionId}` : `host:${identity.hostId}`; const scopeKey = streamId;
     if (metadata.requiresLeaseId) {
       try { this.leases.assertController(scopeKey, String(message.leaseId ?? ""), connection.connectionId); }

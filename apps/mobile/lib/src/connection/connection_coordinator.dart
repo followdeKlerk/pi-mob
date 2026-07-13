@@ -80,6 +80,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, SessionState> _sessions = {};
   final List<WorkspaceInfo> _workspaces = [];
   final List<String> _rawEvents = [];
+  final List<ToolOutputNotice> _toolOutputNotices = [];
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
 
@@ -128,9 +129,29 @@ final class ConnectionCoordinator extends ChangeNotifier
       pendingCommandId != null &&
       pendingPayload != null;
   bool get canAbort => isReady && selectedSessionId != null && leaseId != null;
+  String? get selectedRuntimeState => selectedSessionId == null
+      ? null
+      : _sessions[selectedSessionId]?.runtimeState;
+  bool get canRetrySession {
+    final session = selectedSessionId == null
+        ? null
+        : _sessions[selectedSessionId];
+    return isReady &&
+        leaseId != null &&
+        session != null &&
+        const {
+          'crashed',
+          'crash_loop',
+          'provider_interrupted',
+          'indeterminate',
+        }.contains(session.runtimeState);
+  }
+
   List<WorkspaceInfo> get workspaces => List.unmodifiable(_workspaces);
   List<SessionState> get sessions => List.unmodifiable(_sessions.values);
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
+  List<ToolOutputNotice> get toolOutputNotices =>
+      List.unmodifiable(_toolOutputNotices);
   Map<String, StreamViewState> get streams => Map.unmodifiable(_streams);
 
   Future<void> initialize({bool autoConnect = true}) async {
@@ -357,6 +378,16 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
   }
 
+  Future<void> retrySession() async {
+    if (!canRetrySession) return;
+    await _sendCommand(
+      type: 'session.activate',
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': selectedSessionId!},
+      requiresLease: true,
+    );
+  }
+
   Future<void> abort() async {
     if (!canAbort) return;
     await _sendCommand(
@@ -477,6 +508,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       _streams.clear();
       _sessions.clear();
       _rawEvents.clear();
+      _toolOutputNotices.clear();
       _forceSnapshot.add('host:$newHostId');
     } else {
       await _loadCachedStreams(newHostId);
@@ -681,7 +713,33 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   void _handleEventPayload(String type, Map<String, Object?> payload) {
-    if (type == 'session.summary') {
+    if (type == 'host.degraded') {
+      phase = ConnectionPhase.degraded;
+      errorMessage = payload['reason']?.toString() ?? 'Host degraded';
+    } else if (type == 'host.draining') {
+      phase = ConnectionPhase.hostDraining;
+      errorMessage = 'Host is draining';
+    } else if (type == 'tool.output' ||
+        type == 'tool.completed' ||
+        type == 'tool.failed') {
+      final retained = payload['retainedBytes'];
+      final total = payload['totalBytes'];
+      final truncated = payload['isTruncated'];
+      if (retained is int && total is int && truncated is bool) {
+        _toolOutputNotices.removeWhere(
+          (notice) => notice.toolCallId == payload['toolCallId'],
+        );
+        _toolOutputNotices.add(
+          ToolOutputNotice(
+            toolCallId: payload['toolCallId']?.toString() ?? 'unknown',
+            retainedBytes: retained,
+            totalBytes: total,
+            isTruncated: truncated,
+            digest: payload['digest'] as String?,
+          ),
+        );
+      }
+    } else if (type == 'session.summary') {
       _mergeSession(payload);
       final id = payload['sessionId'];
       if (id is String && selectedSessionId == null) {
@@ -691,12 +749,19 @@ final class ConnectionCoordinator extends ChangeNotifier
       final id = payload['sessionId'];
       if (id is String) _sessions.remove(id);
     } else if (type == 'session.state' || type.startsWith('turn.')) {
-      final runtimeState = switch (type) {
-        'turn.started' => 'running',
-        'turn.waiting_for_input' => 'waiting_for_input',
-        'turn.settled' || 'turn.aborted' || 'turn.failed' => 'idle',
-        _ => null,
-      };
+      final runtimeState =
+          type == 'turn.failed' &&
+              (payload['errorCode'] == 'provider_interrupted' ||
+                  payload['reason'] == 'provider_interrupted')
+          ? 'provider_interrupted'
+          : switch (type) {
+              'turn.started' => 'running',
+              'turn.waiting_for_input' => 'waiting_for_input',
+              'turn.settled' || 'turn.aborted' => 'idle',
+              'turn.failed' => 'failed',
+              'turn.indeterminate' => 'indeterminate',
+              _ => null,
+            };
       _mergeSession(<String, Object?>{
         ...payload,
         'runtimeState': ?runtimeState,
@@ -808,9 +873,18 @@ final class ConnectionCoordinator extends ChangeNotifier
       'host_draining' => ConnectionPhase.hostDraining,
       'host_not_ready' ||
       'database_unavailable' ||
-      'storage_full' => ConnectionPhase.degraded,
+      'storage_full' ||
+      'crash_loop' ||
+      'provider_interrupted' => ConnectionPhase.degraded,
       _ => phase,
     };
+    if ((code == 'crash_loop' || code == 'provider_interrupted') &&
+        selectedSessionId != null) {
+      _mergeSession(<String, Object?>{
+        'sessionId': selectedSessionId,
+        'runtimeState': code,
+      });
+    }
     if (code == 'stale_controller' || code == 'controller_required') {
       leaseId = null;
       _leaseTimer?.cancel();
@@ -1006,6 +1080,9 @@ final class ConnectionCoordinator extends ChangeNotifier
       if (reduction.disposition == EventDisposition.applied ||
           reduction.disposition == EventDisposition.duplicate) {
         _streams[event.streamId] = reduction.state;
+        if (reduction.disposition == EventDisposition.applied) {
+          _handleEventPayload(event.type, payload);
+        }
       } else if (reduction.disposition == EventDisposition.gap ||
           reduction.disposition == EventDisposition.conflict) {
         _forceSnapshot.add(event.streamId);

@@ -100,6 +100,78 @@ void main() {
       await database.close();
     },
   );
+
+  testWidgets('M6 crash, indeterminate, and truncation states are explicit', (
+    tester,
+  ) async {
+    final database = AppDatabase.withExecutor(NativeDatabase.memory());
+    const hostId = '11111111-1111-4111-8111-111111111111';
+    const sessionId = '22222222-2222-4222-8222-222222222222';
+    await database.upsertHost(
+      HostEntriesCompanion.insert(
+        hostId: hostId,
+        endpoint: 'https://fixture.test',
+        displayName: 'Fixture host',
+        generation: '1',
+        connectionState: 'offline',
+        capabilitiesJson: '[]',
+      ),
+    );
+    await database.upsertSessionState(
+      const SessionState(
+        sessionId: sessionId,
+        hostId: hostId,
+        name: 'Broken session',
+        runtimeState: 'crash_loop',
+        queueCount: 0,
+      ),
+    );
+    await database.saveDraft(
+      hostId: hostId,
+      sessionId: sessionId,
+      text: 'Uncertain prompt',
+      pendingCommandId: '33333333-3333-4333-8333-333333333333',
+      pendingPayloadJson:
+          '{"sessionId":"$sessionId","message":"Uncertain prompt"}',
+      pendingState: 'indeterminate',
+      updatedAt: DateTime.utc(2026, 7, 13),
+    );
+    await database.insertEvent(
+      eventId: '44444444-4444-4444-8444-444444444444',
+      hostId: hostId,
+      streamId: 'session:$sessionId',
+      cursor: '1',
+      type: 'tool.output',
+      payloadJson:
+          '{"sessionId":"$sessionId","toolCallId":"55555555-5555-4555-8555-555555555555","retainedBytes":5242880,"totalBytes":6291456,"isTruncated":true,"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+      occurredAt: DateTime.utc(2026, 7, 13),
+    );
+    final coordinator = ConnectionCoordinator(
+      transport: _OfflineTransport(),
+      database: database,
+    );
+    await coordinator.initialize(autoConnect: false);
+    await tester.binding.setSurfaceSize(const Size(1200, 900));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+    await tester.pumpWidget(PiMobApp(coordinator: coordinator));
+    await tester.pump();
+
+    expect(find.textContaining('Repeated crashes'), findsOneWidget);
+    expect(find.byKey(const Key('indeterminate-warning')), findsOneWidget);
+    expect(
+      find.textContaining('will not run again automatically'),
+      findsOneWidget,
+    );
+    expect(find.text('Tool output truncated'), findsOneWidget);
+    expect(
+      find.textContaining('5242880 of 6291456 bytes retained'),
+      findsOneWidget,
+    );
+    expect(find.textContaining('SHA-256 cccc'), findsOneWidget);
+
+    coordinator.dispose();
+    await database.close();
+  });
 }
 
 final class _OfflineTransport implements BridgeTransport {

@@ -1,47 +1,46 @@
 # Working
 
-Status: M5 done; M6 activation ready
+Status: M6 done; M7 activation ready
 
 ## Current checkpoint
 
-**M6 — Failure recovery and process supervision**
+**M7 — macOS install, Serve pairing, and doctor**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
-Harden the real one-session path delivered in M5 across Pi, bridge, host, storage, network, and resource failures. Completed checkpoint evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), [`M3-SUMMARY.md`](M3-SUMMARY.md), [`M4-SUMMARY.md`](M4-SUMMARY.md), and [`M5-SUMMARY.md`](M5-SUMMARY.md).
+Turn the supervised M6 bridge into an installable owner-only macOS service with persistent private Tailscale Serve, pairing, diagnosis, update/rollback, and uninstall flows. Completed evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md) through [`M6-SUMMARY.md`](M6-SUMMARY.md).
 
 ## Completed foundation
 
-- **M0:** product/architecture contracts and exact upstream/toolchain freeze.
-- **M1:** monorepo scaffold, validation/CI, safe config/logger boundaries, and compiled bridge smoke.
-- **M2:** executable protocol schemas, immutable Dart models, shared fixtures/hashes, and drift gates.
-- **M3:** exact Pi `0.80.6` JSONL subprocess adapter and deterministic real prompt/tool/session proof.
-- **M4:** durable SQLite commands/events/leases, loopback WebSocket synchronization, restart recovery, and lost-receipt one-dispatch proof.
-- **M5:** one-session Flutter diagnostic client, Drift cache/drafts, ordered synchronization, real prompt/active abort, reconnect, and app-restart reconciliation.
+- **M0–M2:** frozen contracts, scaffold, executable protocol schemas, and cross-language fixtures.
+- **M3:** exact Pi `0.80.6` RPC adapter and real deterministic provider proof.
+- **M4:** durable SQLite commands/events/leases, synchronization, snapshots, and one-dispatch recovery.
+- **M5:** one-session Flutter diagnostic client with durable drafts, reconnect, and app-restart reconciliation.
+- **M6:** supervised Pi lifecycle, crash loops, capacity/idle/drain/reboot recovery, deterministic fault controls, bounded output, visible failure states, and slow-consumer replay.
 
 ## Immediate next actions
 
-### 1. Process lifecycle
+### 1. Installable release
 
-- Implement the bridge/Pi process state machine and process-group cleanup.
-- Add bounded restart windows, crash-loop state, manual retry, active capacity, and eligible idle stop.
-- Implement graceful host drain and restoration.
+- Produce the supported compiled daemon artifact, manifest, checksums, and licenses.
+- Install owner-only state/config/log directories, absolute Pi path, allowlisted environment, and user LaunchAgent.
 
-### 2. Deterministic failure controls
+### 2. Private connectivity and diagnosis
 
-- Add test-only faults for receipt, dispatch, output pause, Pi/bridge kill, cursor, provider, database, storage, notifications, and cleanup.
-- Prove fault controls are absent from release builds.
+- Configure persistent Tailscale Serve without disturbing unrelated routes.
+- Reject Funnel/public/wildcard/plain-LAN exposure.
+- Add pairing QR/manual recovery, doctor checks, and a redacted report.
 
-### 3. Truthful recovery surfaces
+### 3. Lifecycle operations
 
-- Materialize crash, indeterminate, crash-loop, provider interruption, and oversized-output states.
-- Prove slow-consumer disconnect/replay while Pi continues.
+- Implement explicit backup/migrate/update/verify/rollback flows.
+- Implement retain-data, remove-state, and full uninstall variants while preserving Pi sessions by default.
 
 ## Do not start yet
 
-Until M6 exits: install/pairing/doctor, trust/read-only UX, polished multi-session transcript control, attachments, notifications, and later product surfaces.
+Until M7 exits: workspace trust/read-only UX, polished transcript/tools, broader multi-session control, attachments, extension dialogs, and notifications.
 
 ## Blockers
 

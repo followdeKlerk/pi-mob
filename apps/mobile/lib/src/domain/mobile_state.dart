@@ -132,6 +132,36 @@ final class DraftState {
   final DateTime updatedAt;
 }
 
+final class ToolOutputNotice {
+  const ToolOutputNotice({
+    required this.toolCallId,
+    required this.retainedBytes,
+    required this.totalBytes,
+    required this.isTruncated,
+    this.digest,
+  });
+
+  final String toolCallId;
+  final int retainedBytes;
+  final int totalBytes;
+  final bool isTruncated;
+  final String? digest;
+}
+
+String sessionStateLabel(String state) => switch (state) {
+  'crashed' => 'Pi stopped unexpectedly',
+  'crash_loop' => 'Repeated crashes',
+  'indeterminate' => 'Completion unknown',
+  'provider_interrupted' => 'Provider interrupted',
+  'waiting_for_input' => 'Needs your input',
+  'retry_wait' => 'Retrying soon',
+  'compacting' => 'Compacting context',
+  'running' => 'Working',
+  'idle' => 'Ready',
+  'stopped' => 'Stopped',
+  _ => state.replaceAll('_', ' '),
+};
+
 final class MobileState {
   MobileState({
     required Iterable<HostState> hosts,

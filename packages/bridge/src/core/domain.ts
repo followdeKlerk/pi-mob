@@ -9,7 +9,12 @@ export interface AdapterPort {
    * leave this undefined; the runtime surfaces `workspace_unavailable`.
    */
   listWorkspaces?(): { readonly items: ReadonlyArray<Record<string, unknown>> };
+  admission?(): { readonly accepting: boolean; readonly reason?: string };
 }
+export class IndeterminateDispatchError extends Error {
+  override readonly name = "IndeterminateDispatchError";
+}
+
 export interface CommandSubmission { readonly receipt: { commandId: string; state: string; duplicate: boolean }; readonly completion: Promise<void>; }
 
 export class CommandLanes {
@@ -45,8 +50,12 @@ export class DurableCommandService {
         this.store.transitionCommand(command.commandId, ["dispatched"], "running");
         if (!BRIDGE_LOCAL_COMMANDS.has(claimed.command.type)) await this.adapter.dispatch(claimed.command);
         this.store.transitionCommand(command.commandId, ["running"], "completed");
-      } catch {
-        this.store.transitionCommand(command.commandId, ["dispatched", "running"], "failed");
+      } catch (error) {
+        this.store.transitionCommand(
+          command.commandId,
+          ["dispatched", "running"],
+          error instanceof IndeterminateDispatchError ? "indeterminate" : "failed",
+        );
       }
     });
   }

@@ -43,6 +43,7 @@ describe("Pi event normalization", () => {
       { type: "agent_start" }, { type: "turn_start", turnIndex: 1 }, { type: "turn_end", message: {} },
       { type: "message_start", message: { role: "assistant", id: "a" } },
       { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "hi" } }, { type: "message_end", message: {} },
+      { type: "message_update", assistantMessageEvent: { type: "error", reason: "error" } },
       { type: "tool_execution_start", toolCallId: "one", toolName: "read", args: { path: "/private/repo" } },
       { type: "tool_execution_start", toolCallId: "two", toolName: "bash", args: {} },
       { type: "tool_execution_update", toolCallId: "one", partialResult: "out" },
@@ -59,5 +60,6 @@ describe("Pi event normalization", () => {
     expect(output.filter((item) => item.type === "tool.started").map((item) => item.payload.toolCallId)).toEqual(["one", "two"]);
     expect(JSON.stringify(output)).not.toContain("/private");
     expect(JSON.stringify(output)).not.toContain("/home/private");
+    expect(output.some((item) => item.type === "turn.failed" && item.payload.errorCode === "provider_interrupted")).toBe(true);
   });
 });

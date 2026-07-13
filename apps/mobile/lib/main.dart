@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'src/connection/bridge_transport.dart';
 import 'src/connection/connection_coordinator.dart';
 import 'src/data/app_database.dart';
+import 'src/domain/mobile_state.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -298,7 +299,7 @@ class _WorkspaceSessionPanel extends StatelessWidget {
                     DropdownMenuItem(
                       value: session.sessionId,
                       child: Text(
-                        '${session.name} · ${session.runtimeState}',
+                        '${session.name} · ${sessionStateLabel(session.runtimeState)}',
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
@@ -311,6 +312,24 @@ class _WorkspaceSessionPanel extends StatelessWidget {
             Text(
               'Controller: ${coordinator.leaseId == null ? 'observer' : 'acquired'}',
             ),
+            if (coordinator.sessions.any(
+              (session) =>
+                  session.sessionId == coordinator.selectedSessionId &&
+                  const {
+                    'crashed',
+                    'crash_loop',
+                    'provider_interrupted',
+                    'indeterminate',
+                  }.contains(session.runtimeState),
+            ))
+              FilledButton.tonalIcon(
+                key: const Key('retry-pi-session'),
+                onPressed: coordinator.canRetrySession
+                    ? coordinator.retrySession
+                    : null,
+                icon: const Icon(Icons.restart_alt),
+                label: const Text('Retry Pi'),
+              ),
           ],
         ),
       ),
@@ -326,6 +345,7 @@ class _EventPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final events = coordinator.rawEvents;
+    final notices = coordinator.toolOutputNotices;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: Column(
@@ -338,6 +358,19 @@ class _EventPanel extends StatelessWidget {
               style: Theme.of(context).textTheme.titleMedium,
             ),
           ),
+          if (notices.any((notice) => notice.isTruncated)) ...[
+            const Divider(height: 1),
+            for (final notice in notices.where((notice) => notice.isTruncated))
+              ListTile(
+                key: Key('tool-output-${notice.toolCallId}'),
+                leading: const Icon(Icons.content_cut),
+                title: const Text('Tool output truncated'),
+                subtitle: Text(
+                  '${notice.retainedBytes} of ${notice.totalBytes} bytes retained'
+                  '${notice.digest == null ? '' : '\nSHA-256 ${notice.digest}'}',
+                ),
+              ),
+          ],
           const Divider(height: 1),
           Expanded(
             child: events.isEmpty
@@ -383,6 +416,20 @@ class _Composer extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
+            if (coordinator.pendingState == 'indeterminate' ||
+                coordinator.selectedRuntimeState == 'indeterminate') ...[
+              const Card(
+                key: Key('indeterminate-warning'),
+                color: Color(0xFFFFF3CD),
+                child: Padding(
+                  padding: EdgeInsets.all(10),
+                  child: Text(
+                    'Completion is unknown. The command will not run again automatically. Inspect the session before deciding what to do.',
+                  ),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ],
             TextField(
               key: const Key('draft-field'),
               controller: draftController,

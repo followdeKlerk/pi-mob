@@ -640,6 +640,14 @@ export class RpcProcess {
    * SIGTERM, wait up to the grace period, then escalate to SIGKILL.
    * Idempotent.
    */
+  async forceKillGroup(): Promise<void> {
+    const proc = this.proc;
+    if (!proc || proc.exitCode !== null || typeof proc.pid !== "number") return;
+    this.killGroupOrPid(proc.pid, "SIGKILL");
+    await proc.exited.catch(() => undefined);
+    if (this.exitPromise) await this.exitPromise;
+  }
+
   async close(reason?: string): Promise<void> {
     if (!this.proc) return;
     void reason; // reserved for logging/reporting; not yet wired into a logger

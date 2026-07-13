@@ -27,7 +27,8 @@
 
 import type { StoredCommand } from "../core/store";
 import type { BridgeStore } from "../core/store";
-import { normalizePiEvent } from "./normalize";
+import { IndeterminateDispatchError } from "../core/domain";
+import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
 
 // ---------------- RPC client contract ----------------
@@ -55,6 +56,9 @@ export type PiRpcNotificationHandler = (raw: unknown) => void;
 export interface PiRpcClient {
   request(opts: PiRpcRequestOptions): Promise<unknown>;
   on(kind: "notification", handler: PiRpcNotificationHandler): () => void;
+  markDispatchStart?(): void;
+  manualRetry?(): Promise<void>;
+  isDraining?(): boolean;
 }
 
 // ---------------- Workspace listing shape ----------------
@@ -117,6 +121,7 @@ export class OneSessionPiAdapter {
   private readonly newSessionId: () => string;
   private readonly hostStream: string;
   private readonly sessionById = new Map<string, string>();
+  private readonly toolOutputLimiter = new ToolOutputLimiter();
   private activeSessionId: string | null = null;
   private detach: () => void;
 
@@ -171,11 +176,19 @@ export class OneSessionPiAdapter {
         return this.handlePromptSubmit(command);
       case "turn.abort":
         return this.handleTurnAbort(command);
+      case "session.activate":
+        return this.handleManualRetry(command);
       default:
         // Session-scoped metadata commands (rename, policy.set, ...) are
         // local-only at this checkpoint; no Pi RPC call is required.
         return;
     }
+  }
+
+  admission(): { accepting: boolean; reason?: string } {
+    return this.rpc.isDraining?.()
+      ? { accepting: false, reason: "host_draining" }
+      : { accepting: true };
   }
 
   /** Internal hook for tests/diagnostics. */
@@ -256,13 +269,51 @@ export class OneSessionPiAdapter {
     if (typeof payload.message !== "string" || payload.message.length === 0) throw new Error("prompt.submit requires message");
     if (!this.store.sessionExists(payload.sessionId)) throw new Error("prompt.submit session not found");
     this.activeSessionId = payload.sessionId;
+    this.rpc.markDispatchStart?.();
     const method: "prompt" | "steer" | "follow_up" =
       payload.deliveryMode === "steer" ? "steer" :
       payload.deliveryMode === "follow_up" ? "follow_up" : "prompt";
-    await this.rpc.request({
-      id: command.commandId,
-      method,
-      params: { message: payload.message },
+    try {
+      await this.rpc.request({
+        id: command.commandId,
+        method,
+        params: { message: payload.message },
+      });
+    } catch (error) {
+      const streamId = `session:${payload.sessionId}`;
+      this.store.appendEvent(streamId, "turn.indeterminate", {
+        sessionId: payload.sessionId,
+        reason: "rpc_outcome_unknown",
+      });
+      const prior = this.store.sessionState(payload.sessionId) ?? {};
+      this.store.updateSessionState(payload.sessionId, {
+        ...prior,
+        runtimeState: "indeterminate",
+        attentionState: "needs_attention",
+      });
+      throw new IndeterminateDispatchError(
+        "Pi command outcome is unknown",
+        { cause: error },
+      );
+    }
+  }
+
+  private async handleManualRetry(command: StoredCommand): Promise<void> {
+    const sessionId = String(command.payload.sessionId ?? "");
+    if (!this.store.sessionExists(sessionId)) throw new Error("session.activate session not found");
+    if (!this.rpc.manualRetry) throw new Error("manual retry is unavailable");
+    await this.rpc.manualRetry();
+    const prior = this.store.sessionState(sessionId) ?? {};
+    this.store.updateSessionState(sessionId, {
+      ...prior,
+      runtimeState: "idle",
+      attentionState: "ready",
+    });
+    this.store.appendEvent(`session:${sessionId}`, "session.state", {
+      sessionId,
+      runtimeState: "idle",
+      attentionState: "ready",
+      manualRetry: true,
     });
   }
 
@@ -281,7 +332,10 @@ export class OneSessionPiAdapter {
     if (!type) return;
     const inferredSessionId = this.resolveNotificationSessionId(record);
     if (!inferredSessionId) return;
-    const normalized = normalizePiEvent(record as RawPiEvent, { sessionId: inferredSessionId });
+    const normalized = normalizePiEvent(record as RawPiEvent, {
+      sessionId: inferredSessionId,
+      toolOutputLimiter: this.toolOutputLimiter,
+    });
     if (normalized.length === 0) return;
     const streamId = `session:${inferredSessionId}`;
     for (const event of normalized) {
@@ -289,6 +343,8 @@ export class OneSessionPiAdapter {
       const prior = this.store.sessionState(inferredSessionId) ?? {};
       const runtimeState = event.type === "turn.started"
         ? "running"
+        : event.type === "turn.failed" && event.payload.errorCode === "provider_interrupted"
+        ? "provider_interrupted"
         : ["turn.settled", "turn.aborted", "turn.failed"].includes(event.type)
         ? "idle"
         : event.payload.runtimeState;

@@ -13,13 +13,14 @@
  * development host (see docs/TOOLCHAIN.md §9).
  */
 
-import { existsSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, writeFileSync, rmSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const DIST = join(ROOT, "packages/bridge/dist");
 const EXEC = join(DIST, "bridge-smoke");
+const DAEMON_EXEC = join(DIST, "bridge-daemon");
 const HOSTILE_DIR = join(DIST, "hostile-env-test");
 const CFG_PATH = join(DIST, "release-config.toml");
 
@@ -49,6 +50,45 @@ function compileSmoke(): number {
     { cwd: `${ROOT}/packages/bridge`, stdio: "inherit" },
   );
   return result.status ?? 1;
+}
+
+function compileDaemon(): number {
+  process.stdout.write("==> compile supervised bridge daemon (autoload disabled)\n");
+  const result = spawnSync(
+    "bun",
+    [
+      "build",
+      "--compile",
+      "--no-compile-autoload-dotenv",
+      "--no-compile-autoload-bunfig",
+      "--outfile",
+      DAEMON_EXEC,
+      "src/daemon.ts",
+    ],
+    { cwd: `${ROOT}/packages/bridge`, stdio: "inherit" },
+  );
+  if ((result.status ?? 1) !== 0) return result.status ?? 1;
+  const binary = readFileSync(DAEMON_EXEC).toString("latin1");
+  for (const marker of [
+    "TestFaultInjector",
+    "TEST_FAULT_NAMES",
+    "FaultPlan",
+    "fault-injector",
+    "close_after_accept",
+    "close_after_dispatch",
+    "pause_outbound",
+    "kill_pi_after_events",
+    "kill_bridge_after_transition",
+    "oversized_tool_output",
+    "cleanup_timeout",
+  ]) {
+    if (binary.includes(marker)) {
+      process.stderr.write(`build: release daemon contains test fault marker ${marker}\n`);
+      return 1;
+    }
+  }
+  process.stdout.write("build: release daemon contains no test fault controls\n");
+  return 0;
 }
 
 function writeReleaseConfig(): void {
@@ -90,6 +130,8 @@ function main(): number {
     process.stderr.write("build: compiled executable not found\n");
     return 1;
   }
+  code = compileDaemon();
+  if (code !== 0 || !existsSync(DAEMON_EXEC)) return code || 1;
   process.stdout.write(
     `build: compiled executable ${EXEC} (Mach-O x86_64, ~${(Bun.file(EXEC).size ?? 0) / 1024 / 1024} MiB)\n`,
   );

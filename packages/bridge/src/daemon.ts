@@ -1,10 +1,8 @@
 /**
- * M5 bridge daemon: spawns one Pi RPC subprocess and serves a single
- * configured workspace over the loopback WebSocket transport defined in
- * M4. Intentionally minimal: this is a smoke-quality daemon sufficient
- * for the diagnostic client and for local development. Process
- * supervision, restart policies, install, and pairing land in later
- * checkpoints.
+ * M6 bridge daemon: supervises Pi RPC and serves the currently configured
+ * one-session diagnostic workspace over the durable loopback WebSocket
+ * transport. Install, private Serve exposure, pairing, and service lifecycle
+ * land in M7.
  *
  * CLI:
  *
@@ -26,7 +24,7 @@
 import { existsSync, mkdirSync } from "node:fs";
 import { isAbsolute, basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
-import { RpcProcess } from "./pi/rpc-process";
+import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
 import { OneSessionPiAdapter, type OneSessionWorkspaceConfig } from "./pi/one-session-adapter";
 import { BridgeStore } from "./core/store";
 import { DurableBridgeRuntime } from "./core/runtime";
@@ -34,7 +32,7 @@ import { createBridgeServer, type BridgeServer } from "./core/server";
 import { createRedactingLogger, type RedactingLogger } from "./logger";
 
 const PROTOCOL_VERSION = "1.0";
-const BRIDGE_VERSION = "0.0.0-m5";
+const BRIDGE_VERSION = "0.0.0-m6";
 
 export interface DaemonOptions {
   readonly workspace: string;
@@ -53,7 +51,7 @@ export interface DaemonHandle {
   readonly server: BridgeServer;
   readonly runtime: DurableBridgeRuntime;
   readonly adapter: OneSessionPiAdapter;
-  readonly rpc: RpcProcess;
+  readonly rpc: SupervisedRpcClient;
   readonly store: BridgeStore;
   readonly workspace: OneSessionWorkspaceConfig;
   close(): Promise<void>;
@@ -77,21 +75,78 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const store = new BridgeStore(join(stateDir, "bridge.sqlite"));
   const logger = options.logger ?? createRedactingLogger();
   void logger;
-
-  const rpc = new RpcProcess({
-    executable: options.executable,
-    args: ["--mode", "rpc", "--session-dir", sessionDir, ...(options.rpcArgs ?? [])],
-    cwd: options.workspace,
-    environment: options.environment ?? {},
-    pathDirs: options.pathDirs ?? ["/usr/local/bin", "/usr/bin", "/bin"],
-    defaultRequestTimeoutMs: 30_000,
-    closeGracePeriodMs: 5_000,
-  });
-  await rpc.start();
-
   const displayName = options.displayName ?? basename(options.workspace);
   const workspaceId = hashWorkspaceId(options.workspace);
   const fingerprint = computeFingerprint(options.workspace);
+  const hostStream = `host:${store.identity().hostId}`;
+  store.ensureStream(hostStream, "host");
+  const uncertainAtStartup = store.markUncertainIndeterminate();
+  const restoredSession = store.sessionStates()[0] as Record<string, unknown> | undefined;
+  if (restoredSession && typeof restoredSession.sessionId === "string" &&
+      uncertainAtStartup.some((command) => command.scopeKey === `session:${restoredSession.sessionId}`)) {
+    store.updateSessionState(restoredSession.sessionId, {
+      ...restoredSession,
+      runtimeState: "indeterminate",
+      attentionState: "needs_attention",
+    });
+  }
+  const refreshedSession = store.sessionStates()[0] as Record<string, unknown> | undefined;
+  const restoredRuntime = typeof refreshedSession?.runtimeState === "string"
+    ? refreshedSession.runtimeState
+    : "stopped";
+  if (refreshedSession && typeof refreshedSession.sessionId === "string" &&
+      ["running", "waiting_for_input", "compacting", "retry_wait"].includes(restoredRuntime)) {
+    store.updateSessionState(refreshedSession.sessionId, {
+      ...refreshedSession,
+      runtimeState: "indeterminate",
+      attentionState: "needs_attention",
+    });
+    store.appendEvent(`session:${refreshedSession.sessionId}`, "turn.indeterminate", {
+      sessionId: refreshedSession.sessionId,
+      reason: "bridge_restart",
+    });
+  }
+
+  const rpc = new SupervisedRpcClient({
+    processId: workspaceId,
+    initialState: restoredRuntime === "crash_loop" ? "crash_loop" : "stopped",
+    rpc: {
+      executable: options.executable,
+      args: ["--mode", "rpc", "--session-dir", sessionDir, ...(options.rpcArgs ?? [])],
+      cwd: options.workspace,
+      environment: options.environment ?? {},
+      pathDirs: options.pathDirs ?? ["/usr/local/bin", "/usr/bin", "/bin"],
+      defaultRequestTimeoutMs: 30_000,
+      closeGracePeriodMs: 5_000,
+    },
+    emit(event) {
+      if (event.type.startsWith("host.")) {
+        store.appendEvent(hostStream, event.type, event.payload);
+        return;
+      }
+      const session = store.sessionStates()[0] as Record<string, unknown> | undefined;
+      if (!session || typeof session.sessionId !== "string") return;
+      const sessionId = session.sessionId;
+      const payload: Record<string, unknown> = { ...event.payload, sessionId };
+      store.appendEvent(`session:${sessionId}`, event.type, payload);
+      if (event.type === "turn.indeterminate") {
+        store.updateSessionState(sessionId, { ...session, runtimeState: "indeterminate", attentionState: "needs_attention" });
+      } else if (event.type === "session.state" && typeof payload.runtimeState === "string") {
+        store.updateSessionState(sessionId, {
+          ...session,
+          runtimeState:
+            session["runtimeState"] === "indeterminate" &&
+                payload["runtimeState"] !== "crash_loop"
+            ? "indeterminate"
+            : payload["runtimeState"],
+          attentionState: session["attentionState"] === "needs_attention"
+            ? "needs_attention"
+            : payload["attentionState"] ?? session["attentionState"],
+        });
+      }
+    },
+  });
+  if (restoredRuntime !== "crash_loop") await rpc.start();
   const config: OneSessionWorkspaceConfig = {
     workspaceId,
     rootPath: options.workspace,
@@ -116,6 +171,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   return {
     server, runtime, adapter, rpc, store, workspace: config,
     async close() {
+      try { await rpc.drain(); } catch { /* best-effort drain event */ }
       adapter.close();
       try { server.stop(true); } catch { /* ignore */ }
       try { await rpc.close(); } catch { /* ignore */ }

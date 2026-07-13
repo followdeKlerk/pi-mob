@@ -29,7 +29,11 @@ class FakeRpc implements PiRpcClient {
   readonly responses = new Map<string, unknown>();
   readonly notifications = new Set<(raw: unknown) => void>();
   failWith: Error | null = null;
+  retries = 0;
+  requestAttempts = 0;
+  async manualRetry(): Promise<void> { this.retries += 1; }
   async request(opts: PiRpcRequestOptions): Promise<unknown> {
+    this.requestAttempts += 1;
     if (this.failWith) throw this.failWith;
     this.requests.push(opts);
     const key = `${opts.method}:${opts.id ?? ""}`;
@@ -125,6 +129,15 @@ describe("OneSessionPiAdapter", () => {
     expect(sessions).toHaveLength(1);
     expect(sessions[0]!.runtimeState).toBe("idle");
     expect(sessions[0]!.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+  });
+
+  test("session.activate performs explicit manual process retry", async () => {
+    const { store, rpc, adapter, hostStream } = setup();
+    await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
+    await adapter.dispatch(makeCommand("retry", "session.activate", `session:${sessionId}`, `session:${sessionId}`, { sessionId }));
+    expect(rpc.retries).toBe(1);
+    expect(store.sessionState(sessionId)?.runtimeState).toBe("idle");
   });
 
   test("prompt.submit immediate calls RPC prompt and turn.abort calls RPC abort", async () => {
@@ -393,6 +406,22 @@ describe("M5 runtime integration", () => {
       replay.ws.close();
     } finally { server.stop(true); adapter.close(); store.close(); await rpc_fail_silent(rpc); }
   }, 30_000);
+
+  test("unknown RPC outcome becomes indeterminate and duplicate never reruns", async () => {
+    const { store, rpc, adapter, hostStream } = setup();
+    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.80.6", hostDisplayName: "h" });
+    await runtime.start();
+    await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
+    rpc.failWith = new Error("transport lost after write");
+    const input = { commandId: "abababab-abab-4bab-8bab-abababababab", type: "prompt.submit", payload: { sessionId, deliveryMode: "immediate", message: "once", attachmentIds: [] }, scopeKey: `session:${sessionId}`, streamId: `session:${sessionId}` };
+    const first = runtime.commands.submit(input); await first.completion;
+    expect(store.command(input.commandId)?.state).toBe("indeterminate");
+    expect(store.listEvents(input.streamId).some((event) => event.type === "turn.indeterminate")).toBe(true);
+    const duplicate = runtime.commands.submit(input); await duplicate.completion;
+    expect(duplicate.receipt.duplicate).toBe(true);
+    expect(rpc.requestAttempts).toBe(1);
+  });
 
   test("lost receipt prompt.submit redispatches once", async () => {
     const { store, rpc, adapter, hostStream } = setup();

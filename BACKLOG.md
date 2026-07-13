@@ -71,8 +71,8 @@ A task is Done when:
 | M3 | Real Pi RPC adapter proven | M2 | DONE |
 | M4 | Durable bridge core and replay streams | M2, M3 | DONE |
 | M5 | One-session end-to-end diagnostic client | M4 | DONE |
-| M6 | Failure recovery and process supervision | M5 | READY |
-| M7 | macOS install, Serve pairing, and doctor | M6 | PLANNED |
+| M6 | Failure recovery and process supervision | M5 | DONE |
+| M7 | macOS install, Serve pairing, and doctor | M6 | READY |
 | M8 | Workspaces, trust, and read-only policy | M7 | PLANNED |
 | M9 | Production transcript, tools, and composer | M8 | PLANNED |
 | M10 | Models, context, retry, compaction, and commands | M9 | PLANNED |
@@ -327,15 +327,15 @@ On simulator or phone: connect, submit to real Pi, stream, abort, disconnect, re
 
 ## Tasks
 
-- [ ] **M6-01 P0 L** Implement process state machine and process-group cleanup.
-- [ ] **M6-02 P0 M** Implement restart window/crash loop/manual retry.
-- [ ] **M6-03 P0 M** Implement active capacity and 30-minute eligible idle stop.
-- [ ] **M6-04 P0 M** Implement graceful host drain/shutdown/reboot restoration.
-- [ ] **M6-05 P0 L** Add test-only deterministic faults for receipt, dispatch, output pause, Pi/bridge kill, cursor, output, provider, DB, storage, notification, cleanup.
-- [ ] **M6-06 P0 M** Implement visible crash/indeterminate/crash-loop/provider interruption states.
-- [ ] **M6-07 P0 M** Implement oversized output truncation/digest metadata.
-- [ ] **M6-08 P0 M** Prove slow consumer disconnect/replay while Pi continues.
-- [ ] **M6-09 P0 S** Prove fault controls absent/unreachable in release build.
+- [x] **M6-01 P0 L** Implement process state machine and process-group cleanup.
+- [x] **M6-02 P0 M** Implement restart window/crash loop/manual retry.
+- [x] **M6-03 P0 M** Implement active capacity and 30-minute eligible idle stop.
+- [x] **M6-04 P0 M** Implement graceful host drain/shutdown/reboot restoration.
+- [x] **M6-05 P0 L** Add test-only deterministic faults for receipt, dispatch, output pause, Pi/bridge kill, cursor, output, provider, DB, storage, notification, cleanup.
+- [x] **M6-06 P0 M** Implement visible crash/indeterminate/crash-loop/provider interruption states.
+- [x] **M6-07 P0 M** Implement oversized output truncation/digest metadata.
+- [x] **M6-08 P0 M** Prove slow consumer disconnect/replay while Pi continues.
+- [x] **M6-09 P0 S** Prove fault controls absent/unreachable in release build.
 
 ## Checkpoint demo
 
@@ -343,12 +343,12 @@ Run the deterministic P0 failure matrix; every case ends in settled, failed, abo
 
 ## Exit criteria
 
-- [ ] No indeterminate action auto-reruns.
-- [ ] No running/attention session is evicted.
-- [ ] Process cleanup and diagnostics are bounded/redacted.
-- [ ] Full failure matrix passes.
+- [x] No indeterminate action auto-reruns.
+- [x] No running/attention session is evicted.
+- [x] Process cleanup and diagnostics are bounded/redacted.
+- [x] Full failure matrix passes.
 
-**Evidence:** fault matrix report.
+**Evidence:** [`M6-SUMMARY.md`](M6-SUMMARY.md) and [`M6-FAULT-MATRIX.md`](M6-FAULT-MATRIX.md).
 
 ---
 
@@ -799,6 +799,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-M0 through M5 are complete. M6 is READY; activate failure recovery and process supervision in `WORKING.md` next.
+M0 through M6 are complete. M7 is READY; activate macOS install, Serve pairing, and doctor in `WORKING.md` next.
 
 Do not start transcript polish, multi-session behavior, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.

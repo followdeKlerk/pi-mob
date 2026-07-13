@@ -16,7 +16,7 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M0–M5 done; M6 activation ready
+status: M0–M6 done; M7 activation ready
 shape: monorepo with executable protocol, durable bridge, real Pi adapter, and Flutter one-session diagnostic client
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
@@ -31,9 +31,9 @@ protocol: 1.0, host/session streams, decimal-string cursors
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M6 — Failure recovery and process supervision
-objective: make Pi/bridge/host/storage/network failures truthful and recoverable
-next_checkpoint: M7 — macOS install, Serve, pairing, and doctor
+checkpoint: M7 — macOS install, Serve, pairing, and doctor
+objective: install, privately expose, pair, diagnose, update, and uninstall the supervised bridge
+next_checkpoint: M8 — Workspaces, trust, and read-only policy
 blockers: none requiring a product decision
 ```
 
@@ -44,7 +44,7 @@ M0 evidence retained:
 - sanitized real-Pi session/resource fixture inventory,
 - Flutter/Bun x64 artifact evidence.
 
-M1 shipped the scaffold (`M1-SUMMARY.md`). M2 shipped executable cross-language protocol contracts (`M2-SUMMARY.md`). M3 shipped the exact-Pi adapter (`M3-SUMMARY.md`). M4 shipped durable SQLite commands/events/leases, loopback WebSocket replay/snapshots, restart recovery, and limits/backpressure (`M4-SUMMARY.md`). Full native release toolchain pinning remains deferred to M7.
+M1 shipped the scaffold (`M1-SUMMARY.md`). M2 shipped executable cross-language protocol contracts (`M2-SUMMARY.md`). M3 shipped the exact-Pi adapter (`M3-SUMMARY.md`). M4 shipped durable SQLite commands/events/leases and replay (`M4-SUMMARY.md`). M5 shipped the one-session diagnostic client (`M5-SUMMARY.md`). M6 shipped supervised failure recovery and its deterministic fault matrix (`M6-SUMMARY.md`, `M6-FAULT-MATRIX.md`). Full native release toolchain pinning remains deferred to M7.
 
 ## read first
 
@@ -251,4 +251,4 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## next action
 
-Activate M6: implement process supervision and deterministic failure controls, then prove truthful recovery across Pi, bridge, host, storage, and network faults. Do not begin install/pairing or polished product surfaces before M6 exits.
+Activate M7: produce the installable signed-target daemon, owner-only service/config, private Tailscale Serve pairing, doctor/report, and update/rollback/uninstall flows. Do not begin workspace trust or polished product surfaces before M7 exits.

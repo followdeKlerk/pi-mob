@@ -35,7 +35,19 @@ interface SocketData {
   tokenAt: number;
   queuedBytes: number;
 }
-export interface BridgeServerOptions { readonly hostname?: string; readonly port?: number; readonly runtime: BridgeRuntimePort; }
+export interface BridgeServerTestHooks {
+  afterCommandAccepted?(message: Readonly<Record<string, unknown>>): "drop_receipt" | "close" | void;
+  beforeOutbound?(value: Readonly<Record<string, unknown>>): "pause" | void;
+}
+export interface BridgeServerOptions {
+  readonly hostname?: string;
+  readonly port?: number;
+  readonly runtime: BridgeRuntimePort;
+  /** Lower deterministic threshold for backpressure integration tests. */
+  readonly outboundBackpressureLimit?: number;
+  /** Injectable only by in-process tests; the daemon exposes no control endpoint. */
+  readonly testHooks?: BridgeServerTestHooks;
+}
 export type BridgeServer = Bun.Server<SocketData> & { broadcastProtocol(value: Record<string, unknown>, streamId?: string): void; connectionCount(): number };
 
 function id(): string { return crypto.randomUUID().toLowerCase(); }
@@ -72,7 +84,7 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
     websocket: {
       data: {} as SocketData,
       maxPayloadLength: MAX_JSON_BYTES,
-      backpressureLimit: MAX_OUTBOUND_BYTES,
+      backpressureLimit: options.outboundBackpressureLimit ?? MAX_OUTBOUND_BYTES,
       closeOnBackpressureLimit: true,
       perMessageDeflate: false,
       open(ws) { sockets.add(ws); },
@@ -113,7 +125,11 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
             if (!ws.data.synchronized) { sendError(ws, "host_not_ready", "Initial synchronization is incomplete.", message.requestId, message.commandId); return; }
             const readiness = options.runtime.ready();
             if (!readiness.ready) { sendError(ws, readiness.reason?.includes("full") ? "storage_full" : "database_unavailable", "Durable state is unavailable.", message.requestId, message.commandId); return; }
-            const result = await options.runtime.command(context(ws.data), message); send(ws, envelope("command.receipt", result, message.requestId, message.commandId)); return;
+            const result = await options.runtime.command(context(ws.data), message);
+            const fault = options.testHooks?.afterCommandAccepted?.(message);
+            if (fault === "close") { ws.close(1011, "test_fault"); return; }
+            if (fault !== "drop_receipt") send(ws, envelope("command.receipt", result, message.requestId, message.commandId));
+            return;
           }
           const result = await options.runtime.control(context(ws.data), type, payload);
           if (result) send(ws, envelope(`${type}.result`, result, message.requestId));
@@ -127,10 +143,11 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
   });
 
   function send(ws: Bun.ServerWebSocket<SocketData>, value: Record<string, unknown>): boolean {
+    if (options.testHooks?.beforeOutbound?.(value) === "pause") return true;
     const json = JSON.stringify(value); const bytes = Buffer.byteLength(json);
     if (bytes > MAX_JSON_BYTES) { sendError(ws, "payload_too_large", "Outbound message exceeds the protocol limit."); return false; }
     ws.data.queuedBytes = ws.getBufferedAmount();
-    if (exceedsSlowConsumerLimit(ws.data.queuedBytes, bytes)) { ws.close(1008, "slow_consumer"); return false; }
+    if (ws.data.queuedBytes + bytes > (options.outboundBackpressureLimit ?? MAX_OUTBOUND_BYTES)) { ws.close(1008, "slow_consumer"); return false; }
     ws.send(json, false); return true;
   }
   function sendLiveEvent(ws: Bun.ServerWebSocket<SocketData>, event: PendingLiveEvent): void {
