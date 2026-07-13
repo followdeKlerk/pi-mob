@@ -28,6 +28,7 @@ const ALLOWLIST = new Set([
   ".git",
   "node_modules",
   ".dart_tool",
+  ".flutter-plugins-dependencies",
   "build",
   ".neuralmemory",
   ".omx",

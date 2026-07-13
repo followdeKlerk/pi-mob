@@ -1,7 +1,15 @@
 import { compareDecimalCursors, semanticCommandSha256 } from "@pi-mob/protocol-schema";
 import { BridgeStore, StoreError, type LeaseMutation, type LeaseRecord, type StoredCommand, type StoredEvent } from "./store";
 
-export interface AdapterPort { dispatch(command: StoredCommand): Promise<void>; }
+export interface AdapterPort {
+  dispatch(command: StoredCommand): Promise<void>;
+  /**
+   * Optional workspace listing for the `workspace.list` control flow.
+   * Adapters that do not support multi-workspace discovery should
+   * leave this undefined; the runtime surfaces `workspace_unavailable`.
+   */
+  listWorkspaces?(): { readonly items: ReadonlyArray<Record<string, unknown>> };
+}
 export interface CommandSubmission { readonly receipt: { commandId: string; state: string; duplicate: boolean }; readonly completion: Promise<void>; }
 
 export class CommandLanes {

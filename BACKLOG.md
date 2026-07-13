@@ -70,8 +70,8 @@ A task is Done when:
 | M2 | Protocol schemas and shared fixtures | M1 | DONE |
 | M3 | Real Pi RPC adapter proven | M2 | DONE |
 | M4 | Durable bridge core and replay streams | M2, M3 | DONE |
-| M5 | One-session end-to-end diagnostic client | M4 | READY |
-| M6 | Failure recovery and process supervision | M5 | PLANNED |
+| M5 | One-session end-to-end diagnostic client | M4 | DONE |
+| M6 | Failure recovery and process supervision | M5 | READY |
 | M7 | macOS install, Serve pairing, and doctor | M6 | PLANNED |
 | M8 | Workspaces, trust, and read-only policy | M7 | PLANNED |
 | M9 | Production transcript, tools, and composer | M8 | PLANNED |
@@ -292,16 +292,16 @@ A test client loses an accepted-command receipt, reconnects, resends, and observ
 
 ## Tasks
 
-- [ ] **M5-01 P0 L** Implement mobile connection/handshake/synchronization state machine.
-- [ ] **M5-02 P0 M** Implement Drift schema/migrations for host/session/events/cursors/drafts.
-- [ ] **M5-03 P0 M** Implement ordered event reducer, deduplication, gaps, snapshots, host generation reset.
-- [ ] **M5-04 P0 M** Add manual endpoint and connection/version/readiness screen.
-- [ ] **M5-05 P0 M** Add one configured workspace/session flow.
-- [ ] **M5-06 P0 M** Add raw normalized transcript/event list.
-- [ ] **M5-07 P0 M** Add text draft, submit/receipt/error restoration, and abort.
-- [ ] **M5-08 P0 S** Disable offline send while retaining draft.
-- [ ] **M5-09 P0 M** Implement foreground reconnect and app process restart recovery.
-- [ ] **M5-10 P0 M** Run real prompt/abort/lost receipt/mid-stream disconnect proofs.
+- [x] **M5-01 P0 L** Implement mobile connection/handshake/synchronization state machine.
+- [x] **M5-02 P0 M** Implement Drift schema/migrations for host/session/events/cursors/drafts.
+- [x] **M5-03 P0 M** Implement ordered event reducer, deduplication, gaps, snapshots, host generation reset.
+- [x] **M5-04 P0 M** Add manual endpoint and connection/version/readiness screen.
+- [x] **M5-05 P0 M** Add one configured workspace/session flow.
+- [x] **M5-06 P0 M** Add raw normalized transcript/event list.
+- [x] **M5-07 P0 M** Add text draft, submit/receipt/error restoration, and abort.
+- [x] **M5-08 P0 S** Disable offline send while retaining draft.
+- [x] **M5-09 P0 M** Implement foreground reconnect and app process restart recovery.
+- [x] **M5-10 P0 M** Run real prompt/abort/lost receipt/mid-stream disconnect proofs.
 
 ## Checkpoint demo
 
@@ -309,13 +309,13 @@ On simulator or phone: connect, submit to real Pi, stream, abort, disconnect, re
 
 ## Exit criteria
 
-- [ ] Real prompt completes and abort works.
-- [ ] Lost receipt produces one dispatch.
-- [ ] Replay reaches identical settled state.
-- [ ] Draft clears only after accepted/current receipt.
-- [ ] Offline draft never auto-sends.
+- [x] Real prompt completes and abort works.
+- [x] Lost receipt produces one dispatch.
+- [x] Replay reaches identical settled state.
+- [x] Draft clears only after accepted/current receipt.
+- [x] Offline draft never auto-sends.
 
-**Evidence:** recorded demo and end-to-end tests.
+**Evidence:** [`M5-SUMMARY.md`](M5-SUMMARY.md), real-Pi bridge tests, durable replay tests, and Flutter persistence/coordinator/widget tests.
 
 ---
 
@@ -799,6 +799,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-M0 through M4 are complete. M5 is READY; activate the one-session Flutter diagnostic client in `WORKING.md` next.
+M0 through M5 are complete. M6 is READY; activate failure recovery and process supervision in `WORKING.md` next.
 
 Do not start transcript polish, multi-session behavior, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.

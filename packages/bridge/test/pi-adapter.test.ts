@@ -52,11 +52,12 @@ describe("Pi event normalization", () => {
       { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10 }, { type: "auto_retry_end", success: true, attempt: 1 },
       { type: "session_info_changed", name: "safe" }, { type: "thinking_level_changed", level: "high" }, { type: "entry_appended", entry: { id: "e", path: "/private" } },
       { type: "extension_ui_request", id: "d", method: "confirm", title: "Sure?" }, { type: "extension_ui_request", id: "n", method: "notify", message: "done" },
-      { type: "extension_error", extensionPath: "/private/ext", event: "x", error: "secret" },
+      { type: "extension_error", extensionPath: "/private/ext", event: { detail: "failed at /home/private/repo/file.ts" }, error: "secret" },
     ];
     const output = raws.flatMap((raw) => normalizePiEvent(raw, context));
     expect(new Set(output.map((item) => item.type)).size).toBeGreaterThan(12);
     expect(output.filter((item) => item.type === "tool.started").map((item) => item.payload.toolCallId)).toEqual(["one", "two"]);
     expect(JSON.stringify(output)).not.toContain("/private");
+    expect(JSON.stringify(output)).not.toContain("/home/private");
   });
 });

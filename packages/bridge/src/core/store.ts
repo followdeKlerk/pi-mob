@@ -136,6 +136,10 @@ export class BridgeStore {
     const row = this.db.query("SELECT state_json state FROM sessions WHERE session_id=?").get(sessionId) as { state: string } | null;
     return row ? parseObject(row.state) : null;
   }
+  sessionStates(): Array<Record<string, unknown>> {
+    const rows = this.db.query("SELECT session_id sessionId,state_json state FROM sessions ORDER BY created_at,session_id").all() as Array<{ sessionId: string; state: string }>;
+    return rows.map((row) => ({ sessionId: row.sessionId, ...parseObject(row.state) }));
+  }
   ensureStream(streamId: string, scope: "host" | "session", sessionId: string | null = null): void {
     this.transaction(() => this.ensureStreamTx(streamId, scope, sessionId));
   }
@@ -173,7 +177,9 @@ export class BridgeStore {
     return this.transaction(() => {
       const stream = this.db.query("SELECT current_cursor baseline,session_id sessionId,scope FROM streams WHERE stream_id=?").get(streamId) as { baseline: string; sessionId: string | null; scope: string } | null;
       if (!stream) throw new StoreError("not_found", "stream not found");
-      const state = stream.sessionId ? this.sessionState(stream.sessionId) ?? {} : { scope: "host" };
+      const state = stream.sessionId
+        ? this.sessionState(stream.sessionId) ?? {}
+        : { scope: "host", sessions: this.sessionStates() };
       const current = this.streamPosition(streamId)!.current;
       return { baseline: stream.baseline, current, state, events: this.listEvents(streamId, stream.baseline, current) };
     });

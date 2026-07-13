@@ -1,16 +1,16 @@
 # Working
 
-Status: M4 done; M5 activation ready
+Status: M5 done; M6 activation ready
 
 ## Current checkpoint
 
-**M5 — One-session end-to-end diagnostic client**
+**M6 — Failure recovery and process supervision**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
-Build the plain one-session Flutter diagnostic client against the durable bridge proven in M4. Completed checkpoint evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), [`M3-SUMMARY.md`](M3-SUMMARY.md), and [`M4-SUMMARY.md`](M4-SUMMARY.md).
+Harden the real one-session path delivered in M5 across Pi, bridge, host, storage, network, and resource failures. Completed checkpoint evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), [`M3-SUMMARY.md`](M3-SUMMARY.md), [`M4-SUMMARY.md`](M4-SUMMARY.md), and [`M5-SUMMARY.md`](M5-SUMMARY.md).
 
 ## Completed foundation
 
@@ -18,32 +18,30 @@ Build the plain one-session Flutter diagnostic client against the durable bridge
 - **M1:** monorepo scaffold, validation/CI, safe config/logger boundaries, and compiled bridge smoke.
 - **M2:** executable protocol schemas, immutable Dart models, shared fixtures/hashes, and drift gates.
 - **M3:** exact Pi `0.80.6` JSONL subprocess adapter and deterministic real prompt/tool/session proof.
-- **M4:** durable SQLite commands/events/leases, loopback WebSocket handshake, replay/current/snapshots, restart recovery, limits/backpressure, and lost-receipt one-dispatch proof.
+- **M4:** durable SQLite commands/events/leases, loopback WebSocket synchronization, restart recovery, and lost-receipt one-dispatch proof.
+- **M5:** one-session Flutter diagnostic client, Drift cache/drafts, ordered synchronization, real prompt/active abort, reconnect, and app-restart reconciliation.
 
 ## Immediate next actions
 
-### 1. Mobile durable connection state
+### 1. Process lifecycle
 
-- Drift schema/migrations for host, session, events, cursors, and drafts.
-- Hello/subscription synchronization state machine with host-generation reset.
-- Ordered reducer with deduplication, gaps, replay, and atomic snapshots.
+- Implement the bridge/Pi process state machine and process-group cleanup.
+- Add bounded restart windows, crash-loop state, manual retry, active capacity, and eligible idle stop.
+- Implement graceful host drain and restoration.
 
-### 2. One-session diagnostic flow
+### 2. Deterministic failure controls
 
-- Manual endpoint/readiness screen and one configured workspace/session.
-- Raw normalized event/transcript list.
-- Draft, submit/current receipt reconciliation, error restoration, abort, and disabled offline send.
+- Add test-only faults for receipt, dispatch, output pause, Pi/bridge kill, cursor, provider, database, storage, notifications, and cleanup.
+- Prove fault controls are absent from release builds.
 
-### 3. End-to-end recovery proof
+### 3. Truthful recovery surfaces
 
-- Real Pi prompt completion and abort.
-- Lost receipt with one dispatch.
-- Foreground disconnect/replay and mobile process restart to identical settled state.
-- Draft clears only after accepted/current receipt and never auto-sends after reconnect.
+- Materialize crash, indeterminate, crash-loop, provider interruption, and oversized-output states.
+- Prove slow-consumer disconnect/replay while Pi continues.
 
 ## Do not start yet
 
-Until M5 exits: polished transcript/tool UI, broad process-supervisor work, install/pairing, trust/read-only UX, multi-session control, attachments, notifications, and later product surfaces.
+Until M6 exits: install/pairing/doctor, trust/read-only UX, polished multi-session transcript control, attachments, notifications, and later product surfaces.
 
 ## Blockers
 

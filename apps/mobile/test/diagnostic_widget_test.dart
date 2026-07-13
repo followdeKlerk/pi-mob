@@ -1,0 +1,120 @@
+import 'package:drift/drift.dart' show Value;
+import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pi_mob/main.dart';
+import 'package:pi_mob/src/connection/bridge_transport.dart';
+import 'package:pi_mob/src/connection/connection_coordinator.dart';
+import 'package:pi_mob/src/data/app_database.dart';
+import 'package:pi_mob/src/domain/mobile_state.dart';
+
+void main() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets(
+    'diagnostic UI retains offline draft and exposes explicit controls',
+    (tester) async {
+      final database = AppDatabase.withExecutor(NativeDatabase.memory());
+      const hostId = '11111111-1111-4111-8111-111111111111';
+      const sessionId = '22222222-2222-4222-8222-222222222222';
+      await database.upsertHost(
+        HostEntriesCompanion.insert(
+          hostId: hostId,
+          endpoint: 'https://fixture.test',
+          displayName: 'Fixture host',
+          generation: '1',
+          connectionState: 'offline',
+          bridgeVersion: const Value('m5'),
+          piVersion: const Value('0.80.6'),
+          protocolVersion: const Value('1.0'),
+          capabilitiesJson: '[]',
+        ),
+      );
+      await database.upsertSessionState(
+        const SessionState(
+          sessionId: sessionId,
+          hostId: hostId,
+          name: 'Saved session',
+          runtimeState: 'idle',
+          queueCount: 0,
+        ),
+      );
+      await database.saveDraft(
+        hostId: hostId,
+        sessionId: sessionId,
+        text: 'Saved offline',
+        pendingCommandId: null,
+        pendingPayloadJson: null,
+        pendingState: null,
+        updatedAt: DateTime.utc(2026, 7, 13),
+      );
+      final coordinator = ConnectionCoordinator(
+        transport: _OfflineTransport(),
+        database: database,
+      );
+      await coordinator.initialize(autoConnect: false);
+
+      await tester.binding.setSurfaceSize(const Size(1200, 900));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.pumpWidget(PiMobApp(coordinator: coordinator));
+      await tester.pump();
+
+      expect(find.text('pi-mob M5 diagnostic'), findsOneWidget);
+      expect(find.byKey(const Key('endpoint-field')), findsOneWidget);
+      expect(find.textContaining('Bridge: m5'), findsOneWidget);
+      expect(find.textContaining('Pi: 0.80.6'), findsOneWidget);
+      expect(find.textContaining('Protocol: 1.0'), findsOneWidget);
+      expect(find.byKey(const Key('raw-event-list')), findsNothing);
+      expect(find.text('No events received'), findsOneWidget);
+
+      final draft = tester.widget<TextField>(
+        find.byKey(const Key('draft-field')),
+      );
+      expect(draft.controller!.text, 'Saved offline');
+      final send = tester.widget<FilledButton>(
+        find.byKey(const Key('send-button')),
+      );
+      expect(
+        send.onPressed,
+        isNull,
+        reason: 'offline send must remain disabled',
+      );
+      expect(find.text('Send (offline)'), findsOneWidget);
+      expect(
+        tester
+            .widget<OutlinedButton>(find.byKey(const Key('abort-button')))
+            .onPressed,
+        isNull,
+      );
+
+      await tester.enterText(
+        find.byKey(const Key('draft-field')),
+        'Changed offline',
+      );
+      await tester.pump();
+      final persisted = await database.draft(hostId, sessionId);
+      expect(persisted!.draftText, 'Changed offline');
+      expect(find.byKey(const Key('retry-connection')), findsOneWidget);
+
+      coordinator.dispose();
+      await database.close();
+    },
+  );
+}
+
+final class _OfflineTransport implements BridgeTransport {
+  @override
+  Future<BridgeSocket> connect(Uri endpoint) =>
+      throw const SocketExceptionForTest();
+
+  @override
+  Future<EndpointProbe> probe(Uri endpoint) async => const EndpointProbe(
+    statusCode: 503,
+    ready: false,
+    body: {'status': 'not_ready'},
+  );
+}
+
+final class SocketExceptionForTest implements Exception {
+  const SocketExceptionForTest();
+}

@@ -3,7 +3,7 @@
 ## meta
 
 ```text
-updated_utc: 2026-07-12
+updated_utc: 2026-07-13
 root: .
 managed_by: regenerate with /check after each scaffold milestone
 vcs: git
@@ -16,8 +16,8 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M0–M4 done; M5 activation ready
-shape: monorepo scaffold (M1); workspace, packages, scripts, CI, and compiled bridge smoke executable present
+status: M0–M5 done; M6 activation ready
+shape: monorepo with executable protocol, durable bridge, real Pi adapter, and Flutter one-session diagnostic client
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
 host_floor: macOS 13.0+
@@ -31,9 +31,9 @@ protocol: 1.0, host/session streams, decimal-string cursors
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M5 — One-session end-to-end diagnostic client
-objective: control one real Pi session from Flutter with restart-safe reconciliation
-next_checkpoint: M6 — Failure recovery and process supervision
+checkpoint: M6 — Failure recovery and process supervision
+objective: make Pi/bridge/host/storage/network failures truthful and recoverable
+next_checkpoint: M7 — macOS install, Serve, pairing, and doctor
 blockers: none requiring a product decision
 ```
 
@@ -243,7 +243,7 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## known issues / intentionally incomplete
 
-- Mobile product behavior begins at M5; completed M4 intentionally exposes a diagnostic protocol/core rather than polished UI.
+- M5 intentionally delivers diagnostic raw-event UI; polished transcript/tool presentation remains deferred to M9.
 - Exact Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK pin is deferred to the M7 release-build checkpoint.
 - No real Xcode/Android release build in CI yet; M1 validates the iOS/Android deployment floors and runs `flutter analyze` plus the Dart fixture parity test.
 - Linux/Windows/Termux/public store/multi-user/sandbox/Obsidian are post-MVP.
@@ -251,4 +251,4 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## next action
 
-Activate M5: build the one-session Flutter diagnostic client and prove prompt/abort/reconnect/app-restart reconciliation. Do not begin polished UI or later multi-session/push work before the end-to-end client is proven.
+Activate M6: implement process supervision and deterministic failure controls, then prove truthful recovery across Pi, bridge, host, storage, and network faults. Do not begin install/pairing or polished product surfaces before M6 exits.

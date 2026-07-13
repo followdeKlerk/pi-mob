@@ -15,8 +15,11 @@ function object(value: unknown): Record<string, unknown> {
 function safe(value: unknown, depth = 0): unknown {
   if (depth > 6) return "<truncated>";
   if (typeof value === "string") {
-    if (value.startsWith("/") || /^([A-Za-z]:\\|~\/)/.test(value)) return "<host-private>";
-    return text(value);
+    const bounded = text(value);
+    return bounded
+      .replace(/\/(?:Users|home)\/[^\s"'<>]+/g, "<host-private>")
+      .replace(/[A-Za-z]:\\[^\s"'<>]+/g, "<host-private>")
+      .replace(/~\/[^\s"'<>]+/g, "<host-private>");
   }
   if (Array.isArray(value)) return value.slice(0, 500).map((item) => safe(item, depth + 1));
   if (value && typeof value === "object") {
@@ -47,7 +50,13 @@ export function normalizePiEvent(raw: RawPiEvent, context: PiNormalizationContex
       return [event(message.role === "assistant" ? "assistant.started" : "reasoning.started", sessionId, { contentBlockId: message.id ?? raw.messageId ?? "message" })];
     }
     case "message_update": return normalizeMessageUpdate(raw, sessionId);
-    case "message_end": return [event("assistant.completed", sessionId, { content: safe(raw.message) })];
+    case "message_end": {
+      const message = object(raw.message);
+      if (message.stopReason === "aborted") {
+        return [event("turn.aborted", sessionId, { reason: "aborted" })];
+      }
+      return [event("assistant.completed", sessionId, { content: safe(raw.message) })];
+    }
     case "tool_execution_start": return [event("tool.started", sessionId, {
       toolCallId: String(raw.toolCallId ?? "unknown"), toolName: String(raw.toolName ?? "unknown"),
       builtIn: BUILT_IN_PI_TOOLS.includes(raw.toolName as never), arguments: safe(raw.args), status: "running",
@@ -66,7 +75,7 @@ export function normalizePiEvent(raw: RawPiEvent, context: PiNormalizationContex
     case "entry_appended": return [event("session.state", sessionId, { entry: safe(raw.entry) })];
     case "session_info_changed": return [event("session.metadata", sessionId, { name: text(raw.name) })];
     case "thinking_level_changed": return [event("model.state", sessionId, { thinkingLevel: raw.level })];
-    case "extension_error": return [event("error.event", sessionId, { code: "internal_error", retryable: false, extensionEvent: raw.event })];
+    case "extension_error": return [event("error.event", sessionId, { code: "internal_error", retryable: false, extensionEvent: safe(raw.event) })];
     case "extension_ui_request": return normalizeExtensionUi(raw, sessionId);
     default: return [];
   }

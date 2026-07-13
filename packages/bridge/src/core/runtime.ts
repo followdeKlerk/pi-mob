@@ -77,6 +77,11 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       catch { throw new RuntimeProtocolError("stale_controller", "lease is stale"); }
     }
     if (type === "command.current") { const command = this.options.store.command(String(payload.commandId ?? "")); if (!command) throw new RuntimeProtocolError("command_not_found", "command not found"); return { commandId: command.commandId, state: command.state }; }
+    if (type === "workspace.list") {
+      if (typeof this.options.adapter.listWorkspaces !== "function") throw new RuntimeProtocolError("workspace_unavailable", "adapter does not expose a workspace listing");
+      const listing = this.options.adapter.listWorkspaces();
+      return { items: listing.items.map((item) => ({ ...item })) };
+    }
     return {};
   }
 

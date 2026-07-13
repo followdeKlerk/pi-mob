@@ -11,11 +11,19 @@ dependencies:
     sdk: flutter
   cupertino_icons: 1.0.9
   unorm_dart: 0.3.2
+  drift: 2.34.1
+  drift_flutter: 0.3.1
+  sqlite3: 3.4.0
+  path: 1.9.1
+  path_provider: 2.1.6
+  uuid: 4.5.3
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: 6.0.0
+  build_runner: 2.15.1
+  drift_dev: 2.34.3
 
 flutter:
   uses-material-design: true

@@ -15,6 +15,7 @@
     "typecheck": "tsc --noEmit",
     "test": "bun test",
     "m3:contract": "bun run cmd/m3-contract.ts",
+    "daemon": "bun run src/daemon.ts",
     "build:smoke": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile ./dist/bridge-smoke ./src/smoke.ts"
   },
   "dependencies": {
