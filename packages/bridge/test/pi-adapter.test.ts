@@ -1,0 +1,62 @@
+import { describe, expect, test } from "bun:test";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
+import { extensionUiResponse, normalizePiEvent, normalizePiResponse, toPiRpcCommand, type NormalizedPiCommand, type PiCommandName } from "../src";
+
+const noPayload: PiCommandName[] = ["abort", "new_session", "get_state", "get_messages", "get_session_stats", "get_commands", "cycle_model", "get_available_models", "cycle_thinking_level", "abort_retry", "abort_bash", "clone", "get_fork_messages", "get_tree", "get_last_assistant_text"];
+
+describe("exact Pi 0.80.6 command adapter", () => {
+  test("maps every command family and prevalidates session files", () => {
+    for (const type of noPayload) expect(toPiRpcCommand({ type }, "id")).toMatchObject({ id: "id", type });
+    const cases: NormalizedPiCommand[] = [
+      { type: "prompt", payload: { message: "hello" } }, { type: "steer", payload: { message: "change" } }, { type: "follow_up", payload: { message: "later" } },
+      { type: "set_model", payload: { provider: "fixture", modelId: "model" } }, { type: "set_thinking_level", payload: { level: "high" } },
+      { type: "set_steering_mode", payload: { mode: "all" } }, { type: "set_follow_up_mode", payload: { mode: "one-at-a-time" } },
+      { type: "compact", payload: { customInstructions: "safe" } }, { type: "set_auto_compaction", payload: { enabled: true } }, { type: "set_auto_retry", payload: { enabled: false } },
+      { type: "bash", payload: { command: "pwd" } }, { type: "export_html" }, { type: "fork", payload: { entryId: "entry" } },
+      { type: "get_entries", payload: { since: 2 } }, { type: "set_session_name", payload: { name: "name" } },
+    ];
+    for (const command of cases) expect(toPiRpcCommand(command).type).toBe(command.type);
+    expect(() => toPiRpcCommand({ type: "switch_session", payload: { sessionPath: "/missing/pi-session" } })).toThrow("compatible Pi session file");
+    const dir = mkdtempSync(join(tmpdir(), "pi-adapter-"));
+    const file = join(dir, "session.jsonl"); writeFileSync(file, `${JSON.stringify({ type: "session", version: 3, id: "fixture", timestamp: "2026-07-13T00:00:00.000Z", cwd: dir })}\n`);
+    expect(toPiRpcCommand({ type: "switch_session", payload: { sessionPath: file } })).toMatchObject({ type: "switch_session", sessionPath: file });
+  });
+
+  test("normalizes failures without leaking raw paths", () => {
+    expect(normalizePiResponse({ type: "response", command: "export_html", success: false, error: "Nothing to export yet /private/file" })).toEqual({ command: "export_html", success: false, errorCode: "invalid_state" });
+    expect(extensionUiResponse("dialog", "confirm", true)).toEqual({ type: "extension_ui_response", id: "dialog", confirmed: true });
+    expect(extensionUiResponse("dialog", "input", null, true)).toEqual({ type: "extension_ui_response", id: "dialog", cancelled: true });
+  });
+});
+
+describe("Pi event normalization", () => {
+  const context = { sessionId: "session" };
+  test("agent_settled is the only settled boundary", () => {
+    expect(normalizePiEvent({ type: "agent_end", willRetry: false }, context).map((item) => item.type)).not.toContain("turn.settled");
+    expect(normalizePiEvent({ type: "agent_settled" }, context).map((item) => item.type)).toEqual(["turn.settled"]);
+  });
+
+  test("covers lifecycle, content, tools, queue, retry, compaction, and extension UI", () => {
+    const raws = [
+      { type: "agent_start" }, { type: "turn_start", turnIndex: 1 }, { type: "turn_end", message: {} },
+      { type: "message_start", message: { role: "assistant", id: "a" } },
+      { type: "message_update", assistantMessageEvent: { type: "text_delta", delta: "hi" } }, { type: "message_end", message: {} },
+      { type: "tool_execution_start", toolCallId: "one", toolName: "read", args: { path: "/private/repo" } },
+      { type: "tool_execution_start", toolCallId: "two", toolName: "bash", args: {} },
+      { type: "tool_execution_update", toolCallId: "one", partialResult: "out" },
+      { type: "tool_execution_end", toolCallId: "one", toolName: "read", result: "done", isError: false },
+      { type: "tool_execution_end", toolCallId: "two", toolName: "bash", result: "bad", isError: true },
+      { type: "queue_update", steering: [], followUp: [] }, { type: "compaction_start", reason: "manual" }, { type: "compaction_end", aborted: false },
+      { type: "auto_retry_start", attempt: 1, maxAttempts: 3, delayMs: 10 }, { type: "auto_retry_end", success: true, attempt: 1 },
+      { type: "session_info_changed", name: "safe" }, { type: "thinking_level_changed", level: "high" }, { type: "entry_appended", entry: { id: "e", path: "/private" } },
+      { type: "extension_ui_request", id: "d", method: "confirm", title: "Sure?" }, { type: "extension_ui_request", id: "n", method: "notify", message: "done" },
+      { type: "extension_error", extensionPath: "/private/ext", event: "x", error: "secret" },
+    ];
+    const output = raws.flatMap((raw) => normalizePiEvent(raw, context));
+    expect(new Set(output.map((item) => item.type)).size).toBeGreaterThan(12);
+    expect(output.filter((item) => item.type === "tool.started").map((item) => item.payload.toolCallId)).toEqual(["one", "two"]);
+    expect(JSON.stringify(output)).not.toContain("/private");
+  });
+});

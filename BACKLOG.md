@@ -68,8 +68,8 @@ A task is Done when:
 | M0 | Specification and upstream contract freeze | — | DONE |
 | M1 | Monorepo scaffold and CI foundations | M0 | DONE |
 | M2 | Protocol schemas and shared fixtures | M1 | DONE |
-| M3 | Real Pi RPC adapter proven | M2 | READY |
-| M4 | Durable bridge core and replay streams | M2, M3 | PLANNED |
+| M3 | Real Pi RPC adapter proven | M2 | DONE |
+| M4 | Durable bridge core and replay streams | M2, M3 | READY |
 | M5 | One-session end-to-end diagnostic client | M4 | PLANNED |
 | M6 | Failure recovery and process supervision | M5 | PLANNED |
 | M7 | macOS install, Serve pairing, and doctor | M6 | PLANNED |
@@ -217,18 +217,18 @@ Dart and TypeScript accept all valid fixtures, reject all invalid fixtures, and 
 
 ## Tasks
 
-- [ ] **M3-01 P0 M** Implement incremental LF JSONL splitter and bounded decoder.
-- [ ] **M3-02 P0 M** Add UTF-8/chunk/U+2028/U+2029/property/fuzz coverage.
-- [ ] **M3-03 P0 M** Implement response-ID correlation, stdin backpressure, timeout, and cancellation.
-- [ ] **M3-04 P0 M** Launch Pi directly with absolute executable, cwd, explicit PATH/env allowlist, process group, stdout/stderr separation.
-- [ ] **M3-05 P0 L** Map prompt/steer/follow-up/abort/new-session and lifecycle events.
-- [ ] **M3-06 P0 L** Map state/messages/entries/tree/model/thinking/modes/stats/commands.
-- [ ] **M3-07 P0 L** Map retry/compaction/session name/switch/fork/clone/export.
-- [ ] **M3-08 P0 L** Map built-in tools, parallel calls, errors, cancellation, and updates.
-- [ ] **M3-09 P0 L** Map interactive/presentation extension UI.
-- [ ] **M3-10 P0 M** Implement bounded redacted stderr diagnostics and process cleanup.
-- [ ] **M3-11 P0 L** Build sanitized real Pi session fixture corpus.
-- [ ] **M3-12 P0 M** Test missing/corrupt/incompatible sessions and extension-cancelled lifecycle operations.
+- [x] **M3-01 P0 M** Implement incremental LF JSONL splitter and bounded decoder.
+- [x] **M3-02 P0 M** Add UTF-8/chunk/U+2028/U+2029/property/fuzz coverage.
+- [x] **M3-03 P0 M** Implement response-ID correlation, stdin backpressure, timeout, and cancellation.
+- [x] **M3-04 P0 M** Launch Pi directly with absolute executable, cwd, explicit PATH/env allowlist, process group, stdout/stderr separation.
+- [x] **M3-05 P0 L** Map prompt/steer/follow-up/abort/new-session and lifecycle events.
+- [x] **M3-06 P0 L** Map state/messages/entries/tree/model/thinking/modes/stats/commands.
+- [x] **M3-07 P0 L** Map retry/compaction/session name/switch/fork/clone/export.
+- [x] **M3-08 P0 L** Map built-in tools, parallel calls, errors, cancellation, and updates.
+- [x] **M3-09 P0 L** Map interactive/presentation extension UI.
+- [x] **M3-10 P0 M** Implement bounded redacted stderr diagnostics and process cleanup.
+- [x] **M3-11 P0 L** Build sanitized real Pi session fixture corpus.
+- [x] **M3-12 P0 M** Test missing/corrupt/incompatible sessions and extension-cancelled lifecycle operations.
 
 ## Checkpoint demo
 
@@ -236,11 +236,11 @@ A CLI harness drives a real Pi process through a prompt/tool/session cycle and r
 
 ## Exit criteria
 
-- [ ] Exact real Pi contract suite passes.
-- [ ] `agent_settled` is the only idle boundary.
-- [ ] Hostile shell startup files cannot corrupt RPC.
-- [ ] Adapter exports normalized domain types only.
-- [ ] Compatibility manifest contains exact executable and upstream evidence.
+- [x] Exact real Pi contract suite passes.
+- [x] `agent_settled` is the only idle boundary.
+- [x] Hostile shell startup files cannot corrupt RPC.
+- [x] Adapter exports normalized domain types only.
+- [x] Compatibility manifest contains exact executable and upstream evidence.
 
 **Evidence:** real-binary report and sanitized fixtures.
 
@@ -799,6 +799,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-M0, M1, and M2 are complete. M3 is READY; activate the exact Pi `0.80.6` RPC adapter work in `WORKING.md` next.
+M0 through M3 are complete. M4 is READY; activate the durable bridge core and replay-stream work in `WORKING.md` next.
 
-Do not start durable bridge streams, transcript polish, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.
+Do not start M5 mobile behavior, transcript polish, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.

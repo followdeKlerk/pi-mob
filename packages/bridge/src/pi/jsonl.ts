@@ -101,13 +101,8 @@ export class JsonlSyntaxError extends Error {
   }
 }
 
-function previewOf(raw: string): string {
-  // Keep preview deterministic and short. If the record somehow
-  // contains a newline (Pi does not emit multi-line JSON, but a hostile
-  // producer could), normalize so the preview renders on one line in
-  // any log destination.
-  const slice = raw.length > PREVIEW_BYTES ? raw.slice(0, PREVIEW_BYTES) : raw;
-  return slice.replace(/[\r\n]+/g, "\\n");
+function previewOf(_raw: string): string {
+  return "<redacted>";
 }
 
 function asciiPreview(bytes: Uint8Array): string {
@@ -244,12 +239,11 @@ export class JsonlDecoder {
     // monotonic — within a single push, the running pending buffer
     // was just appended to, so we check whether *post-append* size has
     // exceeded the limit before returning.
-    if (this.pending.length > this.maxBytes) {
-      throw new JsonlRecordTooLargeError(this.maxBytes);
-    }
-
     if (cursor > 0) {
       this.pending = cursor === len ? new Uint8Array(0) : buf.subarray(cursor);
+    }
+    if (this.pending.length > this.maxBytes) {
+      throw new JsonlRecordTooLargeError(this.maxBytes);
     }
     return out;
   }

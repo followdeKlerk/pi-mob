@@ -57,7 +57,7 @@
  */
 
 import { existsSync, statSync } from "node:fs";
-import { isAbsolute, sep } from "node:path";
+import { isAbsolute } from "node:path";
 import { JsonlDecoder } from "./jsonl";
 
 // ---------------- Errors ----------------
@@ -226,7 +226,9 @@ const SENSITIVE_VALUE_RE = new RegExp(
 );
 
 function redactLine(line: string): string {
-  return line.replace(SENSITIVE_VALUE_RE, "redacted");
+  return line
+    .replace(SENSITIVE_VALUE_RE, "redacted")
+    .replace(/\/(?:Users|home)\/[^/\s]+(?:\/[^\s]*)?/g, "redacted");
 }
 
 interface PendingRequest {
@@ -309,10 +311,6 @@ function generateId(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
-function isPosixPath(p: string): boolean {
-  return p.startsWith("/") || p.startsWith("./") || p.startsWith("../");
-}
-
 // ---------------- RpcProcess ----------------
 
 export interface RpcProcessListeners {
@@ -328,7 +326,7 @@ export interface RpcProcessListeners {
  */
 export class RpcProcess {
   private readonly options: RpcInternalOptions;
-  private proc: Bun.Subprocess | null = null;
+  private proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | null = null;
   private readonly jsonl = new JsonlDecoder();
   private readonly pending = new Map<string, PendingRequest>();
   private readonly stderrRing: RpcPendingRecord[] = [];
@@ -337,8 +335,7 @@ export class RpcProcess {
   private stderrSequence = 0;
   private stdoutBytesRead = 0;
   private state: RpcProcessState = "starting";
-  private exitInfo: RpcProcessExitInfo | null = null;
-  private stdinWriter: WritableStreamDefaultWriter<Uint8Array> | null = null;
+  private stdinWriter: Bun.FileSink | null = null;
   private notifListeners = new Set<RpcProcessNotificationHandler>();
   private stderrListeners = new Set<RpcProcessStderrHandler>();
   private exitListeners = new Set<RpcProcessExitHandler>();
@@ -458,7 +455,7 @@ export class RpcProcess {
     // but the runtime check is cheap and explicit.
     const cmd = [this.options.executable, ...this.options.args];
 
-    let proc: Bun.Subprocess;
+    let proc: Bun.Subprocess<"pipe", "pipe", "pipe">;
     try {
       proc = Bun.spawn({
         cmd,
@@ -488,14 +485,13 @@ export class RpcProcess {
 
     // Acquire the writer once. We release only on close() so writes
     // remain serialised through the lifetime of the process.
-    this.stdinWriter = proc.stdin.getWriter();
+    this.stdinWriter = proc.stdin;
 
     this.exitPromise = this.runPumps();
 
     // Drain stdout/stderr pumps. Both must complete (or fail) before
     // we declare the process "exited".
     void this.exitPromise.then((info) => {
-      this.exitInfo = info;
       // Reject any still-pending requests with a structured error.
       this.finalisePending(
         new RpcProcessError(
@@ -543,8 +539,13 @@ export class RpcProcess {
     if (this.pending.has(id)) {
       throw new RpcDuplicateIdError(id);
     }
-    const payload: Record<string, unknown> = { id, method: opts.method };
-    if (opts.params !== undefined) payload.params = opts.params;
+    const payload: Record<string, unknown> = { id, type: opts.method };
+    if (opts.params !== undefined) {
+      if (opts.params === null || typeof opts.params !== "object" || Array.isArray(opts.params)) {
+        throw new RpcInvalidOptionsError("request params must be an object");
+      }
+      Object.assign(payload, opts.params);
+    }
     const json = JSON.stringify(payload);
     if (!id.includes(":") && json.length > 64 * 1024) {
       throw new RpcInvalidOptionsError(
@@ -660,7 +661,7 @@ export class RpcProcess {
     // Release and close the stdin writer if still open.
     try {
       if (this.stdinWriter) {
-        await this.stdinWriter.close().catch(() => undefined);
+        await this.stdinWriter.end();
         this.stdinWriter = null;
       }
     } catch {
@@ -705,7 +706,7 @@ export class RpcProcess {
     return { code, signal };
   }
 
-  private async pumpStdout(proc: Bun.Subprocess): Promise<void> {
+  private async pumpStdout(proc: Bun.Subprocess<"pipe", "pipe", "pipe">): Promise<void> {
     const reader = proc.stdout.getReader();
     try {
       while (true) {
@@ -728,7 +729,7 @@ export class RpcProcess {
     }
   }
 
-  private async pumpStderr(proc: Bun.Subprocess): Promise<void> {
+  private async pumpStderr(proc: Bun.Subprocess<"pipe", "pipe", "pipe">): Promise<void> {
     const reader = proc.stderr.getReader();
     const decoder = new TextDecoder("utf-8", { fatal: false });
     let carry = "";
@@ -795,20 +796,13 @@ export class RpcProcess {
       );
       return;
     }
-    const rec = value as { id?: unknown; result?: unknown; error?: unknown };
-    if (typeof rec.id === "string" && this.pending.has(rec.id)) {
+    const rec = value as { id?: unknown; type?: unknown; success?: unknown; data?: unknown; error?: unknown };
+    if (rec.type === "response" && typeof rec.id === "string" && this.pending.has(rec.id)) {
       const entry = this.pending.get(rec.id)!;
-      if (rec.error !== undefined) {
-        entry.reject(
-          new RpcProcessError(
-            `subprocess error response: ${JSON.stringify(rec.error).slice(
-              0,
-              256,
-            )}`,
-          ),
-        );
+      if (rec.success === false) {
+        entry.reject(new RpcProcessError("Pi RPC command failed"));
       } else {
-        entry.resolve(rec.result);
+        entry.resolve(rec.data);
       }
       return;
     }
@@ -864,7 +858,7 @@ export class RpcProcess {
    */
   private async signalGroup(
     sig: "SIGTERM" | "SIGKILL",
-    proc: Bun.Subprocess,
+    proc: Bun.Subprocess<"pipe", "pipe", "pipe">,
     graceMs: number,
   ): Promise<void> {
     if (proc.exitCode !== null) return;
@@ -937,6 +931,5 @@ export function assertAbsolutePath(label: string, p: string): void {
       `${label} must be an absolute path (got ${JSON.stringify(p)})`,
     );
   }
-  void isPosixPath;
-  void sep;
+
 }

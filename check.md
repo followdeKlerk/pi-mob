@@ -16,7 +16,7 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M0–M2 done; M3 activation ready
+status: M0–M3 done; M4 activation ready
 shape: monorepo scaffold (M1); workspace, packages, scripts, CI, and compiled bridge smoke executable present
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
@@ -31,9 +31,9 @@ protocol: 1.0, host/session streams, decimal-string cursors
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M3 — Real Pi RPC adapter proven
-objective: prove a strict normalized adapter against exact Pi 0.80.6
-next_checkpoint: M4 — Durable bridge core and replay streams
+checkpoint: M4 — Durable bridge core and replay streams
+objective: durably accept commands and recover host/session streams
+next_checkpoint: M5 — One-session end-to-end diagnostic client
 blockers: none requiring a product decision
 ```
 
@@ -44,7 +44,7 @@ M0 evidence retained:
 - sanitized real-Pi session/resource fixture inventory,
 - Flutter/Bun x64 artifact evidence.
 
-M1 shipped the workspace, packages, scripts, CI, and compiled `bridge-smoke` (`M1-SUMMARY.md`). M2 shipped executable schemas, generated catalogues, immutable Dart models, 245 manifest fixtures, payload-validated recovery scenarios, shared semantic hashes, and drift gates (`M2-SUMMARY.md`). Full native release toolchain pinning remains deferred to M7.
+M1 shipped the scaffold (`M1-SUMMARY.md`). M2 shipped executable cross-language protocol contracts (`M2-SUMMARY.md`). M3 shipped the strict exact-Pi JSONL transport, normalized adapter, deterministic real prompt/tool/session harness, and compatibility evidence (`M3-SUMMARY.md`). Full native release toolchain pinning remains deferred to M7.
 
 ## read first
 
@@ -63,8 +63,9 @@ M1 shipped the workspace, packages, scripts, CI, and compiled `bridge-smoke` (`M
 13. [`docs/DECISIONS.md`](docs/DECISIONS.md)
 14. [`BACKLOG.md`](BACKLOG.md)
 15. [`M2-SUMMARY.md`](M2-SUMMARY.md)
-16. [`WORKING.md`](WORKING.md)
-17. [`PLANNING.md`](PLANNING.md) — historical research only
+16. [`M3-SUMMARY.md`](M3-SUMMARY.md)
+17. [`WORKING.md`](WORKING.md)
+18. [`PLANNING.md`](PLANNING.md) — historical research only
 
 Normative documents under `docs/`, `BACKLOG.md`, and current `WORKING.md` override contradictory historical text in `PLANNING.md`.
 
@@ -241,7 +242,7 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## known issues / intentionally incomplete
 
-- The real Pi adapter, durable bridge, and mobile product behavior begin at M3/M4/M5; M2 contains protocol contracts only.
+- Durable bridge and mobile product behavior begin at M4/M5; the completed M3 adapter intentionally contains no SQLite/WebSocket business logic.
 - Exact Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK pin is deferred to the M7 release-build checkpoint.
 - No real Xcode/Android release build in CI yet; M1 validates the iOS/Android deployment floors and runs `flutter analyze` plus the Dart fixture parity test.
 - Linux/Windows/Termux/public store/multi-user/sandbox/Obsidian are post-MVP.
@@ -249,4 +250,4 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## next action
 
-Activate M3: prove the exact Pi `0.80.6` RPC adapter behind normalized domain types. Do not begin M4 durable bridge streams or later UI/push work before the real adapter contract is proven.
+Activate M4: implement durable SQLite command/event/lease state and replay/snapshot synchronization. Do not begin M5 mobile behavior or later UI/push work before bridge recovery invariants are proven.

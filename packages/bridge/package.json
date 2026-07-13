@@ -13,9 +13,15 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "m3:contract": "bun run cmd/m3-contract.ts",
     "build:smoke": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile ./dist/bridge-smoke ./src/smoke.ts"
   },
+  "dependencies": {
+    "@pi-mob/protocol-schema": "workspace:*"
+  },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6",
     "@pi-mob/typescript-config": "workspace:*"
   }
 }
