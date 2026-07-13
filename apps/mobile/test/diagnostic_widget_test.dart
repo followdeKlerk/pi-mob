@@ -59,7 +59,7 @@ void main() {
       await tester.pumpWidget(PiMobApp(coordinator: coordinator));
       await tester.pump();
 
-      expect(find.text('pi-mob M5 diagnostic'), findsOneWidget);
+      expect(find.text('pi-mob M7 diagnostic'), findsOneWidget);
       expect(find.byKey(const Key('endpoint-field')), findsOneWidget);
       expect(find.textContaining('Bridge: m5'), findsOneWidget);
       expect(find.textContaining('Pi: 0.80.6'), findsOneWidget);

@@ -19,10 +19,13 @@
     "build:smoke": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile ./dist/bridge-smoke ./src/smoke.ts"
   },
   "dependencies": {
-    "@pi-mob/protocol-schema": "workspace:*"
+    "@pi-mob/protocol-schema": "workspace:*",
+    "qrcode": "1.5.4"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "0.80.6",
-    "@pi-mob/typescript-config": "workspace:*"
+    "@pi-mob/typescript-config": "workspace:*",
+    "@types/qrcode": "1.5.6",
+    "jsqr": "1.4.0"
   }
 }

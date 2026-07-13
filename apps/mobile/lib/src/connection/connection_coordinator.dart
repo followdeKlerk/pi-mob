@@ -26,17 +26,9 @@ enum ConnectionPhase {
   background,
 }
 
-final class WorkspaceInfo {
-  const WorkspaceInfo({
-    required this.workspaceId,
-    required this.displayName,
-    required this.policyMode,
-  });
-
-  final String workspaceId;
-  final String displayName;
-  final String policyMode;
-}
+/// Server-reported workspace entry. Kept here as a re-export of the domain
+/// type so existing callers continue to compile.
+typedef WorkspaceInfo = WorkspaceEntry;
 
 /// Owns the foreground bridge socket and the durable one-session M5 state.
 ///
@@ -69,6 +61,23 @@ final class ConnectionCoordinator extends ChangeNotifier
     'succeeded',
   };
 
+  // Sentinel returned by firstWhere/orElse to keep workspace lookups
+  // non-throwing. Equality is identity-based so it cannot accidentally match
+  // any real entry.
+  static final WorkspaceEntry _missingWorkspace = WorkspaceEntry(
+    workspaceId: '',
+    displayName: '',
+    rootLabel: '',
+    relativePath: '',
+    repositoryMarker: null,
+    lastUsedAt: null,
+    availability: WorkspaceAvailability.unavailable,
+    trustState: WorkspaceTrustState.unknown,
+    fingerprint: '',
+    policyVersion: '',
+    manifest: const <WorkspaceResource>[],
+  );
+
   final BridgeTransport _transport;
   final AppDatabase _database;
   final Uuid _uuid;
@@ -78,11 +87,14 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, SnapshotAssembler> _snapshots = {};
   final Map<String, String> _snapshotStreams = {};
   final Map<String, SessionState> _sessions = {};
-  final List<WorkspaceInfo> _workspaces = [];
+  final List<WorkspaceEntry> _workspaces = [];
   final List<String> _rawEvents = [];
   final List<ToolOutputNotice> _toolOutputNotices = [];
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
+  WorkspaceSearchState _workspaceSearch = WorkspaceSearchState.idle();
+  int _workspaceSearchEpoch = 0;
+  String? _workspaceTrustRequiredFor;
 
   BridgeSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
@@ -122,7 +134,17 @@ final class ConnectionCoordinator extends ChangeNotifier
       selectedSessionId != null &&
       leaseId != null &&
       draft.trim().isNotEmpty &&
-      pendingCommandId == null;
+      pendingCommandId == null &&
+      !requiresTrustApproval;
+  WorkspaceEntry? get selectedWorkspace {
+    final id = selectedWorkspaceId;
+    if (id == null) return null;
+    for (final w in _workspaces) {
+      if (w.workspaceId == id) return w;
+    }
+    return null;
+  }
+
   bool get canRetry =>
       isReady &&
       leaseId != null &&
@@ -148,6 +170,34 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   List<WorkspaceInfo> get workspaces => List.unmodifiable(_workspaces);
+  WorkspaceSearchState get workspaceSearch => _workspaceSearch;
+  String? get workspaceTrustRequiredFor => _workspaceTrustRequiredFor;
+
+  /// True while the active workspace is missing an approved trust record, a
+  /// fingerprint change invalidated the previous approval, or the workspace is
+  /// marked unavailable. The composer must not send prompts while this holds.
+  bool get requiresTrustApproval {
+    final selected = selectedWorkspaceId;
+    if (selected == null) return false;
+    final entry = _workspaces.firstWhere(
+      (w) => w.workspaceId == selected,
+      orElse: () => _missingWorkspace,
+    );
+    if (entry == _missingWorkspace) return true;
+    if (entry.availability != WorkspaceAvailability.available) return true;
+    return entry.trustState != WorkspaceTrustState.approved;
+  }
+
+  /// The active policy on the currently selected session. Defaults to Full
+  /// because Pi sessions are created Full unless the user explicitly demotes.
+  SessionPolicyMode get activePolicyMode {
+    final id = selectedSessionId;
+    if (id == null) return SessionPolicyMode.full;
+    final mode = _sessions[id]?.policyMode;
+    if (mode == 'read_only') return SessionPolicyMode.readOnly;
+    return SessionPolicyMode.full;
+  }
+
   List<SessionState> get sessions => List.unmodifiable(_sessions.values);
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
   List<ToolOutputNotice> get toolOutputNotices =>
@@ -184,10 +234,18 @@ final class ConnectionCoordinator extends ChangeNotifier
       final saved = drafts.reduce(
         (a, b) => a.updatedAt.isAfter(b.updatedAt) ? a : b,
       );
-      hostId ??= saved.hostId;
-      selectedSessionId = saved.sessionId;
-      _restoreDraft(saved);
-    } else if (_sessions.isNotEmpty) {
+      // Only adopt the draft's hostId if a host row still exists. Drafts are
+      // intentionally preserved across explicit forget-host so the user can
+      // re-pair without losing their typing, but orphaned drafts must not
+      // resurrect a forgotten host identity.
+      if (hostId != null) {
+        hostId ??= saved.hostId;
+      }
+      if (hostId != null) {
+        selectedSessionId = saved.sessionId;
+        _restoreDraft(saved);
+      }
+    } else if (_sessions.isNotEmpty && hostId != null) {
       selectedSessionId = _sessions.keys.first;
     }
 
@@ -278,8 +336,61 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (target != null) await connect(target.toString());
   }
 
+  /// Forget the currently paired host and return to the unpaired state.
+  ///
+  /// Uses the existing durable APIs to clear cached host records, cursors,
+  /// snapshots, normalized events, and session summaries for this host. Draft
+  /// text is intentionally retained so a deliberate re-pair can be followed
+  /// by the user resubmitting their pending work. The public connection is
+  /// closed, the connection epoch is advanced, and the phase is forced to
+  /// [ConnectionPhase.unpaired] regardless of the previous state.
+  Future<void> forgetHost() async {
+    final String? previousHostId = hostId;
+    ++_connectionEpoch;
+    _cancelReconnect();
+    await _closeSocket();
+    _ackTimer?.cancel();
+    _ackTimer = null;
+    _leaseTimer?.cancel();
+    _leaseTimer = null;
+    if (previousHostId != null) {
+      await _database.resetHostCaches(previousHostId);
+      await _database.deleteHost(previousHostId);
+    }
+    endpoint = null;
+    readiness = null;
+    connectionId = null;
+    hostId = null;
+    hostGeneration = null;
+    hostDisplayName = null;
+    bridgeVersion = null;
+    piVersion = null;
+    selectedWorkspaceId = null;
+    selectedSessionId = null;
+    leaseId = null;
+    pendingCommandId = null;
+    pendingPayload = null;
+    pendingState = null;
+    errorMessage = null;
+    _streams.clear();
+    _sessions.clear();
+    _workspaces.clear();
+    _workspaceSearch = WorkspaceSearchState.idle();
+    _workspaceSearchEpoch += 1;
+    _workspaceTrustRequiredFor = null;
+    _rawEvents.clear();
+    _toolOutputNotices.clear();
+    _forceSnapshot.clear();
+    _syncPending.clear();
+    phase = ConnectionPhase.unpaired;
+    _notify();
+  }
+
   Future<void> selectWorkspace(String workspaceId) async {
     selectedWorkspaceId = workspaceId;
+    _workspaceTrustRequiredFor = _needsApproval(_workspaces, workspaceId)
+        ? workspaceId
+        : null;
     _notify();
   }
 
@@ -296,6 +407,138 @@ final class ConnectionCoordinator extends ChangeNotifier
       },
       requiresLease: false,
     );
+  }
+
+  /// Issues a bounded-depth directory-name search against the host. The result
+  /// is cancellable: any in-flight request becomes a no-op the moment a newer
+  /// search starts or [cancelWorkspaceSearch] is called.
+  Future<void> searchWorkspaces(String query) async {
+    final trimmed = query.trim();
+    final epoch = ++_workspaceSearchEpoch;
+    if (trimmed.isEmpty) {
+      _workspaceSearch = WorkspaceSearchState.idle();
+      _notify();
+      return;
+    }
+    _workspaceSearch = _workspaceSearch.copyWith(
+      query: trimmed,
+      phase: WorkspaceSearchPhase.searching,
+      hits: const <WorkspaceSearchHit>[],
+      clearError: true,
+    );
+    _notify();
+    if (!isReady) {
+      _workspaceSearch = _workspaceSearch.copyWith(
+        phase: WorkspaceSearchPhase.error,
+        error: 'Offline. Reconnect to search workspaces.',
+      );
+      _notify();
+      return;
+    }
+    try {
+      await _sendControl('workspace.search', <String, Object?>{
+        'query': trimmed,
+      });
+    } on Object catch (error) {
+      if (epoch != _workspaceSearchEpoch) return;
+      _workspaceSearch = _workspaceSearch.copyWith(
+        phase: WorkspaceSearchPhase.error,
+        error: error.toString(),
+      );
+      _notify();
+    }
+  }
+
+  /// Cancels any pending workspace search. Safe to call multiple times.
+  void cancelWorkspaceSearch() {
+    _workspaceSearchEpoch += 1;
+    if (_workspaceSearch.phase == WorkspaceSearchPhase.searching) {
+      _workspaceSearch = _workspaceSearch.copyWith(
+        phase: WorkspaceSearchPhase.cancelled,
+      );
+      _notify();
+    }
+  }
+
+  /// Sends `workspace.trust.approve` for the given workspace. The host will
+  /// return a `workspace.trust_state` event after the new fingerprint is
+  /// recorded, which then flips the entry to approved.
+  Future<void> approveWorkspaceTrust(String workspaceId) async {
+    final entry = _workspaces.firstWhere(
+      (w) => w.workspaceId == workspaceId,
+      orElse: () => _missingWorkspace,
+    );
+    if (entry == _missingWorkspace) return;
+    if (!isReady) {
+      errorMessage = 'Cannot approve trust while offline.';
+      _notify();
+      return;
+    }
+    await _sendCommand(
+      type: 'workspace.trust.approve',
+      commandId: _id(),
+      payload: <String, Object?>{
+        'workspaceId': workspaceId,
+        'fingerprint': entry.fingerprint,
+      },
+      requiresLease: false,
+    );
+  }
+
+  /// Sends `session.policy.set` to demote the active session to Read-only.
+  /// Read-only is a product guardrail enforced through Pi tool hooks. It is
+  /// not an OS sandbox and never claims to be one in the UI.
+  Future<void> setSessionPolicy(SessionPolicyMode mode) async {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return;
+    if (!isReady) {
+      errorMessage = 'Cannot change policy while offline.';
+      _notify();
+      return;
+    }
+    await _sendCommand(
+      type: 'session.policy.set',
+      commandId: _id(),
+      payload: <String, Object?>{
+        'sessionId': sessionId,
+        'policyMode': sessionPolicyModeWire(mode),
+      },
+      requiresLease: true,
+    );
+  }
+
+  /// Test-only helper: seeds the workspace list from a synthetic server
+  /// payload without going through the wire. The production code path uses
+  /// [_workspaceList] (driven by `workspace.list.result`).
+  @visibleForTesting
+  void debugSeedWorkspaces(List<Map<String, Object?>> items) {
+    _workspaces
+      ..clear()
+      ..addAll(
+        items.whereType<Map>().map(
+          (raw) => _decodeWorkspaceEntry(Map<String, Object?>.from(raw)),
+        ),
+      );
+    if (_workspaces.isNotEmpty &&
+        !_workspaces.any((item) => item.workspaceId == selectedWorkspaceId)) {
+      selectedWorkspaceId = _workspaces.first.workspaceId;
+    }
+    _workspaceTrustRequiredFor =
+        _needsApproval(_workspaces, selectedWorkspaceId)
+        ? selectedWorkspaceId
+        : null;
+    _notify();
+  }
+
+  /// Test-only helper: selects a workspace id and recomputes the
+  /// trust-required flag without driving a UI tap.
+  @visibleForTesting
+  void debugSelectWorkspace(String workspaceId) {
+    selectedWorkspaceId = workspaceId;
+    _workspaceTrustRequiredFor = _needsApproval(_workspaces, workspaceId)
+        ? workspaceId
+        : null;
+    _notify();
   }
 
   Future<void> selectSession(String sessionId) async {
@@ -451,6 +694,10 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _syncComplete(payload);
       case 'workspace.list.result':
         _workspaceList(payload);
+      case 'workspace.search.result':
+        _workspaceSearchResult(_workspaceSearchEpoch, payload);
+      case 'workspace.trust_state':
+        await _workspaceTrustStateEvent(payload);
       case 'command.current.result':
         await _commandCurrent(payload);
       case 'command.receipt':
@@ -748,6 +995,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     } else if (type == 'session.removed') {
       final id = payload['sessionId'];
       if (id is String) _sessions.remove(id);
+    } else if (type == 'workspace.trust_state') {
+      unawaited(_workspaceTrustStateEvent(payload));
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final runtimeState =
           type == 'turn.failed' &&
@@ -813,19 +1062,145 @@ final class ConnectionCoordinator extends ChangeNotifier
     _workspaces
       ..clear()
       ..addAll(
-        items.whereType<Map>().map((value) {
-          final item = Map<String, Object?>.from(value);
-          return WorkspaceInfo(
-            workspaceId: item['workspaceId'] as String,
-            displayName: item['displayName'] as String? ?? 'Workspace',
-            policyMode: item['policyMode'] as String? ?? 'full',
-          );
-        }),
+        items.whereType<Map>().map(
+          (raw) => _decodeWorkspaceEntry(Map<String, Object?>.from(raw)),
+        ),
       );
     if (_workspaces.isNotEmpty &&
         !_workspaces.any((item) => item.workspaceId == selectedWorkspaceId)) {
       selectedWorkspaceId = _workspaces.first.workspaceId;
     }
+    _workspaceTrustRequiredFor =
+        _needsApproval(_workspaces, selectedWorkspaceId)
+        ? selectedWorkspaceId
+        : null;
+  }
+
+  void _workspaceSearchResult(int epoch, Map<String, Object?> payload) {
+    if (epoch != _workspaceSearchEpoch) {
+      // A newer search has been issued; drop stale results so the UI never
+      // surfaces an out-of-order hit list.
+      return;
+    }
+    final items = payload['items'];
+    if (items is! List) {
+      _workspaceSearch = _workspaceSearch.copyWith(
+        phase: WorkspaceSearchPhase.error,
+        error: 'Malformed workspace search result',
+      );
+      _notify();
+      return;
+    }
+    final hits = items
+        .whereType<Map>()
+        .map((raw) {
+          final item = Map<String, Object?>.from(raw);
+          return WorkspaceSearchHit(
+            workspaceId: item['workspaceId'] as String,
+            displayName: item['displayName'] as String? ?? 'Workspace',
+            relativePath: item['relativePath'] as String? ?? '/',
+            rootLabel: item['rootLabel'] as String? ?? '',
+            availability: _parseAvailability(item['availability'] as String?),
+            trustState: _parseTrustState(item['trustState'] as String?),
+            fingerprint: item['fingerprint'] as String? ?? '',
+            policyVersion: item['policyVersion'] as String? ?? '',
+          );
+        })
+        .toList(growable: false);
+    _workspaceSearch = _workspaceSearch.copyWith(
+      phase: WorkspaceSearchPhase.results,
+      hits: hits,
+      clearError: true,
+    );
+    _notify();
+  }
+
+  Future<void> _workspaceTrustStateEvent(Map<String, Object?> payload) async {
+    final id = payload['workspaceId'] as String?;
+    final state = _parseTrustState(payload['trustState'] as String?);
+    final fingerprint = payload['fingerprint'] as String?;
+    final policyVersion = payload['policyVersion'] as String?;
+    if (id == null) return;
+    final updated = <WorkspaceEntry>[];
+    for (final w in _workspaces) {
+      if (w.workspaceId != id) {
+        updated.add(w);
+        continue;
+      }
+      updated.add(
+        WorkspaceEntry(
+          workspaceId: w.workspaceId,
+          displayName: w.displayName,
+          rootLabel: w.rootLabel,
+          relativePath: w.relativePath,
+          repositoryMarker: w.repositoryMarker,
+          lastUsedAt: w.lastUsedAt,
+          availability: w.availability,
+          trustState: state,
+          fingerprint: fingerprint ?? w.fingerprint,
+          policyVersion: policyVersion ?? w.policyVersion,
+          manifest: w.manifest,
+        ),
+      );
+    }
+    _workspaces
+      ..clear()
+      ..addAll(updated);
+    _workspaceTrustRequiredFor = _needsApproval(_workspaces, id) ? id : null;
+    _notify();
+  }
+
+  WorkspaceEntry _decodeWorkspaceEntry(Map<String, Object?> item) {
+    final manifestRaw = item['manifest'];
+    final manifest = manifestRaw is List
+        ? manifestRaw
+              .whereType<Map>()
+              .map((entry) {
+                final asMap = Map<String, Object?>.from(entry);
+                return WorkspaceResource(
+                  relativePath: asMap['relativePath'] as String? ?? '',
+                  kind: asMap['kind'] as String? ?? 'file',
+                  sizeBytes: asMap['sizeBytes'] as int?,
+                );
+              })
+              .toList(growable: false)
+        : const <WorkspaceResource>[];
+    return WorkspaceEntry(
+      workspaceId: item['workspaceId'] as String,
+      displayName: item['displayName'] as String? ?? 'Workspace',
+      rootLabel: item['rootLabel'] as String? ?? '',
+      relativePath: item['relativePath'] as String? ?? '/',
+      repositoryMarker: item['repositoryMarker'] as String?,
+      lastUsedAt: DateTime.tryParse(item['lastUsedAt'] as String? ?? ''),
+      availability: _parseAvailability(item['availability'] as String?),
+      trustState: _parseTrustState(item['trustState'] as String?),
+      fingerprint: item['fingerprint'] as String? ?? '',
+      policyVersion: item['policyVersion'] as String? ?? '',
+      manifest: manifest,
+    );
+  }
+
+  WorkspaceAvailability _parseAvailability(String? value) =>
+      value == 'available'
+      ? WorkspaceAvailability.available
+      : WorkspaceAvailability.unavailable;
+
+  WorkspaceTrustState _parseTrustState(String? value) => switch (value) {
+    'approved' => WorkspaceTrustState.approved,
+    'unapproved' => WorkspaceTrustState.unapproved,
+    'fingerprint_changed' => WorkspaceTrustState.fingerprintChanged,
+    _ => WorkspaceTrustState.unknown,
+  };
+
+  bool _needsApproval(List<WorkspaceEntry> entries, String? workspaceId) {
+    if (workspaceId == null) return false;
+    for (final w in entries) {
+      if (w.workspaceId == workspaceId) {
+        return w.availability != WorkspaceAvailability.available ||
+            w.trustState != WorkspaceTrustState.approved;
+      }
+    }
+    return true;
   }
 
   Future<void> _commandReceipt(
@@ -884,6 +1259,9 @@ final class ConnectionCoordinator extends ChangeNotifier
         'sessionId': selectedSessionId,
         'runtimeState': code,
       });
+    }
+    if (code == 'workspace_trust_required' || code == 'workspace_not_allowed') {
+      _workspaceTrustRequiredFor = selectedWorkspaceId;
     }
     if (code == 'stale_controller' || code == 'controller_required') {
       leaseId = null;

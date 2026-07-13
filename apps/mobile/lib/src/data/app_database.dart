@@ -190,6 +190,13 @@ class AppDatabase extends _$AppDatabase {
     });
   }
 
+  /// Deletes the host row itself. Use this for explicit forget-host actions;
+  /// the cached host records must be cleared first via [resetHostCaches] so
+  /// the transaction is consistent.
+  Future<void> deleteHost(String hostId) async {
+    await (delete(hostEntries)..where((row) => row.hostId.equals(hostId))).go();
+  }
+
   /// Quarantines commands accepted under an old host generation while keeping
   /// the user's draft text available for deliberate resubmission.
   Future<void> quarantinePendingCommands(String hostId) async {

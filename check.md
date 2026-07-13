@@ -16,7 +16,7 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M0–M6 done; M7 activation ready
+status: M0–M8 done; M9 activation ready
 shape: monorepo with executable protocol, durable bridge, real Pi adapter, and Flutter one-session diagnostic client
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
@@ -31,9 +31,9 @@ protocol: 1.0, host/session streams, decimal-string cursors
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M7 — macOS install, Serve, pairing, and doctor
-objective: install, privately expose, pair, diagnose, update, and uninstall the supervised bridge
-next_checkpoint: M8 — Workspaces, trust, and read-only policy
+checkpoint: M9 — Production transcript, tools, and composer
+objective: build a scalable accessible transcript, first-class tool rendering, and reliable composer
+next_checkpoint: M10 — Models, context, retry, compaction, and commands
 blockers: none requiring a product decision
 ```
 
@@ -44,7 +44,7 @@ M0 evidence retained:
 - sanitized real-Pi session/resource fixture inventory,
 - Flutter/Bun x64 artifact evidence.
 
-M1 shipped the scaffold (`M1-SUMMARY.md`). M2 shipped executable cross-language protocol contracts (`M2-SUMMARY.md`). M3 shipped the exact-Pi adapter (`M3-SUMMARY.md`). M4 shipped durable SQLite commands/events/leases and replay (`M4-SUMMARY.md`). M5 shipped the one-session diagnostic client (`M5-SUMMARY.md`). M6 shipped supervised failure recovery and its deterministic fault matrix (`M6-SUMMARY.md`, `M6-FAULT-MATRIX.md`). Full native release toolchain pinning remains deferred to M7.
+M1 shipped the scaffold (`M1-SUMMARY.md`). M2 shipped executable cross-language protocol contracts (`M2-SUMMARY.md`). M3 shipped the exact-Pi adapter (`M3-SUMMARY.md`). M4 shipped durable SQLite commands/events/leases and replay (`M4-SUMMARY.md`). M5 shipped the one-session diagnostic client (`M5-SUMMARY.md`). M6 shipped supervised failure recovery (`M6-SUMMARY.md`). M7 shipped the portable installed host lifecycle (`M7-SUMMARY.md`). M8 shipped canonical workspace trust and host-enforced Read-only policy (`M8-SUMMARY.md`).
 
 ## read first
 
@@ -244,11 +244,11 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 ## known issues / intentionally incomplete
 
 - M5 intentionally delivers diagnostic raw-event UI; polished transcript/tool presentation remains deferred to M9.
-- Exact Xcode/iOS SDK and Android SDK/AGP/Gradle/JDK pin is deferred to the M7 release-build checkpoint.
+- Native mobile release signing/toolchain hardening remains scheduled for M16; M7 pins and verifies the x64 host release.
 - No real Xcode/Android release build in CI yet; M1 validates the iOS/Android deployment floors and runs `flutter analyze` plus the Dart fixture parity test.
 - Linux/Windows/Termux/public store/multi-user/sandbox/Obsidian are post-MVP.
 - `PLANNING.md` contains obsolete research statements and must not be treated as normative.
 
 ## next action
 
-Activate M7: produce the installable signed-target daemon, owner-only service/config, private Tailscale Serve pairing, doctor/report, and update/rollback/uninstall flows. Do not begin workspace trust or polished product surfaces before M7 exits.
+Activate M9: implement the production transcript, built-in and unknown tool rendering, long-session performance, durable composer behavior, and accessibility gates. Do not begin multi-session control or attachments before M9 exits.

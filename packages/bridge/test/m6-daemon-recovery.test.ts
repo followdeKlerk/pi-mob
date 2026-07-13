@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BridgeStore, type StoredCommand } from "../src/core/store";
-import { runDaemon } from "../src/daemon";
+import { runDaemon, type DaemonHandle } from "../src/daemon";
 
 const sessionId = "11111111-1111-4111-8111-111111111111";
 function seed(stateDir: string, runtimeState: string): void {
@@ -16,6 +16,14 @@ function seed(stateDir: string, runtimeState: string): void {
 }
 function command(type: string): StoredCommand {
   return { commandId: crypto.randomUUID(), type, scopeKey: `session:${sessionId}`, streamId: `session:${sessionId}`, semanticHash: type, payload: { sessionId }, state: "accepted", dispatchCount: 0 };
+}
+function approveWorkspace(daemon: DaemonHandle): void {
+  const connection = { connectionId: "connection", installationId: "installation", subscriptions: new Set<string>() };
+  const trust = daemon.runtime.control(connection, "workspace.trust_state", {}) as Record<string, unknown>;
+  daemon.runtime.command(connection, {
+    type: "workspace.trust.approve", commandId: crypto.randomUUID(),
+    payload: { workspaceId: trust.workspaceId, fingerprint: trust.fingerprint },
+  });
 }
 function daemonOptions(root: string, stateDir: string) {
   const sessions = join(root, "sessions"); mkdirSync(sessions, { recursive: true });
@@ -41,6 +49,7 @@ describe("M6 daemon reboot recovery", () => {
       const promptId = crypto.randomUUID();
       expect(() => daemon.runtime.command(connection, { type: "prompt.submit", commandId: promptId, leaseId: crypto.randomUUID(), payload: { sessionId, deliveryMode: "immediate", message: "never replay", attachmentIds: [] } })).toThrow("indeterminate session requires explicit activation");
       expect(daemon.store.command(promptId)).toBeNull();
+      approveWorkspace(daemon);
       await daemon.adapter.dispatch(command("session.activate"));
       expect(daemon.store.sessionState(sessionId)?.runtimeState).toBe("idle");
     } finally { await daemon.close(); }
@@ -67,6 +76,7 @@ describe("M6 daemon reboot recovery", () => {
     try {
       expect(daemon.rpc.state()).toBe("crash_loop");
       expect(daemon.store.sessionState(sessionId)?.runtimeState).toBe("crash_loop");
+      approveWorkspace(daemon);
       await daemon.adapter.dispatch(command("session.activate"));
       expect(daemon.rpc.state()).toBe("idle");
       expect(daemon.store.sessionState(sessionId)?.runtimeState).toBe("idle");

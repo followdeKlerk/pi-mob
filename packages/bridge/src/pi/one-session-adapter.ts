@@ -30,6 +30,22 @@ import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
+import type { HostPolicyMode } from "../core/workspace-policy";
+
+/**
+ * Bridge for the M8 runtime-owned policy module. The adapter never
+ * mutates policy itself — it just sets the per-session default and
+ * reports back the host policy snapshot that the runtime may have
+ * written alongside the session. Tests pass `null` to opt out.
+ */
+export interface OneSessionPolicyBridge {
+  /** Returns the host-wide policy mode the adapter should default new sessions to. */
+  hostMode(): HostPolicyMode;
+  /** Returns the mode the most recent prompt-start snapshot wrote into a session. */
+  snapshotModeFor(sessionId: string): { policyMode: HostPolicyMode; policyVersion: string; fingerprint: string; snapshottedAt: string } | null;
+  /** Publishes policy for the next turn to the bridge-owned extension file. */
+  publish?(snapshot?: { policyMode: HostPolicyMode; policyVersion: string; fingerprint: string; snapshottedAt: string }): void;
+}
 
 // ---------------- RPC client contract ----------------
 
@@ -102,6 +118,13 @@ export interface OneSessionAdapterOptions {
   readonly now?: () => number;
   /** UUID generator; defaults to `crypto.randomUUID`. */
   readonly newSessionId?: () => string;
+  /**
+   * M8 — optional bridge into the host policy module so the adapter can
+   * honour the host-wide mode when seeding a new session. When `null` the
+   * adapter falls back to the configured `workspace.policyMode` for
+   * backwards-compat.
+   */
+  readonly policyBridge?: OneSessionPolicyBridge | null;
 }
 
 // ---------------- Adapter ----------------
@@ -122,6 +145,7 @@ export class OneSessionPiAdapter {
   private readonly hostStream: string;
   private readonly sessionById = new Map<string, string>();
   private readonly toolOutputLimiter = new ToolOutputLimiter();
+  private readonly policyBridge: OneSessionPolicyBridge | null;
   private activeSessionId: string | null = null;
   private detach: () => void;
 
@@ -131,6 +155,7 @@ export class OneSessionPiAdapter {
     this.workspace = options.workspace;
     this.now = options.now ?? Date.now;
     this.newSessionId = options.newSessionId ?? (() => crypto.randomUUID().toLowerCase());
+    this.policyBridge = options.policyBridge ?? null;
     const identity = this.store.identity();
     this.hostStream = `host:${identity.hostId}`;
     const existing = this.store.sessionStates()[0];
@@ -178,6 +203,9 @@ export class OneSessionPiAdapter {
         return this.handleTurnAbort(command);
       case "session.activate":
         return this.handleManualRetry(command);
+      case "session.policy.set":
+        this.policyBridge?.publish?.();
+        return;
       default:
         // Session-scoped metadata commands (rename, policy.set, ...) are
         // local-only at this checkpoint; no Pi RPC call is required.
@@ -207,7 +235,11 @@ export class OneSessionPiAdapter {
     const workspaceId = typeof payload.workspaceId === "string" && payload.workspaceId.length > 0
       ? payload.workspaceId
       : this.workspace.workspaceId;
-    const policyMode = payload.policyMode ?? this.workspace.policyMode;
+    // M8: prefer the host-wide policy mode when a policy bridge is
+    // installed. The bridge owner is responsible for already gating this
+    // command — the adapter just snapshots the right default.
+    const baseMode: WorkspacePolicyMode = payload.policyMode
+      ?? (this.policyBridge ? this.policyBridge.hostMode() : this.workspace.policyMode);
     const existing = this.store.sessionStates()[0];
     if (existing && typeof existing.sessionId === "string") {
       // M5 is deliberately one-session. A repeated create command re-opens
@@ -224,7 +256,7 @@ export class OneSessionPiAdapter {
       workspaceId,
       displayName: this.workspace.displayName,
       name: typeof payload.name === "string" ? payload.name : null,
-      policyMode,
+      policyMode: baseMode,
       runtimeState: "idle",
       attentionState: "ready",
       queueCount: 0,
@@ -244,7 +276,7 @@ export class OneSessionPiAdapter {
       attentionState: "ready",
       queueCount: 0,
       modelSummary: null,
-      policyMode,
+      policyMode: baseMode,
       name: summary.name,
       createdAt,
     });
@@ -252,7 +284,7 @@ export class OneSessionPiAdapter {
       sessionId,
       workspaceId,
       name: summary.name,
-      policyMode,
+      policyMode: baseMode,
       runtimeState: "idle",
       attentionState: "ready",
       createdAt,
@@ -269,6 +301,9 @@ export class OneSessionPiAdapter {
     if (typeof payload.message !== "string" || payload.message.length === 0) throw new Error("prompt.submit requires message");
     if (!this.store.sessionExists(payload.sessionId)) throw new Error("prompt.submit session not found");
     this.activeSessionId = payload.sessionId;
+    const policySnapshot = this.policyBridge?.snapshotModeFor(payload.sessionId);
+    if (this.policyBridge && !policySnapshot) throw new Error("prompt.submit requires a durable policy snapshot");
+    this.policyBridge?.publish?.(policySnapshot ?? undefined);
     this.rpc.markDispatchStart?.();
     const method: "prompt" | "steer" | "follow_up" =
       payload.deliveryMode === "steer" ? "steer" :

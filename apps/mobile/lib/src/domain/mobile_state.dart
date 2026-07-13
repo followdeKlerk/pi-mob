@@ -162,6 +162,144 @@ String sessionStateLabel(String state) => switch (state) {
   _ => state.replaceAll('_', ' '),
 };
 
+/// Coarse availability surfaced by the host. Unavailable workspaces remain
+/// visible so the user can see why selection failed, but they are not
+/// selectable.
+enum WorkspaceAvailability { available, unavailable }
+
+/// Trust posture for a workspace. Mirrors the host's `workspace.trust_state`
+/// event family. The mobile UI must never allow mutation while trust is not
+/// approved and must re-prompt the user when the fingerprint changes.
+enum WorkspaceTrustState { unknown, unapproved, approved, fingerprintChanged }
+
+/// Stable identifier for the active per-session policy. Both Full and
+/// Read-only are product guardrails enforced through Pi tool hooks; they are
+/// not OS-level sandboxes and the UI must never claim otherwise.
+enum SessionPolicyMode { full, readOnly }
+
+String sessionPolicyModeWire(SessionPolicyMode mode) => switch (mode) {
+  SessionPolicyMode.full => 'full',
+  SessionPolicyMode.readOnly => 'read_only',
+};
+
+String sessionPolicyModeLabel(SessionPolicyMode mode) => switch (mode) {
+  SessionPolicyMode.full => 'Full',
+  SessionPolicyMode.readOnly => 'Read-only',
+};
+
+/// Resource manifest line item reported by the host. This is display-only and
+/// is never used as a path on the mobile device.
+final class WorkspaceResource {
+  const WorkspaceResource({
+    required this.relativePath,
+    required this.kind,
+    this.sizeBytes,
+  });
+
+  final String relativePath;
+  final String kind;
+  final int? sizeBytes;
+}
+
+/// Server-reported workspace entry. Only results returned from the host are
+/// ever selectable. Mobile never invents root IDs or relative paths, which is
+/// why "outside the root" selections are structurally impossible.
+final class WorkspaceEntry {
+  const WorkspaceEntry({
+    required this.workspaceId,
+    required this.displayName,
+    required this.rootLabel,
+    required this.relativePath,
+    required this.repositoryMarker,
+    required this.lastUsedAt,
+    required this.availability,
+    required this.trustState,
+    required this.fingerprint,
+    required this.policyVersion,
+    required this.manifest,
+  });
+
+  final String workspaceId;
+  final String displayName;
+  final String rootLabel;
+  final String relativePath;
+  final String? repositoryMarker;
+  final DateTime? lastUsedAt;
+  final WorkspaceAvailability availability;
+  final WorkspaceTrustState trustState;
+  final String fingerprint;
+  final String policyVersion;
+  final List<WorkspaceResource> manifest;
+
+  bool get isSelectable =>
+      availability == WorkspaceAvailability.available &&
+      trustState == WorkspaceTrustState.approved;
+}
+
+/// One cancellable workspace-search result row. Mobile never lets a user
+/// select a workspace from outside the server-reported set.
+final class WorkspaceSearchHit {
+  const WorkspaceSearchHit({
+    required this.workspaceId,
+    required this.displayName,
+    required this.relativePath,
+    required this.rootLabel,
+    required this.availability,
+    required this.trustState,
+    required this.fingerprint,
+    required this.policyVersion,
+  });
+
+  final String workspaceId;
+  final String displayName;
+  final String relativePath;
+  final String rootLabel;
+  final WorkspaceAvailability availability;
+  final WorkspaceTrustState trustState;
+  final String fingerprint;
+  final String policyVersion;
+}
+
+/// Snapshot of the workspace search subsystem. Holds the in-flight request
+/// handle so the UI can cancel before the host responds.
+final class WorkspaceSearchState {
+  WorkspaceSearchState({
+    required this.query,
+    required this.phase,
+    required this.hits,
+    required this.error,
+  });
+
+  factory WorkspaceSearchState.idle() => WorkspaceSearchState(
+    query: '',
+    phase: WorkspaceSearchPhase.idle,
+    hits: const <WorkspaceSearchHit>[],
+    error: null,
+  );
+
+  final String query;
+  final WorkspaceSearchPhase phase;
+  final List<WorkspaceSearchHit> hits;
+  final String? error;
+
+  bool get isActive => phase == WorkspaceSearchPhase.searching;
+
+  WorkspaceSearchState copyWith({
+    String? query,
+    WorkspaceSearchPhase? phase,
+    List<WorkspaceSearchHit>? hits,
+    String? error,
+    bool clearError = false,
+  }) => WorkspaceSearchState(
+    query: query ?? this.query,
+    phase: phase ?? this.phase,
+    hits: hits ?? this.hits,
+    error: clearError ? null : (error ?? this.error),
+  );
+}
+
+enum WorkspaceSearchPhase { idle, searching, results, error, cancelled }
+
 final class MobileState {
   MobileState({
     required Iterable<HostState> hosts,

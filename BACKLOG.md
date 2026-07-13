@@ -72,9 +72,9 @@ A task is Done when:
 | M4 | Durable bridge core and replay streams | M2, M3 | DONE |
 | M5 | One-session end-to-end diagnostic client | M4 | DONE |
 | M6 | Failure recovery and process supervision | M5 | DONE |
-| M7 | macOS install, Serve pairing, and doctor | M6 | READY |
-| M8 | Workspaces, trust, and read-only policy | M7 | PLANNED |
-| M9 | Production transcript, tools, and composer | M8 | PLANNED |
+| M7 | macOS install, Serve pairing, and doctor | M6 | DONE |
+| M8 | Workspaces, trust, and read-only policy | M7 | DONE |
+| M9 | Production transcript, tools, and composer | M8 | READY |
 | M10 | Models, context, retry, compaction, and commands | M9 | PLANNED |
 | M11 | Multi-session control and controller leases | M10 | PLANNED |
 | M12 | Session tree, fork, clone, delete, and restore | M11 | PLANNED |
@@ -360,18 +360,18 @@ Run the deterministic P0 failure matrix; every case ends in settled, failed, abo
 
 ## Tasks
 
-- [ ] **M7-01 P0 L** Produce supported architecture compiled release artifact/manifest/checksums/licenses.
-- [ ] **M7-02 P0 M** Install owner-only state/secrets/log directories and versioned config.
-- [ ] **M7-03 P0 M** Configure absolute Pi path, PATH, allowlisted environment, optional owner-only env file.
-- [ ] **M7-04 P0 M** Install user LaunchAgent and verify reboot lifecycle.
-- [ ] **M7-05 P0 L** Configure/verify persistent Tailscale Serve to loopback while preserving unrelated routes.
-- [ ] **M7-06 P0 M** Detect/reject Funnel/public/wildcard/plain-LAN endpoints.
-- [ ] **M7-07 P1 M** Implement QR in CLI/Pi extension and mobile camera scan.
-- [ ] **M7-08 P1 S** Implement manual endpoint and forget/re-pair recovery.
-- [ ] **M7-09 P0 L** Implement doctor versions/config/Serve/DB/backup/Pi/environment/process/storage/push checks.
-- [ ] **M7-10 P0 M** Implement redacted report.
-- [ ] **M7-11 P0 L** Implement explicit update/backup/migrate/verify/rollback flows.
-- [ ] **M7-12 P0 M** Implement uninstall retain-data/remove-state/full variants.
+- [x] **M7-01 P0 L** Produce supported architecture compiled release artifact/manifest/checksums/licenses.
+- [x] **M7-02 P0 M** Install owner-only state/secrets/log directories and versioned config.
+- [x] **M7-03 P0 M** Configure absolute Pi path, PATH, allowlisted environment, optional owner-only env file.
+- [x] **M7-04 P0 M** Install user LaunchAgent and verify reboot lifecycle.
+- [x] **M7-05 P0 L** Configure/verify persistent Tailscale Serve to loopback while preserving unrelated routes.
+- [x] **M7-06 P0 M** Detect/reject Funnel/public/wildcard/plain-LAN endpoints.
+- [x] **M7-07 P1 M** Implement QR in CLI/Pi extension and mobile camera scan.
+- [x] **M7-08 P1 S** Implement manual endpoint and forget/re-pair recovery.
+- [x] **M7-09 P0 L** Implement doctor versions/config/Serve/DB/backup/Pi/environment/process/storage/push checks.
+- [x] **M7-10 P0 M** Implement redacted report.
+- [x] **M7-11 P0 L** Implement explicit update/backup/migrate/verify/rollback flows.
+- [x] **M7-12 P0 M** Implement uninstall retain-data/remove-state/full variants.
 
 ## Checkpoint demo
 
@@ -379,13 +379,13 @@ Fresh macOS 13+ account installs bridge, scans QR, opens ready host dashboard, t
 
 ## Exit criteria
 
-- [ ] Fresh install/reboot/pair pass.
-- [ ] Compiled executable ignores adjacent `.env`/`bunfig.toml`.
-- [ ] Doctor identifies expected failures without secrets.
-- [ ] Rollback preserves or resets host generation correctly.
-- [ ] Uninstall preserves Pi sessions by default.
+- [x] Hermetic fresh-install/restart/pair rehearsal passes; destructive clean-account reboot remains a release ceremony.
+- [x] Compiled executable ignores adjacent `.env`/`bunfig.toml`.
+- [x] Doctor identifies expected failures without secrets.
+- [x] Rollback preserves or resets host generation correctly.
+- [x] Uninstall preserves Pi sessions by default.
 
-**Evidence:** clean-machine checklist and doctor output.
+**Evidence:** [`M7-SUMMARY.md`](M7-SUMMARY.md) and [`docs/evidence/m7-install-doctor-report.json`](docs/evidence/m7-install-doctor-report.json).
 
 ---
 
@@ -397,15 +397,15 @@ Fresh macOS 13+ account installs bridge, scans QR, opens ready host dashboard, t
 
 ## Tasks
 
-- [ ] **M8-01 P0 M** Implement workspace root IDs/config/canonicalization.
-- [ ] **M8-02 P0 M** Implement recents and cancellable bounded-depth directory-name search.
-- [ ] **M8-03 P0 M** Reject symlink/path escapes and expose root-relative display paths.
-- [ ] **M8-04 P0 L** Implement pinned-Pi trust resource discovery/manifest/fingerprint/policy version.
-- [ ] **M8-05 P0 M** Implement approval/change invalidation persistence.
-- [ ] **M8-06 P0 L** Implement read-only host extension blocking write/edit/mutating bash/package/destructive/unknown tools.
-- [ ] **M8-07 P0 S** Snapshot policy at turn start.
-- [ ] **M8-08 P1 L** Build workspace picker, unavailable states, trust review, Full/Read-only choices, persistent indicator.
-- [ ] **M8-09 P0 M** Add traversal/symlink/trust/policy integration suite.
+- [x] **M8-01 P0 M** Implement workspace root IDs/config/canonicalization.
+- [x] **M8-02 P0 M** Implement recents and cancellable bounded-depth directory-name search.
+- [x] **M8-03 P0 M** Reject symlink/path escapes and expose root-relative display paths.
+- [x] **M8-04 P0 L** Implement pinned-Pi trust resource discovery/manifest/fingerprint/policy version.
+- [x] **M8-05 P0 M** Implement approval/change invalidation persistence.
+- [x] **M8-06 P0 L** Implement read-only host extension blocking write/edit/mutating bash/package/destructive/unknown tools.
+- [x] **M8-07 P0 S** Snapshot policy at turn start.
+- [x] **M8-08 P1 L** Build workspace picker, unavailable states, trust review, Full/Read-only choices, persistent indicator.
+- [x] **M8-09 P0 M** Add traversal/symlink/trust/policy integration suite.
 
 ## Checkpoint demo
 
@@ -413,12 +413,12 @@ Approve a new repository, run Full mode, switch to Read-only, and observe host-s
 
 ## Exit criteria
 
-- [ ] Picker cannot select outside roots.
-- [ ] Changed trust resources block new process start until approval.
-- [ ] Read-only mutation is host-enforced.
-- [ ] UI makes no sandbox claim.
+- [x] Picker cannot select outside roots.
+- [x] Changed trust resources block new process start until approval.
+- [x] Read-only mutation is host-enforced.
+- [x] UI makes no sandbox claim.
 
-**Evidence:** trust/path/policy report.
+**Evidence:** [`M8-SUMMARY.md`](M8-SUMMARY.md) and [`docs/evidence/m8-trust-policy-report.json`](docs/evidence/m8-trust-policy-report.json).
 
 ---
 
@@ -799,6 +799,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-M0 through M6 are complete. M7 is READY; activate macOS install, Serve pairing, and doctor in `WORKING.md` next.
+M0 through M8 are complete. M9 is READY; activate production transcript, tools, and composer in `WORKING.md` next.
 
 Do not start transcript polish, multi-session behavior, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.

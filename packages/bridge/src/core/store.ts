@@ -12,11 +12,44 @@ export interface StoredEvent { readonly eventId: string; readonly streamId: stri
 export interface StoredCommand { readonly commandId: string; readonly type: string; readonly scopeKey: string; readonly streamId: string; readonly semanticHash: string; readonly payload: Record<string, unknown>; readonly state: string; readonly dispatchCount: number; }
 export type AcceptCommandResult = { readonly kind: "accepted" | "duplicate"; readonly command: StoredCommand; readonly event?: StoredEvent } | { readonly kind: "conflict" };
 export interface LeaseRecord { readonly scopeKey: string; readonly leaseId: string; readonly installationId: string; readonly connectionId: string; readonly expiresAt: number; readonly reclaimableUntil: number | null; readonly disconnectedAt: number | null; readonly revokedAt: number | null; }
+
+// M8: durable trust + host policy state records. Kept as plain structural
+// types so the bridge runtime can read them with zero extra dependencies.
+
+/** A single durable workspace approval record. */
+export interface StoredWorkspaceTrust {
+  readonly workspaceId: string;
+  readonly rootPath: string;
+  readonly label: string;
+  /** SHA-256 hex of the canonical manifest. Hex-empty when the record was seeded without fingerprint (M8 compat). */
+  readonly fingerprint: string;
+  readonly policyVersion: string;
+  readonly approvedAt: number;
+  readonly approvedBy: string;
+  /** Wall-clock when this record was seeded by the M8 upgrade. `undefined` for explicit approvals. */
+  readonly seededAt?: number;
+  readonly updatedAt: number;
+}
+
+/** Durable host policy state. Exactly one row. */
+export interface StoredHostPolicyState {
+  readonly mode: "full" | "read_only";
+  readonly policyVersion: string;
+  readonly fingerprint: string;
+  readonly source: "config" | "client" | "seed";
+  readonly updatedAt: number;
+  readonly updatedBy?: string;
+}
 export type LeaseMutation =
   | { readonly action: "acquire" | "takeover"; readonly scopeKey: string; readonly installationId: string; readonly connectionId: string; readonly now?: number }
   | { readonly action: "release"; readonly scopeKey: string; readonly installationId: string; readonly connectionId: string; readonly now?: number };
 
-const MIGRATION = `
+/**
+ * Two-step migration. v1 = original M6 durable schema. v2 adds the M8
+ * workspace trust + host policy state tables. Upgrading from a pre-M8
+ * store applies v2 additively (the v1 tables are unchanged).
+ */
+const MIGRATION_V1 = `
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS bridge_identity(singleton INTEGER PRIMARY KEY CHECK(singleton=1), host_id TEXT NOT NULL, host_generation TEXT NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS sessions(session_id TEXT PRIMARY KEY, state_json TEXT NOT NULL DEFAULT '{}', created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL);
@@ -30,7 +63,13 @@ CREATE TABLE IF NOT EXISTS controller_leases(lease_id TEXT PRIMARY KEY, scope_ke
 CREATE UNIQUE INDEX IF NOT EXISTS controller_leases_one_active_scope ON controller_leases(scope_key) WHERE revoked_at IS NULL;
 CREATE TABLE IF NOT EXISTS backups(backup_id TEXT PRIMARY KEY, path TEXT NOT NULL, sha256 TEXT NOT NULL, bytes INTEGER NOT NULL, created_at INTEGER NOT NULL, verified_at INTEGER);
 `;
-const MIGRATION_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION).digest("hex");
+const MIGRATION_V1_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1).digest("hex");
+/** v2 additions (M8). Tables are additive — does not touch any v1 table. */
+const MIGRATION_V2 = `
+CREATE TABLE IF NOT EXISTS workspace_trust(workspace_id TEXT PRIMARY KEY, root_path TEXT NOT NULL, label TEXT NOT NULL, fingerprint TEXT, policy_version TEXT NOT NULL DEFAULT 'pi-trust/1', approved_at INTEGER NOT NULL, approved_by TEXT NOT NULL, seeded_at INTEGER, updated_at INTEGER NOT NULL);
+CREATE TABLE IF NOT EXISTS policy_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1), mode TEXT NOT NULL CHECK(mode IN ('full','read_only')), policy_version TEXT NOT NULL, fingerprint TEXT NOT NULL, source TEXT NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT);
+`;
+const MIGRATION_V2_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2).digest("hex");
 
 function canonicalCursor(value: string): bigint {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) throw new StoreError("conflict", "cursor is not canonical");
@@ -64,12 +103,20 @@ export class BridgeStore {
 
   private migrate(db: Database): void {
     db.exec("CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL)");
-    const existing = db.query("SELECT checksum FROM schema_migrations WHERE version=1").get() as { checksum: string } | null;
-    if (existing && existing.checksum !== MIGRATION_CHECKSUM) throw new StoreError("corrupt", "migration checksum mismatch");
-    if (!existing) {
+    const existingV1 = db.query("SELECT checksum FROM schema_migrations WHERE version=1").get() as { checksum: string } | null;
+    if (existingV1 && existingV1.checksum !== MIGRATION_V1_CHECKSUM) throw new StoreError("corrupt", "migration checksum mismatch (v1)");
+    if (!existingV1) {
       this.transactionOn(db, () => {
-        db.exec(MIGRATION);
-        db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(1,?,?)").run(MIGRATION_CHECKSUM, this.now());
+        db.exec(MIGRATION_V1);
+        db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(1,?,?)").run(MIGRATION_V1_CHECKSUM, this.now());
+      });
+    }
+    const existingV2 = db.query("SELECT checksum FROM schema_migrations WHERE version=2").get() as { checksum: string } | null;
+    if (existingV2 && existingV2.checksum !== MIGRATION_V2_CHECKSUM) throw new StoreError("corrupt", "migration checksum mismatch (v2)");
+    if (!existingV2) {
+      this.transactionOn(db, () => {
+        db.exec(MIGRATION_V2);
+        db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(2,?,?)").run(MIGRATION_V2_CHECKSUM, this.now());
       });
     }
   }
@@ -261,6 +308,69 @@ export class BridgeStore {
     });
   }
 
+  // ---------------------------------------------------------------------
+  // M8 — durable workspace trust + host policy state persistence.
+  // ---------------------------------------------------------------------
+
+  /**
+   * Returns the persisted trust record for the workspace, or `null` when
+   * the workspace has never been approved. The record is keyed by
+   * `workspace_id` (the root ID), not by absolute path, so a workspace
+   * moved on disk flips back to `approval_required` until re-approved.
+   */
+  loadWorkspaceTrust(workspaceId: string): StoredWorkspaceTrust | null {
+    const row = this.db.query(`SELECT workspace_id workspaceId,root_path rootPath,label,fingerprint,policy_version policyVersion,approved_at approvedAt,approved_by approvedBy,seeded_at seededAt,updated_at updatedAt FROM workspace_trust WHERE workspace_id=?`).get(workspaceId) as (Omit<StoredWorkspaceTrust, "seededAt"> & { seededAt: number | null }) | null;
+    if (!row) return null;
+    const { seededAt, ...rest } = row;
+    return seededAt === null ? rest : { ...rest, seededAt };
+  }
+
+  /**
+   * Persists (creates or replaces) the trust record for a workspace.
+   * The fingerprint is captured at call time — callers must have already
+   * canonicalized the workspace and computed the fingerprint so this
+   * method is purely a write-side primitive.
+   */
+  saveWorkspaceTrust(record: StoredWorkspaceTrust): void {
+    this.transaction(() => {
+      this.db.query(`INSERT INTO workspace_trust(workspace_id,root_path,label,fingerprint,policy_version,approved_at,approved_by,seeded_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)
+        ON CONFLICT(workspace_id) DO UPDATE SET root_path=excluded.root_path,label=excluded.label,fingerprint=excluded.fingerprint,policy_version=excluded.policy_version,approved_at=excluded.approved_at,approved_by=excluded.approved_by,updated_at=excluded.updated_at`).run(
+        record.workspaceId, record.rootPath, record.label, record.fingerprint, record.policyVersion, record.approvedAt, record.approvedBy, record.seededAt ?? null, record.updatedAt,
+      );
+    });
+  }
+
+  /** Lists every persisted trust record (used by diagnostics + tests). */
+  listWorkspaceTrust(): readonly StoredWorkspaceTrust[] {
+    return (this.db.query(`SELECT workspace_id workspaceId,root_path rootPath,label,fingerprint,policy_version policyVersion,approved_at approvedAt,approved_by approvedBy,seeded_at seededAt,updated_at updatedAt FROM workspace_trust ORDER BY workspace_id`).all() as Array<Omit<StoredWorkspaceTrust, "seededAt"> & { seededAt: number | null }>).map((row) => {
+      const { seededAt, ...rest } = row;
+      return seededAt === null ? rest : { ...rest, seededAt };
+    });
+  }
+
+  /** Clears the trust record for a workspace. Idempotent. */
+  clearWorkspaceTrust(workspaceId: string): void {
+    this.transaction(() => this.db.query("DELETE FROM workspace_trust WHERE workspace_id=?").run(workspaceId));
+  }
+
+  /** Returns the persisted host policy state, or `null` if never set. */
+  loadHostPolicyState(): StoredHostPolicyState | null {
+    const row = this.db.query(`SELECT mode,policy_version policyVersion,fingerprint,source,updated_at updatedAt,updated_by updatedBy FROM policy_state WHERE singleton=1`).get() as (Omit<StoredHostPolicyState, "updatedBy"> & { updatedBy: string | null }) | null;
+    if (!row) return null;
+    const { updatedBy, ...rest } = row;
+    return updatedBy === null ? rest : { ...rest, updatedBy };
+  }
+
+  /** Persists (creates or replaces) the host policy state. */
+  saveHostPolicyState(state: StoredHostPolicyState): void {
+    this.transaction(() => {
+      this.db.query(`INSERT INTO policy_state(singleton,mode,policy_version,fingerprint,source,updated_at,updated_by) VALUES(1,?,?,?,?,?,?)
+        ON CONFLICT(singleton) DO UPDATE SET mode=excluded.mode,policy_version=excluded.policy_version,fingerprint=excluded.fingerprint,source=excluded.source,updated_at=excluded.updated_at,updated_by=excluded.updated_by`).run(
+        state.mode, state.policyVersion, state.fingerprint, state.source, state.updatedAt, state.updatedBy ?? null,
+      );
+    });
+  }
+
   integrityCheck(): boolean { const row = this.db.query("PRAGMA integrity_check").get() as Record<string, unknown> | null; return !!row && Object.values(row).includes("ok"); }
   health(): { ready: boolean; reason?: string } {
     if (!this.writable || this.maintenance) return { ready: false, reason: this.maintenance ? "maintenance" : this.lastFailure ?? "not_writable" };
@@ -300,12 +410,17 @@ export class BridgeStore {
       if (this.path !== ":memory:") copyFileSync(this.path, `${this.path}.pre-restore`);
       rmSync(`${this.path}-wal`, { force: true }); rmSync(`${this.path}-shm`, { force: true });
       renameSync(temp, this.path); this.writable = true; this.lastFailure = null; this.db = this.open(this.path); this.maintenance = false;
-      const identity = this.identity();
-      return this.transaction(() => {
-        const generation = (canonicalCursor(identity.hostGeneration) + 1n).toString();
-        this.db.query("UPDATE bridge_identity SET host_generation=?,updated_at=? WHERE singleton=1").run(generation, this.now()); return { hostId: identity.hostId, hostGeneration: generation };
-      });
+      return this.incrementHostGeneration();
     } catch (error) { throw error instanceof StoreError ? error : this.mapError(error); }
     finally { this.maintenance = false; }
+  }
+
+  incrementHostGeneration(): { hostId: string; hostGeneration: string } {
+    const identity = this.identity();
+    return this.transaction(() => {
+      const generation = (canonicalCursor(identity.hostGeneration) + 1n).toString();
+      this.db.query("UPDATE bridge_identity SET host_generation=?,updated_at=? WHERE singleton=1").run(generation, this.now());
+      return { hostId: identity.hostId, hostGeneration: generation };
+    });
   }
 }

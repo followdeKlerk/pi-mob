@@ -10,6 +10,7 @@
     "test": "bun test"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6",
     "@pi-mob/typescript-config": "workspace:*"
   }
 }

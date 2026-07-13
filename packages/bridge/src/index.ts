@@ -40,3 +40,5 @@ export * from "./core/domain";
 export * from "./core/runtime";
 export * from "./core/process-supervisor";
 export * from "./core/server";
+export * from "./core/workspace-policy";
+export * from "./ops";

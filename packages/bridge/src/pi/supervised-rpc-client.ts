@@ -11,6 +11,8 @@ export interface SupervisedRpcClientOptions {
   readonly initialState?: "stopped" | "crash_loop" | "incompatible";
   readonly capacity?: number;
   readonly emit?: (event: ProcessLifecycleEvent) => void;
+  /** Synchronous final admission check invoked immediately before Bun.spawn. */
+  readonly beforeSpawn?: () => void;
 }
 
 /** Restartable Pi RPC proxy used by the daemon. The adapter keeps one stable
@@ -36,6 +38,7 @@ export class SupervisedRpcClient {
         new RpcProcess(options.rpc),
         (rpc) => { this.current = rpc; this.bind(rpc); },
         () => this.unexpectedExit(),
+        options.beforeSpawn,
       ),
       ...(options.emit ? { emit: options.emit } : {}),
     });
@@ -132,9 +135,11 @@ class RpcManagedProcess implements ManagedProcess {
     private readonly rpc: RpcProcess,
     private readonly becameCurrent: (rpc: RpcProcess) => void,
     private readonly exitedUnexpectedly: () => void,
+    private readonly beforeSpawn?: () => void,
   ) {}
   get pid(): number | undefined { return this.rpc.pid; }
   async start(_spec: ProcessSpawnSpec): Promise<void> {
+    this.beforeSpawn?.();
     this.becameCurrent(this.rpc);
     this.rpc.on("exit", () => { if (!this.expected) this.exitedUnexpectedly(); });
     await this.rpc.start();
