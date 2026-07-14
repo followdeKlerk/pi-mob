@@ -1,7 +1,12 @@
 {
   "milestone": "M15",
-  "status": "partial-physical-proof",
-  "capturedAt": "2026-07-14T16:56:00Z",
+  "status": "complete-android-proof",
+  "platformScope": {
+    "included": ["Android", "FCM HTTP v1"],
+    "deferred": ["Apple APNs", "iOS Live Activities"],
+    "reason": "Product owner explicitly deferred Apple-product testing on 2026-07-14."
+  },
+  "capturedAt": "2026-07-14T17:51:00Z",
   "device": {
     "model": "SM_A528B",
     "adbSerial": "R5CR81WLP0Z",
@@ -12,7 +17,8 @@
     "hostId": "75ae07e3-d142-402e-92df-7e256e731c04",
     "hostGeneration": "1",
     "healthStatus": 200,
-    "ready": true
+    "ready": true,
+    "fcmProvider": "configured-from-owner-only-local-service-account"
   },
   "checks": [
     {
@@ -31,9 +37,34 @@
       "evidence": "On-device SQLite retained host ID 75ae07e3-d142-402e-92df-7e256e731c04, the explicit :8443 endpoint, display name, and generation 1."
     },
     {
+      "name": "firebase-client-initialization",
+      "result": "pass",
+      "evidence": "FirebaseInitProvider reported successful default-app initialization for com.example.pi_mob and a real FCM token was cached without logging its value."
+    },
+    {
+      "name": "durable-fcm-device-registration",
+      "result": "pass",
+      "evidence": "Bridge SQLite retained one active fcm installation at token revision 1 with no rejection reason."
+    },
+    {
       "name": "notification-permission",
       "result": "pass",
       "evidence": "Android permission controller granted POST_NOTIFICATIONS after explicit user interaction; package runtime permission reports granted=true."
+    },
+    {
+      "name": "real-fcm-http-v1-background-delivery",
+      "result": "pass",
+      "evidence": "With Pi Mob backgrounded, the production FcmAdapter exchanged the service-account assertion, FCM reported delivered=1 with zero transient/permanent failures, and Android posted generic copy: Pi needs your attention."
+    },
+    {
+      "name": "status-only-payload-privacy",
+      "result": "pass",
+      "evidence": "The real notification exposed only generic status copy and opaque identifiers; deterministic payload tests reject transcript, prompt, path, tool, output, and content fields."
+    },
+    {
+      "name": "stale-deep-link-reconciliation",
+      "result": "pass",
+      "evidence": "Tapping a real FCM notification opened Pi Mob; its deliberately nonexistent opaque session target was not selected, zero session rows remained, and the authoritative foreground state returned ready without exception."
     },
     {
       "name": "foreground-status-service",
@@ -51,13 +82,19 @@
       "evidence": "Relaunch restored ready state and retained the same durable host ID, endpoint, and generation."
     },
     {
+      "name": "push-failure-isolation",
+      "result": "pass",
+      "evidence": "Deterministic provider-failure tests prove transient and permanent FCM failures do not throw into or block Pi processing; permanent rejection cleanup removes dead registrations."
+    },
+    {
       "name": "narrow-device-layout",
       "result": "pass",
       "evidence": "Physical-device overflow was reproduced, fixed with a scrollable workspace/session region and wrapping controls, regression-tested at 360x755 logical pixels, and revalidated without overflow markers."
     }
   ],
-  "remainingExternalProof": [
-    "Real FCM delivery requires Firebase Android configuration and host-side FCM service-account credentials.",
-    "Real APNs and Live Activity lifecycle proof requires Apple signing, APNs credentials, full Xcode selection, and a physical iPhone."
-  ]
+  "credentialHandling": {
+    "googleServicesJson": "local ignored file under apps/mobile/android/app",
+    "serviceAccount": "local owner-only file outside repository",
+    "secretValuesRecorded": false
+  }
 }

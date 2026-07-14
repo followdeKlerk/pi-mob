@@ -80,8 +80,8 @@ A task is Done when:
 | M12 | Session tree, fork, clone, delete, and restore | M11 | DONE |
 | M13 | Attachments, export, and OS sharing | M12 | DONE |
 | M14 | Extension UI and durable follow-up queue | M13 | DONE |
-| M15 | Notifications and background experience | M14 | READY |
-| M16 | Accessibility, performance, privacy, and operations hardening | M15 | PLANNED |
+| M15 | Notifications and background experience | M14 | DONE |
+| M16 | Accessibility, performance, privacy, and operations hardening | M15 | READY |
 | M17 | Signed personal MVP release candidate | M16 | PLANNED |
 
 ---
@@ -633,28 +633,28 @@ Queue/remove prompts and answer dialogs after reconnect; let one expire without 
 
 ## Tasks
 
-- [ ] **M15-01 P1 M** Device installation/token register/replace/unregister and permanent rejection cleanup.
-- [ ] **M15-02 P1 M** Host APNs token authentication adapter.
-- [ ] **M15-03 P1 M** Host FCM HTTP v1 adapter.
-- [ ] **M15-04 P0 M** Settled/failed/indeterminate/attention/crash-loop status policy.
-- [ ] **M15-05 P0 S** Status-only/default-generic payload allowlist.
-- [ ] **M15-06 P1 M** Coalescing/rate limiting/stale deep-link reconciliation.
-- [ ] **M15-07 P1 L** iOS permission, APNs, Live Activity start/update/end/stale cleanup.
-- [ ] **M15-08 P1 L** Android permission/channel, FCM, user-enabled foreground service started while visible.
-- [ ] **M15-09 P0 S** No mutating notification actions.
-- [ ] **M15-10 P0 M** Prove push/network failure never blocks Pi and foreground reconciliation works.
+- [x] **M15-01 P1 M** Device installation/token register/replace/unregister and permanent rejection cleanup.
+- [x] **M15-02 P1 M** Host APNs token authentication adapter (deterministic coverage retained; Apple activation deferred).
+- [x] **M15-03 P1 M** Host FCM HTTP v1 adapter.
+- [x] **M15-04 P0 M** Settled/failed/indeterminate/attention/crash-loop status policy.
+- [x] **M15-05 P0 S** Status-only/default-generic payload allowlist.
+- [x] **M15-06 P1 M** Coalescing/rate limiting/stale deep-link reconciliation.
+- [~] **M15-07 P1 L DEFERRED** iOS permission, APNs, Live Activity start/update/end/stale cleanup. Apple-product testing was explicitly removed from the foreseeable product scope on 2026-07-14.
+- [x] **M15-08 P1 L** Android permission/channel, FCM, user-enabled foreground service started while visible.
+- [x] **M15-09 P0 S** No mutating notification actions.
+- [x] **M15-10 P0 M** Prove push/network failure never blocks Pi and foreground reconciliation works.
 
 ## Checkpoint demo
 
-Lock/background real iOS and Android devices during turns/dialogs, receive status, open into reconciled state, and exercise Live Activity/foreground service.
+Background a real Android device, receive a real FCM status, open into reconciled state, and exercise the user-enabled foreground service. Apple APNs/Live Activity activation remains deferred.
 
 ## Exit criteria
 
-- [ ] Real APNs/FCM device tests pass.
-- [ ] No transcript/path/tool content appears by default.
-- [ ] Stale notification never appears as current truth.
-- [ ] No guaranteed socket/push claim.
-- [ ] Agent use survives push degradation.
+- [x] Real Android FCM device test passes; Apple APNs device testing is deferred by product scope.
+- [x] No transcript/path/tool content appears by default.
+- [x] Stale notification never appears as current truth.
+- [x] No guaranteed socket/push claim.
+- [x] Agent use survives push degradation.
 
 **Evidence:** real-device lifecycle matrix.
 

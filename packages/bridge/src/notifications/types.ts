@@ -141,6 +141,8 @@ export interface NotificationServiceOptions {
   readonly store: BridgeStore;
   readonly apns: NotificationTransport;
   readonly fcm: NotificationTransport;
+  /** Providers configured for this host. Defaults to both transports. */
+  readonly supportedPlatforms?: readonly NotificationPlatform[];
   readonly config?: NotificationConfig;
   /** Optional event source; defaults to a no-op source. */
   readonly source?: NotificationEventSource;

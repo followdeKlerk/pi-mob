@@ -4,6 +4,8 @@ gradle-wrapper.jar
 /gradlew
 /gradlew.bat
 /local.properties
+# Per-project Firebase client configuration; provision locally from Firebase.
+**/google-services.json
 GeneratedPluginRegistrant.java
 .cxx/
 

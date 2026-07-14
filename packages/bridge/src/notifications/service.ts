@@ -49,6 +49,7 @@ export class BridgeNotificationService implements NotificationService {
   private readonly store: BridgeStore;
   private readonly apns: NotificationServiceOptions["apns"];
   private readonly fcm: NotificationServiceOptions["fcm"];
+  private readonly supportedPlatforms: ReadonlySet<StoredDeviceInstall["platform"]>;
   private readonly coalescer: Coalescer;
   private readonly now: () => number;
   private readonly uuid: () => string;
@@ -70,6 +71,7 @@ export class BridgeNotificationService implements NotificationService {
     this.store = options.store;
     this.apns = options.apns;
     this.fcm = options.fcm;
+    this.supportedPlatforms = new Set(options.supportedPlatforms ?? ["apns", "fcm"]);
     this.coalescer = new Coalescer(options.config);
     this.now = options.now ?? Date.now;
     this.uuid = options.uuid ?? (() => crypto.randomUUID().toLowerCase());
@@ -85,6 +87,7 @@ export class BridgeNotificationService implements NotificationService {
   isSuspended(): boolean { return this.suspended || this.source.notificationsSuppressed(); }
 
   registerDevice(input: RegisterDeviceInput): StoredDeviceInstall {
+    if(!this.supportedPlatforms.has(input.platform)) throw new Error("notification provider is not configured");
     if(!/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(input.installationId)) throw new Error("invalid installation id");
     if(input.deviceId && !/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(input.deviceId)) throw new Error("invalid device id");
     if(input.pushToken.length<1||input.pushToken.length>4096||/[\u0000-\u001f]/.test(input.pushToken)) throw new Error("invalid push token");
@@ -100,6 +103,8 @@ export class BridgeNotificationService implements NotificationService {
   }
 
   replaceToken(input: ReplaceTokenInput): StoredDeviceInstall {
+    const existing = this.store.findDeviceInstallById(input.deviceId);
+    if(existing && !this.supportedPlatforms.has(existing.platform)) throw new Error("notification provider is not configured");
     const updated = this.store.replaceDeviceToken(input);
     if (!updated) throw new Error(`device_not_found:${input.deviceId}`);
     return updated;
@@ -119,7 +124,9 @@ export class BridgeNotificationService implements NotificationService {
   }
 
   listDevices(): readonly StoredDeviceInstall[] {
-    return this.store.listActiveDeviceInstalls();
+    return this.store.listActiveDeviceInstalls().filter((device) =>
+      this.supportedPlatforms.has(device.platform),
+    );
   }
 
   rejectionReason(deviceId: string): { readonly reason: string; readonly rejectedAt: number } | null {
@@ -179,6 +186,7 @@ export class BridgeNotificationService implements NotificationService {
     }
 
     for (const device of this.store.listActiveDeviceInstalls()) {
+      if (!this.supportedPlatforms.has(device.platform)) continue;
       const previous = this.coalescer.snapshot(device.deviceId, input.sessionId);
       const decision = this.coalescer.decide({ deviceId: device.deviceId, sessionId: input.sessionId, kind, notificationId, now, previous });
       if (!decision.emit) {

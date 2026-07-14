@@ -12,16 +12,18 @@
  *     --port 8788 \
  *     --state-dir /absolute/state
  *
- *   --workspace <abs path>   workspace root (also becomes Pi's cwd)
- *   --executable <abs path>  Pi RPC binary
- *   --port <int>             loopback port to bind (default 8788)
- *   --state-dir <abs path>   durable SQLite directory (default /tmp/pi-mob-state)
- *   --session-dir <abs path> Pi session directory (default $TMPDIR/pi-mob-sessions)
- *   --display-name <str>     human-readable workspace name (defaults to basename)
- *   --help                   print usage
+ *   --workspace <abs path>            workspace root (also becomes Pi's cwd)
+ *   --executable <abs path>           Pi RPC binary
+ *   --port <int>                      loopback port to bind (default 8788)
+ *   --state-dir <abs path>            durable SQLite directory (default /tmp/pi-mob-state)
+ *   --session-dir <abs path>          Pi session directory (default $TMPDIR/pi-mob-sessions)
+ *   --display-name <str>              human-readable workspace name (defaults to basename)
+ *   --fcm-service-account <abs path>  absolute path to a Google service-account JSON file;
+ *                                     enables FCM push and starts a BridgeNotificationService
+ *   --help                            print usage
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { isAbsolute, basename, join, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
@@ -33,6 +35,13 @@ import { AttachmentStore } from "./core/attachments";
 import { createBinaryHttpHandler } from "./core/binary-http";
 import { ExportRegistry } from "./pi/export-registry";
 import type { NotificationService } from "./notifications";
+import { BridgeNotificationService } from "./notifications/service";
+import { FcmAdapter, type FcmConfig } from "./notifications/transports/fcm";
+import type {
+  NotificationPlatform,
+  NotificationTransport,
+  TransportResult,
+} from "./notifications/types";
 import { createRedactingLogger, type RedactingLogger } from "./logger";
 import { parseInstallConfig } from "./ops/install-config";
 import {
@@ -73,6 +82,72 @@ export interface DaemonOptions {
   readonly extensionPath?: string;
   /** M15 configured host-side APNs/FCM service. Omit to advertise push unavailable. */
   readonly notificationService?: NotificationService;
+  /** M15 — FCM provider configuration. When present, runDaemon constructs a
+   *  BridgeNotificationService using {@link FcmAdapter} (FCM) and an
+   *  unavailable APNs transport. Mutually independent from `notificationService`. */
+  readonly fcm?: FcmConfig;
+}
+
+/** Result of validating a Google service-account JSON file for FCM. */
+export interface LoadedFcmServiceAccount {
+  readonly projectId: string;
+  readonly serviceAccountEmail: string;
+  /** PEM-encoded RSA private key. Held only in memory; never logged. */
+  readonly privateKey: string;
+}
+
+/**
+ * Validate an already-parsed Google service-account JSON object for FCM use.
+ * Errors never echo the private key; they only identify the missing or
+ * malformed field so logs and CLI failures stay safe.
+ */
+export function parseFcmServiceAccountJson(raw: unknown): LoadedFcmServiceAccount {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("fcm service account must be a JSON object");
+  const obj = raw as Record<string, unknown>;
+  if (obj.type !== "service_account") throw new Error("fcm service account type must be 'service_account'");
+  if (typeof obj.project_id !== "string" || obj.project_id.trim().length === 0) throw new Error("fcm service account must include a non-empty project_id");
+  if (typeof obj.client_email !== "string" || obj.client_email.trim().length === 0) throw new Error("fcm service account must include a non-empty client_email");
+  if (typeof obj.private_key !== "string") throw new Error("fcm service account must include a private_key string");
+  const key = obj.private_key;
+  if (!key.includes("BEGIN PRIVATE KEY") || !key.includes("END PRIVATE KEY")) {
+    throw new Error("fcm service account private_key must be a PEM-encoded RSA PRIVATE KEY");
+  }
+  if (key.length > 16_384) throw new Error("fcm service account private_key is implausibly large");
+  return { projectId: obj.project_id.trim(), serviceAccountEmail: obj.client_email.trim(), privateKey: key };
+}
+
+/**
+ * Load and validate a Google service-account JSON file from disk.
+ * The path must be absolute; the file must exist and parse as a service account.
+ * Error messages identify which step failed without including secret text.
+ */
+export function loadFcmServiceAccount(path: string): LoadedFcmServiceAccount {
+  if (!isAbsolute(path)) throw new Error("--fcm-service-account path must be absolute");
+  if (!existsSync(path)) throw new Error("--fcm-service-account file not found");
+  const metadata = statSync(path);
+  if (!metadata.isFile()) throw new Error("--fcm-service-account must be a regular file");
+  if ((metadata.mode & 0o077) !== 0) throw new Error("--fcm-service-account must not be accessible by group or other users");
+  let raw: string;
+  try { raw = readFileSync(path, "utf8"); }
+  catch (error) { throw new Error(`--fcm-service-account could not be read: ${(error as Error).message}`); }
+  let parsed: unknown;
+  try { parsed = JSON.parse(raw); }
+  catch (error) { throw new Error(`--fcm-service-account is not valid JSON: ${(error as Error).message}`); }
+  return parseFcmServiceAccountJson(parsed);
+}
+
+/**
+ * Internal APNs transport used when FCM-only mode is configured. APNs is
+ * explicitly out of scope for the daemon CLI; this transport refuses every
+ * send with a transient failure carrying `apns_not_configured` so the
+ * notification pipeline never silently claims a delivery that did not
+ * happen. Never reports `delivered`.
+ */
+export class UnavailableApnsTransport implements NotificationTransport {
+  readonly platform: NotificationPlatform = "apns";
+  async send(): Promise<TransportResult> {
+    return { kind: "transient_failure", reason: "apns_not_configured" };
+  }
 }
 
 interface DaemonPolicyBootstrap {
@@ -259,9 +334,28 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   }, 15 * 60_000);
   attachmentSweepTimer.unref();
   const exports = new ExportRegistry({ rootDir: join(stateDir, "exports") });
-  const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, ...(options.notificationService ? {notificationService:options.notificationService} : {}) });
-  if(options.notificationService) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:["apns","fcm"],bestEffort:true});
-  const notificationSweepTimer=setInterval(()=>{ try{options.notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
+  // Resolve the host-side notification service exactly once so sweep, close,
+  // and the capability event all see the same instance. The constructed path
+  // is used when the operator passes `--fcm-service-account`; injection is
+  // preserved for tests and downstream callers.
+  let notificationService: NotificationService | null = options.notificationService ?? null;
+  let capabilityProviders: readonly NotificationPlatform[] | null = null;
+  if (!notificationService && options.fcm) {
+    notificationService = new BridgeNotificationService({
+      store,
+      apns: new UnavailableApnsTransport(),
+      fcm: new FcmAdapter(options.fcm),
+      supportedPlatforms: ["fcm"],
+    });
+    capabilityProviders = ["fcm"];
+  } else if (notificationService) {
+    // Backward-compat: an injected service is treated as fully configured
+    // for both platforms. New code should prefer `fcm` configuration.
+    capabilityProviders = ["apns", "fcm"];
+  }
+  const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, ...(notificationService ? {notificationService} : {}) });
+  if(notificationService && capabilityProviders) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:[...capabilityProviders],bestEffort:true});
+  const notificationSweepTimer=setInterval(()=>{ try{notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
   notificationSweepTimer.unref();
   const dialogSweepTimer=setInterval(()=>{ try{adapter.sweepExtensionDialogs();}catch{/* service outlives cleanup failure */} },30_000);
   dialogSweepTimer.unref();
@@ -298,7 +392,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       clearInterval(attachmentSweepTimer);
       clearInterval(dialogSweepTimer);
       clearInterval(notificationSweepTimer);
-      try { options.notificationService?.sweep(); } catch { /* best effort */ }
+      try { notificationService?.sweep(); } catch { /* best effort */ }
       try { attachments.sweep(); } catch { /* best effort */ }
       try { adapter.sweepExtensionDialogs(); } catch { /* best effort */ }
       try { await rpc.drain(); } catch { /* best-effort drain event */ }
@@ -387,11 +481,12 @@ interface CliArgs {
   policyMode: HostPolicyMode | null;
   allowedRoots: string[];
   extensionPath: string | null;
+  fcmServiceAccount: string | null;
   help: boolean;
 }
 
-function parseArgs(argv: readonly string[]): CliArgs {
-  const out: CliArgs = { workspace: null, executable: null, port: null, config: null, stateDir: null, sessionDir: null, displayName: null, policyMode: null, allowedRoots: [], extensionPath: null, help: false };
+export function parseCliArgs(argv: readonly string[]): CliArgs {
+  const out: CliArgs = { workspace: null, executable: null, port: null, config: null, stateDir: null, sessionDir: null, displayName: null, policyMode: null, allowedRoots: [], extensionPath: null, fcmServiceAccount: null, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     switch (arg) {
@@ -403,6 +498,12 @@ function parseArgs(argv: readonly string[]): CliArgs {
       case "--state-dir": out.stateDir = argv[++i] ?? null; break;
       case "--session-dir": out.sessionDir = argv[++i] ?? null; break;
       case "--display-name": out.displayName = argv[++i] ?? null; break;
+      case "--fcm-service-account": {
+        const next = argv[++i] ?? null;
+        if (!next) throw new Error("--fcm-service-account requires a path");
+        out.fcmServiceAccount = next;
+        break;
+      }
       case "--policy-mode": {
         const next = argv[++i] ?? null;
         if (next !== "full" && next !== "read_only") throw new Error("--policy-mode must be `full` or `read_only`");
@@ -421,14 +522,15 @@ function parseArgs(argv: readonly string[]): CliArgs {
   }
   if (out.port !== null && (!Number.isFinite(out.port) || out.port < 0 || out.port > 65535)) throw new Error("--port must be a valid TCP port");
   for (const path of out.allowedRoots) if (!isAbsolute(path)) throw new Error(`--allowed-root paths must be absolute: ${path}`);
+  if (out.fcmServiceAccount !== null && !isAbsolute(out.fcmServiceAccount)) throw new Error("--fcm-service-account path must be absolute");
   return out;
 }
 
-const USAGE = `usage: daemon --workspace <abs path> [--config <abs path> | --executable <abs path>] [--extension <abs path>] [--port N] [--state-dir <abs path>] [--session-dir <abs path>] [--display-name <str>] [--policy-mode full|read_only] [--allowed-root <abs path>]...`;
+const USAGE = `usage: daemon --workspace <abs path> [--config <abs path> | --executable <abs path>] [--extension <abs path>] [--port N] [--state-dir <abs path>] [--session-dir <abs path>] [--display-name <str>] [--policy-mode full|read_only] [--allowed-root <abs path>]... [--fcm-service-account <abs path>]`;
 
 export async function main(argv: readonly string[]): Promise<number> {
   let args: CliArgs;
-  try { args = parseArgs(argv); }
+  try { args = parseCliArgs(argv); }
   catch (error) { process.stderr.write(`${USAGE}\n${(error as Error).message}\n`); return 2; }
   let installed: ReturnType<typeof parseInstallConfig> | null = null;
   try {
@@ -442,6 +544,16 @@ export async function main(argv: readonly string[]): Promise<number> {
     process.stdout.write(`${USAGE}\n`);
     return args.help ? 0 : 2;
   }
+  let fcmConfig: FcmConfig | null = null;
+  if (args.fcmServiceAccount) {
+    try {
+      const loaded = loadFcmServiceAccount(args.fcmServiceAccount);
+      fcmConfig = { projectId: loaded.projectId, serviceAccountEmail: loaded.serviceAccountEmail, privateKey: loaded.privateKey };
+    } catch (error) {
+      process.stderr.write(`${(error as Error).message}\n`);
+      return 2;
+    }
+  }
   const handle = await runDaemon({
     workspace: args.workspace,
     executable,
@@ -452,6 +564,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     ...(args.policyMode ? { policyMode: args.policyMode } : {}),
     ...(args.allowedRoots.length > 0 ? { allowedRoots: args.allowedRoots } : {}),
     ...(args.extensionPath ? { extensionPath: args.extensionPath } : {}),
+    ...(fcmConfig ? { fcm: fcmConfig } : {}),
     ...(process.env.PI_MOB_PAIRING_FILE ? { environment: { PI_MOB_PAIRING_FILE: process.env.PI_MOB_PAIRING_FILE } } : {}),
   });
   process.stdout.write(`${JSON.stringify({

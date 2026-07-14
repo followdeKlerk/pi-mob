@@ -72,6 +72,40 @@ void main() {
     },
   );
   test(
+    'token arriving before bridge readiness is retained and retried',
+    () async {
+      final platform = FakePlatform();
+      var ready = false;
+      final registrations = <String>[];
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (kind, token) async {
+          if (!ready) throw StateError('bridge is not ready');
+          registrations.add('$kind:$token');
+        },
+        reconcile: (_) async => false,
+      );
+      await controller.initialize();
+      platform.tokens.add('early-token');
+      await Future<void>.delayed(Duration.zero);
+      expect(registrations, isEmpty);
+
+      ready = true;
+      await controller.synchronizeToken();
+      expect(registrations, ['fcm:early-token']);
+      await controller.synchronizeToken();
+      expect(registrations, ['fcm:early-token']);
+
+      platform.token = 'early-token';
+      controller.resetHostRegistration();
+      await controller.refreshToken();
+      expect(registrations, ['fcm:early-token', 'fcm:early-token']);
+      controller.dispose();
+    },
+  );
+  test(
     'deep links reconcile authoritative session and stale targets do not apply',
     () async {
       final platform = FakePlatform();

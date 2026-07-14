@@ -1,16 +1,16 @@
 # Working
 
-Status: M0–M14 done; M15 implemented with Android lifecycle proof, external push/iOS proof pending
+Status: M0–M15 done; Android FCM lifecycle proven; Apple activation explicitly deferred
 
 ## Current checkpoint
 
-**M15 — Notifications and background experience**
+**M16 — Accessibility, performance, privacy, and operations hardening (ready, not started)**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
-Finish real FCM delivery and signed iOS APNs/Live Activity lifecycle proof. The privacy-preserving notification stack is implemented, deterministic tests pass, and Android permission, foreground-service, background, and reconciliation behavior is physically proven in [`docs/evidence/m15-android-lifecycle-report.json`](docs/evidence/m15-android-lifecycle-report.json). Completed milestone evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md) through [`M14-SUMMARY.md`](M14-SUMMARY.md).
+Preserve the completed M10–M15 implementation and evidence. M15 now includes production Firebase configuration, durable device registration, real background FCM delivery, foreground-service lifecycle, and authoritative stale deep-link reconciliation on a physical Android device. Apple APNs and Live Activity activation is outside the foreseeable product scope by explicit owner decision.
 
 ## Completed foundation
 
@@ -18,17 +18,18 @@ Finish real FCM delivery and signed iOS APNs/Live Activity lifecycle proof. The 
 - **M10–M12:** Pi controls, multiplexed sessions/controller leases, and durable session lineage/lifecycle.
 - **M13:** bounded private image attachments, opaque HTML export, and explicit native sharing.
 - **M14:** durable bounded follow-up queues, exact Pi extension-response mapping, and reconnect-safe accessible interaction UI.
+- **M15:** status-only APNs/FCM adapters, production Android FCM activation, permission/channel and foreground service, real background delivery, failure isolation, and foreground reconciliation. See [`M15-SUMMARY.md`](M15-SUMMARY.md) and [`docs/evidence/m15-android-lifecycle-report.json`](docs/evidence/m15-android-lifecycle-report.json).
 
 ## Immediate next actions
 
-1. Supply local Firebase Android configuration and host-side FCM service-account credentials, then prove real background/locked delivery and stale deep-link reconciliation.
-2. Select full Xcode, configure Apple signing/APNs credentials, and run the APNs/Live Activity lifecycle matrix on a physical iPhone.
-3. Record final M15 evidence, run the full gate, and only then mark M15 complete.
+1. Keep Firebase client and service-account credentials local and out of version control.
+2. Await explicit direction before starting M16.
+3. If Apple products return to scope later, reactivate the deferred APNs/Live Activity device matrix as separate work.
 
 ## Do not start yet
 
-Until M15 exits: M16 release hardening and later release surfaces.
+M16 and later release-hardening work require explicit owner direction.
 
 ## Blockers
 
-Final M15 proof still requires external Firebase/APNs credentials, Apple signing/full Xcode, and a physical iPhone. Android permission and lifecycle interaction is complete.
+None for the completed Android M15 scope.

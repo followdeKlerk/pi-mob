@@ -277,10 +277,10 @@ Notifications remain MVP but land after reliable core/session work.
 
 - Host always continues active Pi turn after phone disconnect/background.
 - Foreground WebSocket is preferred while app is visible.
-- iOS uses APNs plus Live Activities; no claim of persistent background socket.
+- APNs plus Live Activities remain the designed iOS path, but Apple activation and physical-device testing are deferred until Apple products return to scope; no persistent background socket is claimed.
 - Android foreground service is user-enabled and started while app is visible.
 - FCM is best effort and does not guarantee background service start.
-- Bridge sends directly to APNs/FCM with owner-provided host-side credentials.
+- The current activated bridge sends directly to FCM with an owner-provided host-side credential. The APNs adapter remains deterministic-only until Apple scope is reactivated.
 - Notify only settled, failed, indeterminate, attention-required, and crash-loop states.
 - Default lock-screen payload contains status plus host/session display names only.
 - No mutating notification actions in MVP.

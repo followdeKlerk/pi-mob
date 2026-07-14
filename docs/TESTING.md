@@ -408,7 +408,7 @@ Run representative real devices where behaviour requires hardware/platform servi
 - backup exclusion,
 - TalkBack/font scale/reduce animations.
 
-Simulator/emulator may exercise UI, but real APNs/FCM/lock/network/foreground-service release evidence is required.
+Simulator/emulator may exercise UI, but real-device evidence is required for each activated release platform. The current Android scope requires real FCM/lock/network/foreground-service evidence. Apple APNs/Live Activity device evidence is deferred until Apple products return to the activated product scope.
 
 ## 13. Accessibility gates
 
@@ -559,9 +559,10 @@ Critical cumulative gates:
 
 ### M15 background
 
-- real APNs/FCM/Live Activity/Android foreground behaviour,
+- real Android FCM and foreground-service behaviour,
 - status-only payload,
-- stale reconciliation.
+- stale reconciliation,
+- deterministic APNs adapter coverage; real Apple APNs/Live Activity activation deferred by product scope.
 
 ### M17 personal MVP
 

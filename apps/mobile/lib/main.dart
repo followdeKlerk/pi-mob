@@ -94,6 +94,10 @@ class _HomeRouterState extends State<_HomeRouter> {
 
   void _onCoordinatorChanged() {
     if (!mounted) return;
+    final notifications = widget.notifications;
+    if (widget.coordinator.isReady && notifications != null) {
+      unawaited(notifications.synchronizeToken());
+    }
     final nextPaired = widget.coordinator.hostId != null;
     if (nextPaired != _paired) {
       setState(() {
@@ -114,6 +118,7 @@ class _HomeRouterState extends State<_HomeRouter> {
     // validated the payload and confirmed the user; persistence happens
     // through the coordinator.
     await widget.coordinator.pairAndWait(payload.endpoint.toString());
+    await widget.notifications?.refreshToken();
   }
 
   Future<void> _handleForget() async {
@@ -127,6 +132,7 @@ class _HomeRouterState extends State<_HomeRouter> {
         /* best effort when host is offline */
       }
     }
+    notifications?.resetHostRegistration();
     await widget.coordinator.forgetHost();
   }
 

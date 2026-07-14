@@ -110,13 +110,18 @@ class NotificationController extends ChangeNotifier {
   final String appVersion;
   StreamSubscription<String>? _tokenSub;
   StreamSubscription<Uri>? _tapSub;
+  String? _pendingToken;
+  String? _registeredToken;
+  Future<void>? _tokenSync;
   NotificationPermission permission = NotificationPermission.notDetermined;
   bool enabled = false;
   bool foregroundServiceEnabled = false;
   String? lastReconciledSession;
   Future<void> initialize() async {
     permission = await adapter.permissionStatus();
-    _tokenSub = adapter.tokenChanges.listen((token) => _register(token));
+    _tokenSub = adapter.tokenChanges.listen(
+      (token) => unawaited(_acceptToken(token)),
+    );
     _tapSub = adapter.notificationTaps.listen(
       (uri) => unawaited(handleTap(uri)),
     );
@@ -127,14 +132,61 @@ class NotificationController extends ChangeNotifier {
   Future<void> enableByUserAction() async {
     permission = await adapter.requestPermission();
     enabled = permission == NotificationPermission.authorized;
-    if (enabled) {
-      final token = await adapter.currentToken();
-      if (token != null) await _register(token);
-    }
+    if (enabled) await refreshToken();
     notifyListeners();
   }
 
-  Future<void> _register(String token) => register(adapter.platform, token);
+  /// Reloads the platform token after pairing a different host. A token is
+  /// scoped to the installation, but registration is scoped to each bridge.
+  Future<void> refreshToken() async {
+    final token = await adapter.currentToken();
+    if (token != null) await _acceptToken(token);
+  }
+
+  /// Clears host-scoped registration state without deleting the installation
+  /// token. The next successful pairing calls [refreshToken].
+  void resetHostRegistration() {
+    _registeredToken = null;
+    _pendingToken = null;
+  }
+
+  Future<void> _acceptToken(String token) async {
+    if (token.isEmpty) return;
+    _pendingToken = token;
+    await synchronizeToken();
+  }
+
+  /// Retries a token that arrived before the bridge completed its handshake.
+  /// Registration is best-effort: an unavailable bridge must never surface as
+  /// an unhandled platform-stream error or lose the newest rotated token.
+  Future<void> synchronizeToken() {
+    final active = _tokenSync;
+    if (active != null) return active;
+    final future = _drainPendingToken();
+    _tokenSync = future;
+    return future.whenComplete(() {
+      if (identical(_tokenSync, future)) _tokenSync = null;
+    });
+  }
+
+  Future<void> _drainPendingToken() async {
+    while (true) {
+      final token = _pendingToken;
+      if (token == null) return;
+      if (token == _registeredToken) {
+        if (_pendingToken == token) _pendingToken = null;
+        continue;
+      }
+      try {
+        await register(adapter.platform, token);
+      } catch (_) {
+        return;
+      }
+      _registeredToken = token;
+      if (_pendingToken == token) _pendingToken = null;
+    }
+  }
+
   Future<bool> handleTap(Uri uri) async {
     if (uri.scheme != 'pi-mob' ||
         uri.host != 'session' ||
