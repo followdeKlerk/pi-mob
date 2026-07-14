@@ -13,6 +13,7 @@ import 'src/notifications/notification_controller.dart';
 import 'src/pairing/pairing_payload.dart';
 import 'src/pairing/pairing_screen.dart';
 import 'src/transcript/widgets/transcript_view.dart';
+import 'src/ui/theme/pi_theme.dart';
 import 'src/workspaces/workspace_picker.dart';
 
 Future<void> main() async {
@@ -56,12 +57,11 @@ class PiMobApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-      title: 'pi-mob diagnostic',
+      title: 'Pi Mob',
       debugShowCheckedModeBanner: false,
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
-        useMaterial3: true,
-      ),
+      theme: piLightTheme(),
+      darkTheme: piDarkTheme(),
+      themeMode: ThemeMode.system,
       home: _HomeRouter(coordinator: coordinator, notifications: notifications),
     );
   }
