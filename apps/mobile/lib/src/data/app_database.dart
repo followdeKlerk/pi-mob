@@ -145,6 +145,7 @@ class AppDatabase extends _$AppDatabase {
     },
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');
+      await _ensureM11Schema();
       if (details.wasCreated) {
         await batch((b) {
           b.insert(
@@ -187,6 +188,7 @@ class AppDatabase extends _$AppDatabase {
       await (delete(
         sessionEntries,
       )..where((row) => row.hostId.equals(hostId))).go();
+      await resetM11Caches(hostId);
     });
   }
 
@@ -423,6 +425,208 @@ class AppDatabase extends _$AppDatabase {
   Future<List<HostEntry>> allHosts() => select(hostEntries).get();
   Future<List<SessionEntry>> allSessions() => select(sessionEntries).get();
   Future<List<DraftEntry>> allDrafts() => select(draftEntries).get();
+
+  // ---------------------------------------------------------------------
+  // M11 multi-session support: per-session controller state, attention
+  // badges, and the active subscription set. Implemented as raw SQL so the
+  // generated .g.dart file does not need to be regenerated for the new
+  // tables; the table layout is created lazily in `beforeOpen` below.
+  // ---------------------------------------------------------------------
+
+  static const String kCreateControllerStates = '''
+    CREATE TABLE IF NOT EXISTS controller_states (
+      host_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      mode TEXT NOT NULL,
+      lease_id TEXT,
+      previous_mode TEXT NOT NULL,
+      takeover_pending INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (host_id, session_id)
+    )
+  ''';
+
+  static const String kCreateAttentionStates = '''
+    CREATE TABLE IF NOT EXISTS attention_states (
+      host_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      state TEXT NOT NULL,
+      unread_count INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (host_id, session_id)
+    )
+  ''';
+
+  static const String kCreateSubscriptionSet = '''
+    CREATE TABLE IF NOT EXISTS subscription_set (
+      host_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      stream_id TEXT NOT NULL,
+      detail TEXT NOT NULL,
+      cursor TEXT NOT NULL,
+      position INTEGER NOT NULL,
+      PRIMARY KEY (host_id, session_id)
+    )
+  ''';
+
+  Future<void> _ensureM11Schema() async {
+    await customStatement(kCreateControllerStates);
+    await customStatement(kCreateAttentionStates);
+    await customStatement(kCreateSubscriptionSet);
+  }
+
+  /// Upserts one per-session controller state row.
+  Future<void> upsertControllerState({
+    required String hostId,
+    required String sessionId,
+    required String mode,
+    required String? leaseId,
+    required String previousMode,
+    required bool takeoverPending,
+    required DateTime updatedAt,
+  }) async {
+    await customStatement(
+      'INSERT OR REPLACE INTO controller_states '
+      '(host_id, session_id, mode, lease_id, previous_mode, '
+      'takeover_pending, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)',
+      <Object?>[
+        hostId,
+        sessionId,
+        mode,
+        leaseId,
+        previousMode,
+        takeoverPending ? 1 : 0,
+        updatedAt.toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  Future<List<Map<String, Object?>>> controllerStatesFor(String hostId) async {
+    return customSelect(
+      'SELECT session_id, mode, lease_id, previous_mode, takeover_pending, '
+      'updated_at FROM controller_states WHERE host_id = ?',
+      variables: [Variable.withString(hostId)],
+    ).get().then(
+      (rows) => rows
+          .map(
+            (row) => <String, Object?>{
+              'sessionId': row.read<String>('session_id'),
+              'mode': row.read<String>('mode'),
+              'leaseId': row.readNullable<String>('lease_id'),
+              'previousMode': row.read<String>('previous_mode'),
+              'takeoverPending': row.read<int>('takeover_pending') == 1,
+              'updatedAt': row.read<String>('updated_at'),
+            },
+          )
+          .toList(growable: false),
+    );
+  }
+
+  /// Upserts one attention row. The `state` is the wire value
+  /// (`none`, `unread`, `needs_attention`, `background`).
+  Future<void> upsertAttentionState({
+    required String hostId,
+    required String sessionId,
+    required String state,
+    required int unreadCount,
+    required DateTime updatedAt,
+  }) async {
+    await customStatement(
+      'INSERT OR REPLACE INTO attention_states '
+      '(host_id, session_id, state, unread_count, updated_at) '
+      'VALUES (?, ?, ?, ?, ?)',
+      <Object?>[
+        hostId,
+        sessionId,
+        state,
+        unreadCount,
+        updatedAt.toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  Future<List<Map<String, Object?>>> attentionStatesFor(String hostId) async {
+    return customSelect(
+      'SELECT session_id, state, unread_count, updated_at '
+      'FROM attention_states WHERE host_id = ?',
+      variables: [Variable.withString(hostId)],
+    ).get().then(
+      (rows) => rows
+          .map(
+            (row) => <String, Object?>{
+              'sessionId': row.read<String>('session_id'),
+              'state': row.read<String>('state'),
+              'unreadCount': row.read<int>('unread_count'),
+              'updatedAt': row.read<String>('updated_at'),
+            },
+          )
+          .toList(growable: false),
+    );
+  }
+
+  /// Replaces the entire subscription set for the host atomically.
+  Future<void> replaceSubscriptionSet({
+    required String hostId,
+    required List<Map<String, Object?>> entries,
+  }) async {
+    await transaction(() async {
+      await customStatement(
+        'DELETE FROM subscription_set WHERE host_id = ?',
+        <Object?>[hostId],
+      );
+      for (var i = 0; i < entries.length; i++) {
+        final row = entries[i];
+        await customStatement(
+          'INSERT INTO subscription_set '
+          '(host_id, session_id, stream_id, detail, cursor, position) '
+          'VALUES (?, ?, ?, ?, ?, ?)',
+          <Object?>[
+            hostId,
+            row['sessionId'],
+            row['streamId'],
+            row['detail'],
+            row['cursor'],
+            i,
+          ],
+        );
+      }
+    });
+  }
+
+  Future<List<Map<String, Object?>>> subscriptionSetFor(String hostId) async {
+    return customSelect(
+      'SELECT session_id, stream_id, detail, cursor, position '
+      'FROM subscription_set WHERE host_id = ? ORDER BY position ASC',
+      variables: [Variable.withString(hostId)],
+    ).get().then(
+      (rows) => rows
+          .map(
+            (row) => <String, Object?>{
+              'sessionId': row.read<String>('session_id'),
+              'streamId': row.read<String>('stream_id'),
+              'detail': row.read<String>('detail'),
+              'cursor': row.read<String>('cursor'),
+            },
+          )
+          .toList(growable: false),
+    );
+  }
+
+  /// Drops every M11 row for the host. Called from `resetHostCaches`.
+  Future<void> resetM11Caches(String hostId) async {
+    await customStatement(
+      'DELETE FROM controller_states WHERE host_id = ?',
+      <Object?>[hostId],
+    );
+    await customStatement(
+      'DELETE FROM attention_states WHERE host_id = ?',
+      <Object?>[hostId],
+    );
+    await customStatement(
+      'DELETE FROM subscription_set WHERE host_id = ?',
+      <Object?>[hostId],
+    );
+  }
 }
 
 String _bootstrapInstallationId() => const Uuid().v4().toLowerCase();

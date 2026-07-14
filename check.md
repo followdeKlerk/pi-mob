@@ -3,7 +3,7 @@
 ## meta
 
 ```text
-updated_utc: 2026-07-13
+updated_utc: 2026-07-14
 root: .
 managed_by: regenerate with /check after each scaffold milestone
 vcs: git
@@ -16,8 +16,8 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M0–M9 done; M10 activation ready
-shape: monorepo with executable protocol, durable bridge, real Pi adapter, and Flutter one-session diagnostic client
+status: M0–M11 done; M12 activation ready
+shape: monorepo with executable protocol, durable bridge, multi-session Pi adapter, and Flutter mobile control client
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
 host_floor: macOS 13.0+
@@ -31,9 +31,9 @@ protocol: 1.0, host/session streams, decimal-string cursors
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M10 — Models, context, retry, compaction, and commands
-objective: expose useful configured Pi controls without mobile provider-account management
-next_checkpoint: M11 — Multi-session control and controller leases
+checkpoint: M12 — Session tree, fork, clone, rename, delete, and restore
+objective: add safe durable session lineage and lifecycle operations
+next_checkpoint: M13 — Attachments, export, and native sharing
 blockers: none requiring a product decision
 ```
 
@@ -251,4 +251,4 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## next action
 
-Activate M10: implement configured model/thinking state, advisory context statistics, retry/compaction controls, and supported skill/template/extension-command discovery. Do not begin multi-session control or attachments before M10 exits.
+Activate M12: implement durable tree projection, fork/clone/rename, soft-delete/undo/restore, and permanent-delete safeguards. Do not begin attachments before M12 exits.

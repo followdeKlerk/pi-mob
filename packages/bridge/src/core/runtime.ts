@@ -30,6 +30,18 @@ interface HistoryPageToken {
   readonly pageSize: number;
   readonly beforeCursor: string;
 }
+const SESSION_LIST_TOKEN_KIND = "session.list";
+interface SessionListToken {
+  readonly version: 1;
+  readonly kind: typeof SESSION_LIST_TOKEN_KIND;
+  readonly hostId: string;
+  readonly hostGeneration: string;
+  readonly sort: string;
+  readonly filter: string;
+  readonly query: string;
+  readonly pageSize: number;
+  readonly beforeCursor: string;
+}
 
 function canonicalDecimal(value: unknown): value is string { return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value); }
 
@@ -149,6 +161,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     }
     if (type === "command.current") { const command = this.options.store.command(String(payload.commandId ?? "")); if (!command) throw new RuntimeProtocolError("command_not_found", "command not found"); return { commandId: command.commandId, state: command.state }; }
     if (type === "session.history.page") return this.sessionHistoryPage(payload);
+    if (type === "session.list") return this.sessionList(payload);
     if (type === "model.list") {
       if (typeof this.options.adapter.listModels !== "function") throw new RuntimeProtocolError("unsupported_capability", "adapter does not expose configured models");
       return { items: this.options.adapter.listModels(typeof payload.sessionId === "string" ? payload.sessionId : undefined).items.map((item) => ({ ...item })) };
@@ -181,6 +194,58 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       return { mode: eff.mode, policyVersion: eff.rules.policyVersion, fingerprint: eff.rules.fingerprint };
     }
     return {};
+  }
+
+  private sessionList(payload: Record<string, unknown>): Record<string, unknown> {
+    const pageSize = payload.pageSize;
+    if (!Number.isInteger(pageSize) || (pageSize as number) < 1 || (pageSize as number) > 100) {
+      throw new RuntimeProtocolError("invalid_message", "pageSize must be an integer from 1 through 100");
+    }
+    const sort = typeof payload.sort === "string" ? payload.sort : "activity";
+    const filterRaw = typeof payload.filter === "string" ? payload.filter : "all";
+    const query = typeof payload.query === "string" ? payload.query : "";
+    const identity = this.identity();
+    const rawToken = payload.pageToken;
+    let beforeCursor: string | null = null;
+    if (rawToken !== null && rawToken !== undefined) {
+      if (typeof rawToken !== "string") throw new RuntimeProtocolError("invalid_message", "page token must be a string or null");
+      const decoded = this.decodeSessionListToken(rawToken);
+      if (decoded.sort !== sort) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
+      if (decoded.filter !== filterRaw) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
+      if (decoded.query !== query) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
+      if (decoded.pageSize !== pageSize) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
+      beforeCursor = decoded.beforeCursor;
+    }
+    let page;
+    try {
+      page = this.options.store.listSessionSummaries({
+        filter: filterRaw,
+        query: query || null,
+        sort,
+        pageSize: pageSize as number,
+        beforeCursor,
+      });
+    } catch (error) {
+      if (error instanceof StoreError && error.code === "conflict") throw new RuntimeProtocolError("invalid_message", error.message);
+      throw error;
+    }
+    return {
+      items: page.items.map((item) => ({ ...item })),
+      snapshotRevision: page.snapshotRevision,
+      ...(page.nextBeforeCursor !== undefined
+        ? { nextPageToken: this.encodeSessionListToken({
+          version: 1,
+          kind: SESSION_LIST_TOKEN_KIND,
+          hostId: identity.hostId,
+          hostGeneration: identity.hostGeneration,
+          sort,
+          filter: filterRaw,
+          query,
+          pageSize: pageSize as number,
+          beforeCursor: page.nextBeforeCursor,
+        }) }
+        : {}),
+    };
   }
 
   private sessionHistoryPage(payload: Record<string, unknown>): Record<string, unknown> {
@@ -227,6 +292,33 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     const body = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
     const signature = createHmac("sha256", this.historyTokenSecret).update(body, "utf8").digest("base64url");
     return `${body}.${signature}`;
+  }
+
+  private encodeSessionListToken(value: SessionListToken): string {
+    const body = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+    const signature = createHmac("sha256", this.historyTokenSecret).update(body, "utf8").digest("base64url");
+    return `${body}.${signature}`;
+  }
+
+  private decodeSessionListToken(token: string): SessionListToken {
+    try {
+      if (token.length === 0 || token.length > 4096) throw new Error("invalid token length");
+      const parts = token.split(".");
+      if (parts.length !== 2 || !parts[0] || !parts[1] || !parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part))) throw new Error("invalid token shape");
+      const expected = createHmac("sha256", this.historyTokenSecret).update(parts[0], "utf8").digest();
+      const actual = Buffer.from(parts[1], "base64url");
+      if (actual.toString("base64url") !== parts[1] || actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new Error("invalid token signature");
+      const encodedBody = Buffer.from(parts[0], "base64url");
+      if (encodedBody.toString("base64url") !== parts[0]) throw new Error("invalid token encoding");
+      const parsed = JSON.parse(encodedBody.toString("utf8")) as Partial<SessionListToken>;
+      if (parsed.version !== 1 || parsed.kind !== SESSION_LIST_TOKEN_KIND) throw new Error("token kind mismatch");
+      const identity = this.identity();
+      if (parsed.hostId !== identity.hostId || parsed.hostGeneration !== identity.hostGeneration) throw new Error("page token is not bound to the current host generation");
+      if (typeof parsed.sort !== "string" || typeof parsed.filter !== "string" || typeof parsed.query !== "string" || typeof parsed.pageSize !== "number" || typeof parsed.beforeCursor !== "string" || !canonicalDecimal(parsed.beforeCursor)) throw new Error("page token shape invalid");
+      return parsed as SessionListToken;
+    } catch {
+      throw new RuntimeProtocolError("invalid_message", "page token is invalid or does not match the session list query");
+    }
   }
 
   private decodeHistoryPageToken(token: string, sessionId: string, pageSize: number): HistoryPageToken {

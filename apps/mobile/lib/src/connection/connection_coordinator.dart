@@ -7,8 +7,11 @@ import 'package:uuid/uuid.dart';
 
 import '../../protocol_fixture.dart';
 import '../data/app_database.dart' hide StreamCursor;
+import '../domain/controller_lease.dart';
 import '../domain/mobile_state.dart';
 import '../domain/session_controls.dart';
+import '../domain/session_directory.dart';
+import '../domain/session_subscriptions.dart';
 import '../sync/event_reducer.dart';
 import 'bridge_transport.dart';
 
@@ -114,6 +117,20 @@ final class ConnectionCoordinator extends ChangeNotifier
   WorkspaceSearchState _workspaceSearch = WorkspaceSearchState.idle();
   int _workspaceSearchEpoch = 0;
   String? _workspaceTrustRequiredFor;
+  // M11 multi-session support. The set holds at most one full
+  // subscription and at most five summary subscriptions; each cursor
+  // advances independently so a gap on one background session cannot
+  // stall the foreground session.
+  SessionSubscriptionSet _subscriptionSet = SessionSubscriptionSet.empty();
+  final ControllerBook _controllers = ControllerBook();
+  final Map<String, SessionAttentionState> _attention = {};
+  final Map<String, String> _attentionWire = {};
+  final Map<String, int> _unreadCount = {};
+  // Per-session draft map: the active session's draft is mirrored into
+  // this map on select so an observer session's draft survives a fast
+  // switch and is preserved across takeover/release transitions.
+  final Map<String, String> _draftBySession = {};
+  final Map<String, DeliveryMode> _deliveryModeBySession = {};
 
   BridgeSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
@@ -1282,12 +1299,24 @@ final class ConnectionCoordinator extends ChangeNotifier
         ...payload,
         'runtimeState': ?runtimeState,
       });
-    } else if (type == 'controller.state' &&
-        payload['sessionId'] == selectedSessionId) {
-      leaseId = payload['mode'] == 'controller'
-          ? payload['leaseId'] as String?
-          : null;
-      _startLeaseRenewal();
+    } else if (type == 'controller.state') {
+      adoptControllerEvent(payload);
+      if (payload['sessionId'] == selectedSessionId &&
+          payload['mode'] == 'controller') {
+        _startLeaseRenewal();
+      }
+    } else if (type == 'session.attention' || type == 'session.background') {
+      final id = payload['sessionId'];
+      if (id is String) {
+        final wire =
+            payload['attentionState']?.toString() ??
+            (type == 'session.background' ? 'background' : 'none');
+        final state = sessionAttentionFromWire(wire);
+        final count = payload['unreadCount'] is int
+            ? payload['unreadCount'] as int
+            : null;
+        markAttention(sessionId: id, state: state, unreadCount: count);
+      }
     } else if (type == 'command.state' &&
         payload['commandId'] == pendingCommandId) {
       final state = payload['state'];
@@ -1941,5 +1970,299 @@ final class ConnectionCoordinator extends ChangeNotifier
     _leaseTimer?.cancel();
     unawaited(_closeSocket());
     super.dispose();
+  }
+
+  // =====================================================================
+  // M11 multi-session surface
+  // =====================================================================
+
+  /// The current subscription set, in wire order. Always includes at
+  /// most one full and at most five summary subscriptions. Read-only.
+  SessionSubscriptionSet get subscriptionSet => _subscriptionSet;
+
+  /// Read-only view of per-session controller state. Mutations happen
+  /// only through [acquireController], [releaseController], and
+  /// [takeoverController] so the "no dual controller" invariant is
+  /// enforced in one place.
+  Map<String, SessionControllerState> get controllerStates =>
+      _controllers.snapshot();
+
+  /// Returns the single primary session id, or `null` if the current
+  /// installation is observing all sessions.
+  String? get primarySessionId => _controllers.primarySessionId;
+
+  /// Returns the attention state for `sessionId`, defaulting to `none`.
+  SessionAttentionState attentionFor(String sessionId) =>
+      _attention[sessionId] ?? SessionAttentionState.none;
+
+  /// Returns the unread count for `sessionId`, or zero when unknown.
+  int unreadCountFor(String sessionId) => _unreadCount[sessionId] ?? 0;
+
+  /// Per-session draft text. Selecting a session round-trips the active
+  /// draft through this map so the user never loses work to a fast
+  /// switch.
+  String draftFor(String sessionId) => _draftBySession[sessionId] ?? '';
+
+  /// Per-session sticky delivery mode. Reverts to `immediate` if the
+  /// session has not set one.
+  DeliveryMode deliveryModeFor(String sessionId) =>
+      _deliveryModeBySession[sessionId] ?? DeliveryMode.immediate;
+
+  /// Marks a session as carrying attention. The host may also report
+  /// attention via `session.attention` events; both paths converge
+  /// here. The unread count is the number of new turns the user has
+  /// not yet opened.
+  void markAttention({
+    required String sessionId,
+    required SessionAttentionState state,
+    int? unreadCount,
+  }) {
+    _attention[sessionId] = state;
+    _attentionWire[sessionId] = sessionAttentionWire(state);
+    if (unreadCount != null) {
+      _unreadCount[sessionId] = unreadCount < 0 ? 0 : unreadCount;
+    } else if (state == SessionAttentionState.none) {
+      _unreadCount[sessionId] = 0;
+    }
+    final s = _sessions[sessionId];
+    if (s != null) {
+      _sessions[sessionId] = SessionState(
+        sessionId: s.sessionId,
+        hostId: s.hostId,
+        workspaceId: s.workspaceId,
+        name: s.name,
+        runtimeState: s.runtimeState,
+        policyMode: s.policyMode,
+        modelSummary: s.modelSummary,
+        thinkingLevel: s.thinkingLevel,
+        queueCount: s.queueCount,
+        lastActivityAt: s.lastActivityAt,
+        unreadState: _attentionWire[sessionId],
+        controllerState: _controllers.forSession(sessionId).mode.name,
+      );
+    }
+    _notify();
+    final currentHost = hostId;
+    if (currentHost == null) return;
+    _database
+        .upsertAttentionState(
+          hostId: currentHost,
+          sessionId: sessionId,
+          state: _attentionWire[sessionId]!,
+          unreadCount: _unreadCount[sessionId] ?? 0,
+          updatedAt: _now(),
+        )
+        .then((_) {
+          _notify();
+        }, onError: (_) {});
+  }
+
+  /// Explicit controller acquire. Returns when the host acknowledges
+  /// the request. Only valid for the active subscription set's full
+  /// session; observer sessions are rejected locally.
+  Future<void> acquireController(String sessionId) async {
+    if (!_subscriptionSet.isFull(sessionId)) {
+      throw StateError(
+        'Controller can only be acquired for the foreground session',
+      );
+    }
+    await _sendCommand(
+      type: 'controller.acquire',
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': sessionId},
+      requiresLease: false,
+    );
+  }
+
+  /// Explicit controller release. Mobile stops being the controller
+  /// for the session and reverts to observer. The session remains
+  /// streamed in the subscription set as a summary.
+  Future<void> releaseController(String sessionId) async {
+    if (!_subscriptionSet.contains(sessionId)) {
+      throw StateError('Cannot release a session that is not subscribed');
+    }
+    await _sendCommand(
+      type: 'controller.release',
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': sessionId},
+      requiresLease: true,
+    );
+  }
+
+  /// Explicit takeover. Mobile takes the controller from another
+  /// installation. A repeat takeover is a no-op.
+  Future<void> takeoverController(String sessionId) async {
+    if (!_subscriptionSet.isFull(sessionId)) {
+      throw StateError('Takeover is only allowed on the foreground session');
+    }
+    final controller = _controllers.forSession(sessionId);
+    if (controller.takeoverPending) return;
+    if (controller.mode == ControllerMode.primary) return;
+    controller.beginTakeover();
+    _notify();
+    await _sendCommand(
+      type: 'controller.takeover',
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': sessionId},
+      requiresLease: false,
+    );
+  }
+
+  /// Replaces the foreground session. The previous full subscription,
+  /// if any, is demoted to a summary if there is capacity, otherwise
+  /// dropped. The new session becomes the full subscription.
+  Future<void> selectPrimarySession(String sessionId) async {
+    if (sessionId.isEmpty) {
+      throw ArgumentError.value(sessionId, 'sessionId', 'must not be empty');
+    }
+    if (_subscriptionSet.isFull(sessionId)) {
+      await selectSession(sessionId);
+      return;
+    }
+    final previousFull = _subscriptionSet.full?.sessionId;
+    var next = _subscriptionSet.setFull(
+      sessionId: sessionId,
+      cursor: _cursorForSession(sessionId),
+    );
+    if (previousFull != null && previousFull != sessionId) {
+      if (next.summaries.length <
+          SessionSubscriptionSet.maxSummarySubscriptions) {
+        next = next.addSummary(
+          sessionId: previousFull,
+          cursor: _cursorForSession(previousFull),
+        );
+      }
+    }
+    _subscriptionSet = next;
+    await _persistSubscriptionSet();
+    await selectSession(sessionId);
+    await _pushSubscriptions();
+  }
+
+  /// Adds `sessionId` as a summary subscription. Throws when the cap
+  /// would be exceeded.
+  Future<void> addSummarySubscription(String sessionId) async {
+    if (_subscriptionSet.isFull(sessionId)) return;
+    if (_subscriptionSet.contains(sessionId)) return;
+    _subscriptionSet = _subscriptionSet.addSummary(
+      sessionId: sessionId,
+      cursor: _cursorForSession(sessionId),
+    );
+    await _persistSubscriptionSet();
+    await _pushSubscriptions();
+  }
+
+  /// Removes a session from the subscription set. The full session
+  /// cannot be removed; use [selectPrimarySession] with a new id.
+  Future<void> removeSubscription(String sessionId) async {
+    if (_subscriptionSet.isFull(sessionId)) {
+      throw StateError('Cannot remove the foreground subscription');
+    }
+    if (!_subscriptionSet.contains(sessionId)) return;
+    _subscriptionSet = _subscriptionSet.remove(sessionId);
+    await _persistSubscriptionSet();
+    await _pushSubscriptions();
+  }
+
+  /// Persists the active subscription set, replacing the durable
+  /// storage for the host. Used by [forgetHost] and generation resets.
+  Future<void> _persistSubscriptionSet() async {
+    if (hostId == null) return;
+    final entries = _subscriptionSet.items
+        .map(
+          (item) => <String, Object?>{
+            'sessionId': item.sessionId,
+            'streamId': item.streamId,
+            'detail': subscriptionDetailWire(item.detail),
+            'cursor': item.cursor.value,
+          },
+        )
+        .toList(growable: false);
+    await _database.replaceSubscriptionSet(hostId: hostId!, entries: entries);
+  }
+
+  /// Pushes the subscription set to the host. The host stream is
+  /// always part of the wire-level subscription; the session rows
+  /// come from the active set.
+  Future<void> _pushSubscriptions() async {
+    if (_socket == null || connectionId == null || hostId == null) return;
+    _syncPending
+      ..clear()
+      ..add('host:$hostId');
+    for (final item in _subscriptionSet.items) {
+      _syncPending.add(item.streamId);
+    }
+    phase = ConnectionPhase.synchronizing;
+    final wire = <Map<String, Object?>>[
+      <String, Object?>{'streamId': 'host:$hostId', 'detail': 'full'},
+      ..._subscriptionSet.toWire(),
+    ];
+    _notify();
+    await _sendControl('subscription.set', <String, Object?>{'streams': wire});
+  }
+
+  /// Returns the highest known cursor for `sessionId` across the live
+  /// stream and the durable cache. Defaults to zero.
+  StreamCursor _cursorForSession(String sessionId) {
+    final live = _streams['session:$sessionId']?.lastContiguousCursor;
+    if (live != null) return live;
+    return StreamCursor.zero;
+  }
+
+  /// Records an authoritative controller reply from the host. Mobile
+  /// never invents lease identifiers: this is the only path that
+  /// assigns one.
+  void adoptControllerEvent(Map<String, Object?> payload) {
+    final id = payload['sessionId'] as String?;
+    if (id == null) return;
+    final mode = controllerModeFromWire(payload['mode']);
+    final lease = payload['leaseId'] as String?;
+    final controller = _controllers.forSession(id);
+    switch (mode) {
+      case ControllerMode.primary:
+        if (lease == null) return;
+        controller.adoptAcquire(lease);
+        if (id == selectedSessionId) leaseId = lease;
+        if (hostId != null) {
+          _database.upsertControllerState(
+            hostId: hostId!,
+            sessionId: id,
+            mode: 'controller',
+            leaseId: lease,
+            previousMode: controller.previousMode.name,
+            takeoverPending: false,
+            updatedAt: _now(),
+          );
+        }
+      case ControllerMode.observer:
+        controller.markObserver(observerLeaseId: lease);
+        if (id == selectedSessionId) leaseId = null;
+        if (hostId != null) {
+          _database.upsertControllerState(
+            hostId: hostId!,
+            sessionId: id,
+            mode: 'observer',
+            leaseId: lease,
+            previousMode: controller.previousMode.name,
+            takeoverPending: false,
+            updatedAt: _now(),
+          );
+        }
+      case ControllerMode.none:
+        controller.markNone();
+        if (id == selectedSessionId) leaseId = null;
+        if (hostId != null) {
+          _database.upsertControllerState(
+            hostId: hostId!,
+            sessionId: id,
+            mode: 'none',
+            leaseId: null,
+            previousMode: controller.previousMode.name,
+            takeoverPending: false,
+            updatedAt: _now(),
+          );
+        }
+    }
+    _notify();
   }
 }

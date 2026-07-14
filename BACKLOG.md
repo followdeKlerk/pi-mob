@@ -497,15 +497,15 @@ Switch eligible model/thinking, inspect stats, trigger compaction/retry controls
 
 ## Tasks
 
-- [ ] **M11-01 P0 L** Host stream session summary add/change/remove events.
-- [ ] **M11-02 P1 M** Paginated list/search/filter/sort/attention states.
-- [ ] **M11-03 P0 M** One full plus bounded summary subscriptions.
-- [ ] **M11-04 P0 L** Lease acquire/renew/reclaim/release/takeover/expiry/stale connection.
-- [ ] **M11-05 P0 M** DB uniqueness/race and multi-client stress tests.
-- [ ] **M11-06 P1 M** Observer/take-control/draft-preservation UX.
-- [ ] **M11-07 P0 M** Three-process capacity, eligible LRU eviction, no-victim error.
-- [ ] **M11-08 P0 M** Idle stop and lazy restore.
-- [ ] **M11-09 P1 M** Fast session switcher/subscription/cursor/background badges.
+- [x] **M11-01 P0 L** Host stream session summary add/change/remove events.
+- [x] **M11-02 P1 M** Paginated list/search/filter/sort/attention states.
+- [x] **M11-03 P0 M** One full plus bounded summary subscriptions.
+- [x] **M11-04 P0 L** Lease acquire/renew/reclaim/release/takeover/expiry/stale connection.
+- [x] **M11-05 P0 M** DB uniqueness/race and multi-client stress tests.
+- [x] **M11-06 P1 M** Observer/take-control/draft-preservation UX.
+- [x] **M11-07 P0 M** Three-process capacity, eligible LRU eviction, no-victim error.
+- [x] **M11-08 P0 M** Idle stop and lazy restore.
+- [x] **M11-09 P1 M** Fast session switcher/subscription/cursor/background badges.
 
 ## Checkpoint demo
 
@@ -513,11 +513,11 @@ Run three sessions, hit capacity, idle-stop/restore one, switch foreground detai
 
 ## Exit criteria
 
-- [ ] One socket tracks all summaries.
-- [ ] Three sessions progress independently.
-- [ ] Dual controller cannot occur.
-- [ ] Capacity/eviction policy passes.
-- [ ] No cross-session event application.
+- [x] One socket tracks all summaries.
+- [x] Three sessions progress independently.
+- [x] Dual controller cannot occur.
+- [x] Capacity/eviction policy passes.
+- [x] No cross-session event application.
 
 **Evidence:** multi-client/session report.
 

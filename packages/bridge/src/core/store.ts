@@ -12,7 +12,7 @@ export interface StoredEvent { readonly eventId: string; readonly streamId: stri
 export interface StoredEventPage { readonly items: readonly StoredEvent[]; readonly snapshotRevision: string; readonly nextBeforeCursor?: string; }
 export interface StoredCommand { readonly commandId: string; readonly type: string; readonly scopeKey: string; readonly streamId: string; readonly semanticHash: string; readonly payload: Record<string, unknown>; readonly state: string; readonly dispatchCount: number; }
 export type AcceptCommandResult = { readonly kind: "accepted" | "duplicate"; readonly command: StoredCommand; readonly event?: StoredEvent } | { readonly kind: "conflict" };
-export interface LeaseRecord { readonly scopeKey: string; readonly leaseId: string; readonly installationId: string; readonly connectionId: string; readonly expiresAt: number; readonly reclaimableUntil: number | null; readonly disconnectedAt: number | null; readonly revokedAt: number | null; }
+export interface LeaseRecord { readonly scopeKey: string; readonly leaseId: string; readonly installationId: string; readonly connectionId: string; readonly expiresAt: number; readonly reclaimableUntil: number | null; readonly disconnectedAt: number | null; readonly revokedAt: number | null; readonly takeoverReason: string | null; }
 
 // M8: durable trust + host policy state records. Kept as plain structural
 // types so the bridge runtime can read them with zero extra dependencies.
@@ -246,6 +246,138 @@ export class BridgeStore {
       return { ...position, events: this.listEvents(streamId, after, position.current) };
     });
   }
+  // ---------------------------------------------------------------------
+  // M11 — multi-session summary directory (add/change/remove + paginated
+  // list/search/filter/sort/attention). Summary state is read from the
+  // session JSON blob so the host stream can still replay ordered
+  // `session.summary` / `session.removed` events for subscribers.
+  // ---------------------------------------------------------------------
+
+  /** Allowed sort directions for `listSessionSummaries`. */
+  static readonly SESSION_SORT_KEYS = ["name", "attention", "activity", "created", "queue"] as const;
+  /** Allowed attention filters. */
+  static readonly ATTENTION_FILTERS = new Set(["all", "needs_attention", "ready", "settled", "failed", "aborted", "indeterminate"]);
+
+  /**
+   * Idempotently register a session. The first call for a new session
+   * emits `session.summary` on the host stream; later calls do nothing
+   * (idempotent). The host stream is auto-created.
+   */
+  addSessionSummary(sessionId: string, summary: Record<string, unknown>): { event: StoredEvent; added: boolean } {
+    return this.transaction(() => {
+      const hostStream = `host:${this.identity().hostId}`;
+      this.ensureStream(hostStream, "host");
+      const existing = this.sessionState(sessionId);
+      if (existing && Object.keys(existing).length > 0) return { event: { eventId: "", streamId: hostStream, cursor: "0", type: "session.summary", payload: {}, createdAt: 0 }, added: false };
+      const state: Record<string, unknown> = { runtimeState: "idle", attentionState: "ready", queueCount: 0, lastActivityAt: this.now(), ...summary, sessionId };
+      this.db.query("INSERT INTO sessions(session_id,state_json,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET state_json=excluded.state_json,updated_at=excluded.updated_at").run(sessionId, JSON.stringify(state), this.now(), this.now());
+      this.ensureStream(`session:${sessionId}`, "session", sessionId);
+      const event = this.appendEventTx(hostStream, "session.summary", { sessionId, ...state });
+      return { event, added: true };
+    });
+  }
+
+  /**
+   * Apply a partial summary change. Emits `session.summary` with the
+   * resulting merged state plus a `changedKeys` array describing the
+   * deltas. Unknown sessions are created on demand (mobile can repair
+   * the directory if host restarts mid-flight).
+   */
+  changeSessionSummary(sessionId: string, patch: Record<string, unknown>): { event: StoredEvent; previous: Record<string, unknown> } {
+    return this.transaction(() => {
+      const hostStream = `host:${this.identity().hostId}`;
+      this.ensureStream(hostStream, "host");
+      const prior = this.sessionState(sessionId) ?? { sessionId };
+      const next: Record<string, unknown> = { ...prior, ...patch, sessionId };
+      const changedKeys = Object.keys(patch).filter((key) => JSON.stringify((prior as Record<string, unknown>)[key]) !== JSON.stringify(patch[key]));
+      this.db.query("INSERT INTO sessions(session_id,state_json,created_at,updated_at) VALUES(?,?,?,?) ON CONFLICT(session_id) DO UPDATE SET state_json=excluded.state_json,updated_at=excluded.updated_at").run(sessionId, JSON.stringify(next), this.now(), this.now());
+      this.ensureStream(`session:${sessionId}`, "session", sessionId);
+      const event = this.appendEventTx(hostStream, "session.summary", { sessionId, ...next, changedKeys });
+      return { event, previous: prior };
+    });
+  }
+
+  /** Removes a provisional session that was never admitted; emits no event. */
+  discardSession(sessionId: string): void {
+    this.transaction(() => {
+      this.db.query("DELETE FROM sessions WHERE session_id=?").run(sessionId);
+    });
+  }
+
+  /**
+   * Remove a session from the directory. Emits `session.removed` on the
+   * host stream. Returns `null` when the session was already gone so
+   * the caller can distinguish first removal from a duplicate.
+   */
+  removeSessionSummary(sessionId: string): { event: StoredEvent; removed: boolean } | null {
+    return this.transaction(() => {
+      const hostStream = `host:${this.identity().hostId}`;
+      this.ensureStream(hostStream, "host");
+      if (!this.sessionExists(sessionId)) return null;
+      this.db.query("DELETE FROM sessions WHERE session_id=?").run(sessionId);
+      const event = this.appendEventTx(hostStream, "session.removed", { sessionId, removedAt: this.now() });
+      return { event, removed: true };
+    });
+  }
+
+  /**
+   * Paginated session list with substring search, attention-state
+   * filter, and stable sort. Returns newest-first snapshot and an
+   * opaque `nextBeforeCursor` token the caller must hand back to fetch
+   * the next page. `snapshotRevision` is the host stream current
+   * cursor, suitable for change detection by the client.
+   */
+  listSessionSummaries(input: { filter?: string | null; query?: string | null; sort?: string; pageSize: number; beforeCursor?: string | null }): { items: readonly Record<string, unknown>[]; snapshotRevision: string; nextBeforeCursor?: string } {
+    if (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 100) throw new StoreError("conflict", "page size must be an integer from 1 through 100");
+    const sort = (input.sort ?? "activity") as string;
+    if (!(BridgeStore.SESSION_SORT_KEYS as readonly string[]).includes(sort)) throw new StoreError("conflict", "sort must be one of name|attention|activity|created|queue");
+    const filter = input.filter ?? "all";
+    if (!BridgeStore.ATTENTION_FILTERS.has(filter)) throw new StoreError("conflict", "filter must be all|needs_attention|ready|settled|failed|aborted|indeterminate");
+    const query = (input.query ?? "").toLowerCase();
+    const before = input.beforeCursor;
+    return this.transaction(() => {
+      const hostStream = `host:${this.identity().hostId}`;
+      const position = this.streamPosition(hostStream); if (!position) throw new StoreError("not_found", "host stream not found");
+      let rows = (this.db.query("SELECT session_id sessionId,state_json state,created_at createdAt FROM sessions ORDER BY created_at,session_id").all() as Array<{ sessionId: string; state: string; createdAt: number }>).map((row) => {
+        const parsed = parseObject(row.state);
+        return { ...parsed, sessionId: row.sessionId, createdAt: row.createdAt } as Record<string, unknown>;
+      });
+      if (filter === "needs_attention") rows = rows.filter((row) => row.attentionState === "needs_attention");
+      else if (filter !== "all") rows = rows.filter((row) => row.attentionState === filter || row.runtimeState === filter);
+      if (query.length > 0) rows = rows.filter((row) => {
+        const name = (typeof row.name === "string" ? row.name : typeof row.displayName === "string" ? row.displayName : row.sessionId) as string;
+        return name.toLowerCase().includes(query);
+      });
+      const sortKey = (row: Record<string, unknown>): string | number => {
+        if (sort === "name") return String(row.name ?? row.displayName ?? row.sessionId);
+        if (sort === "attention") return String(row.attentionState ?? "");
+        if (sort === "created") return Number(row.createdAt ?? 0);
+        if (sort === "queue") return Number(row.queueCount ?? 0);
+        return Number(row.lastActivityAt ?? row.createdAt ?? 0);
+      };
+      rows.sort((left, right) => {
+        const lk = sortKey(left); const rk = sortKey(right);
+        if (typeof lk === "number" && typeof rk === "number") return rk - lk;
+        return sort === "name"
+          ? String(lk).localeCompare(String(rk))
+          : String(rk).localeCompare(String(lk));
+      });
+      let startIndex = 0;
+      if (before) {
+        const offset = Number(before);
+        if (!Number.isInteger(offset) || offset < 0) throw new StoreError("conflict", "before cursor is not a valid offset");
+        startIndex = offset;
+      }
+      const slice = rows.slice(startIndex, startIndex + input.pageSize);
+      const hasMore = startIndex + input.pageSize < rows.length;
+      return {
+        items: slice,
+        snapshotRevision: position.current,
+        ...(hasMore ? { nextBeforeCursor: String(startIndex + input.pageSize) } : {}),
+      };
+    });
+  }
+
   captureSnapshot(streamId: string): { baseline: string; current: string; state: Record<string, unknown>; events: StoredEvent[] } {
     return this.transaction(() => {
       const stream = this.db.query("SELECT current_cursor baseline,session_id sessionId,scope FROM streams WHERE stream_id=?").get(streamId) as { baseline: string; sessionId: string | null; scope: string } | null;
@@ -295,9 +427,9 @@ export class BridgeStore {
   ackCursor(installationId: string, streamId: string, cursor: string): void { canonicalCursor(cursor); this.transaction(() => this.db.query("INSERT INTO client_cursors(installation_id,stream_id,cursor,updated_at) VALUES(?,?,?,?) ON CONFLICT(installation_id,stream_id) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at").run(installationId, streamId, cursor, this.now())); }
   ackedCursor(installationId: string, streamId: string): string | null { return (this.db.query("SELECT cursor FROM client_cursors WHERE installation_id=? AND stream_id=?").get(installationId, streamId) as { cursor: string } | null)?.cursor ?? null; }
 
-  lease(scopeKey: string): LeaseRecord | null { return this.db.query("SELECT scope_key scopeKey,lease_id leaseId,installation_id installationId,connection_id connectionId,expires_at expiresAt,reclaimable_until reclaimableUntil,disconnected_at disconnectedAt,revoked_at revokedAt FROM controller_leases WHERE scope_key=? AND revoked_at IS NULL ORDER BY updated_at DESC LIMIT 1").get(scopeKey) as LeaseRecord | null; }
-  leaseById(leaseId: string): LeaseRecord | null { return this.db.query("SELECT scope_key scopeKey,lease_id leaseId,installation_id installationId,connection_id connectionId,expires_at expiresAt,reclaimable_until reclaimableUntil,disconnected_at disconnectedAt,revoked_at revokedAt FROM controller_leases WHERE lease_id=?").get(leaseId) as LeaseRecord | null; }
-  leaseHistory(scopeKey: string): LeaseRecord[] { return this.db.query("SELECT scope_key scopeKey,lease_id leaseId,installation_id installationId,connection_id connectionId,expires_at expiresAt,reclaimable_until reclaimableUntil,disconnected_at disconnectedAt,revoked_at revokedAt FROM controller_leases WHERE scope_key=? ORDER BY acquired_at").all(scopeKey) as LeaseRecord[]; }
+  lease(scopeKey: string): LeaseRecord | null { return this.db.query("SELECT scope_key scopeKey,lease_id leaseId,installation_id installationId,connection_id connectionId,expires_at expiresAt,reclaimable_until reclaimableUntil,disconnected_at disconnectedAt,revoked_at revokedAt,takeover_reason takeoverReason FROM controller_leases WHERE scope_key=? AND revoked_at IS NULL ORDER BY updated_at DESC LIMIT 1").get(scopeKey) as LeaseRecord | null; }
+  leaseById(leaseId: string): LeaseRecord | null { return this.db.query("SELECT scope_key scopeKey,lease_id leaseId,installation_id installationId,connection_id connectionId,expires_at expiresAt,reclaimable_until reclaimableUntil,disconnected_at disconnectedAt,revoked_at revokedAt,takeover_reason takeoverReason FROM controller_leases WHERE lease_id=?").get(leaseId) as LeaseRecord | null; }
+  leaseHistory(scopeKey: string): LeaseRecord[] { return this.db.query("SELECT scope_key scopeKey,lease_id leaseId,installation_id installationId,connection_id connectionId,expires_at expiresAt,reclaimable_until reclaimableUntil,disconnected_at disconnectedAt,revoked_at revokedAt,takeover_reason takeoverReason FROM controller_leases WHERE scope_key=? ORDER BY acquired_at").all(scopeKey) as LeaseRecord[]; }
   private applyLeaseMutationTx(mutation: LeaseMutation): LeaseRecord | null {
     const now = mutation.now ?? this.now();
     const current = this.lease(mutation.scopeKey);

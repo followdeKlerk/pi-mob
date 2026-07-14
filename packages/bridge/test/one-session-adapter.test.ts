@@ -103,8 +103,9 @@ describe("OneSessionPiAdapter", () => {
     });
     await adapter.dispatch(command);
     const sessions = store.listEvents(hostStream).filter((event) => event.type === "session.summary");
-    expect(sessions).toHaveLength(1);
-    const summary = sessions[0]!.payload as Record<string, unknown>;
+    expect(sessions.length).toBeGreaterThanOrEqual(1);
+    const summary = sessions.map((event) => event.payload as Record<string, unknown>)
+      .find((payload) => payload.change === "added")!;
     expect(typeof summary.sessionId).toBe("string");
     expect(summary.workspaceId).toBe("11111111-1111-4111-8111-111111111111");
     expect(summary.policyMode).toBe("full");
