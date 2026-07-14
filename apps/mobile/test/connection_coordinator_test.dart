@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
 import 'package:pi_mob/src/data/app_database.dart';
+import 'package:pi_mob/src/domain/mobile_state.dart';
 
 const hostId = '11111111-1111-4111-8111-111111111111';
 const sessionId = '22222222-2222-4222-8222-222222222222';
@@ -533,6 +534,236 @@ void main() {
     );
     await eventually(() => coordinator.pendingCommandId == null);
     expect(coordinator.draft, isEmpty);
+  });
+
+  test('running session accepts steer prompt over the wire', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    await coordinator.setSelectedDeliveryMode(DeliveryMode.steer);
+    socket.server(
+      event(
+        type: 'turn.started',
+        streamId: 'session:$sessionId',
+        cursor: '2',
+        eventId: '20202020-2020-4202-8202-202020202020',
+        payload: {
+          'sessionId': sessionId,
+          'commandId': 'previous-cmd',
+          'deliveryMode': 'immediate',
+        },
+      ),
+    );
+    await eventually(() => coordinator.selectedRuntimeState == 'running');
+    await coordinator.updateDraft('Steer me');
+    expect(coordinator.canSend, isTrue);
+    expect(coordinator.composerDisabledReason, isNull);
+    await coordinator.submitPrompt();
+    final prompt = socket.sent.lastWhere(
+      (message) => message['type'] == 'prompt.submit',
+    );
+    expect(prompt['payload'], containsPair('deliveryMode', 'steer'));
+    expect(prompt['payload'], containsPair('message', 'Steer me'));
+    final stored = await database.draft(hostId, sessionId);
+    expect(stored!.selectedDeliveryMode, 'steer');
+  });
+
+  test('running session queues follow-up prompt over the wire', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    socket.server(
+      event(
+        type: 'turn.started',
+        streamId: 'session:$sessionId',
+        cursor: '2',
+        eventId: '21212121-2121-4212-8212-212121212121',
+        payload: {
+          'sessionId': sessionId,
+          'commandId': 'previous-cmd',
+          'deliveryMode': 'immediate',
+        },
+      ),
+    );
+    await eventually(() => coordinator.selectedRuntimeState == 'running');
+    await coordinator.setSelectedDeliveryMode(DeliveryMode.followUp);
+    await coordinator.updateDraft('Run this after');
+    await coordinator.submitPrompt();
+    final prompt = socket.sent.lastWhere(
+      (message) => message['type'] == 'prompt.submit',
+    );
+    expect(prompt['payload'], containsPair('deliveryMode', 'follow_up'));
+    final stored = await database.draft(hostId, sessionId);
+    expect(stored!.selectedDeliveryMode, 'follow_up');
+  });
+
+  test('running session blocks default immediate composer', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    socket.server(
+      event(
+        type: 'turn.started',
+        streamId: 'session:$sessionId',
+        cursor: '2',
+        eventId: '22222222-2222-4222-8222-222222222222',
+        payload: {
+          'sessionId': sessionId,
+          'commandId': 'previous-cmd',
+          'deliveryMode': 'immediate',
+        },
+      ),
+    );
+    await eventually(() => coordinator.selectedRuntimeState == 'running');
+    await coordinator.updateDraft('Cannot fire immediately');
+    expect(coordinator.selectedDeliveryMode, DeliveryMode.immediate);
+    expect(coordinator.canSend, isFalse);
+    expect(
+      coordinator.composerDisabledReason,
+      contains('Steer or Queue follow-up'),
+    );
+
+    final sentBefore = socket.sent
+        .where((message) => message['type'] == 'prompt.submit')
+        .length;
+    await coordinator.submitPrompt();
+    expect(
+      socket.sent.where((message) => message['type'] == 'prompt.submit').length,
+      sentBefore,
+    );
+    expect(coordinator.pendingCommandId, isNull);
+  });
+
+  test('history pages merge older events with stable deduplication', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+
+    await coordinator.loadOlderHistory(sessionId, pageSize: 2);
+    final firstRequest = socket.sent.lastWhere(
+      (message) => message['type'] == 'session.history.page',
+    );
+    expect(firstRequest['payload'], containsPair('pageToken', null));
+    socket.server(
+      response(
+        'session.history.page.result',
+        {
+          'snapshotRevision': '4',
+          'nextPageToken': 'opaque-next',
+          'items': [
+            {
+              'eventId': 'history-3',
+              'streamId': 'session:$sessionId',
+              'cursor': '3',
+              'type': 'assistant.delta',
+              'payload': {'contentBlockId': 'a', 'text': 'three'},
+              'createdAt': 1,
+            },
+            {
+              'eventId': 'history-4',
+              'streamId': 'session:$sessionId',
+              'cursor': '4',
+              'type': 'assistant.completed',
+              'payload': {'contentBlockId': 'a'},
+              'createdAt': 2,
+            },
+          ],
+        },
+        requestId: firstRequest['requestId'] as String,
+      ),
+    );
+    await eventually(() => coordinator.transcriptEvents(sessionId).length == 2);
+    expect(coordinator.historyFor(sessionId).snapshotRevision, '4');
+    expect(coordinator.hasOlderHistory(sessionId), isTrue);
+
+    await coordinator.loadOlderHistory(sessionId, pageSize: 2);
+    final secondRequest = socket.sent.lastWhere(
+      (message) => message['type'] == 'session.history.page',
+    );
+    expect(secondRequest['payload'], containsPair('pageToken', 'opaque-next'));
+    socket.server(
+      response(
+        'session.history.page.result',
+        {
+          'snapshotRevision': '5',
+          'items': [
+            {
+              'eventId': 'history-2',
+              'streamId': 'session:$sessionId',
+              'cursor': '2',
+              'type': 'assistant.started',
+              'payload': {'contentBlockId': 'a'},
+              'createdAt': 0,
+            },
+            {
+              'eventId': 'history-3',
+              'streamId': 'session:$sessionId',
+              'cursor': '3',
+              'type': 'assistant.delta',
+              'payload': {'contentBlockId': 'a', 'text': 'three'},
+              'createdAt': 1,
+            },
+          ],
+        },
+        requestId: secondRequest['requestId'] as String,
+      ),
+    );
+    await eventually(() => coordinator.transcriptEvents(sessionId).length == 3);
+    expect(
+      coordinator
+          .transcriptEvents(sessionId)
+          .map((event) => event.cursor.value),
+      ['2', '3', '4'],
+    );
+    expect(coordinator.historyFor(sessionId).snapshotRevision, '5');
+    expect(coordinator.hasOlderHistory(sessionId), isFalse);
+  });
+
+  test('idle session blocks steer and follow-up delivery modes', () async {
+    await makeReady(coordinator, transport);
+    // makeReady leaves the session in the idle state.
+    expect(coordinator.selectedRuntimeState, 'idle');
+
+    for (final mode in [DeliveryMode.steer, DeliveryMode.followUp]) {
+      await coordinator.setSelectedDeliveryMode(mode);
+      expect(
+        coordinator.canSend,
+        isFalse,
+        reason: 'idle session must not allow $mode',
+      );
+      expect(coordinator.composerDisabledReason, isNotNull);
+    }
+  });
+
+  test('read-only policy still allows composer submission', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    socket.server(
+      event(
+        type: 'session.summary',
+        streamId: 'host:$hostId',
+        cursor: '2',
+        eventId: '23232323-2323-4232-8232-232323232323',
+        payload: {
+          'sessionId': sessionId,
+          'name': 'Read-only',
+          'runtimeState': 'idle',
+          'queueCount': 0,
+          'policyMode': 'read_only',
+        },
+      ),
+    );
+    await eventually(
+      () => coordinator.activePolicyMode == SessionPolicyMode.readOnly,
+    );
+    await coordinator.updateDraft('Edit me but do not run tools');
+    expect(coordinator.canSend, isTrue);
+    expect(coordinator.composerDisabledReason, isNull);
+    await coordinator.submitPrompt();
+    final prompt = socket.sent.lastWhere(
+      (message) => message['type'] == 'prompt.submit',
+    );
+    expect(prompt['payload'], containsPair('deliveryMode', 'immediate'));
+    expect(
+      prompt['payload'],
+      containsPair('message', 'Edit me but do not run tools'),
+    );
   });
 }
 

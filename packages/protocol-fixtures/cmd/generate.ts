@@ -52,7 +52,7 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "stream.snapshot.end") return { snapshotId: ids.sessionId, partCount: 1 };
   if (type === "command.receipt") return { state: "accepted", duplicate: false };
   if (type === "command.current.result") return { commandId: ids.commandId, state: "accepted" };
-  if (type === "session.list.result") return { items: [], snapshotRevision: "1" };
+  if (type === "session.list.result" || type === "session.history.page.result") return { items: [], snapshotRevision: "1" };
   return { items: [] };
 }
 function controlPayload(type: string): Record<string, unknown> {

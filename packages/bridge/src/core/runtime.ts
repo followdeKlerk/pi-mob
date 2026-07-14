@@ -1,3 +1,4 @@
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { COMMAND_METADATA, semanticCommandSha256 } from "@pi-mob/protocol-schema";
 import { ControllerLeaseService, DurableCommandService, StreamService, type AdapterPort } from "./domain";
 import type { BridgeRuntimePort, ConnectionContext, SubscriptionMessage, SubscriptionResult } from "./server";
@@ -20,6 +21,17 @@ const SESSION_GATING_COMMAND_TYPES = new Set(["session.create", "session.activat
 /** M8 commands that the runtime recognises as lease-free because they
  * happen at host-bootstrap time, before any controller can exist. */
 const M8_LEASE_FREE_COMMANDS = new Set(["workspace.trust.approve"]) as ReadonlySet<string>;
+const HISTORY_TOKEN_KIND = "session.history.page";
+interface HistoryPageToken {
+  readonly version: 1;
+  readonly kind: typeof HISTORY_TOKEN_KIND;
+  readonly hostId: string;
+  readonly sessionId: string;
+  readonly pageSize: number;
+  readonly beforeCursor: string;
+}
+
+function canonicalDecimal(value: unknown): value is string { return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value); }
 
 function mobileTrustState(status: TrustState["status"]): "approved" | "unapproved" | "fingerprint_changed" {
   if (status === "trusted") return "approved";
@@ -70,6 +82,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private readonly hostDisplayName: string;
   private readonly policy: RuntimePolicyHandler | null;
   private readonly defaultSessionPolicyMode: HostPolicyMode;
+  private readonly historyTokenSecret = randomBytes(32);
   private readyState = false;
   private readonly searchCandidates = new Map<WorkspaceRootId, { canonicalPath: string; label: string }>();
   constructor(readonly options: DurableRuntimeOptions) {
@@ -135,6 +148,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       catch { throw new RuntimeProtocolError("stale_controller", "lease is stale"); }
     }
     if (type === "command.current") { const command = this.options.store.command(String(payload.commandId ?? "")); if (!command) throw new RuntimeProtocolError("command_not_found", "command not found"); return { commandId: command.commandId, state: command.state }; }
+    if (type === "session.history.page") return this.sessionHistoryPage(payload);
     if (type === "workspace.list") {
       if (!this.policy) {
         // Backwards-compatible behaviour: fall back to the adapter's
@@ -163,6 +177,73 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       return { mode: eff.mode, policyVersion: eff.rules.policyVersion, fingerprint: eff.rules.fingerprint };
     }
     return {};
+  }
+
+  private sessionHistoryPage(payload: Record<string, unknown>): Record<string, unknown> {
+    const sessionId = String(payload.sessionId ?? "");
+    const pageSize = payload.pageSize;
+    if (!Number.isInteger(pageSize) || (pageSize as number) < 1 || (pageSize as number) > 100) {
+      throw new RuntimeProtocolError("invalid_message", "pageSize must be an integer from 1 through 100");
+    }
+    if (!this.options.store.sessionExists(sessionId)) throw new RuntimeProtocolError("session_not_found", "session not found");
+    const rawToken = payload.pageToken;
+    let beforeCursor: string | undefined;
+    if (rawToken !== null && rawToken !== undefined) {
+      if (typeof rawToken !== "string") throw new RuntimeProtocolError("invalid_message", "page token must be a string or null");
+      beforeCursor = this.decodeHistoryPageToken(rawToken, sessionId, pageSize as number).beforeCursor;
+    }
+    let page;
+    try { page = this.options.store.pageSessionEvents(sessionId, pageSize as number, beforeCursor); }
+    catch (error) {
+      if (error instanceof StoreError && error.code === "not_found") throw new RuntimeProtocolError("session_not_found", "session not found");
+      throw error;
+    }
+    return {
+      items: page.items.map((event) => ({
+        eventId: event.eventId,
+        streamId: event.streamId,
+        cursor: event.cursor,
+        type: event.type,
+        payload: event.payload,
+        createdAt: event.createdAt,
+      })),
+      snapshotRevision: page.snapshotRevision,
+      ...(page.nextBeforeCursor ? { nextPageToken: this.encodeHistoryPageToken({
+        version: 1,
+        kind: HISTORY_TOKEN_KIND,
+        hostId: this.identity().hostId,
+        sessionId,
+        pageSize: pageSize as number,
+        beforeCursor: page.nextBeforeCursor,
+      }) } : {}),
+    };
+  }
+
+  private encodeHistoryPageToken(value: HistoryPageToken): string {
+    const body = Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
+    const signature = createHmac("sha256", this.historyTokenSecret).update(body, "utf8").digest("base64url");
+    return `${body}.${signature}`;
+  }
+
+  private decodeHistoryPageToken(token: string, sessionId: string, pageSize: number): HistoryPageToken {
+    try {
+      if (token.length === 0 || token.length > 4096) throw new Error("invalid token length");
+      const parts = token.split(".");
+      if (parts.length !== 2 || !parts[0] || !parts[1] || !parts.every((part) => /^[A-Za-z0-9_-]+$/.test(part))) throw new Error("invalid token shape");
+      const expected = createHmac("sha256", this.historyTokenSecret).update(parts[0], "utf8").digest();
+      const actual = Buffer.from(parts[1], "base64url");
+      if (actual.toString("base64url") !== parts[1] || actual.length !== expected.length || !timingSafeEqual(actual, expected)) throw new Error("invalid token signature");
+      const encodedBody = Buffer.from(parts[0], "base64url");
+      if (encodedBody.toString("base64url") !== parts[0]) throw new Error("invalid token encoding");
+      const parsed = JSON.parse(encodedBody.toString("utf8")) as Partial<HistoryPageToken>;
+      const hostId = this.identity().hostId;
+      if (parsed.version !== 1 || parsed.kind !== HISTORY_TOKEN_KIND || parsed.hostId !== hostId || parsed.sessionId !== sessionId || parsed.pageSize !== pageSize || !canonicalDecimal(parsed.beforeCursor)) {
+        throw new Error("page token is not bound to this query");
+      }
+      return parsed as HistoryPageToken;
+    } catch {
+      throw new RuntimeProtocolError("invalid_message", "page token is invalid or does not match the history query");
+    }
   }
 
   /** Bounded workspace listing produced by the policy module. */

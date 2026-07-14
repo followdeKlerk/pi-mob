@@ -837,10 +837,14 @@
             },
             "nextPageToken": {
               "type": "string"
+            },
+            "snapshotRevision": {
+              "type": "string"
             }
           },
           "required": [
-            "items"
+            "items",
+            "snapshotRevision"
           ],
           "type": "object"
         },

@@ -4,11 +4,11 @@ A private Flutter mobile control surface for Pi coding-agent sessions running on
 
 ## Status
 
-The product and architecture are implemented checkpoint by checkpoint. M1–M6 delivered the protocol, durable bridge, diagnostic client, and supervised recovery. M7 delivered the portable macOS host lifecycle and private pairing; M8 delivered workspace trust and host-enforced Read-only policy.
+The product and architecture are implemented checkpoint by checkpoint. M1–M6 delivered the protocol, durable bridge, one-session client, and supervised recovery. M7–M8 delivered the portable private host lifecycle, pairing, workspace trust, and host-enforced Read-only policy. M9 delivered the production transcript, first-class tool rendering, durable history paging, and reliable composer.
 
-Current checkpoint: **M9 — production transcript, tools, and composer** (ready to activate).
+Current checkpoint: **M10 — models, context, retry, compaction, and commands** (ready to activate).
 
-M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), [`M3-SUMMARY.md`](M3-SUMMARY.md), [`M4-SUMMARY.md`](M4-SUMMARY.md), [`M5-SUMMARY.md`](M5-SUMMARY.md), [`M6-SUMMARY.md`](M6-SUMMARY.md), [`M7-SUMMARY.md`](M7-SUMMARY.md), and [`M8-SUMMARY.md`](M8-SUMMARY.md).
+M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is in [`M1-SUMMARY.md`](M1-SUMMARY.md), [`M2-SUMMARY.md`](M2-SUMMARY.md), [`M3-SUMMARY.md`](M3-SUMMARY.md), [`M4-SUMMARY.md`](M4-SUMMARY.md), [`M5-SUMMARY.md`](M5-SUMMARY.md), [`M6-SUMMARY.md`](M6-SUMMARY.md), [`M7-SUMMARY.md`](M7-SUMMARY.md), [`M8-SUMMARY.md`](M8-SUMMARY.md), and [`M9-SUMMARY.md`](M9-SUMMARY.md).
 
 See [`BACKLOG.md`](BACKLOG.md) for the complete checkpoint plan and [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) for the final coverage review.
 

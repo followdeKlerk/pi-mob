@@ -373,12 +373,16 @@ class AppDatabase extends _$AppDatabase {
     required String? pendingPayloadJson,
     required String? pendingState,
     required DateTime updatedAt,
+    DeliveryMode? selectedDeliveryMode,
   }) async {
     await into(draftEntries).insertOnConflictUpdate(
       DraftEntriesCompanion.insert(
         hostId: hostId,
         sessionId: sessionId,
         draftText: Value(text),
+        selectedDeliveryMode: selectedDeliveryMode == null
+            ? const Value.absent()
+            : Value(deliveryModeWire(selectedDeliveryMode)),
         pendingCommandId: Value(pendingCommandId),
         pendingPayloadJson: Value(pendingPayloadJson),
         pendingState: Value(pendingState),

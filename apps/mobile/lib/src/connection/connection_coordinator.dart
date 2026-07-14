@@ -30,6 +30,17 @@ enum ConnectionPhase {
 /// type so existing callers continue to compile.
 typedef WorkspaceInfo = WorkspaceEntry;
 
+/// In-flight bookkeeping for a `session.history.page` round trip. The
+/// coordinator pairs the request id with the connection epoch at the time of
+/// send so a response that arrives after a socket teardown is dropped
+/// instead of silently overwriting a fresh page.
+class _HistoryRequest {
+  const _HistoryRequest({required this.sessionId, required this.epoch});
+
+  final String sessionId;
+  final int epoch;
+}
+
 /// Owns the foreground bridge socket and the durable one-session M5 state.
 ///
 /// The transport is injected so synchronization, lost-receipt recovery, and
@@ -87,6 +98,11 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, SnapshotAssembler> _snapshots = {};
   final Map<String, String> _snapshotStreams = {};
   final Map<String, SessionState> _sessions = {};
+  final Map<String, SessionHistoryState> _history = {};
+  // In-flight `session.history.page` requests. The host may take several
+  // seconds to return a large page; without bookkeeping we could apply a
+  // response from a stale epoch after the user has reconnected.
+  final Map<String, _HistoryRequest> _historyRequests = {};
   final List<WorkspaceEntry> _workspaces = [];
   final List<String> _rawEvents = [];
   final List<ToolOutputNotice> _toolOutputNotices = [];
@@ -127,15 +143,53 @@ final class ConnectionCoordinator extends ChangeNotifier
   String? pendingCommandId;
   Map<String, Object?>? pendingPayload;
   String? pendingState;
+  DeliveryMode selectedDeliveryMode = DeliveryMode.immediate;
 
   bool get isReady => phase == ConnectionPhase.ready && _socket != null;
-  bool get canSend =>
-      isReady &&
-      selectedSessionId != null &&
-      leaseId != null &&
-      draft.trim().isNotEmpty &&
-      pendingCommandId == null &&
-      !requiresTrustApproval;
+
+  /// True when the composer can submit the current draft. In addition to the
+  /// connection / session prerequisites, the selected [DeliveryMode] must be
+  /// compatible with the current session runtime state:
+  ///
+  /// - `immediate` is only valid while the session is idle or stopped (or
+  ///   when the state is still unknown).
+  /// - `steer` and `followUp` require the session to be running.
+  ///
+  /// Read-only sessions are still allowed to send prompts here because the
+  /// host enforces the tool hook; the mobile client must not block authoring.
+  bool get canSend {
+    if (!isReady ||
+        selectedSessionId == null ||
+        leaseId == null ||
+        draft.trim().isEmpty ||
+        pendingCommandId != null ||
+        requiresTrustApproval) {
+      return false;
+    }
+    return _deliveryModeMatchesRuntime(
+      selectedDeliveryMode,
+      selectedRuntimeState,
+    );
+  }
+
+  /// Human-readable explanation of why [canSend] is false, or `null` when the
+  /// composer is sendable. The UI binds this to the disabled affordance.
+  String? get composerDisabledReason {
+    if (requiresTrustApproval) {
+      return 'Approve workspace trust before sending.';
+    }
+    if (!isReady) return 'Bridge is not ready.';
+    if (selectedSessionId == null) return 'Select a session.';
+    if (leaseId == null) return 'Acquire the controller lease.';
+    if (draft.trim().isEmpty) return 'Compose a message before sending.';
+    if (pendingCommandId != null) return 'A command is already in flight.';
+    final state = selectedRuntimeState;
+    if (!_deliveryModeMatchesRuntime(selectedDeliveryMode, state)) {
+      return _deliveryModeMismatchReason(selectedDeliveryMode, state);
+    }
+    return null;
+  }
+
   WorkspaceEntry? get selectedWorkspace {
     final id = selectedWorkspaceId;
     if (id == null) return null;
@@ -198,11 +252,118 @@ final class ConnectionCoordinator extends ChangeNotifier
     return SessionPolicyMode.full;
   }
 
+  /// Selects the composer delivery mode. The selection is sticky per session
+  /// and persists with the draft so reconnecting after a host generation
+  /// reset does not silently re-arm `immediate` against a still-running turn.
+  Future<void> setSelectedDeliveryMode(DeliveryMode mode) async {
+    if (selectedDeliveryMode == mode) return;
+    selectedDeliveryMode = mode;
+    _notify();
+    await _persistDraft();
+  }
+
+  /// True when [mode] is a valid delivery choice for a session whose current
+  /// runtime [state] is reported by the host. Used by [canSend] and the UI
+  /// affordance gating.
+  static bool _deliveryModeMatchesRuntime(DeliveryMode mode, String? state) {
+    switch (mode) {
+      case DeliveryMode.immediate:
+        // Session is eligible for an immediate prompt when idle, stopped, or
+        // when the state has not yet been reported. Anything else means a
+        // turn is already in flight or has crashed and the bridge cannot
+        // dispatch directly.
+        return state == null || state == 'idle' || state == 'stopped';
+      case DeliveryMode.steer:
+      case DeliveryMode.followUp:
+        return state == 'running';
+    }
+  }
+
+  static String _deliveryModeMismatchReason(DeliveryMode mode, String? state) {
+    final shown = state ?? 'unknown';
+    switch (mode) {
+      case DeliveryMode.immediate:
+        return 'Session is $shown; switch to Steer or Queue follow-up.';
+      case DeliveryMode.steer:
+        return 'Steer is only available while the session is running.';
+      case DeliveryMode.followUp:
+        return 'Follow-ups are only available while the session is running.';
+    }
+  }
+
   List<SessionState> get sessions => List.unmodifiable(_sessions.values);
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
   List<ToolOutputNotice> get toolOutputNotices =>
       List.unmodifiable(_toolOutputNotices);
   Map<String, StreamViewState> get streams => Map.unmodifiable(_streams);
+
+  SessionHistoryState historyFor(String sessionId) =>
+      _history[sessionId] ?? SessionHistoryState.empty(sessionId);
+
+  List<StreamEventState> transcriptEvents(String sessionId) {
+    final byId = <String, StreamEventState>{};
+    for (final event
+        in _history[sessionId]?.items ?? const <StreamEventState>[]) {
+      byId[event.eventId] = event;
+    }
+    for (final event
+        in _streams['session:$sessionId']?.events ??
+            const <StreamEventState>[]) {
+      byId[event.eventId] = event;
+    }
+    final result =
+        byId.values
+            .where(
+              (event) => const <String>{
+                'turn',
+                'assistant',
+                'reasoning',
+                'tool',
+              }.contains(event.type.split('.').first),
+            )
+            .toList()
+          ..sort((a, b) => a.cursor.compareTo(b.cursor));
+    return List<StreamEventState>.unmodifiable(result);
+  }
+
+  bool hasOlderHistory(String sessionId) {
+    final state = _history[sessionId];
+    return state == null || state.hasOlder;
+  }
+
+  Future<void> loadOlderHistory(
+    String sessionId, {
+    int pageSize = kSessionHistoryPageSize,
+  }) async {
+    if (!isReady) return;
+    if (pageSize < 1 || pageSize > kSessionHistoryPageSize) {
+      throw RangeError.range(pageSize, 1, kSessionHistoryPageSize, 'pageSize');
+    }
+    final current = historyFor(sessionId);
+    if (current.isLoading || (current.items.isNotEmpty && !current.hasOlder)) {
+      return;
+    }
+    _history[sessionId] = current.copyWith(isLoading: true, error: null);
+    _notify();
+    try {
+      final requestId =
+          await _sendControl('session.history.page', <String, Object?>{
+            'sessionId': sessionId,
+            'pageSize': pageSize,
+            'pageToken': current.nextPageToken,
+          });
+      _historyRequests[requestId] = _HistoryRequest(
+        sessionId: sessionId,
+        epoch: _connectionEpoch,
+      );
+    } on Object catch (error) {
+      _history[sessionId] = current.copyWith(
+        isLoading: false,
+        error: error.toString(),
+      );
+      _notify();
+    }
+  }
 
   Future<void> initialize({bool autoConnect = true}) async {
     if (_initialized) return;
@@ -371,9 +532,12 @@ final class ConnectionCoordinator extends ChangeNotifier
     pendingCommandId = null;
     pendingPayload = null;
     pendingState = null;
+    selectedDeliveryMode = DeliveryMode.immediate;
     errorMessage = null;
     _streams.clear();
     _sessions.clear();
+    _history.clear();
+    _historyRequests.clear();
     _workspaces.clear();
     _workspaceSearch = WorkspaceSearchState.idle();
     _workspaceSearchEpoch += 1;
@@ -549,7 +713,10 @@ final class ConnectionCoordinator extends ChangeNotifier
         ? null
         : await _database.draft(hostId!, sessionId);
     if (saved == null) {
-      if (!_carryDraftAfterGeneration) draft = '';
+      if (!_carryDraftAfterGeneration) {
+        draft = '';
+        selectedDeliveryMode = DeliveryMode.immediate;
+      }
       pendingCommandId = null;
       pendingPayload = null;
       pendingState = null;
@@ -575,7 +742,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final commandId = _id();
     final payload = <String, Object?>{
       'sessionId': selectedSessionId!,
-      'deliveryMode': 'immediate',
+      'deliveryMode': deliveryModeWire(selectedDeliveryMode),
       'message': draft,
       'attachmentIds': const <String>[],
     };
@@ -696,6 +863,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         _workspaceList(payload);
       case 'workspace.search.result':
         _workspaceSearchResult(_workspaceSearchEpoch, payload);
+      case 'session.history.page.result':
+        _sessionHistoryPageResult(message, payload);
       case 'workspace.trust_state':
         await _workspaceTrustStateEvent(payload);
       case 'command.current.result':
@@ -752,8 +921,15 @@ final class ConnectionCoordinator extends ChangeNotifier
       pendingPayload = null;
       pendingState = _carryDraftAfterGeneration ? 'generation_changed' : null;
       leaseId = null;
+      // Carry the explicit composer mode with the draft; default back to
+      // immediate only when there is no draft worth carrying forward.
+      if (!_carryDraftAfterGeneration) {
+        selectedDeliveryMode = DeliveryMode.immediate;
+      }
       _streams.clear();
       _sessions.clear();
+      _history.clear();
+      _historyRequests.clear();
       _rawEvents.clear();
       _toolOutputNotices.clear();
       _forceSnapshot.add('host:$newHostId');
@@ -1056,6 +1232,65 @@ final class ConnectionCoordinator extends ChangeNotifier
     unawaited(_database.upsertSessionState(state));
   }
 
+  void _sessionHistoryPageResult(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) {
+    final requestId = message['requestId'];
+    if (requestId is! String) return;
+    final request = _historyRequests.remove(requestId);
+    if (request == null || request.epoch != _connectionEpoch) return;
+    final existing = historyFor(request.sessionId);
+    final items = payload['items'];
+    final decoded = <StreamEventState>[];
+    if (items is List) {
+      for (final raw in items.whereType<Map>()) {
+        final item = Map<String, Object?>.from(raw);
+        final eventId = item['eventId'];
+        final streamId = item['streamId'];
+        final cursor = item['cursor'];
+        final type = item['type'];
+        final eventPayload = item['payload'];
+        if (eventId is! String ||
+            streamId != 'session:${request.sessionId}' ||
+            cursor is! String ||
+            type is! String ||
+            eventPayload is! Map) {
+          continue;
+        }
+        final createdAt = item['createdAt'];
+        decoded.add(
+          StreamEventState(
+            hostId: hostId ?? '',
+            streamId: streamId as String,
+            cursor: StreamCursor.parse(cursor),
+            eventId: eventId,
+            type: type,
+            payload: Map<String, Object?>.from(eventPayload),
+            occurredAt: createdAt is int
+                ? DateTime.fromMillisecondsSinceEpoch(createdAt, isUtc: true)
+                : _now(),
+          ),
+        );
+      }
+    }
+    final merged = <String, StreamEventState>{
+      for (final event in existing.items) event.eventId: event,
+      for (final event in decoded) event.eventId: event,
+    }.values.toList()..sort((a, b) => a.cursor.compareTo(b.cursor));
+    _history[request.sessionId] = existing.copyWith(
+      items: merged,
+      snapshotRevision: payload['snapshotRevision'] is String
+          ? payload['snapshotRevision'] as String
+          : existing.snapshotRevision,
+      nextPageToken: payload['nextPageToken'] is String
+          ? payload['nextPageToken'] as String
+          : null,
+      isLoading: false,
+      error: null,
+    );
+  }
+
   void _workspaceList(Map<String, Object?> payload) {
     final items = payload['items'];
     if (items is! List) return;
@@ -1310,10 +1545,12 @@ final class ConnectionCoordinator extends ChangeNotifier
     });
   }
 
-  Future<void> _sendControl(String type, Map<String, Object?> payload) async {
+  Future<String> _sendControl(String type, Map<String, Object?> payload) async {
     final socket = _socket;
     if (socket == null || connectionId == null) throw StateError('Offline');
-    await socket.send(_envelope(type, payload, requestId: _id()));
+    final requestId = _id();
+    await socket.send(_envelope(type, payload, requestId: requestId));
+    return requestId;
   }
 
   Future<void> _sendCommand({
@@ -1388,6 +1625,7 @@ final class ConnectionCoordinator extends ChangeNotifier
           ? null
           : jsonEncode(pendingPayload),
       pendingState: pendingState,
+      selectedDeliveryMode: selectedDeliveryMode,
       updatedAt: _now(),
     );
   }
@@ -1396,6 +1634,9 @@ final class ConnectionCoordinator extends ChangeNotifier
     draft = saved.draftText;
     pendingCommandId = saved.pendingCommandId;
     pendingState = saved.pendingState;
+    selectedDeliveryMode =
+        deliveryModeFromWire(saved.selectedDeliveryMode) ??
+        DeliveryMode.immediate;
     final encoded = saved.pendingPayloadJson;
     if (encoded == null) {
       pendingPayload = null;

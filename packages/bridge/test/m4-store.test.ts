@@ -27,6 +27,30 @@ describe("M4 durable SQLite store", () => {
     store.close();
   });
 
+  test("pages a 250-event session journal newest-first with canonical order inside each page", () => {
+    const { store, sessionStream } = seeded();
+    for (let index = 1; index <= 250; index += 1) {
+      store.appendEvent(sessionStream, "assistant.delta", { index }, `event-${index}`);
+    }
+
+    const first = store.pageSessionEvents("session", 100);
+    expect(first.snapshotRevision).toBe("250");
+    expect(first.items).toHaveLength(100);
+    expect(first.items.map((event) => event.cursor)).toEqual(Array.from({ length: 100 }, (_, index) => String(index + 151)));
+    expect(first.items.map((event) => event.eventId)).toEqual(Array.from({ length: 100 }, (_, index) => `event-${index + 151}`));
+    expect(first.nextBeforeCursor).toBe("151");
+
+    const second = store.pageSessionEvents("session", 100, first.nextBeforeCursor);
+    expect(second.items.map((event) => event.cursor)).toEqual(Array.from({ length: 100 }, (_, index) => String(index + 51)));
+    expect(second.nextBeforeCursor).toBe("51");
+
+    const third = store.pageSessionEvents("session", 100, second.nextBeforeCursor);
+    expect(third.items.map((event) => event.cursor)).toEqual(Array.from({ length: 50 }, (_, index) => String(index + 1)));
+    expect(third.nextBeforeCursor).toBeUndefined();
+    expect(() => store.pageSessionEvents("missing", 100)).toThrow("session not found");
+    store.close();
+  });
+
   test("accepts command and event atomically, deduplicates, conflicts, and fails closed", () => {
     const { store, sessionStream } = seeded();
     const input = { commandId: "command", type: "prompt.submit", scopeKey: sessionStream, streamId: sessionStream, semanticHash: "hash", payload: { sessionId: "session", message: "safe" } };

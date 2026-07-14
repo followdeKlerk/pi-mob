@@ -1,7 +1,10 @@
-import 'package:drift/drift.dart' hide isNull;
+import 'package:drift/drift.dart' hide isNull, isNotNull;
 import 'package:drift/native.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/data/app_database.dart';
+import 'package:pi_mob/src/domain/mobile_state.dart';
+
+const hostId = '11111111-1111-4111-8111-111111111111';
 
 void main() {
   late AppDatabase db;
@@ -112,4 +115,67 @@ void main() {
       );
     },
   );
+
+  test('saveDraft roundtrips the selected delivery mode per session', () async {
+    const idleSession = '22222222-2222-4222-8222-222222222222';
+    const runningSession = '33333333-3333-4333-8333-333333333333';
+    const otherSession = '44444444-4444-4444-8444-444444444444';
+
+    // Default is implicit `immediate`; absence is a valid persisted state for
+    // older clients and must not block newer writes.
+    await db.saveDraft(
+      hostId: hostId,
+      sessionId: idleSession,
+      text: 'send now',
+      pendingCommandId: null,
+      pendingPayloadJson: null,
+      pendingState: null,
+      updatedAt: now,
+    );
+    final defaults = await db.draft(hostId, idleSession);
+    expect(defaults, isNotNull);
+    expect(defaults!.selectedDeliveryMode, isNull);
+
+    // Explicit steer / follow_up persist using the protocol wire names so
+    // older readers still see a valid token.
+    await db.saveDraft(
+      hostId: hostId,
+      sessionId: runningSession,
+      text: 'redirect',
+      pendingCommandId: null,
+      pendingPayloadJson: null,
+      pendingState: null,
+      updatedAt: now,
+      selectedDeliveryMode: DeliveryMode.steer,
+    );
+    await db.saveDraft(
+      hostId: hostId,
+      sessionId: otherSession,
+      text: 'queue this',
+      pendingCommandId: null,
+      pendingPayloadJson: null,
+      pendingState: null,
+      updatedAt: now,
+      selectedDeliveryMode: DeliveryMode.followUp,
+    );
+
+    final steered = await db.draft(hostId, runningSession);
+    final queued = await db.draft(hostId, otherSession);
+    expect(steered!.selectedDeliveryMode, 'steer');
+    expect(queued!.selectedDeliveryMode, 'follow_up');
+
+    // Switching mode on the same row overwrites the prior value.
+    await db.saveDraft(
+      hostId: hostId,
+      sessionId: otherSession,
+      text: 'queue this',
+      pendingCommandId: null,
+      pendingPayloadJson: null,
+      pendingState: null,
+      updatedAt: now.add(const Duration(seconds: 1)),
+      selectedDeliveryMode: DeliveryMode.immediate,
+    );
+    final cleared = await db.draft(hostId, otherSession);
+    expect(cleared!.selectedDeliveryMode, 'immediate');
+  });
 }

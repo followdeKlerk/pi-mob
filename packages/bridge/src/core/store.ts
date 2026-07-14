@@ -9,6 +9,7 @@ export class StoreError extends Error {
 }
 
 export interface StoredEvent { readonly eventId: string; readonly streamId: string; readonly cursor: string; readonly type: string; readonly payload: Record<string, unknown>; readonly createdAt: number; }
+export interface StoredEventPage { readonly items: readonly StoredEvent[]; readonly snapshotRevision: string; readonly nextBeforeCursor?: string; }
 export interface StoredCommand { readonly commandId: string; readonly type: string; readonly scopeKey: string; readonly streamId: string; readonly semanticHash: string; readonly payload: Record<string, unknown>; readonly state: string; readonly dispatchCount: number; }
 export type AcceptCommandResult = { readonly kind: "accepted" | "duplicate"; readonly command: StoredCommand; readonly event?: StoredEvent } | { readonly kind: "conflict" };
 export interface LeaseRecord { readonly scopeKey: string; readonly leaseId: string; readonly installationId: string; readonly connectionId: string; readonly expiresAt: number; readonly reclaimableUntil: number | null; readonly disconnectedAt: number | null; readonly revokedAt: number | null; }
@@ -213,6 +214,31 @@ export class BridgeStore {
     canonicalCursor(after); if (through) canonicalCursor(through);
     const rows = this.db.query(`SELECT event_id eventId,stream_id streamId,cursor,type,payload_json payload,created_at createdAt FROM events WHERE stream_id=? AND (length(cursor)>length(?) OR (length(cursor)=length(?) AND cursor>?)) ${through ? "AND (length(cursor)<length(?) OR (length(cursor)=length(?) AND cursor<=?))" : ""} ORDER BY length(cursor),cursor`).all(...(through ? [streamId, after, after, after, through, through, through] : [streamId, after, after, after])) as Array<{ eventId: string; streamId: string; cursor: string; type: string; payload: string; createdAt: number }>;
     return rows.map((row) => ({ ...row, payload: parseObject(row.payload) }));
+  }
+  pageSessionEvents(sessionId: string, pageSize: number, beforeCursor?: string): StoredEventPage {
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new StoreError("conflict", "page size must be an integer from 1 through 100");
+    if (beforeCursor !== undefined) canonicalCursor(beforeCursor);
+    return this.transaction(() => {
+      if (!this.sessionExists(sessionId)) throw new StoreError("not_found", "session not found");
+      const streamId = `session:${sessionId}`;
+      const position = this.streamPosition(streamId);
+      if (!position) throw new StoreError("not_found", "session stream not found");
+      const before = beforeCursor === undefined
+        ? ""
+        : "AND (length(cursor)<length(?) OR (length(cursor)=length(?) AND cursor<?))";
+      const parameters: Array<string | number> = beforeCursor === undefined
+        ? [streamId, pageSize + 1]
+        : [streamId, beforeCursor, beforeCursor, beforeCursor, pageSize + 1];
+      const rows = this.db.query(`SELECT event_id eventId,stream_id streamId,cursor,type,payload_json payload,created_at createdAt FROM events WHERE stream_id=? ${before} ORDER BY length(cursor) DESC,cursor DESC LIMIT ?`).all(...parameters) as Array<{ eventId: string; streamId: string; cursor: string; type: string; payload: string; createdAt: number }>;
+      const hasMore = rows.length > pageSize;
+      const newestFirst = hasMore ? rows.slice(0, pageSize) : rows;
+      const items = newestFirst.reverse().map((row) => ({ ...row, payload: parseObject(row.payload) }));
+      return {
+        items,
+        snapshotRevision: position.current,
+        ...(hasMore ? { nextBeforeCursor: items[0]!.cursor } : {}),
+      };
+    });
   }
   readReplay(streamId: string, after: string): { current: string; floor: string; events: StoredEvent[] } {
     return this.transaction(() => {

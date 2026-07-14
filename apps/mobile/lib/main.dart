@@ -8,6 +8,7 @@ import 'src/data/app_database.dart';
 import 'src/domain/mobile_state.dart';
 import 'src/pairing/pairing_payload.dart';
 import 'src/pairing/pairing_screen.dart';
+import 'src/transcript/widgets/transcript_view.dart';
 import 'src/workspaces/workspace_picker.dart';
 
 Future<void> main() async {
@@ -174,7 +175,7 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
     final colors = Theme.of(context).colorScheme;
     return Scaffold(
       appBar: AppBar(
-        title: const Text('pi-mob M7 diagnostic'),
+        title: const Text('pi-mob'),
         actions: [
           IconButton(
             key: const Key('forget-host-button'),
@@ -208,7 +209,7 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
               const SizedBox(height: 8),
               _WorkspaceSessionPanel(coordinator: coordinator),
               const SizedBox(height: 8),
-              Expanded(child: _EventPanel(coordinator: coordinator)),
+              Expanded(child: _TranscriptPanel(coordinator: coordinator)),
               const SizedBox(height: 8),
               _Composer(
                 coordinator: coordinator,
@@ -671,67 +672,44 @@ class _PolicyModeRow extends StatelessWidget {
   }
 }
 
-class _EventPanel extends StatelessWidget {
-  const _EventPanel({required this.coordinator});
+class _TranscriptPanel extends StatelessWidget {
+  const _TranscriptPanel({required this.coordinator});
 
   final ConnectionCoordinator coordinator;
 
   @override
   Widget build(BuildContext context) {
-    final events = coordinator.rawEvents;
-    final notices = coordinator.toolOutputNotices;
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-            child: Text(
-              'Raw protocol events (${events.length})',
-              style: Theme.of(context).textTheme.titleMedium,
+    final sessionId = coordinator.selectedSessionId;
+    if (sessionId == null) {
+      return const Card(child: Center(child: Text('No events received')));
+    }
+    final streamId = 'session:$sessionId';
+    final truncated = coordinator.toolOutputNotices.where(
+      (item) => item.isTruncated,
+    );
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        for (final notice in truncated)
+          ListTile(
+            key: Key('tool-output-${notice.toolCallId}'),
+            leading: const Icon(Icons.content_cut),
+            title: const Text('Tool output truncated'),
+            subtitle: Text(
+              '${notice.retainedBytes} of ${notice.totalBytes} bytes retained'
+              '${notice.digest == null ? '' : '\nSHA-256 ${notice.digest}'}',
             ),
           ),
-          if (notices.any((notice) => notice.isTruncated)) ...[
-            const Divider(height: 1),
-            for (final notice in notices.where((notice) => notice.isTruncated))
-              ListTile(
-                key: Key('tool-output-${notice.toolCallId}'),
-                leading: const Icon(Icons.content_cut),
-                title: const Text('Tool output truncated'),
-                subtitle: Text(
-                  '${notice.retainedBytes} of ${notice.totalBytes} bytes retained'
-                  '${notice.digest == null ? '' : '\nSHA-256 ${notice.digest}'}',
-                ),
-              ),
-          ],
-          const Divider(height: 1),
-          Expanded(
-            child: events.isEmpty
-                ? const Center(child: Text('No events received'))
-                : ListView.separated(
-                    key: const Key('raw-event-list'),
-                    reverse: true,
-                    itemCount: events.length,
-                    separatorBuilder: (_, _) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final event = events[events.length - index - 1];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 12,
-                          vertical: 7,
-                        ),
-                        child: SelectableText(
-                          event,
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(fontFamily: 'monospace'),
-                        ),
-                      );
-                    },
-                  ),
+        Expanded(
+          child: TranscriptEventView(
+            key: ValueKey(streamId),
+            streamId: streamId,
+            events: coordinator.transcriptEvents(sessionId),
+            hasOlder: coordinator.hasOlderHistory(sessionId),
+            onLoadOlder: () => coordinator.loadOlderHistory(sessionId),
           ),
-        ],
-      ),
+        ),
+      ],
     );
   }
 }
@@ -764,6 +742,41 @@ class _Composer extends StatelessWidget {
               ),
               const SizedBox(height: 8),
             ],
+            if (coordinator.selectedRuntimeState == 'running') ...[
+              Text(
+                'Choose how to deliver while Pi is working',
+                style: Theme.of(context).textTheme.labelLarge,
+              ),
+              const SizedBox(height: 6),
+              SegmentedButton<DeliveryMode>(
+                key: const Key('delivery-mode-selector'),
+                segments: const [
+                  ButtonSegment(
+                    value: DeliveryMode.steer,
+                    label: Text('Steer'),
+                  ),
+                  ButtonSegment(
+                    value: DeliveryMode.followUp,
+                    label: Text('Follow up'),
+                  ),
+                ],
+                emptySelectionAllowed: true,
+                selected:
+                    coordinator.selectedDeliveryMode == DeliveryMode.immediate
+                    ? const <DeliveryMode>{}
+                    : <DeliveryMode>{coordinator.selectedDeliveryMode},
+                onSelectionChanged: (selection) {
+                  unawaited(
+                    coordinator.setSelectedDeliveryMode(
+                      selection.isEmpty
+                          ? DeliveryMode.immediate
+                          : selection.first,
+                    ),
+                  );
+                },
+              ),
+              const SizedBox(height: 8),
+            ],
             TextField(
               key: const Key('draft-field'),
               controller: draftController,
@@ -774,6 +787,22 @@ class _Composer extends StatelessWidget {
                 border: OutlineInputBorder(),
               ),
               onChanged: (value) => unawaited(coordinator.updateDraft(value)),
+            ),
+            if (!coordinator.canSend &&
+                coordinator.composerDisabledReason != null) ...[
+              const SizedBox(height: 6),
+              Text(
+                coordinator.composerDisabledReason!,
+                key: const Key('composer-disabled-reason'),
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+            Semantics(
+              liveRegion: true,
+              label: coordinator.pendingCommandId == null
+                  ? 'Composer ready'
+                  : 'Prompt ${coordinator.pendingState ?? 'pending'}',
+              child: const SizedBox.shrink(),
             ),
             const SizedBox(height: 8),
             Row(
@@ -798,11 +827,15 @@ class _Composer extends StatelessWidget {
                   const SizedBox(width: 8),
                 ] else
                   const Spacer(),
-                OutlinedButton.icon(
-                  key: const Key('abort-button'),
-                  onPressed: coordinator.canAbort ? coordinator.abort : null,
-                  icon: const Icon(Icons.stop),
-                  label: const Text('Abort'),
+                Semantics(
+                  button: true,
+                  label: 'Abort active Pi turn',
+                  child: OutlinedButton.icon(
+                    key: const Key('abort-button'),
+                    onPressed: coordinator.canAbort ? coordinator.abort : null,
+                    icon: const Icon(Icons.stop),
+                    label: const Text('Abort'),
+                  ),
                 ),
                 const SizedBox(width: 8),
                 FilledButton.icon(
@@ -811,7 +844,11 @@ class _Composer extends StatelessWidget {
                       ? coordinator.submitPrompt
                       : null,
                   icon: const Icon(Icons.send),
-                  label: Text(coordinator.isReady ? 'Send' : 'Send (offline)'),
+                  label: Text(
+                    !coordinator.isReady
+                        ? 'Send (offline)'
+                        : deliveryModeLabel(coordinator.selectedDeliveryMode),
+                  ),
                 ),
               ],
             ),

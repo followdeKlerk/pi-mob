@@ -59,13 +59,13 @@ void main() {
       await tester.pumpWidget(PiMobApp(coordinator: coordinator));
       await tester.pump();
 
-      expect(find.text('pi-mob M7 diagnostic'), findsOneWidget);
+      expect(find.text('pi-mob'), findsOneWidget);
       expect(find.byKey(const Key('endpoint-field')), findsOneWidget);
       expect(find.textContaining('Bridge: m5'), findsOneWidget);
       expect(find.textContaining('Pi: 0.80.6'), findsOneWidget);
       expect(find.textContaining('Protocol: 1.0'), findsOneWidget);
       expect(find.byKey(const Key('raw-event-list')), findsNothing);
-      expect(find.text('No events received'), findsOneWidget);
+      expect(find.text('Transcript'), findsOneWidget);
 
       final draft = tester.widget<TextField>(
         find.byKey(const Key('draft-field')),

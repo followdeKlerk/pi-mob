@@ -198,7 +198,7 @@ const ResponsePayloads = {
   "command.receipt": Type.Object({ state: Type.String({ minLength: 1 }), duplicate: Type.Boolean() }, { additionalProperties: true }),
   "command.current.result": Type.Object({ commandId: Uuid, state: Type.String() }, { additionalProperties: true }),
   "session.list.result": Type.Object({ items: Type.Array(Payload), snapshotRevision: Type.String(), nextPageToken: Type.Optional(Type.String()) }, { additionalProperties: true }),
-  "session.history.page.result": Type.Object({ items: Type.Array(Payload), nextPageToken: Type.Optional(Type.String()) }, { additionalProperties: true }),
+  "session.history.page.result": Type.Object({ items: Type.Array(Payload), snapshotRevision: Type.String(), nextPageToken: Type.Optional(Type.String()) }, { additionalProperties: true }),
   "workspace.list.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }), "workspace.search.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }), "model.list.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }),
 } as const;
 

@@ -128,8 +128,43 @@ final class DraftState {
   final String sessionId;
   final String text;
   final List<String> localAttachmentRefs;
-  final String? selectedDeliveryMode;
+  final DeliveryMode? selectedDeliveryMode;
   final DateTime updatedAt;
+}
+
+/// Delivery mode the composer submits with. Mirrors the protocol's
+/// `deliveryMode` field on `prompt.submit`. Selection is sticky per session
+/// and persists with the draft so a user can queue follow-ups, switch to
+/// steer, and reconnect without losing the chosen mode.
+enum DeliveryMode { immediate, steer, followUp }
+
+String deliveryModeWire(DeliveryMode mode) => switch (mode) {
+  DeliveryMode.immediate => 'immediate',
+  DeliveryMode.steer => 'steer',
+  DeliveryMode.followUp => 'follow_up',
+};
+
+String deliveryModeLabel(DeliveryMode mode) => switch (mode) {
+  DeliveryMode.immediate => 'Send now',
+  DeliveryMode.steer => 'Steer',
+  DeliveryMode.followUp => 'Queue follow-up',
+};
+
+/// Returns the [DeliveryMode] for a wire string, or `null` for unknown /
+/// empty values. Tolerant of host additions: future modes fall through to
+/// `null` so the UI can default back to immediate without crashing.
+DeliveryMode? deliveryModeFromWire(Object? value) {
+  if (value is! String) return null;
+  switch (value) {
+    case 'immediate':
+      return DeliveryMode.immediate;
+    case 'steer':
+      return DeliveryMode.steer;
+    case 'follow_up':
+      return DeliveryMode.followUp;
+    default:
+      return null;
+  }
 }
 
 final class ToolOutputNotice {
@@ -361,6 +396,78 @@ final class StreamSnapshot {
   final String streamId;
   final StreamCursor baselineCursor;
   final List<Map<String, Object?>> items;
+}
+
+/// Default page size requested by mobile for `session.history.page`. Mirrors
+/// `LIMITS.maxSessionPageSize` from the protocol schema; the host may also
+/// enforce smaller pages but never larger.
+const int kSessionHistoryPageSize = 100;
+
+const Object _sentinel = Object();
+
+/// Per-session history buffer populated from `session.history.page` responses.
+///
+/// History items predate the live stream's sync baseline: they are merged
+/// with the live `_streams['session:<id>'].events` only at the view layer
+/// (see [ConnectionCoordinator.transcriptEvents]) so the canonical
+/// cursor-ordered reducer that owns the live stream view is never bypassed.
+///
+/// Stored events are deduplicated by `eventId` and kept in ascending cursor
+/// order across all fetched pages. The coordinator tracks [snapshotRevision]
+/// so the UI can react to concurrent host changes (per
+/// `docs/PROTOCOL.md §16`). The [nextPageToken] is opaque; mobile never
+/// reads or reconstructs it, only echoes it back.
+final class SessionHistoryState {
+  SessionHistoryState({
+    required this.sessionId,
+    required Iterable<StreamEventState> items,
+    required this.snapshotRevision,
+    required this.nextPageToken,
+    required this.isLoading,
+    required this.error,
+  }) : items = List<StreamEventState>.unmodifiable(items);
+
+  factory SessionHistoryState.empty(String sessionId) => SessionHistoryState(
+    sessionId: sessionId,
+    items: const <StreamEventState>[],
+    snapshotRevision: null,
+    nextPageToken: null,
+    isLoading: false,
+    error: null,
+  );
+
+  final String sessionId;
+  final List<StreamEventState> items;
+  final String? snapshotRevision;
+  final String? nextPageToken;
+  final bool isLoading;
+
+  /// Last transient error string, or `null` if the last fetch succeeded.
+  /// Loaded pages preserve prior items even when a follow-up page errors.
+  final String? error;
+
+  /// True while older pages remain available on the host. The UI binds this
+  /// to the "Load older history" affordance.
+  bool get hasOlder => nextPageToken != null;
+
+  SessionHistoryState copyWith({
+    List<StreamEventState>? items,
+    Object? snapshotRevision = _sentinel,
+    Object? nextPageToken = _sentinel,
+    bool? isLoading,
+    Object? error = _sentinel,
+  }) => SessionHistoryState(
+    sessionId: sessionId,
+    items: items ?? this.items,
+    snapshotRevision: identical(snapshotRevision, _sentinel)
+        ? this.snapshotRevision
+        : snapshotRevision as String?,
+    nextPageToken: identical(nextPageToken, _sentinel)
+        ? this.nextPageToken
+        : nextPageToken as String?,
+    isLoading: isLoading ?? this.isLoading,
+    error: identical(error, _sentinel) ? this.error : error as String?,
+  );
 }
 
 Map<String, Object?> immutableJsonObject(Map<String, Object?> source) =>

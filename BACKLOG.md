@@ -430,16 +430,16 @@ Approve a new repository, run Full mode, switch to Read-only, and observe host-s
 
 ## Tasks
 
-- [ ] **M9-01 P1 L** Implement stable turn/item transcript domain model.
-- [ ] **M9-02 P1 M** Implement reasoning active/completed/absent states.
-- [ ] **M9-03 P1 L** Implement read/bash/edit/write/grep/find/ls tool cards.
-- [ ] **M9-04 P1 M** Implement parallel tool grouping and unknown generic tools.
-- [ ] **M9-05 P1 M** Implement tool errors/cancellation/truncation/large-output viewer.
-- [ ] **M9-06 P1 M** Implement Markdown final answer and safe selection/copy/link behaviour.
-- [ ] **M9-07 P1 M** Implement history paging, stable keys, anchor preservation, jump-to-latest.
-- [ ] **M9-08 P0 M** Isolate active streaming paint and profile 1,000 items.
-- [ ] **M9-09 P1 M** Implement multiline draft, accepted/error restoration, idle send, explicit steer/follow-up, observer/read-only/offline states.
-- [ ] **M9-10 P1 S** Implement accessible abort and significant-state announcements.
+- [x] **M9-01 P1 L** Implement stable turn/item transcript domain model.
+- [x] **M9-02 P1 M** Implement reasoning active/completed/absent states.
+- [x] **M9-03 P1 L** Implement read/bash/edit/write/grep/find/ls tool cards.
+- [x] **M9-04 P1 M** Implement parallel tool grouping and unknown generic tools.
+- [x] **M9-05 P1 M** Implement tool errors/cancellation/truncation/large-output viewer.
+- [x] **M9-06 P1 M** Implement Markdown final answer and safe selection/copy/link behaviour.
+- [x] **M9-07 P1 M** Implement history paging, stable keys, anchor preservation, jump-to-latest.
+- [x] **M9-08 P0 M** Isolate active streaming paint and profile 1,000 items.
+- [x] **M9-09 P1 M** Implement multiline draft, accepted/error restoration, idle send, explicit steer/follow-up, observer/read-only/offline states.
+- [x] **M9-10 P1 S** Implement accessible abort and significant-state announcements.
 
 ## Checkpoint demo
 
@@ -447,13 +447,13 @@ A long real session streams reasoning and parallel tools, truncates huge output,
 
 ## Exit criteria
 
-- [ ] Real built-in tools render correctly.
-- [ ] Maximum output does not freeze UI.
-- [ ] Long-session performance target passes.
-- [ ] Text scale/reduced-motion baseline passes.
-- [ ] Unaccepted draft is never lost.
+- [x] Real built-in tools render correctly.
+- [x] Maximum output does not freeze UI.
+- [x] Long-session performance target passes.
+- [x] Text scale/reduced-motion baseline passes.
+- [x] Unaccepted draft is never lost.
 
-**Evidence:** profile traces, goldens, device demo.
+**Evidence:** [`M9-SUMMARY.md`](M9-SUMMARY.md) and [`docs/evidence/m9-transcript-profile-report.json`](docs/evidence/m9-transcript-profile-report.json).
 
 ---
 

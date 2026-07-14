@@ -46,6 +46,18 @@ test("validates fixture labels against compiled TypeBox validators", () => {
   expect(validateFixture({ name: "bad", kind: "event", valid: false, message: { cursor: 4 } })).toBe(true);
 });
 
+test("requires a history snapshot revision while preserving additive response fields", () => {
+  const base = {
+    protocol: { major: 1, minor: 0 },
+    messageId: "11111111-1111-4111-8111-111111111111",
+    requestId: "22222222-2222-4222-8222-222222222222",
+    type: "session.history.page.result",
+    sentAt: "2026-07-12T00:00:00.000Z",
+  };
+  expect(validateFixture({ name: "history", kind: "response", valid: true, message: { ...base, payload: { items: [], snapshotRevision: "7", futureField: true } } })).toBe(true);
+  expect(validateFixture({ name: "history-missing-revision", kind: "response", valid: false, message: { ...base, payload: { items: [] } } })).toBe(true);
+});
+
 test("accepts only explicitly optional additive unknown events", () => {
   const base = { protocol: { major: 1, minor: 0 }, messageId: "11111111-1111-4111-8111-111111111111", eventId: "22222222-2222-4222-8222-222222222222", sentAt: "2026-07-12T00:00:00.000Z", streamId: "session:33333333-3333-4333-8333-333333333333", cursor: "1", type: "future.event" };
   expect(validateFixture({ name: "optional", kind: "event", valid: true, message: { ...base, payload: { optional: true } } })).toBe(true);
