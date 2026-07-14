@@ -535,6 +535,15 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       : type === "controller.release"
       ? { action: "release", scopeKey, installationId: connection.installationId, connectionId: connection.connectionId }
       : undefined;
+    if (!this.options.store.command(commandId)) {
+      try { this.options.adapter.validateCommand?.(type, payload); }
+      catch (error) {
+        if ((error as Error).message === "attachment_unavailable") {
+          throw new RuntimeProtocolError("attachment_unavailable", "one or more attachments are unavailable");
+        }
+        throw error;
+      }
+    }
     let submission;
     try { submission = this.commands.submit({ commandId, type, payload, scopeKey, streamId, ...(leaseMutation ? { leaseMutation } : {}) }); }
     catch (error) {
@@ -542,6 +551,8 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       if (error instanceof StoreError && error.code === "conflict" && type === "controller.release") throw new RuntimeProtocolError("stale_controller", "controller release is not authorized");
       throw error;
     }
+
+    if (!submission.receipt.duplicate) this.options.adapter.commandAccepted?.(type, payload);
 
     // Mutate host policy only after lease validation and durable command
     // acceptance. A stale observer or conflicting command must have no side

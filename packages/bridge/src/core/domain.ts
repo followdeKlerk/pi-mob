@@ -11,6 +11,10 @@ export interface AdapterPort {
   listWorkspaces?(): { readonly items: ReadonlyArray<Record<string, unknown>> };
   listModels?(sessionId?: string): { readonly items: ReadonlyArray<Record<string, unknown>> };
   admission?(): { readonly accepting: boolean; readonly reason?: string };
+  /** Reject invalid external references before durable command acceptance. */
+  validateCommand?(type: string, payload: Record<string, unknown>): void;
+  /** Non-throwing post-acceptance retention hook. */
+  commandAccepted?(type: string, payload: Record<string, unknown>): void;
 }
 export class IndeterminateDispatchError extends Error {
   override readonly name = "IndeterminateDispatchError";

@@ -74,12 +74,12 @@ A task is Done when:
 | M6 | Failure recovery and process supervision | M5 | DONE |
 | M7 | macOS install, Serve pairing, and doctor | M6 | DONE |
 | M8 | Workspaces, trust, and read-only policy | M7 | DONE |
-| M9 | Production transcript, tools, and composer | M8 | READY |
-| M10 | Models, context, retry, compaction, and commands | M9 | PLANNED |
-| M11 | Multi-session control and controller leases | M10 | PLANNED |
-| M12 | Session tree, fork, clone, delete, and restore | M11 | PLANNED |
-| M13 | Attachments, export, and OS sharing | M12 | PLANNED |
-| M14 | Extension UI and durable follow-up queue | M13 | PLANNED |
+| M9 | Production transcript, tools, and composer | M8 | DONE |
+| M10 | Models, context, retry, compaction, and commands | M9 | DONE |
+| M11 | Multi-session control and controller leases | M10 | DONE |
+| M12 | Session tree, fork, clone, delete, and restore | M11 | DONE |
+| M13 | Attachments, export, and OS sharing | M12 | DONE |
+| M14 | Extension UI and durable follow-up queue | M13 | READY |
 | M15 | Notifications and background experience | M14 | PLANNED |
 | M16 | Accessibility, performance, privacy, and operations hardening | M15 | PLANNED |
 | M17 | Signed personal MVP release candidate | M16 | PLANNED |
@@ -565,15 +565,15 @@ Name, inspect tree, fork, clone, soft-delete, restore, and exercise extension ca
 
 ## Tasks
 
-- [ ] **M13-01 P1 M** Mobile JPEG/PNG picker, metadata strip, resize, count/byte validation.
-- [ ] **M13-02 P0 L** Multipart streaming upload, client upload idempotency, random private storage.
-- [ ] **M13-03 P0 M** Magic/decode/dimension/digest/malformed/decompression limits.
-- [ ] **M13-04 P0 M** Prompt attachment availability/reference/queue retention/cleanup.
-- [ ] **M13-05 P0 M** Pi image mapping only at dispatch boundary.
-- [ ] **M13-06 P1 M** Host-side Pi HTML export and opaque export ID.
-- [ ] **M13-07 P1 M** Private bounded download/expiry/content-disposition.
-- [ ] **M13-08 P1 M** Mobile progress/download/OS share and privacy warning.
-- [ ] **M13-09 P0 S** Prove no public URL generation.
+- [x] **M13-01 P1 M** Mobile JPEG/PNG picker, metadata strip, resize, count/byte validation.
+- [x] **M13-02 P0 L** Multipart streaming upload, client upload idempotency, random private storage.
+- [x] **M13-03 P0 M** Magic/decode/dimension/digest/malformed/decompression limits.
+- [x] **M13-04 P0 M** Prompt attachment availability/reference/queue retention/cleanup.
+- [x] **M13-05 P0 M** Pi image mapping only at dispatch boundary.
+- [x] **M13-06 P1 M** Host-side Pi HTML export and opaque export ID.
+- [x] **M13-07 P1 M** Private bounded download/expiry/content-disposition.
+- [x] **M13-08 P1 M** Mobile progress/download/OS share and privacy warning.
+- [x] **M13-09 P0 S** Prove no public URL generation.
 
 ## Checkpoint demo
 
@@ -581,11 +581,11 @@ Retry an image upload, complete image prompt, expire an orphan, export HTML, and
 
 ## Exit criteria
 
-- [ ] Malformed/oversized image fixtures reject safely.
-- [ ] Retry does not duplicate storage.
-- [ ] Queue-retained attachment survives.
-- [ ] Expired IDs are unavailable/cleaned.
-- [ ] Sharing is explicit.
+- [x] Malformed/oversized image fixtures reject safely.
+- [x] Retry does not duplicate storage.
+- [x] Queue-retained attachment survives.
+- [x] Expired IDs are unavailable/cleaned.
+- [x] Sharing is explicit.
 
 **Evidence:** attachment security suite and device share demo.
 

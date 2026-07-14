@@ -6,6 +6,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
 import 'package:pi_mob/src/data/app_database.dart';
+import 'package:pi_mob/src/domain/attachments.dart';
 import 'package:pi_mob/src/domain/mobile_state.dart';
 import 'package:pi_mob/src/domain/session_tree.dart';
 
@@ -882,6 +883,38 @@ void main() {
       containsPair('message', 'Edit me but do not run tools'),
     );
   });
+
+  test(
+    'M13 ready attachment IDs persist and enter prompt only on explicit send',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final ref = AttachmentRef(
+        id: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        kind: AttachmentKind.imagePng,
+        filename: 'clean.png',
+        sizeBytes: 128,
+        mimeType: 'image/png',
+        status: AttachmentStatus.ready,
+        createdAt: DateTime.utc(2026, 7, 13),
+        expiresAt: DateTime.utc(2026, 7, 14),
+        width: 1,
+        height: 1,
+      );
+      await coordinator.addDraftAttachment(ref);
+      expect(
+        socket.sent.where((message) => message['type'] == 'prompt.submit'),
+        isEmpty,
+      );
+      await coordinator.updateDraft('inspect image');
+      await coordinator.submitPrompt();
+      final prompt = socket.sent.lastWhere(
+        (message) => message['type'] == 'prompt.submit',
+      );
+      expect(prompt['payload'], containsPair('attachmentIds', [ref.id]));
+      expect(coordinator.draftAttachments.single.id, ref.id);
+    },
+  );
 
   test(
     'M12 lifecycle commands preserve drafts and require explicit purge confirmation',

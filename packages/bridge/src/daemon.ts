@@ -29,6 +29,9 @@ import { OneSessionPiAdapter, type OneSessionPolicyBridge, type OneSessionWorksp
 import { BridgeStore } from "./core/store";
 import { DurableBridgeRuntime, type RuntimePolicyHandler } from "./core/runtime";
 import { createBridgeServer, type BridgeServer } from "./core/server";
+import { AttachmentStore } from "./core/attachments";
+import { createBinaryHttpHandler } from "./core/binary-http";
+import { ExportRegistry } from "./pi/export-registry";
 import { createRedactingLogger, type RedactingLogger } from "./logger";
 import { parseInstallConfig } from "./ops/install-config";
 import {
@@ -246,7 +249,14 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     availableSince: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
   };
-  const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge });
+  const attachments = new AttachmentStore({ root: join(stateDir, "attachments") });
+  attachments.sweep();
+  const attachmentSweepTimer = setInterval(() => {
+    try { attachments.sweep(); } catch { /* push/Pi service must outlive cleanup failure */ }
+  }, 15 * 60_000);
+  attachmentSweepTimer.unref();
+  const exports = new ExportRegistry({ rootDir: join(stateDir, "exports") });
+  const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports });
   const runtime = new DurableBridgeRuntime({
     store,
     adapter,
@@ -258,7 +268,12 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   });
   await runtime.start();
 
-  const server = createBridgeServer({ hostname: "127.0.0.1", port: options.port ?? 0, runtime });
+  const server = createBridgeServer({
+    hostname: "127.0.0.1",
+    port: options.port ?? 0,
+    runtime,
+    httpHandler: createBinaryHttpHandler({ attachments, exports: adapter }),
+  });
 
   return {
     server, runtime, adapter, rpc, store, workspace: config,
@@ -272,10 +287,13 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       }
     },
     async close() {
+      clearInterval(attachmentSweepTimer);
+      try { attachments.sweep(); } catch { /* best effort */ }
       try { await rpc.drain(); } catch { /* best-effort drain event */ }
       adapter.close();
       try { server.stop(true); } catch { /* ignore */ }
       try { await rpc.close(); } catch { /* ignore */ }
+      attachments.close();
       store.close();
     },
   };

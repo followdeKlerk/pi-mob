@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../protocol_fixture.dart';
 import '../data/app_database.dart' hide StreamCursor;
+import '../domain/attachments.dart';
 import '../domain/controller_lease.dart';
 import '../domain/mobile_state.dart';
 import '../domain/session_controls.dart';
@@ -132,6 +133,11 @@ final class ConnectionCoordinator extends ChangeNotifier
   // switch and is preserved across takeover/release transitions.
   final Map<String, String> _draftBySession = {};
   final Map<String, DeliveryMode> _deliveryModeBySession = {};
+  // M13 — draft attachment references per session. The on-disk source of
+  // truth is `local_attachments`; this in-memory mirror is what the prompt
+  // submit path and the UI affordances read. Mirroring here means a fast
+  // session switch never shows the wrong attachment list.
+  final Map<String, List<AttachmentRef>> _attachmentsBySession = {};
   final SessionTreeProjection _sessionTree = SessionTreeProjection();
 
   BridgeSocket? _socket;
@@ -854,12 +860,20 @@ final class ConnectionCoordinator extends ChangeNotifier
       pendingCommandId = null;
       pendingPayload = null;
       pendingState = null;
+      // No saved draft for this host/session pair; clear any stale
+      // in-memory attachment list so the next composer edit starts clean.
+      _attachmentsBySession.remove(sessionId);
       if (_carryDraftAfterGeneration) {
         _carryDraftAfterGeneration = false;
         await _persistDraft();
       }
     } else {
       _restoreDraft(saved);
+      final stored = await _database.localAttachmentsFor(
+        hostId: hostId!,
+        sessionId: sessionId,
+      );
+      _attachmentsBySession[sessionId] = List<AttachmentRef>.of(stored);
     }
     _notify();
     if (_socket != null && connectionId != null) await _subscribe();
@@ -878,7 +892,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       'sessionId': selectedSessionId!,
       'deliveryMode': deliveryModeWire(selectedDeliveryMode),
       'message': draft,
-      'attachmentIds': const <String>[],
+      'attachmentIds': _activeReadyAttachmentIds(),
     };
 
     // Durability barrier: this exact semantic payload is committed before send.
@@ -1855,6 +1869,23 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> _persistDraft() async {
     if (hostId == null || selectedSessionId == null) return;
+    final attachments =
+        _attachmentsBySession[selectedSessionId] ?? const <AttachmentRef>[];
+    // Persist the in-memory attachment list to its dedicated table. The
+    // M13 column on `draft_entries` is a denormalised mirror used only to
+    // surface the count in the composer; the table is the source of truth.
+    await _database.removeLocalAttachmentsForSession(
+      hostId: hostId!,
+      sessionId: selectedSessionId!,
+    );
+    for (var i = 0; i < attachments.length; i++) {
+      await _database.upsertLocalAttachment(
+        hostId: hostId!,
+        sessionId: selectedSessionId!,
+        ref: attachments[i],
+        orderIndex: i,
+      );
+    }
     await _database.saveDraft(
       hostId: hostId!,
       sessionId: selectedSessionId!,
@@ -1866,6 +1897,9 @@ final class ConnectionCoordinator extends ChangeNotifier
       pendingState: pendingState,
       selectedDeliveryMode: selectedDeliveryMode,
       updatedAt: _now(),
+      localAttachmentRefsJson: attachments
+          .map((ref) => ref.id)
+          .toList(growable: false),
     );
   }
 
@@ -1885,6 +1919,136 @@ final class ConnectionCoordinator extends ChangeNotifier
         Map<String, Object?>.from(decoded as Map),
       );
     }
+    // The dedicated `local_attachments` table holds the canonical list; the
+    // mirror column is only used as a sanity hint and is intentionally not
+    // re-hydrated from here.
+  }
+
+  /// Returns the IDs the wire payload should reference, in original draft
+  /// order, restricted to entries that are `ready`. Failed, uploading,
+  /// expired, replaced, and removed entries are never included.
+  List<String> _activeReadyAttachmentIds() {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return const <String>[];
+    final list = _attachmentsBySession[sessionId] ?? const <AttachmentRef>[];
+    final out = <String>[];
+    for (final ref in list) {
+      if (ref.isReady) out.add(ref.id);
+    }
+    return List<String>.unmodifiable(out);
+  }
+
+  /// Public read-only view of the active draft's attachment list.
+  List<AttachmentRef> get draftAttachments => List<AttachmentRef>.unmodifiable(
+    _attachmentsBySession[selectedSessionId] ?? const <AttachmentRef>[],
+  );
+
+  /// IDs the wire payload would carry if the user submitted right now.
+  List<String> get draftAttachmentIds => _activeReadyAttachmentIds();
+
+  /// Admit a new draft attachment. Returns the rejection reason on failure
+  /// (e.g. quota exceeded, duplicate id). On success the registry and the
+  /// durable row are updated and the draft is re-persisted.
+  Future<String?> addDraftAttachment(AttachmentRef ref) async {
+    if (hostId == null || selectedSessionId == null) {
+      return 'No active session';
+    }
+    final current =
+        _attachmentsBySession[selectedSessionId!] ?? const <AttachmentRef>[];
+    final registry = AttachmentRegistry(initial: current);
+    final result = registry.add(ref);
+    if (!result.isAccepted) return result.rejection;
+    _attachmentsBySession[selectedSessionId!] = List<AttachmentRef>.of(
+      result.registry.items,
+    );
+    _notify();
+    await _persistDraft();
+    return null;
+  }
+
+  /// Remove a draft attachment by ID. The host never sees the local path
+  /// and the local bytes (when present) are not touched here — that is the
+  /// picker's responsibility. The user is never auto-sent on remove.
+  Future<void> removeDraftAttachment(String attachmentId) async {
+    if (hostId == null || selectedSessionId == null) return;
+    final current =
+        _attachmentsBySession[selectedSessionId!] ?? const <AttachmentRef>[];
+    final registry = AttachmentRegistry(initial: current).remove(attachmentId);
+    _attachmentsBySession[selectedSessionId!] = List<AttachmentRef>.of(
+      registry.items,
+    );
+    _notify();
+    await _persistDraft();
+  }
+
+  /// Replace an existing draft attachment in place. Used when the picker
+  /// re-emits the same file with different bytes (e.g. after re-encode).
+  /// The new reference is validated against the same quota a fresh add
+  /// would use.
+  Future<String?> replaceDraftAttachment({
+    required String oldId,
+    required AttachmentRef incoming,
+  }) async {
+    if (hostId == null || selectedSessionId == null) {
+      return 'No active session';
+    }
+    final current =
+        _attachmentsBySession[selectedSessionId!] ?? const <AttachmentRef>[];
+    final result = AttachmentRegistry(
+      initial: current,
+    ).replace(oldId: oldId, incoming: incoming);
+    if (!result.isAccepted) return result.rejection;
+    _attachmentsBySession[selectedSessionId!] = List<AttachmentRef>.of(
+      result.registry.items,
+    );
+    _notify();
+    await _persistDraft();
+    return null;
+  }
+
+  /// Update the lifecycle status of a draft attachment. Bumps
+  /// `uploadAttempt` when [bumpAttempt] is true. The coordinator never
+  /// triggers an upload on its own; the future transport drives this.
+  Future<void> markDraftAttachment(
+    String attachmentId,
+    AttachmentStatus status, {
+    String? lastError,
+    bool bumpAttempt = false,
+  }) async {
+    if (hostId == null || selectedSessionId == null) return;
+    final current =
+        _attachmentsBySession[selectedSessionId!] ?? const <AttachmentRef>[];
+    final next = AttachmentRegistry(initial: current).markStatus(
+      attachmentId,
+      status,
+      lastError: lastError,
+      bumpAttempt: bumpAttempt,
+    );
+    _attachmentsBySession[selectedSessionId!] = List<AttachmentRef>.of(
+      next.items,
+    );
+    _notify();
+    await _persistDraft();
+  }
+
+  /// Sweep the active draft for stale references. Expired entries are
+  /// dropped from the in-memory list and the durable table; the user is
+  /// never auto-sent anything. Returns the IDs that were expired.
+  Future<List<String>> expireStaleDraftAttachments({DateTime? now}) async {
+    if (hostId == null || selectedSessionId == null) {
+      return const <String>[];
+    }
+    final current =
+        _attachmentsBySession[selectedSessionId!] ?? const <AttachmentRef>[];
+    final cutoff = now ?? _now();
+    final result = AttachmentRegistry(initial: current).expireStale(cutoff);
+    if (result.expiredIds.isEmpty) return const <String>[];
+    _attachmentsBySession[selectedSessionId!] = List<AttachmentRef>.of(
+      result.registry.items,
+    );
+    _notify();
+    await _persistDraft();
+    return result.expiredIds;
   }
 
   Future<void> _loadCachedStreams(String forHost) async {

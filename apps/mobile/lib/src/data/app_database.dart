@@ -1,7 +1,10 @@
+import 'dart:convert';
+
 import 'package:drift/drift.dart';
 import 'package:drift_flutter/drift_flutter.dart';
 import 'package:uuid/uuid.dart';
 
+import '../domain/attachments.dart';
 import '../domain/mobile_state.dart' hide StreamCursor;
 import '../domain/session_tree.dart';
 
@@ -148,6 +151,7 @@ class AppDatabase extends _$AppDatabase {
       await customStatement('PRAGMA foreign_keys = ON');
       await _ensureM11Schema();
       await _ensureM12Schema();
+      await _ensureM13Schema();
       if (details.wasCreated) {
         await batch((b) {
           b.insert(
@@ -192,6 +196,7 @@ class AppDatabase extends _$AppDatabase {
       )..where((row) => row.hostId.equals(hostId))).go();
       await resetM11Caches(hostId);
       await resetM12Caches(hostId);
+      await resetM13Caches(hostId);
     });
   }
 
@@ -379,12 +384,14 @@ class AppDatabase extends _$AppDatabase {
     required String? pendingState,
     required DateTime updatedAt,
     DeliveryMode? selectedDeliveryMode,
+    List<String> localAttachmentRefsJson = const <String>[],
   }) async {
     await into(draftEntries).insertOnConflictUpdate(
       DraftEntriesCompanion.insert(
         hostId: hostId,
         sessionId: sessionId,
         draftText: Value(text),
+        localAttachmentRefsJson: Value(jsonEncode(localAttachmentRefsJson)),
         selectedDeliveryMode: selectedDeliveryMode == null
             ? const Value.absent()
             : Value(deliveryModeWire(selectedDeliveryMode)),
@@ -612,6 +619,77 @@ class AppDatabase extends _$AppDatabase {
             },
           )
           .toList(growable: false),
+    );
+  }
+
+  Future<void> _ensureM13Schema() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS local_attachments (
+        host_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        attachment_id TEXT NOT NULL,
+        ref_json TEXT NOT NULL,
+        order_index INTEGER NOT NULL,
+        PRIMARY KEY(host_id, session_id, attachment_id)
+      )
+    ''');
+  }
+
+  Future<void> upsertLocalAttachment({
+    required String hostId,
+    required String sessionId,
+    required AttachmentRef ref,
+    required int orderIndex,
+  }) async {
+    await _ensureM13Schema();
+    await customStatement(
+      'INSERT OR REPLACE INTO local_attachments(host_id,session_id,attachment_id,ref_json,order_index) VALUES(?,?,?,?,?)',
+      <Object?>[
+        hostId,
+        sessionId,
+        ref.id,
+        jsonEncode(ref.toJson()),
+        orderIndex,
+      ],
+    );
+  }
+
+  Future<List<AttachmentRef>> localAttachmentsFor({
+    required String hostId,
+    required String sessionId,
+  }) async {
+    await _ensureM13Schema();
+    final rows = await customSelect(
+      'SELECT ref_json FROM local_attachments WHERE host_id=? AND session_id=? ORDER BY order_index',
+      variables: [Variable.withString(hostId), Variable.withString(sessionId)],
+    ).get();
+    return rows
+        .map(
+          (row) => AttachmentRef.fromJson(
+            Map<String, Object?>.from(
+              jsonDecode(row.read<String>('ref_json')) as Map,
+            ),
+          ),
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> removeLocalAttachmentsForSession({
+    required String hostId,
+    required String sessionId,
+  }) async {
+    await _ensureM13Schema();
+    await customStatement(
+      'DELETE FROM local_attachments WHERE host_id=? AND session_id=?',
+      <Object?>[hostId, sessionId],
+    );
+  }
+
+  Future<void> resetM13Caches(String hostId) async {
+    await _ensureM13Schema();
+    await customStatement(
+      'DELETE FROM local_attachments WHERE host_id=?',
+      <Object?>[hostId],
     );
   }
 

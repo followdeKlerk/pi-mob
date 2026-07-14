@@ -45,6 +45,8 @@ export interface BridgeServerOptions {
   readonly runtime: BridgeRuntimePort;
   /** Lower deterministic threshold for backpressure integration tests. */
   readonly outboundBackpressureLimit?: number;
+  /** Private binary attachment/export routes; never receives WebSocket traffic. */
+  readonly httpHandler?: (request: Request) => Response | Promise<Response | null> | null;
   /** Injectable only by in-process tests; the daemon exposes no control endpoint. */
   readonly testHooks?: BridgeServerTestHooks;
 }
@@ -68,12 +70,16 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
 
   const server = Bun.serve<SocketData>({
     hostname, port: options.port ?? 0,
-    fetch(request, server) {
+    async fetch(request, server) {
       const url = new URL(request.url);
       if (url.pathname === "/healthz") return Response.json({ status: "ok" });
       if (url.pathname === "/readyz") {
         try { const ready = options.runtime.ready(); return Response.json({ status: ready.ready ? "ready" : "not_ready", ...(ready.reason ? { reason: ready.reason } : {}) }, { status: ready.ready ? 200 : 503 }); }
         catch { return Response.json({ status: "not_ready", reason: "runtime unavailable" }, { status: 503 }); }
+      }
+      if (options.httpHandler && (url.pathname === "/v1/attachments" || url.pathname.startsWith("/v1/exports/"))) {
+        const response = await options.httpHandler(request);
+        if (response) return response;
       }
       if (url.pathname === "/v1/ws") {
         const upgraded = server.upgrade(request, { data: { connectionId: id(), installationId: "", hello: false, synchronized: false, subscriptions: new Map(), syncing: false, pendingEvents: [], tokens: 20, tokenAt: Date.now(), queuedBytes: 0 } });

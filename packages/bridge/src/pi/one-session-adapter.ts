@@ -25,11 +25,15 @@
  * session it did not originate from.
  */
 
+import { createHash } from "node:crypto";
+import { mkdirSync, readFileSync } from "node:fs";
 import type { StoredCommand } from "../core/store";
 import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
+import type { AttachmentStore } from "../core/attachments";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
 import { normalizeCommandCatalogue } from "./command-catalogue";
+import { ExportRegistry, ExportRegistryInvalidInputError, type ExportMetadata } from "./export-registry";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
 import type { HostPolicyMode } from "../core/workspace-policy";
 import {
@@ -177,6 +181,17 @@ export interface OneSessionAdapterOptions {
    * M11-correct behaviour: every create admits a new session.
    */
   readonly reuseExistingOnCreate?: boolean;
+  /**
+   * M13-06 / M13-07 — host-side export registry. The adapter calls
+   * into it when handling `session.export`. When omitted the adapter
+   * builds a default {@link ExportRegistry} rooted in a private
+   * `${workspace.rootPath}/.pi-mob/exports` directory; production
+   * deployments should pass a registry whose `rootDir` lives on a
+   * private partition with bounded TTL/sweep.
+   */
+  readonly exportRegistry?: ExportRegistry;
+  /** M13 host-private attachment bytes, resolved only at Pi dispatch. */
+  readonly attachmentStore?: AttachmentStore;
 }
 
 // ---------------- Adapter ----------------
@@ -231,6 +246,8 @@ export class OneSessionPiAdapter {
   private readonly globalDetach = new Set<() => void>();
   /** M12 — soft-deletion retention window (7 days) for `session.delete`. */
   private readonly softDeleteRetentionMs: number;
+  private readonly exportRegistry: ExportRegistry | null;
+  private readonly attachmentStore: AttachmentStore | null;
 
   constructor(options: OneSessionAdapterOptions) {
     this.store = options.store;
@@ -243,6 +260,11 @@ export class OneSessionPiAdapter {
     this.processSpec = options.processSpec ?? null;
     this.reuseExistingOnCreate = options.reuseExistingOnCreate ?? false;
     this.softDeleteRetentionMs = 7 * 24 * 60 * 60 * 1000;
+    this.attachmentStore = options.attachmentStore ?? null;
+    // Production injects a registry rooted in the bridge state directory.
+    // Keeping this optional avoids filesystem side effects for adapters that
+    // do not advertise export support (including read-only test fixtures).
+    this.exportRegistry = options.exportRegistry ?? null;
     const identity = this.store.identity();
     this.hostStream = `host:${identity.hostId}`;
     if (options.supervisor) {
@@ -367,10 +389,35 @@ export class OneSessionPiAdapter {
         return this.handleSessionRestore(command);
       case "session.purge":
         return this.handleSessionPurge(command);
+      case "session.export":
+        return this.handleSessionExport(command);
       default:
         // Session-scoped metadata commands (rename, policy.set, ...) are
         // local-only at this checkpoint; no Pi RPC call is required.
         return;
+    }
+  }
+
+  validateCommand(type: string, payload: Record<string, unknown>): void {
+    if (type !== "prompt.submit") return;
+    const ids = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
+    if (ids.length > 4) throw new Error("attachment_unavailable");
+    let bytes = 0;
+    for (const value of ids) {
+      if (typeof value !== "string" || !this.attachmentStore) throw new Error("attachment_unavailable");
+      const resolved = this.attachmentStore.resolve(value);
+      if (!resolved.available || !resolved.bytes || !resolved.contentType || !["image/jpeg", "image/png"].includes(resolved.contentType)) throw new Error("attachment_unavailable");
+      bytes += resolved.bytes;
+    }
+    if (bytes > 25 * 1024 * 1024) throw new Error("attachment_unavailable");
+  }
+
+  commandAccepted(type: string, payload: Record<string, unknown>): void {
+    if (type !== "prompt.submit" || !this.attachmentStore) return;
+    const ids = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
+    for (const id of ids) {
+      if (typeof id !== "string") continue;
+      try { this.attachmentStore.retain(id, this.now() + 7 * 24 * 60 * 60_000); } catch { /* validation already succeeded; never break Pi acceptance */ }
     }
   }
 
@@ -751,6 +798,7 @@ export class OneSessionPiAdapter {
       sessionId?: string;
       message?: string;
       deliveryMode?: "immediate" | "steer" | "follow_up";
+      attachmentIds?: string[];
     };
     if (typeof payload.sessionId !== "string") throw new Error("prompt.submit requires sessionId");
     if (typeof payload.message !== "string" || payload.message.length === 0) throw new Error("prompt.submit requires message");
@@ -765,11 +813,27 @@ export class OneSessionPiAdapter {
     const method: "prompt" | "steer" | "follow_up" =
       payload.deliveryMode === "steer" ? "steer" :
       payload.deliveryMode === "follow_up" ? "follow_up" : "prompt";
+    const attachmentIds = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
+    if (attachmentIds.length > 4) throw new Error("prompt.submit supports at most four attachments");
+    const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
+    let attachmentBytes = 0;
+    for (const attachmentId of attachmentIds) {
+      if (!this.attachmentStore) throw new Error("attachment_unavailable");
+      const resolved = this.attachmentStore.resolve(attachmentId);
+      if (!resolved.available || !resolved.contentType || !resolved.bytes) throw new Error("attachment_unavailable");
+      attachmentBytes += resolved.bytes;
+      if (attachmentBytes > 25 * 1024 * 1024) throw new Error("prompt attachments exceed 25 MiB");
+      const chunks: Uint8Array[] = [];
+      for await (const chunk of this.attachmentStore.openReadStream(attachmentId)) chunks.push(chunk);
+      const joined = Buffer.concat(chunks.map((chunk) => Buffer.from(chunk)));
+      images.push({ type: "image", data: joined.toString("base64"), mimeType: resolved.contentType });
+      this.attachmentStore.retain(attachmentId, this.now() + 24 * 60 * 60_000);
+    }
     try {
       await rpc.request({
         id: command.commandId,
         method,
-        params: { message: payload.message },
+        params: { message: payload.message, ...(images.length ? { images } : {}) },
       });
     } catch (error) {
       const streamId = `session:${payload.sessionId}`;
@@ -1157,6 +1221,50 @@ export class OneSessionPiAdapter {
     }
     this.store.purgeSessionTombstone(payload.sessionId);
   }
+
+  private async handleSessionExport(command: StoredCommand): Promise<void> {
+    const sessionId = String(command.payload.sessionId ?? "");
+    const state = this.store.sessionState(sessionId);
+    if (!state) throw new Error("session.export session not found");
+    if (state.deletedAt || state.lifecycleState === "purged") throw new Error("session_deleted");
+    const rpc = this.sessions.get(sessionId)?.rpc ?? this.rpc;
+    if (!rpc) throw new Error("session.export no RPC available");
+    const exportRegistry = this.exportRegistry;
+    if (!exportRegistry) throw new Error("session.export unsupported");
+    for (const expired of exportRegistry.sweepExpired()) {
+      this.store.appendEvent(`session:${expired.sessionId}`, "session.export", expired as unknown as Record<string, unknown>);
+    }
+    const reserved = exportRegistry.register({ sessionId, format: "html" });
+    mkdirSync(exportRegistry.rootPath(), { recursive: true, mode: 0o700 });
+    try {
+      const response = await rpc.request({
+        id: command.commandId,
+        method: "export_html",
+        params: { outputPath: reserved.storagePath },
+      });
+      const responseObject = response && typeof response === "object" ? response as Record<string, unknown> : {};
+      let bytes = typeof responseObject.bytes === "number" ? responseObject.bytes : 0;
+      let digest = typeof responseObject.sha256 === "string" ? responseObject.sha256 : "";
+      if (!/^[0-9a-f]{64}$/.test(digest)) {
+        const content = readFileSync(reserved.storagePath);
+        bytes = content.byteLength;
+        digest = createHash("sha256").update(content).digest("hex");
+      }
+      const metadata = exportRegistry.markCompleted(reserved.metadata.exportId, { bytes, sha256: digest });
+      if (!metadata) throw new ExportRegistryInvalidInputError("export reservation disappeared");
+      this.store.appendEvent(`session:${sessionId}`, "session.export", metadata as unknown as Record<string, unknown>);
+      this.store.changeSessionSummary(sessionId, { latestExport: metadata });
+    } catch (error) {
+      const failed = exportRegistry.markFailed(reserved.metadata.exportId, (error as Error).message || "export failed");
+      if (failed) this.store.appendEvent(`session:${sessionId}`, "session.export", failed as unknown as Record<string, unknown>);
+      throw error;
+    }
+  }
+
+  listExports(sessionId: string): ExportMetadata[] { return this.exportRegistry?.list(sessionId) ?? []; }
+  getExport(exportId: string): ExportMetadata | null { return this.exportRegistry?.get(exportId) ?? null; }
+  deleteExport(exportId: string): ExportMetadata | null { return this.exportRegistry?.delete(exportId) ?? null; }
+  exportFile(exportId: string): ReturnType<typeof Bun.file> | null { return this.exportRegistry?.file(exportId) ?? null; }
 
   private handleNotification(raw: unknown): void {
     if (!raw || typeof raw !== "object") return;
