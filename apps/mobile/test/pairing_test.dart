@@ -54,6 +54,11 @@ void main() {
       expect(endpoint.host, 'mac.tailnet-name.ts.net');
       expect(endpoint.hasPort, isFalse);
       expect(endpoint.path, isEmpty);
+      final privatePort = validateManualEndpoint(
+        'https://mac.tailnet-name.ts.net:8443',
+      );
+      expect(privatePort.port, 8443);
+      expect(privatePort.toString(), 'https://mac.tailnet-name.ts.net:8443');
     });
 
     test(
@@ -158,13 +163,6 @@ void main() {
             overrides: {'endpoint': 'wss://macmini.tailnet.ts.net'},
           ),
           reason: PairingRejection.nonHttps,
-        ),
-        _RejectionCase(
-          label: 'endpoint with explicit port',
-          input: _validPayload(
-            overrides: {'endpoint': 'https://macmini.tailnet.ts.net:8443'},
-          ),
-          reason: PairingRejection.portNotAllowed,
         ),
         _RejectionCase(
           label: 'endpoint with user info',

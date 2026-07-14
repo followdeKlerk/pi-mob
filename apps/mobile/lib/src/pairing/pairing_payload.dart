@@ -191,7 +191,7 @@ final class PairingValidationFailure implements Exception {
 ///   * the resolved IP must not be loopback, wildcard, private LAN, link
 ///     local, IPv6 unique local, IPv4-mapped IPv6, IPv4-compatible IPv6,
 ///     tunnel broker, documentation, or discard prefix,
-///   * explicit ports, user-info, paths, queries, and fragments are rejected,
+///   * user-info, paths, queries, and fragments are rejected; explicit private HTTPS ports are allowed,
 ///   * well-known reserved names are rejected,
 ///   * any pattern that resembles Tailscale Funnel/public routing is rejected.
 ///
@@ -268,8 +268,8 @@ PairingPayload validatePairingPayload(Object? raw) {
 }
 
 /// Strict validator for a manually typed HTTPS origin. Used by the manual
-/// recovery flow. Returns a normalized origin URL with no path, query,
-/// fragment, or port.
+/// recovery flow. Returns a normalized origin URL with no path, query, or
+/// fragment. An explicit HTTPS port is preserved for private Serve routes.
 Uri validateManualEndpoint(Object? raw) {
   final endpoint = _validateEndpoint(raw);
   return endpoint;
@@ -293,10 +293,6 @@ Uri _validateEndpoint(Object? raw) {
 
   if (endpoint.userInfo.isNotEmpty) {
     throw const PairingValidationFailure(PairingRejection.userInfoNotAllowed);
-  }
-
-  if (endpoint.hasPort) {
-    throw const PairingValidationFailure(PairingRejection.portNotAllowed);
   }
 
   if (endpoint.path.isNotEmpty && endpoint.path != '/' ||
