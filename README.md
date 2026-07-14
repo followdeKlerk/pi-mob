@@ -6,7 +6,7 @@ A private Flutter mobile control surface for Pi coding-agent sessions running on
 
 The product and architecture are implemented checkpoint by checkpoint. M1–M9 delivered the protocol, durable bridge, private host, trust policy, transcript, tools, and composer. M10–M11 delivered configured Pi controls and safe multiplexed multi-session control. M12 delivered durable session lineage and lifecycle. M13 delivered bounded private attachments, opaque HTML exports, and explicit native sharing. M14 delivered durable follow-up queues and reconnect-safe extension interaction.
 
-Current checkpoint: **M15 — notifications and background experience** (ready to activate).
+Current checkpoint: **M15 — notifications and background experience** (implemented; Android lifecycle proven; real FCM and signed iOS/APNs proof pending).
 
 M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is in [`M1-SUMMARY.md`](M1-SUMMARY.md) through [`M14-SUMMARY.md`](M14-SUMMARY.md).
 

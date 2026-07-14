@@ -2010,7 +2010,10 @@ final class ConnectionCoordinator extends ChangeNotifier
     'commandId': ?commandId,
     'leaseId': ?lease,
     'type': type,
-    'sentAt': _now().toIso8601String(),
+    'sentAt': DateTime.fromMillisecondsSinceEpoch(
+      _now().toUtc().millisecondsSinceEpoch,
+      isUtc: true,
+    ).toIso8601String(),
     'payload': payload,
   };
 

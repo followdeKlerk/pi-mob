@@ -351,7 +351,12 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
                 endpointController: _endpointController,
               ),
               const SizedBox(height: 8),
-              _WorkspaceSessionPanel(coordinator: coordinator),
+              Flexible(
+                child: SingleChildScrollView(
+                  key: const Key('workspace-session-scroll'),
+                  child: _WorkspaceSessionPanel(coordinator: coordinator),
+                ),
+              ),
               const SizedBox(height: 8),
               Expanded(child: _TranscriptPanel(coordinator: coordinator)),
               const SizedBox(height: 8),
@@ -926,7 +931,10 @@ class _PolicyModeRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = Theme.of(context).colorScheme;
-    return Row(
+    return Wrap(
+      spacing: 12,
+      runSpacing: 8,
+      crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         Text('Policy: ', key: const Key('policy-mode-label')),
         SegmentedButton<SessionPolicyMode>(
@@ -951,7 +959,6 @@ class _PolicyModeRow extends StatelessWidget {
                 }
               : null,
         ),
-        const SizedBox(width: 12),
         if (mode == SessionPolicyMode.readOnly)
           Container(
             key: const Key('read-only-indicator'),
@@ -1133,17 +1140,19 @@ class _Composer extends StatelessWidget {
               child: const SizedBox.shrink(),
             ),
             const SizedBox(height: 8),
-            Row(
+            if (coordinator.pendingCommandId != null)
+              Text(
+                'Pending ${coordinator.pendingState ?? 'unknown'} · '
+                '${coordinator.pendingCommandId}',
+                key: const Key('pending-command'),
+                overflow: TextOverflow.ellipsis,
+              ),
+            Wrap(
+              alignment: WrapAlignment.end,
+              spacing: 8,
+              runSpacing: 8,
               children: [
-                if (coordinator.pendingCommandId != null) ...[
-                  Expanded(
-                    child: Text(
-                      'Pending ${coordinator.pendingState ?? 'unknown'} · '
-                      '${coordinator.pendingCommandId}',
-                      key: const Key('pending-command'),
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
+                if (coordinator.pendingCommandId != null)
                   OutlinedButton.icon(
                     key: const Key('retry-command'),
                     onPressed: coordinator.canRetry
@@ -1152,9 +1161,6 @@ class _Composer extends StatelessWidget {
                     icon: const Icon(Icons.replay),
                     label: const Text('Retry exact command'),
                   ),
-                  const SizedBox(width: 8),
-                ] else
-                  const Spacer(),
                 Semantics(
                   button: true,
                   label: 'Abort active Pi turn',
@@ -1165,7 +1171,6 @@ class _Composer extends StatelessWidget {
                     label: const Text('Abort'),
                   ),
                 ),
-                const SizedBox(width: 8),
                 FilledButton.icon(
                   key: const Key('send-button'),
                   onPressed: coordinator.canSend

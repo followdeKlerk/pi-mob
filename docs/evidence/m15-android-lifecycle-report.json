@@ -1,0 +1,63 @@
+{
+  "milestone": "M15",
+  "status": "partial-physical-proof",
+  "capturedAt": "2026-07-14T16:56:00Z",
+  "device": {
+    "model": "SM_A528B",
+    "adbSerial": "R5CR81WLP0Z",
+    "platform": "Android"
+  },
+  "bridge": {
+    "endpoint": "https://nathans-macbook-pro.tail7d5b8e.ts.net:8443",
+    "hostId": "75ae07e3-d142-402e-92df-7e256e731c04",
+    "hostGeneration": "1",
+    "healthStatus": 200,
+    "ready": true
+  },
+  "checks": [
+    {
+      "name": "private-tailnet-connectivity",
+      "result": "pass",
+      "evidence": "MagicDNS resolved to 100.112.136.90 and the phone reached the private Tailscale Serve endpoint."
+    },
+    {
+      "name": "manual-pairing-and-schema-handshake",
+      "result": "pass",
+      "evidence": "Bridge accepted a hello with millisecond sentAt, emitted hello.accepted, then received subscription.set and workspace.list."
+    },
+    {
+      "name": "durable-host-identity",
+      "result": "pass",
+      "evidence": "On-device SQLite retained host ID 75ae07e3-d142-402e-92df-7e256e731c04, the explicit :8443 endpoint, display name, and generation 1."
+    },
+    {
+      "name": "notification-permission",
+      "result": "pass",
+      "evidence": "Android permission controller granted POST_NOTIFICATIONS after explicit user interaction; package runtime permission reports granted=true."
+    },
+    {
+      "name": "foreground-status-service",
+      "result": "pass",
+      "evidence": "PiMobForegroundService reported isForeground=true, foregroundId=1502, type dataSync, and channel pi_mob_status after user-enabled activation while visible."
+    },
+    {
+      "name": "background-persistence",
+      "result": "pass",
+      "evidence": "After KEYCODE_HOME the foreground service remained active while the foreground WebSocket closed as designed."
+    },
+    {
+      "name": "foreground-reconciliation",
+      "result": "pass",
+      "evidence": "Relaunch restored ready state and retained the same durable host ID, endpoint, and generation."
+    },
+    {
+      "name": "narrow-device-layout",
+      "result": "pass",
+      "evidence": "Physical-device overflow was reproduced, fixed with a scrollable workspace/session region and wrapping controls, regression-tested at 360x755 logical pixels, and revalidated without overflow markers."
+    }
+  ],
+  "remainingExternalProof": [
+    "Real FCM delivery requires Firebase Android configuration and host-side FCM service-account credentials.",
+    "Real APNs and Live Activity lifecycle proof requires Apple signing, APNs credentials, full Xcode selection, and a physical iPhone."
+  ]
+}

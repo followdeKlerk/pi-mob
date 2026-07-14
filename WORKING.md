@@ -1,6 +1,6 @@
 # Working
 
-Status: M0–M14 done; M15 activation ready
+Status: M0–M14 done; M15 implemented with Android lifecycle proof, external push/iOS proof pending
 
 ## Current checkpoint
 
@@ -10,7 +10,7 @@ The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative doc
 
 ## Current objective
 
-Add privacy-preserving best-effort APNs/FCM status delivery and platform background surfaces while keeping foreground bridge reconciliation authoritative. Completed evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md) through [`M14-SUMMARY.md`](M14-SUMMARY.md).
+Finish real FCM delivery and signed iOS APNs/Live Activity lifecycle proof. The privacy-preserving notification stack is implemented, deterministic tests pass, and Android permission, foreground-service, background, and reconciliation behavior is physically proven in [`docs/evidence/m15-android-lifecycle-report.json`](docs/evidence/m15-android-lifecycle-report.json). Completed milestone evidence is retained in [`M1-SUMMARY.md`](M1-SUMMARY.md) through [`M14-SUMMARY.md`](M14-SUMMARY.md).
 
 ## Completed foundation
 
@@ -21,9 +21,9 @@ Add privacy-preserving best-effort APNs/FCM status delivery and platform backgro
 
 ## Immediate next actions
 
-1. Add durable device registration and APNs/FCM host adapters with permanent rejection cleanup.
-2. Implement status-only notification policy, coalescing/rate limits, deep-link reconciliation, and degradation isolation.
-3. Add iOS and Android permission/background surfaces and execute the real-device lifecycle matrix.
+1. Supply local Firebase Android configuration and host-side FCM service-account credentials, then prove real background/locked delivery and stale deep-link reconciliation.
+2. Select full Xcode, configure Apple signing/APNs credentials, and run the APNs/Live Activity lifecycle matrix on a physical iPhone.
+3. Record final M15 evidence, run the full gate, and only then mark M15 complete.
 
 ## Do not start yet
 
@@ -31,4 +31,4 @@ Until M15 exits: M16 release hardening and later release surfaces.
 
 ## Blockers
 
-Final M15 proof requires external APNs/FCM credentials, signing, notification permission interaction, and physical iOS/Android devices.
+Final M15 proof still requires external Firebase/APNs credentials, Apple signing/full Xcode, and a physical iPhone. Android permission and lifecycle interaction is complete.

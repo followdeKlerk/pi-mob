@@ -363,10 +363,17 @@ void main() {
           seedReady: true,
         );
         _seedWorkspaces(coordinator, unapproved: true);
-        await tester.binding.setSurfaceSize(const Size(1200, 900));
+        // Match the narrow logical viewport observed on a physical Android
+        // phone so a tall trust card scrolls instead of overflowing.
+        await tester.binding.setSurfaceSize(const Size(360, 755));
         addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(PiMobApp(coordinator: coordinator));
         await tester.pump();
+        expect(tester.takeException(), isNull);
+        expect(
+          find.byKey(const Key('workspace-session-scroll')),
+          findsOneWidget,
+        );
 
         // The session panel exposes the trust-required banner and a
         // prominent Review and approve action.

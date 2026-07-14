@@ -74,6 +74,9 @@ void main() {
       await eventually(() => transport.sockets.isNotEmpty);
       expect(transport.lastProbed?.port, 8443);
       expect(completed, isFalse);
+      final sentAt = transport.sockets.single.sent.single['sentAt'];
+      expect(sentAt, isA<String>());
+      expect(sentAt as String, matches(RegExp(r'\.\d{3}Z$')));
       transport.sockets.single.server(helloAccepted());
       await pairing;
       expect(completed, isTrue);
