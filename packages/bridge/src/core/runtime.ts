@@ -39,6 +39,7 @@ interface SessionListToken {
   readonly sort: string;
   readonly filter: string;
   readonly query: string;
+  readonly parentSessionId: string;
   readonly pageSize: number;
   readonly beforeCursor: string;
 }
@@ -204,6 +205,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     const sort = typeof payload.sort === "string" ? payload.sort : "activity";
     const filterRaw = typeof payload.filter === "string" ? payload.filter : "all";
     const query = typeof payload.query === "string" ? payload.query : "";
+    const parentSessionId = typeof payload.parentSessionId === "string" ? payload.parentSessionId : "";
     const identity = this.identity();
     const rawToken = payload.pageToken;
     let beforeCursor: string | null = null;
@@ -213,6 +215,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       if (decoded.sort !== sort) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
       if (decoded.filter !== filterRaw) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
       if (decoded.query !== query) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
+      if (decoded.parentSessionId !== parentSessionId) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this tree parent");
       if (decoded.pageSize !== pageSize) throw new RuntimeProtocolError("invalid_message", "page token is not bound to this query");
       beforeCursor = decoded.beforeCursor;
     }
@@ -224,6 +227,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
         sort,
         pageSize: pageSize as number,
         beforeCursor,
+        ...(parentSessionId ? { parentSessionId } : {}),
       });
     } catch (error) {
       if (error instanceof StoreError && error.code === "conflict") throw new RuntimeProtocolError("invalid_message", error.message);
@@ -241,6 +245,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
           sort,
           filter: filterRaw,
           query,
+          parentSessionId,
           pageSize: pageSize as number,
           beforeCursor: page.nextBeforeCursor,
         }) }
@@ -314,7 +319,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       if (parsed.version !== 1 || parsed.kind !== SESSION_LIST_TOKEN_KIND) throw new Error("token kind mismatch");
       const identity = this.identity();
       if (parsed.hostId !== identity.hostId || parsed.hostGeneration !== identity.hostGeneration) throw new Error("page token is not bound to the current host generation");
-      if (typeof parsed.sort !== "string" || typeof parsed.filter !== "string" || typeof parsed.query !== "string" || typeof parsed.pageSize !== "number" || typeof parsed.beforeCursor !== "string" || !canonicalDecimal(parsed.beforeCursor)) throw new Error("page token shape invalid");
+      if (typeof parsed.sort !== "string" || typeof parsed.filter !== "string" || typeof parsed.query !== "string" || typeof parsed.parentSessionId !== "string" || typeof parsed.pageSize !== "number" || typeof parsed.beforeCursor !== "string" || !canonicalDecimal(parsed.beforeCursor)) throw new Error("page token shape invalid");
       return parsed as SessionListToken;
     } catch {
       throw new RuntimeProtocolError("invalid_message", "page token is invalid or does not match the session list query");

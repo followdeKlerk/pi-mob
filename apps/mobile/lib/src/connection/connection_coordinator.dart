@@ -12,6 +12,7 @@ import '../domain/mobile_state.dart';
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
+import '../domain/session_tree.dart';
 import '../sync/event_reducer.dart';
 import 'bridge_transport.dart';
 
@@ -131,6 +132,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   // switch and is preserved across takeover/release transitions.
   final Map<String, String> _draftBySession = {};
   final Map<String, DeliveryMode> _deliveryModeBySession = {};
+  final SessionTreeProjection _sessionTree = SessionTreeProjection();
 
   BridgeSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
@@ -474,6 +476,12 @@ final class ConnectionCoordinator extends ChangeNotifier
     for (final session in await _database.allSessions()) {
       _sessions[session.sessionId] = _sessionFromEntry(session);
     }
+    final currentHost = hostId;
+    if (currentHost != null) {
+      for (final node in await _database.sessionTreeNodes(currentHost)) {
+        _sessionTree.upsert(node);
+      }
+    }
     final drafts = await _database.allDrafts();
     if (drafts.isNotEmpty) {
       final saved = drafts.reduce(
@@ -656,6 +664,46 @@ final class ConnectionCoordinator extends ChangeNotifier
         if (name != null && name.isNotEmpty) 'name': name,
       },
       requiresLease: false,
+    );
+  }
+
+  SessionTreeProjection get sessionTree => _sessionTree;
+
+  Future<void> renameSession(String sessionId, String name) =>
+      _sendSessionLifecycle('session.rename', sessionId, <String, Object?>{
+        'name': name.trim(),
+      });
+  Future<void> forkSession(String sessionId, String entryId) =>
+      _sendSessionLifecycle('session.fork', sessionId, <String, Object?>{
+        'entryId': entryId,
+      });
+  Future<void> cloneSession(String sessionId) =>
+      _sendSessionLifecycle('session.clone', sessionId);
+  Future<void> deleteSession(String sessionId) => _sendSessionLifecycle(
+    'session.delete',
+    sessionId,
+    const <String, Object?>{'abortActive': true, 'cancelQueued': true},
+  );
+  Future<void> restoreSession(String sessionId) =>
+      _sendSessionLifecycle('session.restore', sessionId);
+  Future<void> purgeSession(String sessionId, {required bool confirmed}) {
+    if (!confirmed) {
+      throw StateError('Permanent delete requires explicit confirmation');
+    }
+    return _sendSessionLifecycle('session.purge', sessionId);
+  }
+
+  Future<void> _sendSessionLifecycle(
+    String type,
+    String sessionId, [
+    Map<String, Object?> extra = const <String, Object?>{},
+  ]) async {
+    if (sessionId.isEmpty) throw ArgumentError.value(sessionId, 'sessionId');
+    await _sendCommand(
+      type: type,
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': sessionId, ...extra},
+      requiresLease: true,
     );
   }
 
@@ -1273,12 +1321,58 @@ final class ConnectionCoordinator extends ChangeNotifier
     } else if (type == 'session.summary') {
       _mergeSession(payload);
       final id = payload['sessionId'];
+      if (id is String) {
+        final node = SessionTreeNode.fromWire(payload);
+        _sessionTree.upsert(node);
+        final currentHost = hostId;
+        if (currentHost != null) {
+          unawaited(
+            _database.upsertSessionTreeNode(hostId: currentHost, node: node),
+          );
+        }
+      }
       if (id is String && selectedSessionId == null) {
         unawaited(selectSession(id));
       }
     } else if (type == 'session.removed') {
       final id = payload['sessionId'];
-      if (id is String) _sessions.remove(id);
+      if (id is String && payload['permanent'] == true) {
+        _sessions.remove(id);
+        _sessionTree.remove(id);
+      } else if (id is String) {
+        final existing = _sessionTree[id];
+        final node = SessionTreeNode.fromWire(<String, Object?>{
+          if (existing != null) ...existing.toWire(),
+          ...payload,
+          'sessionId': id,
+          'lifecycleState': payload['deletionState'] ?? 'soft_deleted',
+        });
+        _sessionTree.upsert(node);
+        final currentHost = hostId;
+        if (currentHost != null) {
+          unawaited(
+            _database.upsertSessionTreeNode(hostId: currentHost, node: node),
+          );
+        }
+      }
+    } else if (type == 'session.delete_failed') {
+      final id = payload['sessionId'];
+      if (id is String) {
+        final existing = _sessionTree[id];
+        final node = SessionTreeNode.fromWire(<String, Object?>{
+          if (existing != null) ...existing.toWire(),
+          ...payload,
+          'sessionId': id,
+          'lifecycleState': 'delete_failed',
+        });
+        _sessionTree.upsert(node);
+        final currentHost = hostId;
+        if (currentHost != null) {
+          unawaited(
+            _database.upsertSessionTreeNode(hostId: currentHost, node: node),
+          );
+        }
+      }
     } else if (type == 'workspace.trust_state') {
       unawaited(_workspaceTrustStateEvent(payload));
     } else if (type == 'session.state' || type.startsWith('turn.')) {

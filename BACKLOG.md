@@ -531,16 +531,16 @@ Run three sessions, hit capacity, idle-stop/restore one, switch foreground detai
 
 ## Tasks
 
-- [ ] **M12-01 P1 M** Create/resume/name/details/lineage and fallback names.
-- [ ] **M12-02 P1 M** Normalize/lazily render session tree.
-- [ ] **M12-03 P1 M** Eligible fork-message selection/confirmation.
-- [ ] **M12-04 P1 M** Fork and extension-cancel handling.
-- [ ] **M12-05 P1 M** Clone and extension-cancel handling.
-- [ ] **M12-06 P0 M** Map/snapshot new session before navigation.
-- [ ] **M12-07 P0 L** Soft delete active-state/queue/process/Pi session handling.
-- [ ] **M12-08 P0 M** Seven-day restore and purge date UX.
-- [ ] **M12-09 P0 M** Partial `delete_failed` repair.
-- [ ] **M12-10 P0 M** Irreversible explicit purge and non-reused IDs.
+- [x] **M12-01 P1 M** Create/resume/name/details/lineage and fallback names.
+- [x] **M12-02 P1 M** Normalize/lazily render session tree.
+- [x] **M12-03 P1 M** Eligible fork-message selection/confirmation.
+- [x] **M12-04 P1 M** Fork and extension-cancel handling.
+- [x] **M12-05 P1 M** Clone and extension-cancel handling.
+- [x] **M12-06 P0 M** Map/snapshot new session before navigation.
+- [x] **M12-07 P0 L** Soft delete active-state/queue/process/Pi session handling.
+- [x] **M12-08 P0 M** Seven-day restore and purge date UX.
+- [x] **M12-09 P0 M** Partial `delete_failed` repair.
+- [x] **M12-10 P0 M** Irreversible explicit purge and non-reused IDs.
 
 ## Checkpoint demo
 
@@ -548,10 +548,10 @@ Name, inspect tree, fork, clone, soft-delete, restore, and exercise extension ca
 
 ## Exit criteria
 
-- [ ] Fork/clone branch correctness proven.
-- [ ] Cancellation leaves original unchanged.
-- [ ] Delete is recoverable for seven days.
-- [ ] Partial failure is visible/repairable.
+- [x] Fork/clone branch correctness proven.
+- [x] Cancellation leaves original unchanged.
+- [x] Delete is recoverable for seven days.
+- [x] Partial failure is visible/repairable.
 
 **Evidence:** lifecycle fixture matrix.
 

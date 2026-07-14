@@ -7,6 +7,7 @@ import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
 import 'package:pi_mob/src/data/app_database.dart';
 import 'package:pi_mob/src/domain/mobile_state.dart';
+import 'package:pi_mob/src/domain/session_tree.dart';
 
 const hostId = '11111111-1111-4111-8111-111111111111';
 const sessionId = '22222222-2222-4222-8222-222222222222';
@@ -881,6 +882,108 @@ void main() {
       containsPair('message', 'Edit me but do not run tools'),
     );
   });
+
+  test(
+    'M12 lifecycle commands preserve drafts and require explicit purge confirmation',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      await coordinator.updateDraft('keep this draft');
+      await coordinator.renameSession(sessionId, 'Renamed');
+      await coordinator.forkSession(sessionId, 'entry-1');
+      await coordinator.cloneSession(sessionId);
+      await coordinator.deleteSession(sessionId);
+      expect(coordinator.draft, 'keep this draft');
+      expect(
+        () => coordinator.purgeSession(sessionId, confirmed: false),
+        throwsStateError,
+      );
+      await coordinator.purgeSession(sessionId, confirmed: true);
+      final sentTypes = socket.sent.map((message) => message['type']).toList();
+      expect(
+        sentTypes,
+        containsAll(<String>[
+          'session.rename',
+          'session.fork',
+          'session.clone',
+          'session.delete',
+          'session.purge',
+        ]),
+      );
+      final fork = socket.sent.lastWhere(
+        (message) => message['type'] == 'session.fork',
+      );
+      expect(fork['payload'], containsPair('entryId', 'entry-1'));
+    },
+  );
+
+  test(
+    'M12 summary and soft removal update the durable tree projection',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final firstCursor =
+          (BigInt.parse(
+                    coordinator
+                        .streams['host:$hostId']!
+                        .lastContiguousCursor
+                        .value,
+                  ) +
+                  BigInt.one)
+              .toString();
+      socket.server(
+        event(
+          type: 'session.summary',
+          streamId: 'host:$hostId',
+          cursor: firstCursor,
+          eventId: '24242424-2424-4242-8242-242424242424',
+          payload: {
+            'sessionId': '66666666-6666-4666-8666-666666666666',
+            'name': 'Fork child',
+            'workspaceId': workspaceId,
+            'runtimeState': 'idle',
+            'queueCount': 0,
+            'parentSessionId': sessionId,
+            'lineageType': 'branch',
+            'lineageCreatedFrom': 'entry-1',
+          },
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      expect(
+        coordinator.sessionTree['66666666-6666-4666-8666-666666666666'],
+        isNotNull,
+        reason:
+            'host cursor ${coordinator.streams['host:$hostId']?.lastContiguousCursor.value}; phase ${coordinator.phase}; error ${coordinator.errorMessage}; raw ${coordinator.rawEvents.isEmpty ? 'none' : coordinator.rawEvents.last}',
+      );
+      expect(
+        coordinator
+            .sessionTree['66666666-6666-4666-8666-666666666666']!
+            .forkOriginEntryId,
+        'entry-1',
+      );
+      final secondCursor = (BigInt.parse(firstCursor) + BigInt.one).toString();
+      socket.server(
+        event(
+          type: 'session.removed',
+          streamId: 'host:$hostId',
+          cursor: secondCursor,
+          eventId: '25252525-2525-4252-8252-252525252525',
+          payload: {
+            'sessionId': '66666666-6666-4666-8666-666666666666',
+            'deletionState': 'soft_deleted',
+            'removedAt': '2026-07-14T00:00:00Z',
+            'purgeAfter': '2026-07-21T00:00:00Z',
+          },
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+      final deleted =
+          coordinator.sessionTree['66666666-6666-4666-8666-666666666666'];
+      expect(deleted?.lifecycle, SessionLifecycleState.softDeleted);
+      expect(deleted?.canRestore, isTrue);
+    },
+  );
 }
 
 Future<void> makeReady(

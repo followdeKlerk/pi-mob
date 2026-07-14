@@ -3,6 +3,7 @@ import 'package:drift_flutter/drift_flutter.dart';
 import 'package:uuid/uuid.dart';
 
 import '../domain/mobile_state.dart' hide StreamCursor;
+import '../domain/session_tree.dart';
 
 part 'app_database.g.dart';
 
@@ -146,6 +147,7 @@ class AppDatabase extends _$AppDatabase {
     beforeOpen: (details) async {
       await customStatement('PRAGMA foreign_keys = ON');
       await _ensureM11Schema();
+      await _ensureM12Schema();
       if (details.wasCreated) {
         await batch((b) {
           b.insert(
@@ -189,6 +191,7 @@ class AppDatabase extends _$AppDatabase {
         sessionEntries,
       )..where((row) => row.hostId.equals(hostId))).go();
       await resetM11Caches(hostId);
+      await resetM12Caches(hostId);
     });
   }
 
@@ -609,6 +612,91 @@ class AppDatabase extends _$AppDatabase {
             },
           )
           .toList(growable: false),
+    );
+  }
+
+  Future<void> _ensureM12Schema() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS session_tree_nodes (
+        host_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        parent_session_id TEXT,
+        fork_origin_entry_id TEXT,
+        lineage TEXT NOT NULL,
+        lifecycle TEXT NOT NULL,
+        deleted_at TEXT,
+        purge_after TEXT,
+        repair_reason TEXT,
+        PRIMARY KEY(host_id, session_id)
+      )
+    ''');
+    await customStatement(
+      'CREATE INDEX IF NOT EXISTS session_tree_parent_idx ON session_tree_nodes(host_id,parent_session_id)',
+    );
+  }
+
+  Future<void> upsertSessionTreeNode({
+    required String hostId,
+    required SessionTreeNode node,
+  }) async {
+    await _ensureM12Schema();
+    await customStatement(
+      'INSERT OR REPLACE INTO session_tree_nodes(host_id,session_id,name,parent_session_id,fork_origin_entry_id,lineage,lifecycle,deleted_at,purge_after,repair_reason) VALUES(?,?,?,?,?,?,?,?,?,?)',
+      <Object?>[
+        hostId,
+        node.sessionId,
+        node.name,
+        node.parentSessionId,
+        node.forkOriginEntryId,
+        node.lineage.name,
+        node.lifecycle.name,
+        node.deletedAt?.toUtc().toIso8601String(),
+        node.purgeAfter?.toUtc().toIso8601String(),
+        node.repairReason,
+      ],
+    );
+  }
+
+  Future<List<SessionTreeNode>> sessionTreeNodes(String hostId) async {
+    await _ensureM12Schema();
+    return customSelect(
+      'SELECT session_id,name,parent_session_id,fork_origin_entry_id,lineage,lifecycle,deleted_at,purge_after,repair_reason FROM session_tree_nodes WHERE host_id=?',
+      variables: [Variable.withString(hostId)],
+    ).get().then(
+      (rows) => rows
+          .map(
+            (row) => SessionTreeNode(
+              sessionId: row.read<String>('session_id'),
+              name: row.read<String>('name'),
+              parentSessionId: row.readNullable<String>('parent_session_id'),
+              forkOriginEntryId: row.readNullable<String>(
+                'fork_origin_entry_id',
+              ),
+              lineage: SessionLineageKind.values.byName(
+                row.read<String>('lineage'),
+              ),
+              lifecycle: SessionLifecycleState.values.byName(
+                row.read<String>('lifecycle'),
+              ),
+              deletedAt: DateTime.tryParse(
+                row.readNullable<String>('deleted_at') ?? '',
+              ),
+              purgeAfter: DateTime.tryParse(
+                row.readNullable<String>('purge_after') ?? '',
+              ),
+              repairReason: row.readNullable<String>('repair_reason'),
+            ),
+          )
+          .toList(growable: false),
+    );
+  }
+
+  Future<void> resetM12Caches(String hostId) async {
+    await _ensureM12Schema();
+    await customStatement(
+      'DELETE FROM session_tree_nodes WHERE host_id = ?',
+      <Object?>[hostId],
     );
   }
 

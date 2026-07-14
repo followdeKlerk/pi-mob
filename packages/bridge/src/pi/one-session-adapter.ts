@@ -229,6 +229,8 @@ export class OneSessionPiAdapter {
   private readonly reuseExistingOnCreate: boolean;
   private lastUsedSessionId: string | null = null;
   private readonly globalDetach = new Set<() => void>();
+  /** M12 — soft-deletion retention window (7 days) for `session.delete`. */
+  private readonly softDeleteRetentionMs: number;
 
   constructor(options: OneSessionAdapterOptions) {
     this.store = options.store;
@@ -240,6 +242,7 @@ export class OneSessionPiAdapter {
     this.createRpc = options.createRpc ?? null;
     this.processSpec = options.processSpec ?? null;
     this.reuseExistingOnCreate = options.reuseExistingOnCreate ?? false;
+    this.softDeleteRetentionMs = 7 * 24 * 60 * 60 * 1000;
     const identity = this.store.identity();
     this.hostStream = `host:${identity.hostId}`;
     if (options.supervisor) {
@@ -351,6 +354,19 @@ export class OneSessionPiAdapter {
         return this.handleSessionControl(command, "set_follow_up_mode", "model.state", {
           followUpEnabled: command.payload.enabled,
         });
+      // ---------------- M12 lifecycle ----------------
+      case "session.rename":
+        return this.handleSessionRename(command);
+      case "session.fork":
+        return this.handleSessionFork(command);
+      case "session.clone":
+        return this.handleSessionClone(command);
+      case "session.delete":
+        return this.handleSessionDelete(command);
+      case "session.restore":
+        return this.handleSessionRestore(command);
+      case "session.purge":
+        return this.handleSessionPurge(command);
       default:
         // Session-scoped metadata commands (rename, policy.set, ...) are
         // local-only at this checkpoint; no Pi RPC call is required.
@@ -643,9 +659,10 @@ export class OneSessionPiAdapter {
       try { return await rpc.request({ method, timeoutMs: 5_000 }); }
       catch { return null; }
     };
-    const [modelsRaw, stateRaw, statsRaw, commandsRaw] = await Promise.all([
+    const [modelsRaw, stateRaw, statsRaw, commandsRaw, treeRaw, forkMessagesRaw] = await Promise.all([
       safeRequest("get_available_models"), safeRequest("get_state"),
       safeRequest("get_session_stats"), safeRequest("get_commands"),
+      safeRequest("get_tree"), safeRequest("get_fork_messages"),
     ]);
     const unwrap = (value: unknown): unknown => value && typeof value === "object" && "data" in value
       ? (value as Record<string, unknown>).data : value;
@@ -658,6 +675,19 @@ export class OneSessionPiAdapter {
     const stateObject = state && typeof state === "object" ? state as Record<string, unknown> : {};
     const statsObject = stats && typeof stats === "object" ? stats as Record<string, unknown> : {};
     const commandCatalogue = normalizeCommandCatalogue(unwrap(commandsRaw));
+    const boundTree = (value: unknown, depth = 0): unknown => {
+      if (depth >= 12) return "[depth limited]";
+      if (typeof value === "string") return value.slice(0, 2_000);
+      if (typeof value === "number" || typeof value === "boolean" || value === null) return value;
+      if (Array.isArray(value)) return value.slice(0, 500).map((item) => boundTree(item, depth + 1));
+      if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).slice(0, 50).map(([key, item]) => [key, boundTree(item, depth + 1)]));
+      return null;
+    };
+    const sessionTree = boundTree(unwrap(treeRaw));
+    const forkValue = unwrap(forkMessagesRaw);
+    const eligibleForkMessages = Array.isArray(forkValue)
+      ? forkValue.filter((item) => item && typeof item === "object").slice(0, 500).map((item) => boundTree(item))
+      : [];
     const prior = this.store.sessionState(sessionId) ?? {};
     const patch = {
       availableModels,
@@ -667,8 +697,11 @@ export class OneSessionPiAdapter {
       steeringMode: stateObject.steeringMode ?? null,
       followUpMode: stateObject.followUpMode ?? null,
       autoCompactionEnabled: stateObject.autoCompactionEnabled ?? null,
+      sessionTree,
+      eligibleForkMessages,
     };
     this.store.updateSessionState(sessionId, { ...prior, ...patch });
+    this.store.appendEvent(`session:${sessionId}`, "session.tree", { sessionId, tree: sessionTree, eligibleForkMessages });
     this.store.appendEvent(`session:${sessionId}`, "model.state", { sessionId, ...patch });
     this.store.appendEvent(`session:${sessionId}`, "context.state", { sessionId, ...statsObject });
   }
@@ -765,6 +798,364 @@ export class OneSessionPiAdapter {
     const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
     if (!rpc) throw new Error("turn.abort no RPC available");
     await rpc.request({ id: command.commandId, method: "abort" });
+  }
+
+  // ---------------- M12 lifecycle handlers ----------------
+
+  /**
+   * Map an opaque bridge-side entry reference (`entryId`) into a
+   * Pi `get_fork_messages`/`fork` entry id. The mapping is identity
+   * because the upstream notification stream already emits the
+   * canonical entry id, and `get_fork_messages` exposes the eligible
+   * range. Tests verify that unknown references produce a
+   * `session_not_found` style error.
+   */
+  private mapForkEntryId(sessionId: string, entryId: string): { eligible: boolean; reason?: string } {
+    if (typeof entryId !== "string" || entryId.length === 0) return { eligible: false, reason: "invalid_entry" };
+    const prior = this.store.sessionState(sessionId) ?? {};
+    const deleted = prior.deletedAt;
+    if (deleted) return { eligible: false, reason: "session_deleted" };
+    return { eligible: true };
+  }
+
+  /** Writes lineage metadata onto a session and publishes it as `session.metadata`. */
+  private writeLineage(sessionId: string, lineage: { parentSessionId: string | null; lineageType: "root" | "branch" | "clone"; createdFrom: string | null; createdAt: string }): void {
+    this.store.changeSessionSummary(sessionId, {
+      parentSessionId: lineage.parentSessionId,
+      lineageType: lineage.lineageType,
+      lineageCreatedFrom: lineage.createdFrom,
+      lineageCreatedAt: lineage.createdAt,
+    });
+    this.store.appendEvent(`session:${sessionId}`, "session.metadata", {
+      sessionId,
+      parentSessionId: lineage.parentSessionId,
+      lineageType: lineage.lineageType,
+      createdFrom: lineage.createdFrom,
+      createdAt: lineage.createdAt,
+    });
+  }
+
+  /** session.rename — requires an idle (or stopped) session and writes the new name. */
+  private async handleSessionRename(command: StoredCommand): Promise<void> {
+    const payload = (command.payload ?? {}) as { sessionId?: string; name?: string };
+    if (typeof payload.sessionId !== "string") throw new Error("session.rename requires sessionId");
+    if (typeof payload.name !== "string" || payload.name.length === 0) throw new Error("session.rename requires name");
+    const prior = this.store.sessionState(payload.sessionId);
+    if (!prior) throw new Error("session.rename session not found");
+    if (prior.deletedAt) throw new Error("session_deleted");
+    if (prior.runtimeState && prior.runtimeState !== "idle" && prior.runtimeState !== "stopped") {
+      throw new Error("session.rename requires an idle session");
+    }
+    const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
+    if (!rpc) throw new Error("session.rename no RPC available");
+    try {
+      await rpc.request({ id: command.commandId, method: "set_session_name", params: { name: payload.name } });
+    } catch (error) {
+      // Extension cancel / RPC failure — surface as capability-safe `invalid_state`
+      // so mobile sees the rename failed but the durable summary is unchanged.
+      throw new Error(`session.rename failed: ${(error as Error).message ?? "rpc_error"}`);
+    }
+    const previousName = typeof prior.name === "string" ? prior.name : null;
+    this.store.updateSessionState(payload.sessionId, { ...prior, name: payload.name, previousName });
+    this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
+      sessionId: payload.sessionId,
+      name: payload.name,
+      previousName,
+      renamedAt: new Date(this.now()).toISOString(),
+    });
+    this.store.appendEvent(this.hostStream, "session.summary", {
+      sessionId: payload.sessionId,
+      workspaceId: this.workspace.workspaceId,
+      name: payload.name,
+      previousName,
+      change: "renamed",
+    });
+  }
+
+  /**
+   * session.fork — branches a session at the eligible entry id. The
+   * new session is the child; the original is unchanged. Extension
+   * cancellation is signalled by `fork` throwing — the original
+   * session is not mutated and no child row is added.
+   */
+  private async handleSessionFork(command: StoredCommand): Promise<void> {
+    const payload = (command.payload ?? {}) as { sessionId?: string; entryId?: string };
+    if (typeof payload.sessionId !== "string") throw new Error("session.fork requires sessionId");
+    if (typeof payload.entryId !== "string" || payload.entryId.length === 0) throw new Error("session.fork requires entryId");
+    const prior = this.store.sessionState(payload.sessionId);
+    if (!prior) throw new Error("session.fork session not found");
+    if (prior.deletedAt) throw new Error("session_deleted");
+    if (prior.runtimeState && prior.runtimeState !== "idle" && prior.runtimeState !== "stopped") {
+      throw new Error("session.fork requires an idle session");
+    }
+    const mapping = this.mapForkEntryId(payload.sessionId, payload.entryId);
+    if (!mapping.eligible) throw new Error(`session.fork ineligible: ${mapping.reason ?? "unknown"}`);
+    const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
+    if (!rpc) throw new Error("session.fork no RPC available");
+    let eligibleResponse: unknown;
+    try {
+      eligibleResponse = await rpc.request({ id: `${command.commandId}:eligible`, method: "get_fork_messages" });
+    } catch (error) {
+      this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
+        sessionId: payload.sessionId,
+        forkCancelled: true,
+        entryId: payload.entryId,
+        reason: (error as Error).message ?? "rpc_error",
+      });
+      throw error;
+    }
+    const eligibleItems = Array.isArray(eligibleResponse)
+      ? eligibleResponse
+      : eligibleResponse && typeof eligibleResponse === "object" && Array.isArray((eligibleResponse as Record<string, unknown>).messages)
+        ? (eligibleResponse as Record<string, unknown>).messages as unknown[]
+        : null;
+    if (eligibleItems && !eligibleItems.some((item) => item && typeof item === "object"
+      && ((item as Record<string, unknown>).entryId === payload.entryId || (item as Record<string, unknown>).id === payload.entryId))) {
+      throw new Error("session.fork entry is not eligible");
+    }
+    let response: unknown;
+    try {
+      response = await rpc.request({ id: command.commandId, method: "fork", params: { entryId: payload.entryId } });
+    } catch (error) {
+      // Extension cancel or RPC failure — leave original unchanged.
+      this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
+        sessionId: payload.sessionId,
+        forkCancelled: true,
+        entryId: payload.entryId,
+        reason: (error as Error).message ?? "rpc_error",
+      });
+      throw error;
+    }
+    if (response && typeof response === "object" && (response as Record<string, unknown>).cancelled === true) {
+      this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
+        sessionId: payload.sessionId,
+        forkCancelled: true,
+        entryId: payload.entryId,
+      });
+      return;
+    }
+    const childSessionId = this.newSessionId();
+    const createdAt = new Date(this.now()).toISOString();
+    const lineage = {
+      parentSessionId: payload.sessionId,
+      lineageType: "branch" as const,
+      createdFrom: payload.entryId,
+      createdAt,
+    };
+    this.store.addSessionSummary(childSessionId, {
+      sessionId: childSessionId,
+      workspaceId: this.workspace.workspaceId,
+      displayName: this.workspace.displayName,
+      name: `Fork of ${typeof prior.name === "string" ? prior.name : payload.sessionId.slice(0, 8)}`,
+      policyMode: (prior.policyMode as WorkspacePolicyMode) ?? this.workspace.policyMode,
+      runtimeState: "idle",
+      attentionState: "ready",
+      queueCount: 0,
+      createdAt,
+      lastActivityAt: createdAt,
+      forkResult: response ?? null,
+    });
+    this.writeLineage(childSessionId, lineage);
+    this.lastUsedSessionId = childSessionId;
+  }
+
+  /**
+   * session.clone — duplicates the current active branch. Like fork,
+   * the original session is never mutated. The child has no
+   * `createdFrom` (entry id) but does carry `parentSessionId` and a
+   * `lineageType: "clone"` marker so mobile can render the tree.
+   */
+  private async handleSessionClone(command: StoredCommand): Promise<void> {
+    const payload = (command.payload ?? {}) as { sessionId?: string };
+    if (typeof payload.sessionId !== "string") throw new Error("session.clone requires sessionId");
+    const prior = this.store.sessionState(payload.sessionId);
+    if (!prior) throw new Error("session.clone session not found");
+    if (prior.deletedAt) throw new Error("session_deleted");
+    if (prior.runtimeState && prior.runtimeState !== "idle" && prior.runtimeState !== "stopped") {
+      throw new Error("session.clone requires an idle session");
+    }
+    const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
+    if (!rpc) throw new Error("session.clone no RPC available");
+    let response: unknown;
+    try {
+      response = await rpc.request({ id: command.commandId, method: "clone" });
+    } catch (error) {
+      this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
+        sessionId: payload.sessionId,
+        cloneCancelled: true,
+        reason: (error as Error).message ?? "rpc_error",
+      });
+      throw error;
+    }
+    if (response && typeof response === "object" && (response as Record<string, unknown>).cancelled === true) {
+      this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
+        sessionId: payload.sessionId,
+        cloneCancelled: true,
+      });
+      return;
+    }
+    const childSessionId = this.newSessionId();
+    const createdAt = new Date(this.now()).toISOString();
+    const lineage = {
+      parentSessionId: payload.sessionId,
+      lineageType: "clone" as const,
+      createdFrom: null,
+      createdAt,
+    };
+    this.store.addSessionSummary(childSessionId, {
+      sessionId: childSessionId,
+      workspaceId: this.workspace.workspaceId,
+      displayName: this.workspace.displayName,
+      name: `Clone of ${typeof prior.name === "string" ? prior.name : payload.sessionId.slice(0, 8)}`,
+      policyMode: (prior.policyMode as WorkspacePolicyMode) ?? this.workspace.policyMode,
+      runtimeState: "idle",
+      attentionState: "ready",
+      queueCount: 0,
+      createdAt,
+      lastActivityAt: createdAt,
+      cloneResult: response ?? null,
+    });
+    this.writeLineage(childSessionId, lineage);
+    this.lastUsedSessionId = childSessionId;
+  }
+
+  /**
+   * session.delete — soft-delete with a 7-day purge window.
+   *
+   * Pi has no delete-session RPC command (BACKLOG M0-20), so this
+   * adapter only marks the session as soft-deleted in the durable
+   * store: state gains `deletedAt`, `purgeAfter`, `deletionState =
+   * "soft_deleted"`, and the host stream receives a `session.removed`
+   * event with the purge window. Running processes are stopped; the
+   * Pi on-disk session file is left untouched so restore is possible.
+   */
+  private async handleSessionDelete(command: StoredCommand): Promise<void> {
+    const payload = (command.payload ?? {}) as { sessionId?: string; abortActive?: boolean; cancelQueued?: boolean };
+    if (typeof payload.sessionId !== "string") throw new Error("session.delete requires sessionId");
+    const prior = this.store.sessionState(payload.sessionId);
+    if (!prior) throw new Error("session.delete session not found");
+    if (prior.deletedAt) {
+      // Idempotent: already soft-deleted.
+      return;
+    }
+    const supervisorState = this.supervisor.state(payload.sessionId);
+    const activeTurn = prior.runtimeState === "running" || prior.runtimeState === "waiting_for_input" || supervisorState === "running" || supervisorState === "waiting_for_input";
+    if (activeTurn && payload.abortActive !== true) throw new Error("session.delete requires explicit active-turn abort");
+    if (Number(prior.queueCount ?? 0) > 0 && payload.cancelQueued !== true) throw new Error("session.delete requires explicit queued-prompt cancellation");
+    // Abort explicitly before process stop; no active action is silently discarded.
+    if (activeTurn) {
+      const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
+      if (!rpc) throw new Error("session.delete no RPC available to abort active turn");
+      await rpc.request({ id: `${command.commandId}:abort`, method: "abort" });
+    }
+    // Stop running process so the Pi session file is no longer being mutated.
+    try {
+      if (supervisorState === "running" || supervisorState === "idle") {
+        await this.supervisor.stop(payload.sessionId, "soft_delete");
+      }
+      this.unbindSession(payload.sessionId);
+    } catch (error) {
+      this.store.markSessionDeleteFailed(payload.sessionId, (error as Error).message || "process stop failed");
+      throw new Error("session.delete_failed: repair required");
+    }
+    const deleted = this.store.softDeleteSession(payload.sessionId, this.softDeleteRetentionMs, this.now());
+    const deletedAt = String(deleted.deletedAt);
+    const purgeAfter = String(deleted.purgeAfter);
+    this.store.appendEvent(`session:${payload.sessionId}`, "session.state", {
+      sessionId: payload.sessionId,
+      runtimeState: "stopped",
+      attentionState: "none",
+      deletedAt,
+      purgeAfter,
+      deletionState: "soft_deleted",
+    });
+    // Host-stream `session.removed` so mobile can show the deleted
+    // badge with the purge window. Removal is soft — the row remains
+    // durably addressable so restore can revive it.
+    this.store.appendEvent(this.hostStream, "session.removed", {
+      sessionId: payload.sessionId,
+      workspaceId: this.workspace.workspaceId,
+      removedAt: deletedAt,
+      purgeAfter,
+      deletionState: "soft_deleted",
+      partial: false,
+      reason: "operator",
+    });
+    // Also keep the durable summary coherent with the removal so list
+    // consumers see `runtimeState: stopped` until restore.
+    this.store.appendEvent(this.hostStream, "session.summary", {
+      sessionId: payload.sessionId,
+      workspaceId: this.workspace.workspaceId,
+      runtimeState: "stopped",
+      attentionState: "none",
+      deletedAt,
+      purgeAfter,
+      deletionState: "soft_deleted",
+      change: "removed",
+    });
+  }
+
+  /**
+   * session.restore — revives a soft-deleted session whose purge
+   * window has not elapsed. Restoring after the window is rejected
+   * (use `session.purge` for irreversible removal). The restored
+   * session is re-bound to its RPC client and a fresh `session.activate`
+   * cycle is performed so mobile lands on the idle summary.
+   */
+  private async handleSessionRestore(command: StoredCommand): Promise<void> {
+    const payload = (command.payload ?? {}) as { sessionId?: string };
+    if (typeof payload.sessionId !== "string") throw new Error("session.restore requires sessionId");
+    const prior = this.store.sessionState(payload.sessionId);
+    if (!prior) throw new Error("session.restore session not found");
+    if (!prior.deletedAt) {
+      // Not deleted — restore is a no-op; surface as `invalid_state`.
+      throw new Error("session.restore: session is not deleted");
+    }
+    const purgeAfterMs = Date.parse(String(prior.purgeAfter));
+    if (Number.isFinite(purgeAfterMs) && purgeAfterMs <= this.now()) {
+      throw new Error("session.restore: purge window has elapsed");
+    }
+    const restored = this.store.restoreSoftDeletedSession(payload.sessionId, this.now());
+    const restoredAt = String(restored.restoredAt);
+    this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
+      sessionId: payload.sessionId,
+      restoredAt,
+      previousDeletedAt: prior.deletedAt,
+      previousPurgeAfter: prior.purgeAfter,
+    });
+    this.store.appendEvent(this.hostStream, "session.summary", {
+      sessionId: payload.sessionId,
+      workspaceId: this.workspace.workspaceId,
+      runtimeState: "stopped",
+      attentionState: "none",
+      restoredAt,
+      change: "restored",
+    });
+    // Delegate process re-establishment to session.activate semantics.
+    await this.handleSessionActivate(command);
+  }
+
+  /**
+   * session.purge — irreversible. Pi has no delete RPC (M0-20), so
+   * purge removes the durable row and emits `session.removed` with
+   * `permanent: true`. The session ID is never reused because the
+   * store issues fresh UUIDs for every `session.create`.
+   */
+  private async handleSessionPurge(command: StoredCommand): Promise<void> {
+    const payload = (command.payload ?? {}) as { sessionId?: string };
+    if (typeof payload.sessionId !== "string") throw new Error("session.purge requires sessionId");
+    if (!this.store.sessionExists(payload.sessionId)) throw new Error("session.purge session not found");
+    try {
+      this.unbindSession(payload.sessionId);
+      const supervisorState = this.supervisor.state(payload.sessionId);
+      if (supervisorState === "running" || supervisorState === "idle") {
+        await this.supervisor.stop(payload.sessionId, "purge");
+      }
+    } catch (error) {
+      this.store.markSessionDeleteFailed(payload.sessionId, (error as Error).message || "purge stop failed");
+      throw new Error("session.delete_failed: repair required");
+    }
+    this.store.purgeSessionTombstone(payload.sessionId);
   }
 
   private handleNotification(raw: unknown): void {

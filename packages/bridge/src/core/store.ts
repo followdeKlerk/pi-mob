@@ -327,7 +327,7 @@ export class BridgeStore {
    * the next page. `snapshotRevision` is the host stream current
    * cursor, suitable for change detection by the client.
    */
-  listSessionSummaries(input: { filter?: string | null; query?: string | null; sort?: string; pageSize: number; beforeCursor?: string | null }): { items: readonly Record<string, unknown>[]; snapshotRevision: string; nextBeforeCursor?: string } {
+  listSessionSummaries(input: { filter?: string | null; query?: string | null; sort?: string; pageSize: number; beforeCursor?: string | null; parentSessionId?: string | null }): { items: readonly Record<string, unknown>[]; snapshotRevision: string; nextBeforeCursor?: string } {
     if (!Number.isInteger(input.pageSize) || input.pageSize < 1 || input.pageSize > 100) throw new StoreError("conflict", "page size must be an integer from 1 through 100");
     const sort = (input.sort ?? "activity") as string;
     if (!(BridgeStore.SESSION_SORT_KEYS as readonly string[]).includes(sort)) throw new StoreError("conflict", "sort must be one of name|attention|activity|created|queue");
@@ -342,6 +342,8 @@ export class BridgeStore {
         const parsed = parseObject(row.state);
         return { ...parsed, sessionId: row.sessionId, createdAt: row.createdAt } as Record<string, unknown>;
       });
+      if (input.parentSessionId !== undefined) rows = rows.filter((row) => (row.parentSessionId ?? null) === input.parentSessionId && row.lifecycleState !== "purged");
+      else rows = rows.filter((row) => row.lifecycleState !== "purged");
       if (filter === "needs_attention") rows = rows.filter((row) => row.attentionState === "needs_attention");
       else if (filter !== "all") rows = rows.filter((row) => row.attentionState === filter || row.runtimeState === filter);
       if (query.length > 0) rows = rows.filter((row) => {
@@ -375,6 +377,70 @@ export class BridgeStore {
         snapshotRevision: position.current,
         ...(hasMore ? { nextBeforeCursor: String(startIndex + input.pageSize) } : {}),
       };
+    });
+  }
+
+  resolvedSessionName(sessionId: string): string {
+    const state = this.sessionState(sessionId);
+    if (!state) throw new StoreError("not_found", "session not found");
+    const name = typeof state.name === "string" ? state.name.trim() : "";
+    return name || `Session ${sessionId.slice(0, 8)}`;
+  }
+
+  softDeleteSession(sessionId: string, retentionMs = 7 * 24 * 60 * 60_000, at = this.now()): Record<string, unknown> {
+    if (!Number.isFinite(retentionMs) || retentionMs <= 0) throw new StoreError("conflict", "retention must be positive");
+    return this.transaction(() => {
+      const prior = this.sessionState(sessionId);
+      if (!prior) throw new StoreError("not_found", "session not found");
+      if (prior.lifecycleState === "purged") throw new StoreError("conflict", "purged session cannot be deleted");
+      if (prior.lifecycleState === "soft_deleted") return prior;
+      const deletedAt = new Date(at).toISOString();
+      const next = { ...prior, lifecycleState: "soft_deleted", deletionState: "soft_deleted", deletedAt, purgeAfter: new Date(at + retentionMs).toISOString(), runtimeState: "stopped" };
+      this.db.query("UPDATE sessions SET state_json=?,updated_at=? WHERE session_id=?").run(JSON.stringify(next), this.now(), sessionId);
+      this.appendEventTx(`session:${sessionId}`, "session.deleted", { sessionId, deletedAt: next.deletedAt, purgeAfter: next.purgeAfter });
+      this.appendEventTx(`host:${this.identity().hostId}`, "session.summary", next);
+      return next;
+    });
+  }
+
+  markSessionDeleteFailed(sessionId: string, reason: string): Record<string, unknown> {
+    return this.transaction(() => {
+      const prior = this.sessionState(sessionId);
+      if (!prior) throw new StoreError("not_found", "session not found");
+      const next = { ...prior, lifecycleState: "delete_failed", deletionState: "delete_failed", repairReason: reason.slice(0, 500), deleteAttemptedAt: new Date(this.now()).toISOString() };
+      this.db.query("UPDATE sessions SET state_json=?,updated_at=? WHERE session_id=?").run(JSON.stringify(next), this.now(), sessionId);
+      this.appendEventTx(`session:${sessionId}`, "session.delete_failed", { sessionId, repairReason: next.repairReason, repairable: true });
+      this.appendEventTx(`host:${this.identity().hostId}`, "session.summary", next);
+      return next;
+    });
+  }
+
+  restoreSoftDeletedSession(sessionId: string, at = this.now()): Record<string, unknown> {
+    return this.transaction(() => {
+      const prior = this.sessionState(sessionId);
+      if (!prior) throw new StoreError("not_found", "session not found");
+      if (prior.lifecycleState === "delete_failed") throw new StoreError("conflict", "delete repair is required before restore");
+      if (prior.lifecycleState !== "soft_deleted") throw new StoreError("conflict", "session is not deleted");
+      const deadline = Date.parse(String(prior.purgeAfter ?? ""));
+      if (!Number.isFinite(deadline) || deadline <= at) throw new StoreError("conflict", "restore window has elapsed");
+      const next = { ...prior, lifecycleState: "active", deletionState: "active", deletedAt: null, purgeAfter: null, repairReason: null, restoredAt: new Date(at).toISOString() };
+      this.db.query("UPDATE sessions SET state_json=?,updated_at=? WHERE session_id=?").run(JSON.stringify(next), this.now(), sessionId);
+      this.appendEventTx(`session:${sessionId}`, "session.restored", { sessionId, restoredAt: next.restoredAt });
+      this.appendEventTx(`host:${this.identity().hostId}`, "session.summary", next);
+      return next;
+    });
+  }
+
+  purgeSessionTombstone(sessionId: string): Record<string, unknown> {
+    return this.transaction(() => {
+      const prior = this.sessionState(sessionId);
+      if (!prior) throw new StoreError("not_found", "session not found");
+      if (prior.lifecycleState === "purged") return prior;
+      const purgedAt = new Date(this.now()).toISOString();
+      const tombstone = { sessionId, lifecycleState: "purged", deletionState: "purged", purgedAt, name: prior.name ?? null, parentSessionId: prior.parentSessionId ?? null, neverReuse: true };
+      this.db.query("UPDATE sessions SET state_json=?,updated_at=? WHERE session_id=?").run(JSON.stringify(tombstone), this.now(), sessionId);
+      this.appendEventTx(`host:${this.identity().hostId}`, "session.removed", { sessionId, purgedAt, permanent: true, neverReuse: true });
+      return tombstone;
     });
   }
 
