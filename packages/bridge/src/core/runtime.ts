@@ -149,6 +149,10 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     }
     if (type === "command.current") { const command = this.options.store.command(String(payload.commandId ?? "")); if (!command) throw new RuntimeProtocolError("command_not_found", "command not found"); return { commandId: command.commandId, state: command.state }; }
     if (type === "session.history.page") return this.sessionHistoryPage(payload);
+    if (type === "model.list") {
+      if (typeof this.options.adapter.listModels !== "function") throw new RuntimeProtocolError("unsupported_capability", "adapter does not expose configured models");
+      return { items: this.options.adapter.listModels(typeof payload.sessionId === "string" ? payload.sessionId : undefined).items.map((item) => ({ ...item })) };
+    }
     if (type === "workspace.list") {
       if (!this.policy) {
         // Backwards-compatible behaviour: fall back to the adapter's

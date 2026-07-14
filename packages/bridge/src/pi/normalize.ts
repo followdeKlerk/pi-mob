@@ -322,6 +322,14 @@ function text(value: unknown): string {
   if (typeof value !== "string") return "";
   return value.length > TEXT_LIMIT ? `${value.slice(0, TEXT_LIMIT)}…` : value;
 }
+function numberOr(value: unknown, fallback: number | null): number | null {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string" && value.length > 0) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return fallback;
+}
 function identifier(value: unknown): string {
   const raw = String(value ?? "unknown");
   return raw.length > 256 ? `${raw.slice(0, 255)}…` : raw;
@@ -410,6 +418,13 @@ export function normalizePiEvent(raw: RawPiEvent, context: PiNormalizationContex
     case "entry_appended": return [event("session.state", sessionId, { entry: safe(raw.entry) })];
     case "session_info_changed": return [event("session.metadata", sessionId, { name: text(raw.name) })];
     case "thinking_level_changed": return [event("model.state", sessionId, { thinkingLevel: raw.level })];
+    case "model_changed": return [event("model.state", sessionId, { provider: text(raw.provider), modelId: text(raw.id ?? raw.modelId) })];
+    case "steering_mode_changed": return [event("model.state", sessionId, { steeringMode: text(raw.mode) })];
+    case "follow_up_mode_changed": return [event("model.state", sessionId, { followUpMode: text(raw.mode) })];
+    case "session_stats": return [event("context.state", sessionId, {
+      tokens: numberOr(raw.tokens, null), cost: numberOr(raw.cost, null),
+      contextWindow: numberOr(raw.contextWindow ?? raw.context_window, null),
+    })];
     case "extension_error": return [event("error.event", sessionId, { code: "internal_error", retryable: false, extensionEvent: safe(raw.event) })];
     case "extension_ui_request": return normalizeExtensionUi(raw, sessionId);
     default: return [];

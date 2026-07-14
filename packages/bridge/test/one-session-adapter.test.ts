@@ -48,7 +48,7 @@ class FakeRpc implements PiRpcClient {
   emit(raw: PiRpcNotification | Record<string, unknown>): void {
     for (const fn of this.notifications) fn(raw);
   }
-  reset(): void { this.requests.length = 0; this.responses.clear(); this.failWith = null; }
+  reset(): void { this.requests.length = 0; this.responses.clear(); this.failWith = null; this.requestAttempts = 0; }
 }
 
 function setup(opts: { workspace?: Partial<ConstructorParameters<typeof OneSessionPiAdapter>[0]["workspace"]> } = {}): {
@@ -140,6 +140,53 @@ describe("OneSessionPiAdapter", () => {
     expect(store.sessionState(sessionId)?.runtimeState).toBe("idle");
   });
 
+  test("M10 controls expose configured state and map durable Pi commands", async () => {
+    const { store, rpc, adapter, hostStream } = setup();
+    rpc.responses.set("get_available_models:", { data: [
+      { id: "anthropic/sonnet", name: "Sonnet", provider: "anthropic", available: true },
+    ] });
+    rpc.responses.set("get_state:", { data: {
+      model: "anthropic/sonnet", thinkingLevel: "medium",
+      steeringMode: "all", followUpMode: "one-at-a-time",
+      autoCompactionEnabled: true,
+    } });
+    rpc.responses.set("get_session_stats:", { data: {
+      inputTokens: 10, outputTokens: 5, contextTokens: 15,
+      contextWindow: 1000, cost: 0.001,
+    } });
+    rpc.responses.set("get_commands:", { data: [
+      { name: "review", description: "Review code", source: "skill" },
+      { name: "quit", description: "TUI only", source: "extension" },
+    ] });
+    await adapter.dispatch(makeCommand("create-m10", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
+    expect(adapter.listModels(sessionId).items).toHaveLength(1);
+    expect(store.sessionState(sessionId)?.modelId).toBe("anthropic/sonnet");
+    expect((store.sessionState(sessionId)?.commandCatalogue as unknown[])).toHaveLength(1);
+    expect(store.listEvents(`session:${sessionId}`).some((event) => event.type === "context.state")).toBe(true);
+
+    rpc.reset();
+    for (const [type, payload, method] of [
+      ["model.set", { modelId: "anthropic/sonnet" }, "set_model"],
+      ["thinking.set", { level: "high" }, "set_thinking_level"],
+      ["compaction.start", {}, "compact"],
+      ["compaction.auto.set", { enabled: false }, "set_auto_compaction"],
+      ["retry.auto.set", { enabled: true }, "set_auto_retry"],
+      ["retry.abort", {}, "abort_retry"],
+      ["steering_mode.set", { enabled: true }, "set_steering_mode"],
+      ["follow_up_mode.set", { enabled: false }, "set_follow_up_mode"],
+    ] as const) {
+      await adapter.dispatch(makeCommand(`m10-${type}`, type, `session:${sessionId}`, `session:${sessionId}`, { sessionId, ...payload }));
+      expect(rpc.requests.at(-1)?.method).toBe(method);
+    }
+    expect(store.sessionState(sessionId)?.runtimeState).toBe("idle");
+    expect(store.listEvents(`session:${sessionId}`).some((event) => event.type === "compaction.state")).toBe(true);
+    expect(store.listEvents(`session:${sessionId}`).some((event) => event.type === "retry.state")).toBe(true);
+
+    store.updateSessionState(sessionId, { ...store.sessionState(sessionId), runtimeState: "running" });
+    await expect(adapter.dispatch(makeCommand("blocked-model", "model.set", `session:${sessionId}`, `session:${sessionId}`, { sessionId, modelId: "x" }))).rejects.toThrow("requires an idle session");
+  });
+
   test("prompt.submit immediate calls RPC prompt and turn.abort calls RPC abort", async () => {
     const { store, rpc, adapter, hostStream } = setup();
     const create = makeCommand("cmd-create", "session.create", hostStream, hostStream, {
@@ -147,6 +194,7 @@ describe("OneSessionPiAdapter", () => {
       policyMode: "full",
     });
     await adapter.dispatch(create);
+    rpc.reset();
     const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
     const prompt = makeCommand("cmd-prompt", "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, {
       sessionId,
@@ -413,6 +461,7 @@ describe("M5 runtime integration", () => {
     await runtime.start();
     await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
     const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
+    rpc.reset();
     rpc.failWith = new Error("transport lost after write");
     const input = { commandId: "abababab-abab-4bab-8bab-abababababab", type: "prompt.submit", payload: { sessionId, deliveryMode: "immediate", message: "once", attachmentIds: [] }, scopeKey: `session:${sessionId}`, streamId: `session:${sessionId}` };
     const first = runtime.commands.submit(input); await first.completion;

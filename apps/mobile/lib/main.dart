@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 
 import 'src/connection/bridge_transport.dart';
 import 'src/connection/connection_coordinator.dart';
+import 'src/controls/controls.dart' as control_ui;
 import 'src/data/app_database.dart';
 import 'src/domain/mobile_state.dart';
+import 'src/domain/session_controls.dart' as control_domain;
 import 'src/pairing/pairing_payload.dart';
 import 'src/pairing/pairing_screen.dart';
 import 'src/transcript/widgets/transcript_view.dart';
@@ -358,6 +360,151 @@ class _WorkspaceSessionPanelState extends State<_WorkspaceSessionPanel> {
     }
   }
 
+  Future<void> _openSessionControls() async {
+    final coordinator = widget.coordinator;
+    await coordinator.requestModels();
+    if (!mounted) return;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (context) {
+        final state = coordinator.selectedControls;
+        final models = coordinator.configuredModels;
+        final idle =
+            coordinator.selectedRuntimeState == 'idle' ||
+            coordinator.selectedRuntimeState == 'stopped';
+        final retryPhase = switch (state?.retryPhase) {
+          control_domain.RetryPhase.waiting => control_ui.RetryPhase.scheduled,
+          control_domain.RetryPhase.running => control_ui.RetryPhase.retrying,
+          control_domain.RetryPhase.aborted => control_ui.RetryPhase.idle,
+          control_domain.RetryPhase.failed => control_ui.RetryPhase.idle,
+          _ => control_ui.RetryPhase.idle,
+        };
+        final compactionPhase = switch (state?.compactionPhase) {
+          control_domain.CompactionPhase.running =>
+            control_ui.CompactionPhase.compacting,
+          control_domain.CompactionPhase.completed =>
+            control_ui.CompactionPhase.completed,
+          control_domain.CompactionPhase.failed =>
+            control_ui.CompactionPhase.failed,
+          _ => control_ui.CompactionPhase.idle,
+        };
+        return FractionallySizedBox(
+          heightFactor: 0.92,
+          child: ListView(
+            key: const Key('session-controls-sheet'),
+            padding: const EdgeInsets.all(16),
+            children: [
+              Text(
+                'Pi controls',
+                style: Theme.of(context).textTheme.headlineSmall,
+              ),
+              const SizedBox(height: 12),
+              control_ui.ModelThinkingSelector(
+                data: control_ui.ModelThinkingViewData(
+                  models: [
+                    for (final model in models)
+                      control_ui.ModelOptionData(
+                        id: model.id,
+                        label: model.label,
+                        provider: model.provider ?? 'Configured host',
+                        thinkingLevels: const [
+                          'off',
+                          'minimal',
+                          'low',
+                          'medium',
+                          'high',
+                        ],
+                      ),
+                  ],
+                  selectedModelId: state?.modelId,
+                  selectedThinkingLevel: state?.thinkingLevel,
+                  unavailableRestoredModel: state?.modelUnavailable == true
+                      ? state?.modelId
+                      : null,
+                  enabled: idle,
+                  disabledReason: idle
+                      ? null
+                      : 'Model and thinking can change only while idle.',
+                ),
+                callbacks: control_ui.ModelThinkingCallbacks(
+                  onModelSelected: (id) => unawaited(coordinator.setModel(id)),
+                  onThinkingSelected: (level) =>
+                      unawaited(coordinator.setThinking(level)),
+                ),
+              ),
+              control_ui.ContextStatsCard(
+                data: control_ui.ContextStatsViewData(
+                  sessionTokens:
+                      (state?.inputTokens ?? 0) + (state?.outputTokens ?? 0),
+                  contextTokens: state?.contextTokens,
+                  contextWindowTokens: state?.contextWindow,
+                  costUsd: state?.cost,
+                ),
+              ),
+              control_ui.RetryControls(
+                data: control_ui.RetryViewData(
+                  phase: retryPhase,
+                  autoRetry: state?.autoRetryEnabled,
+                  remaining: state?.retryDelayMs == null
+                      ? null
+                      : Duration(milliseconds: state!.retryDelayMs!),
+                  attempt: state?.retryAttempt,
+                  maximumAttempts: state?.retryMaxAttempts,
+                ),
+                callbacks: control_ui.RetryCallbacks(
+                  onAutoRetryChanged: (value) =>
+                      unawaited(coordinator.setAutoRetry(value)),
+                  onAbort: () => unawaited(coordinator.abortRetry()),
+                ),
+              ),
+              control_ui.CompactionControls(
+                data: control_ui.CompactionViewData(
+                  phase: compactionPhase,
+                  autoCompact: state?.autoCompactionEnabled,
+                  summary: state?.compactionSummary,
+                  canStart: coordinator.isReady,
+                ),
+                callbacks: control_ui.CompactionCallbacks(
+                  onAutoCompactChanged: (value) =>
+                      unawaited(coordinator.setAutoCompaction(value)),
+                  onStart: () => unawaited(coordinator.compactNow()),
+                ),
+              ),
+              control_ui.SupportedCommandList(
+                commands: [
+                  for (final command
+                      in state?.commands ??
+                          const <control_domain.DiscoveredCommand>[])
+                    control_ui.SupportedCommandData(
+                      id: '${command.category}:${command.name}',
+                      title: '/${command.name}',
+                      category: switch (command.category) {
+                        'skill' => control_ui.SupportedCommandCategory.skill,
+                        'template' =>
+                          control_ui.SupportedCommandCategory.template,
+                        _ => control_ui.SupportedCommandCategory.extension,
+                      },
+                      description: command.description,
+                      invocation: '/${command.name}',
+                    ),
+                ],
+                onInvoke: (command) {
+                  unawaited(
+                    coordinator.updateDraft(
+                      command.invocation ?? command.title,
+                    ),
+                  );
+                  Navigator.of(context).pop();
+                },
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
   Future<void> _openTrustReviewForSelected() async {
     final selected = widget.coordinator.selectedWorkspace;
     if (selected == null) return;
@@ -447,6 +594,14 @@ class _WorkspaceSessionPanelState extends State<_WorkspaceSessionPanel> {
                 ),
                 Text(
                   'Controller: ${coordinator.leaseId == null ? 'observer' : 'acquired'}',
+                ),
+                FilledButton.tonalIcon(
+                  key: const Key('open-session-controls'),
+                  onPressed: coordinator.isReady && sessionValue != null
+                      ? _openSessionControls
+                      : null,
+                  icon: const Icon(Icons.tune),
+                  label: const Text('Pi controls'),
                 ),
                 if (coordinator.sessions.any(
                   (session) =>

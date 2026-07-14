@@ -8,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import '../../protocol_fixture.dart';
 import '../data/app_database.dart' hide StreamCursor;
 import '../domain/mobile_state.dart';
+import '../domain/session_controls.dart';
 import '../sync/event_reducer.dart';
 import 'bridge_transport.dart';
 
@@ -98,6 +99,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, SnapshotAssembler> _snapshots = {};
   final Map<String, String> _snapshotStreams = {};
   final Map<String, SessionState> _sessions = {};
+  final Map<String, SessionControlState> _sessionControls = {};
+  final List<ModelOption> _models = [];
   final Map<String, SessionHistoryState> _history = {};
   // In-flight `session.history.page` requests. The host may take several
   // seconds to return a large page; without bookkeeping we could apply a
@@ -292,6 +295,11 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   List<SessionState> get sessions => List.unmodifiable(_sessions.values);
+  List<ModelOption> get configuredModels => List.unmodifiable(_models);
+  SessionControlState? get selectedControls => selectedSessionId == null
+      ? null
+      : (_sessionControls[selectedSessionId!] ??
+            SessionControlState.empty(selectedSessionId!));
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
   List<ToolOutputNotice> get toolOutputNotices =>
       List.unmodifiable(_toolOutputNotices);
@@ -363,6 +371,65 @@ final class ConnectionCoordinator extends ChangeNotifier
       );
       _notify();
     }
+  }
+
+  Future<void> requestModels() async {
+    await _sendControl('model.list', <String, Object?>{
+      if (selectedSessionId != null) 'sessionId': selectedSessionId,
+    });
+  }
+
+  Future<void> setModel(String modelId) => _sendSessionControl(
+    'model.set',
+    <String, Object?>{'modelId': modelId},
+    idleOnly: true,
+  );
+  Future<void> setThinking(String level) => _sendSessionControl(
+    'thinking.set',
+    <String, Object?>{'level': level},
+    idleOnly: true,
+  );
+  Future<void> setAutoRetry(bool enabled) => _sendSessionControl(
+    'retry.auto.set',
+    <String, Object?>{'enabled': enabled},
+  );
+  Future<void> abortRetry() =>
+      _sendSessionControl('retry.abort', const <String, Object?>{});
+  Future<void> compactNow() =>
+      _sendSessionControl('compaction.start', const <String, Object?>{});
+  Future<void> setAutoCompaction(bool enabled) => _sendSessionControl(
+    'compaction.auto.set',
+    <String, Object?>{'enabled': enabled},
+  );
+  Future<void> setSteeringEnabled(bool enabled) => _sendSessionControl(
+    'steering_mode.set',
+    <String, Object?>{'enabled': enabled},
+  );
+  Future<void> setFollowUpEnabled(bool enabled) => _sendSessionControl(
+    'follow_up_mode.set',
+    <String, Object?>{'enabled': enabled},
+  );
+
+  Future<void> _sendSessionControl(
+    String type,
+    Map<String, Object?> values, {
+    bool idleOnly = false,
+  }) async {
+    final sessionId = selectedSessionId;
+    if (!isReady || sessionId == null || leaseId == null) {
+      throw StateError('Controller and online session required');
+    }
+    if (idleOnly &&
+        selectedRuntimeState != 'idle' &&
+        selectedRuntimeState != 'stopped') {
+      throw StateError('$type requires an idle session');
+    }
+    await _sendCommand(
+      type: type,
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': sessionId, ...values},
+      requiresLease: true,
+    );
   }
 
   Future<void> initialize({bool autoConnect = true}) async {
@@ -536,6 +603,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     errorMessage = null;
     _streams.clear();
     _sessions.clear();
+    _sessionControls.clear();
+    _models.clear();
     _history.clear();
     _historyRequests.clear();
     _workspaces.clear();
@@ -863,6 +932,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         _workspaceList(payload);
       case 'workspace.search.result':
         _workspaceSearchResult(_workspaceSearchEpoch, payload);
+      case 'model.list.result':
+        _modelListResult(payload);
       case 'session.history.page.result':
         _sessionHistoryPageResult(message, payload);
       case 'workspace.trust_state':
@@ -928,6 +999,8 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
       _streams.clear();
       _sessions.clear();
+      _sessionControls.clear();
+      _models.clear();
       _history.clear();
       _historyRequests.clear();
       _rawEvents.clear();
@@ -1162,6 +1235,24 @@ final class ConnectionCoordinator extends ChangeNotifier
           ),
         );
       }
+    } else if (type == 'model.state' ||
+        type == 'context.state' ||
+        type == 'retry.state' ||
+        type == 'compaction.state') {
+      final id = payload['sessionId'];
+      if (id is String) {
+        _sessionControls[id] =
+            (_sessionControls[id] ?? SessionControlState.empty(id)).apply(
+              type,
+              payload,
+            );
+        if (type == 'model.state') {
+          _mergeSession(<String, Object?>{
+            ...payload,
+            'modelSummary': payload['modelId'],
+          });
+        }
+      }
     } else if (type == 'session.summary') {
       _mergeSession(payload);
       final id = payload['sessionId'];
@@ -1230,6 +1321,31 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
     _sessions[id] = state;
     unawaited(_database.upsertSessionState(state));
+  }
+
+  void _modelListResult(Map<String, Object?> payload) {
+    final items = payload['items'];
+    _models
+      ..clear()
+      ..addAll(
+        items is List
+            ? items
+                  .whereType<Map>()
+                  .map(
+                    (item) =>
+                        ModelOption.fromJson(Map<String, Object?>.from(item)),
+                  )
+                  .where((item) => item.id.isNotEmpty)
+            : const <ModelOption>[],
+      );
+    final controls = selectedControls;
+    if (controls?.modelId != null &&
+        !_models.any((model) => model.id == controls!.modelId)) {
+      final id = selectedSessionId!;
+      _sessionControls[id] = controls!.apply('model.state', <String, Object?>{
+        'modelUnavailable': true,
+      });
+    }
   }
 
   void _sessionHistoryPageResult(

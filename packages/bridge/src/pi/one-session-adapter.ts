@@ -29,6 +29,7 @@ import type { StoredCommand } from "../core/store";
 import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
+import { normalizeCommandCatalogue } from "./command-catalogue";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
 import type { HostPolicyMode } from "../core/workspace-policy";
 
@@ -206,6 +207,38 @@ export class OneSessionPiAdapter {
       case "session.policy.set":
         this.policyBridge?.publish?.();
         return;
+      case "model.set":
+        return this.handleSessionControl(command, "set_model", "model.state", {
+          modelId: command.payload.modelId,
+        }, true);
+      case "thinking.set":
+        return this.handleSessionControl(command, "set_thinking_level", "model.state", {
+          level: command.payload.level,
+        }, true);
+      case "compaction.start":
+        return this.handleSessionControl(command, "compact", "compaction.state", {
+          state: "running",
+        });
+      case "compaction.auto.set":
+        return this.handleSessionControl(command, "set_auto_compaction", "compaction.state", {
+          autoEnabled: command.payload.enabled,
+        });
+      case "retry.auto.set":
+        return this.handleSessionControl(command, "set_auto_retry", "retry.state", {
+          autoEnabled: command.payload.enabled,
+        });
+      case "retry.abort":
+        return this.handleSessionControl(command, "abort_retry", "retry.state", {
+          state: "aborted",
+        });
+      case "steering_mode.set":
+        return this.handleSessionControl(command, "set_steering_mode", "model.state", {
+          steeringEnabled: command.payload.enabled,
+        });
+      case "follow_up_mode.set":
+        return this.handleSessionControl(command, "set_follow_up_mode", "model.state", {
+          followUpEnabled: command.payload.enabled,
+        });
       default:
         // Session-scoped metadata commands (rename, policy.set, ...) are
         // local-only at this checkpoint; no Pi RPC call is required.
@@ -226,7 +259,7 @@ export class OneSessionPiAdapter {
 
   // ---------------- Internals ----------------
 
-  private handleSessionCreate(command: StoredCommand): void {
+  private async handleSessionCreate(command: StoredCommand): Promise<void> {
     const payload = (command.payload ?? {}) as {
       workspaceId?: string;
       policyMode?: WorkspacePolicyMode;
@@ -247,6 +280,7 @@ export class OneSessionPiAdapter {
       // identity that could not be represented by this one-process adapter.
       this.activeSessionId = existing.sessionId;
       this.store.appendEvent(this.hostStream, "session.summary", existing);
+      await this.refreshSessionCapabilities(existing.sessionId as string);
       return;
     }
     const sessionId = this.newSessionId();
@@ -289,6 +323,80 @@ export class OneSessionPiAdapter {
       attentionState: "ready",
       createdAt,
     });
+    await this.refreshSessionCapabilities(sessionId);
+  }
+
+  private async refreshSessionCapabilities(sessionId: string): Promise<void> {
+    const safeRequest = async (method: string): Promise<unknown> => {
+      try { return await this.rpc.request({ method, timeoutMs: 5_000 }); }
+      catch { return null; }
+    };
+    const [modelsRaw, stateRaw, statsRaw, commandsRaw] = await Promise.all([
+      safeRequest("get_available_models"), safeRequest("get_state"),
+      safeRequest("get_session_stats"), safeRequest("get_commands"),
+    ]);
+    const unwrap = (value: unknown): unknown => value && typeof value === "object" && "data" in value
+      ? (value as Record<string, unknown>).data : value;
+    const modelsValue = unwrap(modelsRaw);
+    const availableModels = Array.isArray(modelsValue)
+      ? modelsValue.filter((item) => item && typeof item === "object").slice(0, 500)
+      : [];
+    const state = unwrap(stateRaw);
+    const stats = unwrap(statsRaw);
+    const stateObject = state && typeof state === "object" ? state as Record<string, unknown> : {};
+    const statsObject = stats && typeof stats === "object" ? stats as Record<string, unknown> : {};
+    const commandCatalogue = normalizeCommandCatalogue(unwrap(commandsRaw));
+    const prior = this.store.sessionState(sessionId) ?? {};
+    const patch = {
+      availableModels,
+      commandCatalogue,
+      modelId: typeof stateObject.model === "string" ? stateObject.model : null,
+      thinkingLevel: typeof stateObject.thinkingLevel === "string" ? stateObject.thinkingLevel : null,
+      steeringMode: stateObject.steeringMode ?? null,
+      followUpMode: stateObject.followUpMode ?? null,
+      autoCompactionEnabled: stateObject.autoCompactionEnabled ?? null,
+    };
+    this.store.updateSessionState(sessionId, { ...prior, ...patch });
+    this.store.appendEvent(`session:${sessionId}`, "model.state", { sessionId, ...patch });
+    this.store.appendEvent(`session:${sessionId}`, "context.state", { sessionId, ...statsObject });
+  }
+
+  private async handleSessionControl(
+    command: StoredCommand,
+    method: string,
+    eventType: "model.state" | "retry.state" | "compaction.state",
+    statePatch: Record<string, unknown>,
+    idleOnly = false,
+  ): Promise<void> {
+    const sessionId = String(command.payload.sessionId ?? "");
+    const prior = this.store.sessionState(sessionId);
+    if (!prior) throw new Error(`${command.type} session not found`);
+    if (idleOnly && prior.runtimeState !== "idle" && prior.runtimeState !== "stopped") {
+      throw new Error(`${command.type} requires an idle session`);
+    }
+    const params = command.type === "steering_mode.set" || command.type === "follow_up_mode.set"
+      ? { mode: command.payload.enabled === true ? "all" : "one-at-a-time" }
+      : Object.fromEntries(Object.entries(command.payload).filter(([key]) => key !== "sessionId"));
+    await this.rpc.request({ id: command.commandId, method, params });
+    const patch = {
+      sessionId,
+      ...statePatch,
+      ...(command.type === "model.set" ? { modelId: command.payload.modelId } : {}),
+      ...(command.type === "thinking.set" ? { thinkingLevel: command.payload.level } : {}),
+    };
+    this.store.updateSessionState(sessionId, { ...prior, ...patch });
+    this.store.appendEvent(`session:${sessionId}`, eventType, patch);
+  }
+
+  /** Returns the last durable model catalogue. A Pi `model_list` notification
+   * refreshes this through `model.state`; an empty list is explicit rather
+   * than inventing provider configuration on mobile. */
+  listModels(sessionId?: string): { readonly items: ReadonlyArray<Record<string, unknown>> } {
+    const id = sessionId ?? this.activeSessionId;
+    if (!id) return { items: [] };
+    const state = this.store.sessionState(id) ?? {};
+    const models = Array.isArray(state.availableModels) ? state.availableModels : [];
+    return { items: models.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object").map((item) => ({ ...item })) };
   }
 
   private async handlePromptSubmit(command: StoredCommand): Promise<void> {

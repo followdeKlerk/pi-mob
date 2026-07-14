@@ -465,14 +465,14 @@ A long real session streams reasoning and parallel tools, truncates huge output,
 
 ## Tasks
 
-- [ ] **M10-01 P1 M** List/configured model state and unavailable restored model UX.
-- [ ] **M10-02 P1 M** Model/thinking set with valid runtime-state restrictions.
-- [ ] **M10-03 P1 S** Session tokens/cost/context with unknown/null states and advisory thresholds.
-- [ ] **M10-04 P1 M** Auto-retry state, retry countdown/count, abort retry.
-- [ ] **M10-05 P1 M** Manual/auto compaction state and summary transition.
-- [ ] **M10-06 P1 M** Steering/follow-up mode state where supported.
-- [ ] **M10-07 P1 M** Discover/categorize/search/invoke skills, templates, extension commands.
-- [ ] **M10-08 P1 S** Exclude unsupported TUI-only commands.
+- [x] **M10-01 P1 M** List/configured model state and unavailable restored model UX.
+- [x] **M10-02 P1 M** Model/thinking set with valid runtime-state restrictions.
+- [x] **M10-03 P1 S** Session tokens/cost/context with unknown/null states and advisory thresholds.
+- [x] **M10-04 P1 M** Auto-retry state, retry countdown/count, abort retry.
+- [x] **M10-05 P1 M** Manual/auto compaction state and summary transition.
+- [x] **M10-06 P1 M** Steering/follow-up mode state where supported.
+- [x] **M10-07 P1 M** Discover/categorize/search/invoke skills, templates, extension commands.
+- [x] **M10-08 P1 S** Exclude unsupported TUI-only commands.
 
 ## Checkpoint demo
 
@@ -480,12 +480,12 @@ Switch eligible model/thinking, inspect stats, trigger compaction/retry controls
 
 ## Exit criteria
 
-- [ ] Every control is durable and replayable.
-- [ ] Restored state matches Pi.
-- [ ] Unsupported/unavailable capabilities are explicit.
-- [ ] Retry/compaction cannot create false settled state.
+- [x] Every control is durable and replayable.
+- [x] Restored state matches Pi.
+- [x] Unsupported/unavailable capabilities are explicit.
+- [x] Retry/compaction cannot create false settled state.
 
-**Evidence:** real Pi control suite.
+**Evidence:** [`M10-SUMMARY.md`](M10-SUMMARY.md) and the real/fake Pi control suites.
 
 ---
 

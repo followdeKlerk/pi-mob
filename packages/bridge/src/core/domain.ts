@@ -9,6 +9,7 @@ export interface AdapterPort {
    * leave this undefined; the runtime surfaces `workspace_unavailable`.
    */
   listWorkspaces?(): { readonly items: ReadonlyArray<Record<string, unknown>> };
+  listModels?(sessionId?: string): { readonly items: ReadonlyArray<Record<string, unknown>> };
   admission?(): { readonly accepting: boolean; readonly reason?: string };
 }
 export class IndeterminateDispatchError extends Error {

@@ -631,6 +631,122 @@ void main() {
     expect(coordinator.pendingCommandId, isNull);
   });
 
+  test(
+    'M10 model context retry compaction controls reconcile and gate',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      await coordinator.requestModels();
+      final request = socket.sent.lastWhere(
+        (message) => message['type'] == 'model.list',
+      );
+      socket.server(
+        response('model.list.result', {
+          'items': [
+            {
+              'id': 'anthropic/sonnet',
+              'label': 'Sonnet',
+              'provider': 'anthropic',
+            },
+          ],
+        }, requestId: request['requestId'] as String),
+      );
+      socket.server(
+        event(
+          type: 'model.state',
+          streamId: 'session:$sessionId',
+          cursor: '2',
+          eventId: '30303030-3030-4030-8030-303030303030',
+          payload: {
+            'sessionId': sessionId,
+            'modelId': 'anthropic/sonnet',
+            'thinkingLevel': 'medium',
+            'steeringEnabled': true,
+            'followUpEnabled': false,
+          },
+        ),
+      );
+      socket.server(
+        event(
+          type: 'context.state',
+          streamId: 'session:$sessionId',
+          cursor: '3',
+          eventId: '31313131-3131-4131-8131-313131313131',
+          payload: {
+            'sessionId': sessionId,
+            'inputTokens': 10,
+            'outputTokens': 5,
+            'contextTokens': 15,
+            'contextWindow': 1000,
+            'cost': 0.001,
+          },
+        ),
+      );
+      socket.server(
+        event(
+          type: 'retry.state',
+          streamId: 'session:$sessionId',
+          cursor: '4',
+          eventId: '32323232-3232-4232-8232-323232323232',
+          payload: {
+            'sessionId': sessionId,
+            'state': 'waiting',
+            'attempt': 1,
+            'maxAttempts': 3,
+            'delayMs': 5000,
+          },
+        ),
+      );
+      socket.server(
+        event(
+          type: 'compaction.state',
+          streamId: 'session:$sessionId',
+          cursor: '5',
+          eventId: '33333333-3333-4333-8333-333333333334',
+          payload: {'sessionId': sessionId, 'state': 'running'},
+        ),
+      );
+      await eventually(() => coordinator.selectedControls?.contextTokens == 15);
+      expect(coordinator.configuredModels.single.id, 'anthropic/sonnet');
+      expect(coordinator.selectedControls?.retryAttempt, 1);
+      expect(coordinator.selectedControls?.compactionPhase.name, 'running');
+
+      await coordinator.setModel('anthropic/sonnet');
+      await coordinator.setThinking('high');
+      await coordinator.setAutoRetry(true);
+      await coordinator.abortRetry();
+      await coordinator.compactNow();
+      await coordinator.setAutoCompaction(true);
+      await coordinator.setSteeringEnabled(true);
+      await coordinator.setFollowUpEnabled(false);
+      expect(
+        socket.sent.map((message) => message['type']),
+        containsAll(<String>[
+          'model.set',
+          'thinking.set',
+          'retry.auto.set',
+          'retry.abort',
+          'compaction.start',
+          'compaction.auto.set',
+          'steering_mode.set',
+          'follow_up_mode.set',
+        ]),
+      );
+
+      socket.server(
+        event(
+          type: 'turn.started',
+          streamId: 'session:$sessionId',
+          cursor: '6',
+          eventId: '34343434-3434-4434-8434-343434343434',
+          payload: {'sessionId': sessionId, 'turnIndex': 1},
+        ),
+      );
+      await eventually(() => coordinator.selectedRuntimeState == 'running');
+      await expectLater(coordinator.setModel('x'), throwsStateError);
+    },
+  );
+
   test('history pages merge older events with stable deduplication', () async {
     await makeReady(coordinator, transport);
     final socket = transport.sockets.single;
