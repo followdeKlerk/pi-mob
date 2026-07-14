@@ -113,7 +113,7 @@ class _HomeRouterState extends State<_HomeRouter> {
     // can fill in hostId and hostDisplayName. The pairing screen has already
     // validated the payload and confirmed the user; persistence happens
     // through the coordinator.
-    await widget.coordinator.connect(payload.endpoint.toString());
+    await widget.coordinator.pairAndWait(payload.endpoint.toString());
   }
 
   Future<void> _handleForget() async {

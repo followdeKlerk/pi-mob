@@ -74,7 +74,7 @@ class _PairingScreenState extends State<PairingScreen> {
     setState(() => _busy = true);
     try {
       await widget.onPair(candidate);
-      _flow.confirm();
+      if (mounted) _flow.confirm();
     } on Object catch (error) {
       _flow.decline();
       if (!mounted) return;

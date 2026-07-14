@@ -600,6 +600,48 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
+  /// Connects and waits until the bridge has accepted hello and supplied its
+  /// durable host identity. Manual pairing must not report success merely
+  /// because the WebSocket hello frame was sent.
+  Future<void> pairAndWait(
+    String endpointText, {
+    Duration timeout = const Duration(seconds: 20),
+  }) async {
+    await connect(endpointText);
+    if (hostId != null) return;
+    final completer = Completer<void>();
+    late VoidCallback listener;
+    listener = () {
+      if (hostId != null && !completer.isCompleted) {
+        completer.complete();
+        return;
+      }
+      if (!completer.isCompleted &&
+          const {
+            ConnectionPhase.hostUnreachable,
+            ConnectionPhase.incompatible,
+            ConnectionPhase.hostDraining,
+            ConnectionPhase.degraded,
+          }.contains(phase)) {
+        completer.completeError(
+          StateError(errorMessage ?? 'Host pairing failed (${phase.name})'),
+        );
+      }
+    };
+    addListener(listener);
+    listener();
+    try {
+      await completer.future.timeout(
+        timeout,
+        onTimeout: () => throw TimeoutException(
+          'Host did not complete the pairing handshake within ${timeout.inSeconds} seconds',
+        ),
+      );
+    } finally {
+      removeListener(listener);
+    }
+  }
+
   Future<void> retryConnection() async {
     final target = endpoint;
     if (target != null) await connect(target.toString());

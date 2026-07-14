@@ -61,6 +61,27 @@ void main() {
   });
 
   test(
+    'manual pairing waits for accepted host identity on an explicit port',
+    () async {
+      await coordinator.initialize(autoConnect: false);
+      var completed = false;
+      final pairing = coordinator
+          .pairAndWait(
+            'https://fixture.test:8443',
+            timeout: const Duration(seconds: 2),
+          )
+          .then((_) => completed = true);
+      await eventually(() => transport.sockets.isNotEmpty);
+      expect(transport.lastProbed?.port, 8443);
+      expect(completed, isFalse);
+      transport.sockets.single.server(helloAccepted());
+      await pairing;
+      expect(completed, isTrue);
+      expect(coordinator.hostId, hostId);
+    },
+  );
+
+  test(
     'hello, mandatory host plus one session, ordered event and cursor ack',
     () async {
       await coordinator.initialize(autoConnect: false);
@@ -1213,13 +1234,17 @@ Future<void> eventually(
 
 final class FakeBridgeTransport implements BridgeTransport {
   final List<FakeBridgeSocket> sockets = [];
+  Uri? lastProbed;
 
   @override
-  Future<EndpointProbe> probe(Uri endpoint) async => const EndpointProbe(
-    statusCode: 200,
-    ready: true,
-    body: {'status': 'ready'},
-  );
+  Future<EndpointProbe> probe(Uri endpoint) async {
+    lastProbed = endpoint;
+    return const EndpointProbe(
+      statusCode: 200,
+      ready: true,
+      body: {'status': 'ready'},
+    );
+  }
 
   @override
   Future<BridgeSocket> connect(Uri endpoint) async {
