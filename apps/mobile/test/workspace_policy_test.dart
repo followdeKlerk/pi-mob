@@ -369,6 +369,8 @@ void main() {
         addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(PiMobApp(coordinator: coordinator));
         await tester.pump();
+        await tester.tap(find.byKey(const Key('shell-sessions')));
+        await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
         expect(
           find.byKey(const Key('workspace-session-scroll')),
@@ -379,6 +381,8 @@ void main() {
         // prominent Review and approve action.
         expect(find.byKey(const Key('trust-required-banner')), findsOneWidget);
         expect(find.byKey(const Key('trust-required-review')), findsOneWidget);
+        await tester.tap(find.byKey(const Key('shell-activity')));
+        await tester.pumpAndSettle();
         // Send button is disabled because trust approval is required.
         final send = tester.widget<FilledButton>(
           find.byKey(const Key('send-button')),
@@ -473,6 +477,8 @@ void main() {
         addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(PiMobApp(coordinator: coordinator));
         await tester.pump();
+        await tester.tap(find.byKey(const Key('shell-sessions')));
+        await tester.pumpAndSettle();
 
         // Persistent read-only indicator must be visible.
         expect(find.byKey(const Key('read-only-indicator')), findsOneWidget);

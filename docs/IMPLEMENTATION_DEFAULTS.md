@@ -286,7 +286,18 @@ Notifications remain MVP but land after reliable core/session work.
 - No mutating notification actions in MVP.
 - Opening any notification reconciles with bridge before showing state.
 
-## 21. Compatibility
+## 21. Mobile visual-system defaults
+
+- Material 3 remains the primitive baseline; project-owned themes and `ThemeExtension` values are the visual authority.
+- `PiSpacing`, `PiRadius`, and `PiDuration` provide the shared spacing, shape, and timing scales.
+- `PiSemanticColors` provides status and connection roles for light and dark themes; colour is always paired with icon/text.
+- The product identity uses neutral surfaces, an indigo primary family, and restrained cyan accents. External-product palettes and assets are not copied.
+- Paired navigation uses the Sessions, Activity, and Host destinations. Host diagnostics are progressively disclosed rather than shown on the daily-work surface.
+- Reduced-motion preferences collapse nonessential timing; no workflow depends on animation.
+- Do not add a third-party chat UI or visual asset framework by default.
+- Android compact layouts must reflow at 360 dp and 200% text without horizontal overflow.
+
+## 22. Compatibility
 
 - Protocol major `1`; minor versions additive.
 - Handshake reports mobile, bridge, protocol, host generation, Pi version, capabilities, and limits.
@@ -304,7 +315,7 @@ Current deliberate floors:
 - Android API 29 as a product quality floor, not a Flutter impossibility below it.
 - High-refresh rendering is best effort; OS selects actual 60/90/120 Hz behaviour.
 
-## 22. Logging and diagnostics
+## 23. Logging and diagnostics
 
 - Structured JSONL logs rotate at 10 MiB with five retained files.
 - No prompt, answer, reasoning, tool output, source content, environment values, absolute paths, or credentials by default.
@@ -313,9 +324,9 @@ Current deliberate floors:
 - Push problems degrade readiness without blocking agent use.
 - `pi-mob doctor` reports versions, configuration, Serve, DB/backup, process/session, storage, compatibility, and push state using an explicit redacted allowlist.
 
-## 23. Delivery checkpoints
+## 24. Delivery checkpoints
 
-The MVP is delivered through M0–M17 in [`BACKLOG.md`](../BACKLOG.md), not one oversized implementation pass.
+The MVP is delivered through M0–M18 in [`BACKLOG.md`](../BACKLOG.md), not one oversized implementation pass.
 
 Immediate sequence:
 
@@ -328,7 +339,7 @@ Immediate sequence:
 
 Later checkpoints add host installation, trust, production UI, controls, multi-session, lifecycle, files, extension UI, notifications, and hardening without weakening earlier reliability contracts.
 
-## 24. Explicitly deferred
+## 25. Explicitly deferred
 
 - Multi-user/shared bridges.
 - Application-layer authentication.

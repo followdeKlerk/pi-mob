@@ -521,3 +521,23 @@ Avoid generic `Something went wrong` when a stable bridge error code exists.
 - Paginate older history.
 - Profile on a 60 Hz baseline and high-refresh device.
 - High refresh is a best-effort enhancement; no UX depends on 120 Hz.
+
+## 21. M16 product shell and visual identity
+
+Pi Mob uses an original, non-derivative visual system. External products are references for interaction grammar only:
+
+- Linear informs calm information density, precise hierarchy, compact status treatment, and restrained chrome.
+- GitHub Mobile agent surfaces inform session-first navigation, visible execution state, and contextual actions.
+- Claude informs transcript readability, secondary reasoning treatment, and focused final answers.
+
+No third-party logo, trademarked glyph, copied illustration, proprietary asset, or cloned palette enters the product.
+
+The paired Android shell has three stable destinations:
+
+1. **Sessions** — workspace choice, session creation/selection, trust, policy, and session state.
+2. **Activity** — the selected session transcript and keyboard-safe composer.
+3. **Host** — endpoint, connection diagnostics, protocol/version details, and privacy explanation.
+
+Technical connection detail must never dominate Sessions or Activity. The app bar is contextual, the bottom navigation remains thumb-reachable, and Android Back follows platform expectations. Transient choices use sheets/dialogs; durable state remains in the coordinator and database.
+
+The visual system is token-led through Flutter themes/extensions: neutral surfaces, one indigo primary family, a restrained cyan accent, semantic status roles, 4/8-based spacing, consistent radii, and reduced-motion-aware timing. New UI must support light and dark themes, icon-plus-text status redundancy, 360 dp narrow widths, and 200% text reflow.

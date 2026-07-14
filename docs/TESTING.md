@@ -564,7 +564,20 @@ Critical cumulative gates:
 - stale reconciliation,
 - deterministic APNs adapter coverage; real Apple APNs/Live Activity activation deferred by product scope.
 
-### M17 personal MVP
+### M16 product UX
+
+- light/dark theme and semantic-status contrast tests,
+- Sessions/Activity/Host destination and platform-back widget tests,
+- 360×755 layouts at 100%, 150%, and 200% text scale,
+- transcript final-answer/reasoning/tool hierarchy and selection semantics,
+- reduced-motion token behavior,
+- Android screenshots and primary-flow observations with sanitized content.
+
+### M17 hardening
+
+- accessibility, performance, privacy, operations, soak, and recovery evidence.
+
+### M18 personal MVP
 
 - all product success criteria,
 - all P0/P1 MVP tasks Done or explicitly Deferred,

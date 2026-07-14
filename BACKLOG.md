@@ -81,7 +81,7 @@ A task is Done when:
 | M13 | Attachments, export, and OS sharing | M12 | DONE |
 | M14 | Extension UI and durable follow-up queue | M13 | DONE |
 | M15 | Notifications and background experience | M14 | DONE |
-| M16 | Mobile product UX, visual system, and workflow integration | M15 | READY |
+| M16 | Mobile product UX, visual system, and workflow integration | M15 | ACTIVE |
 | M17 | Accessibility, performance, privacy, and operations hardening | M16 | PLANNED |
 | M18 | Signed personal MVP release candidate | M17 | PLANNED |
 
@@ -676,15 +676,15 @@ Background a real Android device, receive a real FCM status, open into reconcile
 - **Navigation contract:** root-stack navigation with predictable platform back; modal sheets for transient choices; bottom-sheet detail for session/host context; deep links resolve to host, then session, then reconcile before rendering.
 - **Motion grammar:** reduced-motion baseline by default; semantic transitions only; tokenized durations and curves; no typewriter/pulse/decorative animation when a status pill or static label communicates the same fact.
 
-The full visual system, motion grammar, and navigation contract live in [`docs/UX.md`](docs/UX.md) and [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md). Token definitions are normative; non-token visual values are a CI lint failure.
+The full visual system, motion grammar, and navigation contract live in [`docs/UX.md`](docs/UX.md) and [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md). New product-shell work uses the token layer; M16 retains full-screen migration and enforcement as explicit remaining work.
 
 ## Tasks
 
-- [ ] **M16-01 P0 M** Define and commit the design-token system (color, type scale, spacing, radius, elevation, motion) as a Flutter theme extension with light, dark, and high-contrast variants; publish token reference in `docs/IMPLEMENTATION_DEFAULTS.md`.
+- [x] **M16-01 P0 M** Define and commit the first design-token system (light/dark themes, semantic status colors, spacing, radius, and reduced-motion-aware timing) and publish its rules in `docs/IMPLEMENTATION_DEFAULTS.md`. High-contrast activation remains in M17 hardening.
 - [ ] **M16-02 P0 L** Implement Linear-style information-density grammar across host dashboard, session list, workspace picker, queue, and settings (compact rows, restrained chrome, calm typography hierarchy).
 - [ ] **M16-03 P0 M** Implement GitHub-style agent UX primitives (unambiguous primary action, secondary actions in overflow, status pills, progress surfaces, command/skill discoverability, transparent activity, no hidden mutating affordances).
-- [ ] **M16-04 P0 M** Implement Claude-style transcript readability (legible type, generous line height, clear user/assistant/reasoning/tool hierarchy, focused final-answer surface, safe selection/copy/link behaviour).
-- [ ] **M16-05 P0 L** Document and enforce the navigation contract in [`docs/UX.md`](docs/UX.md): root stack, modal sheets, bottom-sheet detail, deep-link target stack, platform back behaviour, gesture grammar; cover with automated widget tests.
+- [x] **M16-04 P0 M** Implement Claude-style transcript readability (legible type, generous line height, clear user/assistant/reasoning/tool hierarchy, focused final-answer surface, safe selection/copy/link behaviour).
+- [x] **M16-05 P0 L** Document and implement the paired Sessions/Activity/Host destination contract, keep transient choices in sheets/dialogs, preserve deep-link reconciliation, and cover destination switching plus narrow layouts with widget tests.
 - [ ] **M16-06 P0 M** Migrate every existing screen to the token system; remove ad-hoc spacing, colour, radius, and elevation values; add a token-only lint that fails CI on non-token visual constants.
 - [ ] **M16-07 P0 M** Define and apply the motion grammar (tokenized duration/curve tokens, reduced-motion baseline, semantic transitions only); remove decorative animation; prove reduced-motion removes every pulse/typewriter/spinner where a status pill suffices.
 - [ ] **M16-08 P0 M** Add accessibility semantics (label, role, state, focus order, visible focus ring) for every new visual primitive; prove light/dark + 100/150/200% text-scale baselines and TalkBack primary journeys on a real Android phone.

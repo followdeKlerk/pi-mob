@@ -1,18 +1,18 @@
 # Working
 
-Status: M0–M15 done; Android FCM lifecycle proven; Apple activation explicitly deferred
+Status: M0–M15 done; M16 active with theme, transcript, and product-shell foundation implemented
 
 ## Current checkpoint
 
-**M16 — Mobile product UX, visual system, and workflow integration (ready, not started)**
+**M16 — Mobile product UX, visual system, and workflow integration (active)**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
-Preserve the completed M10–M15 implementation and evidence. M15 now includes production Firebase configuration, durable device registration, real background FCM delivery, foreground-service lifecycle, and authoritative stale deep-link reconciliation on a physical Android device. Apple APNs and Live Activity activation is outside the foreseeable product scope by explicit owner decision.
+Complete the new mobile product experience without changing bridge authority or durable command semantics. The first M16 slice now includes light/dark token themes, semantic status colors, a Sessions/Activity/Host product shell, progressive host diagnostics, and a calmer transcript hierarchy.
 
-The next checkpoint, M16, builds the mobile product's original non-derivative identity on three proven grammars:
+M16 builds the mobile product's original non-derivative identity on three proven grammars:
 
 - **Linear-grade information density** — compact session/list rows, restrained chrome, focused content surfaces, calm typography hierarchy.
 - **GitHub-grade agent UX** — unambiguous primary action, secondary actions in overflow, transparent state, status pills, discoverable command/skill surface.
@@ -30,14 +30,14 @@ M16 is anchored by a normative design-token system and navigation contract docum
 
 ## Immediate next actions
 
-1. Keep Firebase client and service-account credentials local and out of version control.
-2. Await explicit direction before starting M16.
-3. If Apple products return to scope later, reactivate the deferred APNs/Live Activity device matrix as separate work; do not let iOS work block M16's Android-only physical evidence.
+1. Validate the new shell and theme on the target Android phone from the Taildrop build.
+2. Continue migrating session/workspace/control surfaces away from generic nested cards and complete TalkBack evidence.
+3. Keep Firebase credentials local; Apple activation remains deferred.
 
 ## Do not start yet
 
-M16 implementation work, M17 hardening, and M18 signed release require explicit owner direction.
+M17 hardening and M18 signed release remain blocked until M16 exits.
 
 ## Blockers
 
-None for the completed Android M15 scope.
+None. Remaining M16 work is planned product work, not an external blocker.
