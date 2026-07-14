@@ -364,6 +364,7 @@ List<Widget> buildSafeMarkdownWidgets(
   TextStyle? baseStyle,
   TextStyle? codeStyle,
   TextStyle? linkStyle,
+  Color? blockBackground,
   SafeMarkdownLinkTap? onLinkTap,
 }) {
   InlineSpan buildInline(SafeMarkdownInline inline) {
@@ -433,8 +434,12 @@ List<Widget> buildSafeMarkdownWidgets(
 
   return document.blocks
       .map(
-        (block) =>
-            _renderBlock(block, baseStyle: baseStyle, buildInline: buildInline),
+        (block) => _renderBlock(
+          block,
+          baseStyle: baseStyle,
+          blockBackground: blockBackground ?? const Color(0x11000000),
+          buildInline: buildInline,
+        ),
       )
       .toList(growable: false);
 }
@@ -516,6 +521,7 @@ InlineSpan buildInlineSafeMarkdownInline(
 Widget _renderBlock(
   SafeMarkdownBlock block, {
   TextStyle? baseStyle,
+  required Color blockBackground,
   required InlineSpan Function(SafeMarkdownInline inline) buildInline,
 }) {
   switch (block) {
@@ -535,7 +541,7 @@ Widget _renderBlock(
         child: Container(
           padding: const EdgeInsets.all(8),
           decoration: BoxDecoration(
-            color: const Color(0x11000000),
+            color: blockBackground,
             borderRadius: BorderRadius.circular(6),
           ),
           child: Column(

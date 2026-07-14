@@ -5,6 +5,13 @@
 /// wrapper around the parsed blocks: the parser is the security boundary,
 /// and we expose a single visible Markdown body plus the link tap callback.
 ///
+/// Presentation: the final answer is the primary reading surface in the
+/// transcript. It renders **edge-to-edge** against the surrounding surface
+/// (no nested card chrome, no elevated container, no extra margin) so the
+/// reader can focus on the prose. Typography draws from
+/// `Theme.of(context).textTheme` so it cooperates with the rest of the
+/// app's hierarchy and the upcoming token theme work.
+///
 /// The widget never inspects the raw protocol payload. All decisions about
 /// which inline marks survive, what links are dropped, and what becomes a
 /// paragraph happen in the parser.
@@ -44,32 +51,61 @@ class FinalAnswerView extends StatelessWidget {
   /// host before the callback fires.
   final SafeMarkdownLinkTap? onLinkTap;
 
+  /// Horizontal inset (in logical pixels) between the edges of the transcript
+  /// surface and the prose. Kept as a constant so the rhythm is identical
+  /// for every answer and the layout responds predictably at 200% text
+  /// scaling.
+  static const double _contentInset = 16;
+
+  /// Vertical breathing room above and below the prose. Generous enough
+  /// to separate consecutive final answers without reintroducing card
+  /// chrome.
+  static const double _blockVerticalPadding = 12;
+
   @override
   Widget build(BuildContext context) {
     final document = parseSafeMarkdown(data.markdown);
     final theme = Theme.of(context);
-    final baseStyle = theme.textTheme.bodyMedium ?? const TextStyle();
-    final codeStyle = const TextStyle(fontFamily: 'monospace');
+    final scheme = theme.colorScheme;
+    // Calm, readable body type. `bodyLarge` is the primary reading size
+    // in M3; it scales predictably with the system text scaler.
+    final baseStyle = theme.textTheme.bodyLarge ?? const TextStyle();
+    final codeStyle = baseStyle.copyWith(
+      fontFamily: 'monospace',
+      fontSize: (baseStyle.fontSize ?? 14) - 1,
+    );
     final linkStyle = baseStyle.copyWith(
-      color: theme.colorScheme.primary,
+      color: scheme.primary,
       decoration: TextDecoration.underline,
+      decorationColor: scheme.primary,
     );
     final widgets = buildSafeMarkdownWidgets(
       document,
       baseStyle: baseStyle,
       codeStyle: codeStyle,
       linkStyle: linkStyle,
+      blockBackground: scheme.surfaceContainerHighest,
       onLinkTap: onLinkTap,
     );
     return Semantics(
       container: true,
       label: 'Assistant answer',
       child: Card(
-        margin: const EdgeInsets.symmetric(vertical: 4),
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.symmetric(
+            horizontal: _contentInset,
+            vertical: _blockVerticalPadding,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
+            // Loose line height keeps multi-paragraph answers readable at
+            // 100% and 200% without forcing a horizontal scroll.
+            mainAxisSize: MainAxisSize.min,
             children: widgets,
           ),
         ),

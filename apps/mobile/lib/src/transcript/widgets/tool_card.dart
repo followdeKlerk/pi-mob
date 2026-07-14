@@ -8,13 +8,20 @@
 ///
 /// The card always renders:
 ///
-///   * A header with the canonical tool label and a status icon.
+///   * A compact header with the canonical tool label, a status icon, and
+///     a redundant status text label (icon and text are both visible so the
+///     affordance never depends on colour alone).
 ///   * An optional truncation banner when the host dropped bytes.
 ///   * An expandable region for the arguments, the raw result, and
 ///     tool-specific highlights.
 ///
 /// Widgets are immutable from the outside: the only state we keep is
 /// `expanded`, which the user toggles by tapping the header.
+///
+/// Presentation: the card is rendered edge-to-edge with restrained chrome:
+/// hairline top/bottom borders, no card elevation, and a compact single-line
+/// header so a stack of tool calls reads as a list rather than as nested
+/// boxes.
 library;
 
 import 'dart:convert';
@@ -54,45 +61,82 @@ class _ToolCardState extends State<ToolCard> {
   ColorScheme get _colors => Theme.of(context).colorScheme;
   TextTheme get _text => Theme.of(context).textTheme;
 
+  /// Horizontal inset (logical pixels) shared across the transcript so the
+  /// prose edges align.
+  static const double _contentInset = 16;
+
   @override
   Widget build(BuildContext context) {
-    final color = _status.resolveColor(_colors);
+    final scheme = _colors;
+    final statusColor = _status.resolveColor(scheme);
     final toolLabel = _toolLabel(_data.toolName);
+    final muted = scheme.onSurfaceVariant;
     return Semantics(
       container: true,
       label: 'Tool $toolLabel, ${_status.semanticLabel}',
       child: Card(
-        margin: const EdgeInsets.symmetric(vertical: 4),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            InkWell(
-              onTap: () => setState(() => _expanded = !_expanded),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 8, 8, 8),
-                child: Row(
-                  children: [
-                    Icon(_status.icon, color: color, size: 18),
-                    const SizedBox(width: 8),
-                    Expanded(child: Text(toolLabel, style: _text.titleSmall)),
-                    Text(
-                      _status.label,
-                      style: _text.labelSmall?.copyWith(color: color),
-                    ),
-                    Icon(
-                      _expanded ? Icons.expand_less : Icons.expand_more,
-                      size: 18,
-                    ),
-                  ],
+        margin: EdgeInsets.zero,
+        elevation: 0,
+        color: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        shape: const RoundedRectangleBorder(),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            border: Border(
+              top: BorderSide(color: scheme.outlineVariant),
+              bottom: BorderSide(color: scheme.outlineVariant),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              InkWell(
+                onTap: () => setState(() => _expanded = !_expanded),
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(_contentInset, 10, 8, 10),
+                  child: Row(
+                    children: [
+                      Icon(_status.icon, color: statusColor, size: 16),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          toolLabel,
+                          style: _text.titleSmall?.copyWith(
+                            fontFeatures: const [FontFeature.tabularFigures()],
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      // Status text + icon: redundant on purpose, so the
+                      // affordance never relies on colour alone.
+                      Text(
+                        _status.label,
+                        style: _text.labelMedium?.copyWith(
+                          color: statusColor,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(
+                        _expanded ? Icons.expand_less : Icons.expand_more,
+                        size: 18,
+                        color: muted,
+                      ),
+                    ],
+                  ),
                 ),
               ),
-            ),
-            if (_data.truncation != null) _truncationBanner(_data.truncation!),
-            if (_data.status == TranscriptToolStatus.error ||
-                _data.status == TranscriptToolStatus.policyDenied)
-              _errorBanner(_data.errorMessage),
-            if (_expanded) _expandedBody(),
-          ],
+              if (_data.truncation != null)
+                _truncationBanner(_data.truncation!),
+              if (_data.status == TranscriptToolStatus.error ||
+                  _data.status == TranscriptToolStatus.policyDenied)
+                _errorBanner(_data.errorMessage),
+              if (_expanded) _expandedBody(),
+            ],
+          ),
         ),
       ),
     );
@@ -100,16 +144,16 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _expandedBody() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+      padding: const EdgeInsets.fromLTRB(_contentInset, 0, _contentInset, 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
-          const Divider(height: 1),
-          const SizedBox(height: 6),
+          Divider(height: 12, thickness: 1, color: _colors.outlineVariant),
           _argsSection(),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           _resultSection(),
-          const SizedBox(height: 6),
+          const SizedBox(height: 8),
           _timingRow(),
         ],
       ),
@@ -126,6 +170,7 @@ class _ToolCardState extends State<ToolCard> {
       // why the dedicated renderer fell back.
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           _notice('Argument parse failed: ${e.message}'),
           const SizedBox(height: 4),
@@ -147,6 +192,7 @@ class _ToolCardState extends State<ToolCard> {
       );
       body = Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           _notice('Result parse failed: ${e.message}'),
           const SizedBox(height: 4),
@@ -159,9 +205,16 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _section(String title, Widget body) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
+    mainAxisSize: MainAxisSize.min,
     children: [
-      Text(title, style: _text.labelMedium),
-      const SizedBox(height: 4),
+      Text(
+        title,
+        style: _text.labelMedium?.copyWith(
+          color: _colors.onSurfaceVariant,
+          letterSpacing: 0.4,
+        ),
+      ),
+      const SizedBox(height: 6),
       body,
     ],
   );
@@ -174,7 +227,7 @@ class _ToolCardState extends State<ToolCard> {
     final endLabel = end?.toIso8601String() ?? '—';
     return Text(
       'Started: $startLabel · Finished: $endLabel',
-      style: _text.bodySmall,
+      style: _text.bodySmall?.copyWith(color: _colors.onSurfaceVariant),
     );
   }
 
@@ -200,13 +253,24 @@ class _ToolCardState extends State<ToolCard> {
         final args = EditToolArgs.fromMap(_data.arguments);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             _kv([MapEntry('path', args.path)]),
-            const SizedBox(height: 4),
-            Text('oldText', style: _text.labelSmall),
+            const SizedBox(height: 6),
+            Text(
+              'oldText',
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
+            ),
             _codeBlock(args.oldText),
-            const SizedBox(height: 4),
-            Text('newText', style: _text.labelSmall),
+            const SizedBox(height: 6),
+            Text(
+              'newText',
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
+            ),
             _codeBlock(args.newText),
           ],
         );
@@ -214,12 +278,15 @@ class _ToolCardState extends State<ToolCard> {
         final args = WriteToolArgs.fromMap(_data.arguments);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             _kv([MapEntry('path', args.path)]),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             Text(
               'content (${args.content.length} chars)',
-              style: _text.labelSmall,
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
             ),
             _codeBlock(args.content),
           ],
@@ -250,19 +317,23 @@ class _ToolCardState extends State<ToolCard> {
   Widget _renderResult() {
     final result = _data.result;
     if (result == null) {
-      return Text('No result yet', style: _text.bodySmall);
+      return Text(
+        'No result yet',
+        style: _text.bodySmall?.copyWith(color: _colors.onSurfaceVariant),
+      );
     }
     switch (_data.toolName) {
       case BuiltInToolName.read:
         final r = ReadToolResult.fromMap(result);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             _kv([
               MapEntry('bytes', r.byteCount),
               if (r.totalLines != null) MapEntry('totalLines', r.totalLines!),
             ]),
-            const SizedBox(height: 4),
+            const SizedBox(height: 6),
             _codeBlock(r.content),
           ],
         );
@@ -270,25 +341,45 @@ class _ToolCardState extends State<ToolCard> {
         final r = BashToolResult.fromMap(result);
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             _kv([MapEntry('exitCode', r.exitCode)]),
-            const SizedBox(height: 4),
-            Text('stdout', style: _text.labelSmall),
+            const SizedBox(height: 6),
+            Text(
+              'stdout',
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
+            ),
             _codeBlock(r.stdout),
-            const SizedBox(height: 4),
-            Text('stderr', style: _text.labelSmall),
+            const SizedBox(height: 6),
+            Text(
+              'stderr',
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
+            ),
             _codeBlock(r.stderr),
           ],
         );
       case BuiltInToolName.edit:
         final r = EditToolResult.fromMap(result);
         if (r.diff == null || r.diff!.isEmpty) {
-          return Text('Edit completed', style: _text.bodySmall);
+          return Text(
+            'Edit completed',
+            style: _text.bodySmall?.copyWith(color: _colors.onSurfaceVariant),
+          );
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('diff', style: _text.labelSmall),
+            Text(
+              'diff',
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
+            ),
             _codeBlock(r.diff!),
           ],
         );
@@ -298,12 +389,21 @@ class _ToolCardState extends State<ToolCard> {
       case BuiltInToolName.grep:
         final r = GrepToolResult.fromMap(result);
         if (r.matches.isEmpty) {
-          return Text('No matches', style: _text.bodySmall);
+          return Text(
+            'No matches',
+            style: _text.bodySmall?.copyWith(color: _colors.onSurfaceVariant),
+          );
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('${r.matches.length} match(es)', style: _text.labelSmall),
+            Text(
+              '${r.matches.length} match(es)',
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
+            ),
             for (final m in r.matches)
               _codeBlock('${m.path}:${m.lineNumber}: ${m.line}'),
           ],
@@ -311,22 +411,35 @@ class _ToolCardState extends State<ToolCard> {
       case BuiltInToolName.find:
         final r = FindToolResult.fromMap(result);
         if (r.matches.isEmpty) {
-          return Text('No matches', style: _text.bodySmall);
+          return Text(
+            'No matches',
+            style: _text.bodySmall?.copyWith(color: _colors.onSurfaceVariant),
+          );
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            Text('${r.matches.length} match(es)', style: _text.labelSmall),
+            Text(
+              '${r.matches.length} match(es)',
+              style: _text.labelSmall?.copyWith(
+                color: _colors.onSurfaceVariant,
+              ),
+            ),
             for (final m in r.matches) _codeBlock(m.path),
           ],
         );
       case BuiltInToolName.ls:
         final r = LsToolResult.fromMap(result);
         if (r.entries.isEmpty) {
-          return Text('Empty directory', style: _text.bodySmall);
+          return Text(
+            'Empty directory',
+            style: _text.bodySmall?.copyWith(color: _colors.onSurfaceVariant),
+          );
         }
         return Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
             for (final e in r.entries)
               Text(
@@ -346,6 +459,7 @@ class _ToolCardState extends State<ToolCard> {
   Widget _kv(List<MapEntry<String, Object>> entries) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
         for (final entry in entries)
           Padding(
@@ -358,6 +472,7 @@ class _ToolCardState extends State<ToolCard> {
                     text: '${entry.key}: ',
                     style: _text.bodySmall?.copyWith(
                       fontWeight: FontWeight.w600,
+                      color: _colors.onSurfaceVariant,
                     ),
                   ),
                   TextSpan(text: '${entry.value}'),
@@ -372,8 +487,12 @@ class _ToolCardState extends State<ToolCard> {
   Widget _jsonBlock(Map<String, Object?> map, {required String label}) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
       children: [
-        Text(label, style: _text.labelSmall),
+        Text(
+          label,
+          style: _text.labelSmall?.copyWith(color: _colors.onSurfaceVariant),
+        ),
         _codeBlock(const JsonEncoder.withIndent('  ').convert(map)),
       ],
     );
@@ -385,24 +504,34 @@ class _ToolCardState extends State<ToolCard> {
     final visible = clipped ? text.substring(0, previewCharacters) : text;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(6),
+      padding: const EdgeInsets.all(8),
       decoration: BoxDecoration(
-        color: const Color(0x11000000),
-        borderRadius: BorderRadius.circular(4),
+        color: _colors.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
         children: [
           SelectableText(
             visible,
-            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            style: TextStyle(
+              fontFamily: 'monospace',
+              fontSize: 12,
+              color: _colors.onSurface,
+            ),
           ),
           if (clipped)
-            Text(
-              'Preview capped at $previewCharacters characters; '
-              '${text.length - previewCharacters} more are not rendered.',
-              key: const Key('tool-inline-preview-cap'),
-              style: _text.labelSmall,
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Text(
+                'Preview capped at $previewCharacters characters; '
+                '${text.length - previewCharacters} more are not rendered.',
+                key: const Key('tool-inline-preview-cap'),
+                style: _text.labelSmall?.copyWith(
+                  color: _colors.onSurfaceVariant,
+                ),
+              ),
             ),
         ],
       ),
@@ -410,10 +539,10 @@ class _ToolCardState extends State<ToolCard> {
   }
 
   Widget _notice(String message) => Container(
-    padding: const EdgeInsets.all(6),
+    padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
       color: _colors.errorContainer,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(6),
     ),
     child: Text(
       message,
@@ -423,21 +552,23 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _truncationBanner(ToolOutputTruncation t) => Container(
     key: const Key('tool-truncation-banner'),
-    margin: const EdgeInsets.symmetric(horizontal: 12),
-    padding: const EdgeInsets.all(6),
+    margin: const EdgeInsets.symmetric(horizontal: _contentInset, vertical: 4),
+    padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
       color: _colors.tertiaryContainer,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(6),
     ),
     child: Row(
       children: [
-        const Icon(Icons.content_cut, size: 16),
-        const SizedBox(width: 6),
+        Icon(Icons.content_cut, size: 16, color: _colors.onTertiaryContainer),
+        const SizedBox(width: 8),
         Expanded(
           child: Text(
             'Truncated: ${t.summaryLabel}'
             '${t.digest == null ? '' : ' · SHA-256 ${t.digest}'}',
-            style: _text.bodySmall,
+            style: _text.bodySmall?.copyWith(
+              color: _colors.onTertiaryContainer,
+            ),
           ),
         ),
       ],
@@ -446,16 +577,16 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _errorBanner(String? message) => Container(
     key: const Key('tool-error-banner'),
-    margin: const EdgeInsets.symmetric(horizontal: 12),
-    padding: const EdgeInsets.all(6),
+    margin: const EdgeInsets.symmetric(horizontal: _contentInset, vertical: 4),
+    padding: const EdgeInsets.all(8),
     decoration: BoxDecoration(
       color: _colors.errorContainer,
-      borderRadius: BorderRadius.circular(4),
+      borderRadius: BorderRadius.circular(6),
     ),
     child: Row(
       children: [
         Icon(Icons.error_outline, size: 16, color: _colors.onErrorContainer),
-        const SizedBox(width: 6),
+        const SizedBox(width: 8),
         Expanded(
           child: Text(
             message ?? 'Tool failed',

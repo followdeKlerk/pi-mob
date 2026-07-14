@@ -12,6 +12,13 @@ import 'tool_card.dart';
 /// Production transcript surface. Historical rows are lazily built, each turn
 /// has a stable key and paint boundary, and active streaming cannot repaint the
 /// full list.
+///
+/// Presentation: the surface is rendered edge-to-edge against the parent
+/// route. It paints the M3 [ColorScheme.surface] tone, uses a hairline
+/// outline-variant divider between the title bar and the list, and never
+/// wraps the transcript in a `Card`. The inner widgets
+/// ([FinalAnswerView], [ReasoningBlock], [ToolCard]) own their own
+/// horizontal rhythm.
 class TranscriptView extends StatefulWidget {
   const TranscriptView({
     required this.document,
@@ -91,44 +98,102 @@ class _TranscriptViewState extends State<TranscriptView> {
     super.dispose();
   }
 
+  /// Horizontal inset shared with the inner widgets so headings, prose and
+  /// tool cards line up consistently.
+  static const double _contentInset = 16;
+
   @override
   Widget build(BuildContext context) {
     final turns = widget.document.turns;
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
     return LayoutBuilder(
       builder: (context, constraints) {
         if (constraints.maxHeight < 96) {
-          return const Card(child: Center(child: Text('Transcript')));
+          return Padding(
+            padding: const EdgeInsets.symmetric(horizontal: _contentInset),
+            child: Align(
+              alignment: Alignment.center,
+              child: Text('Transcript', style: text.titleSmall),
+            ),
+          );
         }
-        return Card(
-          clipBehavior: Clip.antiAlias,
+        return ColoredBox(
+          color: scheme.surface,
           child: Stack(
             children: [
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
                   Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 10, 12, 6),
-                    child: Text(
-                      'Transcript',
-                      style: Theme.of(context).textTheme.titleMedium,
+                    padding: const EdgeInsets.fromLTRB(
+                      _contentInset,
+                      12,
+                      _contentInset,
+                      8,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Transcript',
+                            style: text.titleSmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                        if (widget.hasOlder)
+                          TextButton.icon(
+                            key: const Key('load-older-transcript'),
+                            onPressed: _loadingOlder ? null : _loadOlder,
+                            icon: _loadingOlder
+                                ? SizedBox.square(
+                                    dimension: 14,
+                                    child: CircularProgressIndicator(
+                                      strokeWidth: 2,
+                                      color: scheme.primary,
+                                    ),
+                                  )
+                                : Icon(
+                                    Icons.history,
+                                    size: 18,
+                                    color: scheme.onSurfaceVariant,
+                                  ),
+                            label: Text(
+                              'Load older history',
+                              style: text.labelLarge?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                            style: TextButton.styleFrom(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              minimumSize: const Size(0, 32),
+                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                            ),
+                          ),
+                      ],
                     ),
                   ),
-                  if (widget.hasOlder)
-                    TextButton.icon(
-                      key: const Key('load-older-transcript'),
-                      onPressed: _loadingOlder ? null : _loadOlder,
-                      icon: _loadingOlder
-                          ? const SizedBox.square(
-                              dimension: 16,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.history),
-                      label: const Text('Load older history'),
-                    ),
-                  const Divider(height: 1),
+                  Divider(
+                    height: 1,
+                    thickness: 1,
+                    color: scheme.outlineVariant,
+                  ),
                   Expanded(
                     child: turns.isEmpty
-                        ? const Center(child: Text('No transcript yet'))
+                        ? Center(
+                            child: Text(
+                              'No transcript yet',
+                              style: text.bodyMedium?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          )
                         : SelectionArea(
                             child: ListView.builder(
                               key: const Key('transcript-list'),
@@ -247,8 +312,14 @@ class _TurnView extends StatelessWidget {
   const _TurnView({required this.turn});
   final Turn turn;
 
+  /// Horizontal inset shared with the inner widgets so system / user rows
+  /// align with the rest of the transcript.
+  static const double _contentInset = 16;
+
   @override
   Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final text = Theme.of(context).textTheme;
     if (turn is AssistantTurn) {
       final assistant = turn as AssistantTurn;
       return Semantics(
@@ -256,9 +327,10 @@ class _TurnView extends StatelessWidget {
         liveRegion: assistant.isTerminal,
         label: 'Assistant turn ${assistant.status.name}',
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          padding: const EdgeInsets.symmetric(vertical: 6),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
             children: [
               for (final item in assistant.items)
                 if (item is ReasoningItem)
@@ -277,21 +349,37 @@ class _TurnView extends StatelessWidget {
                     key: ValueKey(item.widgetKey),
                   )
                 else if (item is UnknownItem)
-                  ListTile(
-                    key: ValueKey(item.widgetKey),
-                    leading: const Icon(Icons.extension),
-                    title: const Text('Other event'),
-                    subtitle: Text(
-                      item.diagnostic.previewJson ?? item.diagnostic.detail,
-                      maxLines: 4,
-                      overflow: TextOverflow.ellipsis,
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: _contentInset,
+                    ),
+                    child: ListTile(
+                      key: ValueKey(item.widgetKey),
+                      leading: const Icon(Icons.extension),
+                      title: const Text('Other event'),
+                      subtitle: Text(
+                        item.diagnostic.previewJson ?? item.diagnostic.detail,
+                        maxLines: 4,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ),
                   ),
-              Align(
-                alignment: Alignment.centerRight,
-                child: Text(
-                  assistant.status.name,
-                  style: Theme.of(context).textTheme.labelSmall,
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  _contentInset,
+                  6,
+                  _contentInset,
+                  4,
+                ),
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  child: Text(
+                    assistant.status.name,
+                    style: text.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      letterSpacing: 0.4,
+                    ),
+                  ),
                 ),
               ),
             ],
@@ -301,16 +389,28 @@ class _TurnView extends StatelessWidget {
     }
     if (turn is UserTurn) {
       final user = turn as UserTurn;
-      return ListTile(
-        title: const Text('Prompt'),
-        subtitle: Text('${user.deliveryMode} · ${user.status.name}'),
+      return Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: _contentInset,
+          vertical: 6,
+        ),
+        child: ListTile(
+          title: const Text('Prompt'),
+          subtitle: Text('${user.deliveryMode} · ${user.status.name}'),
+        ),
       );
     }
     final system = turn as SystemTurn;
-    return ListTile(
-      leading: const Icon(Icons.info_outline),
-      title: Text(system.kind.name.replaceAll('_', ' ')),
-      subtitle: Text(system.message),
+    return Padding(
+      padding: const EdgeInsets.symmetric(
+        horizontal: _contentInset,
+        vertical: 6,
+      ),
+      child: ListTile(
+        leading: const Icon(Icons.info_outline),
+        title: Text(system.kind.name.replaceAll('_', ' ')),
+        subtitle: Text(system.message),
+      ),
     );
   }
 }
