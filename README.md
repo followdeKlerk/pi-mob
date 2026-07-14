@@ -6,7 +6,7 @@ A private Flutter mobile control surface for Pi coding-agent sessions running on
 
 The product and architecture are implemented checkpoint by checkpoint. M1–M9 delivered the protocol, durable bridge, private host, trust policy, transcript, tools, and composer. M10–M11 delivered configured Pi controls and safe multiplexed multi-session control. M12 delivered durable session lineage and lifecycle. M13 delivered bounded private attachments, opaque HTML exports, and explicit native sharing. M14 delivered durable follow-up queues and reconnect-safe extension interaction. M15 delivered privacy-preserving Android FCM status notifications and background reconciliation.
 
-Completed through: **M15 — notifications and background experience**. Real Android FCM delivery is proven; Apple activation is explicitly deferred from the foreseeable product scope.
+Completed through: **M15 — notifications and background experience**. Real Android FCM delivery is proven; Apple activation is explicitly deferred from the foreseeable product scope. Next ready checkpoint: **M16 — mobile product UX, visual system, and workflow integration**, an original non-derivative identity built on Linear-grade information density, GitHub-grade agent UX patterns, and Claude-grade transcript readability.
 
 M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is in [`M1-SUMMARY.md`](M1-SUMMARY.md) through [`M15-SUMMARY.md`](M15-SUMMARY.md).
 
@@ -61,7 +61,7 @@ The bridge binds to loopback only. Tailscale is the sole connection-authenticati
 11. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) — verified initial versions and platform floors.
 12. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision ledger and revisit conditions.
 13. [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) — concern-by-concern coverage and remaining executable evidence.
-14. [`BACKLOG.md`](BACKLOG.md) — achievable checkpoints M0–M17 and post-MVP work.
+14. [`BACKLOG.md`](BACKLOG.md) — achievable checkpoints M0–M18 and post-MVP work.
 15. [`WORKING.md`](WORKING.md) — current objective and immediate next actions.
 16. [`PLANNING.md`](PLANNING.md) — research history and earlier exploration.
 
@@ -107,8 +107,9 @@ M12 Fork/clone/tree/delete/restore
 M13 Attachments/export/share
 M14 Extension UI/durable queue
 M15 Notifications/background
-M16 Accessibility/performance/privacy hardening
-M17 Signed personal MVP release
+M16 Mobile product UX, visual system, workflow integration
+M17 Accessibility/performance/privacy hardening
+M18 Signed personal MVP release
 ```
 
 Each checkpoint has tasks, dependencies, a concrete demo, exit criteria, and required evidence in [`BACKLOG.md`](BACKLOG.md).

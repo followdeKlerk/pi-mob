@@ -4,13 +4,21 @@ Status: M0–M15 done; Android FCM lifecycle proven; Apple activation explicitly
 
 ## Current checkpoint
 
-**M16 — Accessibility, performance, privacy, and operations hardening (ready, not started)**
+**M16 — Mobile product UX, visual system, and workflow integration (ready, not started)**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
 Preserve the completed M10–M15 implementation and evidence. M15 now includes production Firebase configuration, durable device registration, real background FCM delivery, foreground-service lifecycle, and authoritative stale deep-link reconciliation on a physical Android device. Apple APNs and Live Activity activation is outside the foreseeable product scope by explicit owner decision.
+
+The next checkpoint, M16, builds the mobile product's original non-derivative identity on three proven grammars:
+
+- **Linear-grade information density** — compact session/list rows, restrained chrome, focused content surfaces, calm typography hierarchy.
+- **GitHub-grade agent UX** — unambiguous primary action, secondary actions in overflow, transparent state, status pills, discoverable command/skill surface.
+- **Claude-grade readability** — legible transcript typography, generous line height, clear user/assistant/reasoning/tool hierarchy, focused final-answer surface.
+
+M16 is anchored by a normative design-token system and navigation contract documented in [`docs/UX.md`](docs/UX.md) and [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md), so M17 hardening and M18 signed release ship on one coherent visual foundation. Apple physical-device evidence is deferred by product scope; M16 physical evidence is Android-only.
 
 ## Completed foundation
 
@@ -24,11 +32,11 @@ Preserve the completed M10–M15 implementation and evidence. M15 now includes p
 
 1. Keep Firebase client and service-account credentials local and out of version control.
 2. Await explicit direction before starting M16.
-3. If Apple products return to scope later, reactivate the deferred APNs/Live Activity device matrix as separate work.
+3. If Apple products return to scope later, reactivate the deferred APNs/Live Activity device matrix as separate work; do not let iOS work block M16's Android-only physical evidence.
 
 ## Do not start yet
 
-M16 and later release-hardening work require explicit owner direction.
+M16 implementation work, M17 hardening, and M18 signed release require explicit owner direction.
 
 ## Blockers
 

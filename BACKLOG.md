@@ -81,8 +81,9 @@ A task is Done when:
 | M13 | Attachments, export, and OS sharing | M12 | DONE |
 | M14 | Extension UI and durable follow-up queue | M13 | DONE |
 | M15 | Notifications and background experience | M14 | DONE |
-| M16 | Accessibility, performance, privacy, and operations hardening | M15 | READY |
-| M17 | Signed personal MVP release candidate | M16 | PLANNED |
+| M16 | Mobile product UX, visual system, and workflow integration | M15 | READY |
+| M17 | Accessibility, performance, privacy, and operations hardening | M16 | PLANNED |
+| M18 | Signed personal MVP release candidate | M17 | PLANNED |
 
 ---
 
@@ -104,7 +105,7 @@ A task is Done when:
 - [x] **M0-08 P0 M** Test strategy and deterministic failure matrix.
 - [x] **M0-09 P0 M** Build, private distribution, install, update, rollback, uninstall, and release evidence.
 - [x] **M0-10 P0 M** Architecture decision ledger.
-- [x] **M0-11 P0 L** M0–M17 checkpoint backlog plus cross-cutting and post-MVP work.
+- [x] **M0-11 P0 L** M0–M18 checkpoint backlog plus cross-cutting and post-MVP work.
 - [x] **M0-12 P0 M** Final concern-by-concern specification coverage audit.
 - [x] **M0-13 P0 S** README, WORKING, defaults, testing, release, runtime, and check orientation reconciled.
 - [x] **M0-14 P0 S** Current Pi repository/package/version identified.
@@ -660,74 +661,122 @@ Background a real Android device, receive a real FCM status, open into reconcile
 
 ---
 
-# M16 — Accessibility, performance, privacy, and operations hardening
+# M16 — Mobile product UX, visual system, and workflow integration
 
-**Outcome:** Full MVP meets release-quality nonfunctional gates.
+**Outcome:** The mobile app presents one coherent original product identity with a Linear-grade information-density grammar, GitHub-grade agent UX patterns, and Claude-grade transcript readability, anchored by a normative design-token system and navigation contract so M17 hardening and M18 release ship on a consistent foundation.
 
 **Dependencies:** M15.
 
+## Visual and navigation contract (summary)
+
+- **Linear-grade grammar:** compact session/list rows, restrained chrome, focused content surfaces, calm and quiet typography hierarchy, no decorative chrome competing with content. Density earns its keep; spacing is tokenized.
+- **GitHub-grade agent UX:** unambiguous primary action, secondary actions in overflow, status pills and progress surfaces, transparent state and activity, discoverable command/skill surface, no hidden mutating affordances.
+- **Claude-grade readability:** legible transcript typography with generous line height, clear hierarchy between user/assistant/reasoning/tool surfaces, focused final-answer region with safe selection/copy/link behaviour, no animation competing with reading.
+- **Original non-derivative identity:** the visual system is original; no third-party logo, illustration set, marketing imagery, or trademarked glyph is reused. Inspiration is structural, not asset-level.
+- **Navigation contract:** root-stack navigation with predictable platform back; modal sheets for transient choices; bottom-sheet detail for session/host context; deep links resolve to host, then session, then reconcile before rendering.
+- **Motion grammar:** reduced-motion baseline by default; semantic transitions only; tokenized durations and curves; no typewriter/pulse/decorative animation when a status pill or static label communicates the same fact.
+
+The full visual system, motion grammar, and navigation contract live in [`docs/UX.md`](docs/UX.md) and [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md). Token definitions are normative; non-token visual values are a CI lint failure.
+
 ## Tasks
 
-- [ ] **M16-01 P0 L** VoiceOver/TalkBack primary journeys.
-- [ ] **M16-02 P0 M** Switch/keyboard/Voice Control critical actions.
-- [ ] **M16-03 P0 M** 200% text, reduced motion, contrast, focus, non-colour status.
-- [ ] **M16-04 P0 L** Streaming/scroll/tool output/multi-session performance profiling.
-- [ ] **M16-05 P0 M** Memory/file descriptor/disk/reconnect/session soak.
-- [ ] **M16-06 P0 M** Mobile cache/journal/log/attachment/export retention bounds.
-- [ ] **M16-07 P0 M** Mobile backup exclusions/app-switcher snapshot review.
-- [ ] **M16-08 P0 M** Log/diagnostic/notification/artifact secret-content tests.
-- [ ] **M16-09 P0 M** Traversal/symlink race/lease/idempotency concurrency stress.
-- [ ] **M16-10 P0 L** Daily backup/restore/host generation/retention/repair.
-- [ ] **M16-11 P0 M** Lost-phone token removal and incident procedures.
-- [ ] **M16-12 P0 L** Update/rollback rehearsal and clean-host recovery.
+- [ ] **M16-01 P0 M** Define and commit the design-token system (color, type scale, spacing, radius, elevation, motion) as a Flutter theme extension with light, dark, and high-contrast variants; publish token reference in `docs/IMPLEMENTATION_DEFAULTS.md`.
+- [ ] **M16-02 P0 L** Implement Linear-style information-density grammar across host dashboard, session list, workspace picker, queue, and settings (compact rows, restrained chrome, calm typography hierarchy).
+- [ ] **M16-03 P0 M** Implement GitHub-style agent UX primitives (unambiguous primary action, secondary actions in overflow, status pills, progress surfaces, command/skill discoverability, transparent activity, no hidden mutating affordances).
+- [ ] **M16-04 P0 M** Implement Claude-style transcript readability (legible type, generous line height, clear user/assistant/reasoning/tool hierarchy, focused final-answer surface, safe selection/copy/link behaviour).
+- [ ] **M16-05 P0 L** Document and enforce the navigation contract in [`docs/UX.md`](docs/UX.md): root stack, modal sheets, bottom-sheet detail, deep-link target stack, platform back behaviour, gesture grammar; cover with automated widget tests.
+- [ ] **M16-06 P0 M** Migrate every existing screen to the token system; remove ad-hoc spacing, colour, radius, and elevation values; add a token-only lint that fails CI on non-token visual constants.
+- [ ] **M16-07 P0 M** Define and apply the motion grammar (tokenized duration/curve tokens, reduced-motion baseline, semantic transitions only); remove decorative animation; prove reduced-motion removes every pulse/typewriter/spinner where a status pill suffices.
+- [ ] **M16-08 P0 M** Add accessibility semantics (label, role, state, focus order, visible focus ring) for every new visual primitive; prove light/dark + 100/150/200% text-scale baselines and TalkBack primary journeys on a real Android phone.
 
 ## Checkpoint demo
 
-Complete full journey with screen readers, 200% text, reduced motion, long sessions, network transitions, backup/restore, and redacted diagnostics.
+On a real Android phone, walk onboarding → host dashboard → workspace picker → session list → transcript → composer → queue → settings → diagnostics with TalkBack enabled, 200% text scale, and reduced motion on. The visual system reads as one coherent product; navigation is predictable; transcript stays readable through a long session; the design-token lint passes; Apple physical-device demo is deferred by product scope.
 
 ## Exit criteria
 
-- [ ] Accessibility gates pass on representative devices.
-- [ ] No performance/resource-bound failure remains.
-- [ ] Privacy/security release gates pass.
-- [ ] Backup/restore/update/rollback demonstrated.
-- [ ] Known limitations documented.
+- [ ] Design-token system is normative and consumed by every screen; CI lint blocks non-token visual constants.
+- [ ] Navigation contract is documented in [`docs/UX.md`](docs/UX.md) and covered by automated widget tests for every primary screen.
+- [ ] Light, dark, and high-contrast themes pass at 100%, 150%, and 200% text scale on Android phone.
+- [ ] TalkBack completes every primary journey on Android without missing semantics or stuck focus.
+- [ ] Reduced motion removes decorative animation; semantic transitions remain.
+- [ ] No third-party chat UI framework and no third-party visual asset library is introduced.
+- [ ] No visual element is derivative of an external product trademark or identity.
+- [ ] Android-only physical-device evidence (screenshots, frame captures, TalkBack transcripts) is retained; Apple physical-device evidence remains deferred.
 
-**Evidence:** hardening/recovery report.
+**Evidence:** Android visual-system evidence bundle (screenshots, frame captures, TalkBack transcripts, reduced-motion captures) and the token/navigation contract entries in [`docs/UX.md`](docs/UX.md) and [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md).
 
 ---
 
-# M17 — Signed personal MVP release candidate
+# M17 — Accessibility, performance, privacy, and operations hardening
 
-**Outcome:** Signed private release satisfies every product success criterion from clean host/phone installations.
+**Outcome:** Full MVP meets release-quality nonfunctional gates.
 
 **Dependencies:** M16.
 
 ## Tasks
 
-- [ ] **M17-01 P0 M** Freeze compatible versions/schemas and release manifest.
-- [ ] **M17-02 P0 M** Produce signed/checksummed bridge artifact and installer.
-- [ ] **M17-03 P0 M** Produce TestFlight iOS build.
-- [ ] **M17-04 P0 M** Produce signed Android release build.
-- [ ] **M17-05 P0 S** Complete privacy/permission/distribution metadata.
-- [ ] **M17-06 P0 S** Publish install/update/rollback/uninstall/known-issues docs.
-- [ ] **M17-07 P0 L** Run all twelve PRODUCT success scenarios.
-- [ ] **M17-08 P0 M** Retain CI/protocol/migration/Pi/fault/device/accessibility/performance/security evidence.
-- [ ] **M17-09 P0 S** Mark every P0/P1 MVP item Done or explicitly Deferred with owner decision.
-- [ ] **M17-10 P0 S** Tag/release checkpoint and retain rollback artifact.
+- [ ] **M17-01 P0 L** VoiceOver/TalkBack primary journeys on Android (Apple iOS journeys remain deferred by product scope).
+- [ ] **M17-02 P0 M** Switch/keyboard/Voice Control critical actions.
+- [ ] **M17-03 P0 M** 200% text, reduced motion, contrast, focus, non-colour status.
+- [ ] **M17-04 P0 L** Streaming/scroll/tool output/multi-session performance profiling.
+- [ ] **M17-05 P0 M** Memory/file descriptor/disk/reconnect/session soak.
+- [ ] **M17-06 P0 M** Mobile cache/journal/log/attachment/export retention bounds.
+- [ ] **M17-07 P0 M** Mobile backup exclusions/app-switcher snapshot review.
+- [ ] **M17-08 P0 M** Log/diagnostic/notification/artifact secret-content tests.
+- [ ] **M17-09 P0 M** Traversal/symlink race/lease/idempotency concurrency stress.
+- [ ] **M17-10 P0 L** Daily backup/restore/host generation/retention/repair.
+- [ ] **M17-11 P0 M** Lost-phone token removal and incident procedures.
+- [ ] **M17-12 P0 L** Update/rollback rehearsal and clean-host recovery.
 
 ## Checkpoint demo
 
-From clean host and phone, complete the full acceptance suite without development tools.
+Complete full journey on a real Android phone with screen readers, 200% text, reduced motion, long sessions, network transitions, backup/restore, and redacted diagnostics. Apple iOS physical-device demo remains deferred by product scope.
 
 ## Exit criteria
 
-- [ ] No release blocker in `docs/RELEASE.md`.
-- [ ] All P0/P1 MVP work is Done or explicitly Deferred.
-- [ ] Clean install and acceptance suite pass.
-- [ ] Owner can operate, diagnose, recover, update, and rollback system.
+- [ ] Accessibility gates pass on representative Android devices; Apple iOS device evidence remains deferred.
+- [ ] No performance/resource-bound failure remains.
+- [ ] Privacy/security release gates pass.
+- [ ] Backup/restore/update/rollback demonstrated.
+- [ ] Known limitations documented.
 
-**Evidence:** signed release evidence bundle.
+**Evidence:** Android hardening/recovery report.
+
+---
+
+# M18 — Signed personal MVP release candidate
+
+**Outcome:** Signed private release satisfies every product success criterion from clean host/phone installations.
+
+**Dependencies:** M17.
+
+## Tasks
+
+- [ ] **M18-01 P0 M** Freeze compatible versions/schemas and release manifest.
+- [ ] **M18-02 P0 M** Produce signed/checksummed bridge artifact and installer.
+- [ ] **M18-03 P0 S DEFERRED** Produce TestFlight iOS build. Apple-product release is explicitly outside the foreseeable product scope; reactivate only if Apple products return to the activated product scope.
+- [ ] **M18-04 P0 M** Produce signed Android release build.
+- [ ] **M18-05 P0 S** Complete privacy/permission/distribution metadata for the Android release channel.
+- [ ] **M18-06 P0 S** Publish install/update/rollback/uninstall/known-issues docs.
+- [ ] **M18-07 P0 L** Run all twelve PRODUCT success scenarios on Android.
+- [ ] **M18-08 P0 M** Retain CI/protocol/migration/Pi/fault/device/accessibility/performance/security evidence.
+- [ ] **M18-09 P0 S** Mark every P0/P1 MVP item Done or explicitly Deferred with owner decision.
+- [ ] **M18-10 P0 S** Tag/release checkpoint and retain rollback artifact.
+
+## Checkpoint demo
+
+From clean Android host and Android phone, complete the full acceptance suite without development tools. Apple iOS clean-install rehearsal remains deferred by product scope.
+
+## Exit criteria
+
+- [ ] No release blocker in `docs/RELEASE.md` for the Android release channel.
+- [ ] All P0/P1 MVP work is Done or explicitly Deferred.
+- [ ] Clean Android install and acceptance suite pass.
+- [ ] Owner can operate, diagnose, recover, update, and rollback system.
+- [ ] Apple iOS release status is recorded as Deferred by owner decision.
+
+**Evidence:** Android signed release evidence bundle.
 
 ---
 
@@ -780,7 +829,7 @@ Apply whenever relevant.
 
 # Post-MVP backlog
 
-All are DEFERRED and do not block M17.
+All are DEFERRED and do not block M18.
 
 - **P3-01 Linux host:** `systemd --user`, Linux paths/secrets/install/rollback/artifacts.
 - **P3-02 Windows host:** service/task strategy, Job Objects, installer/signing.
@@ -799,6 +848,6 @@ All are DEFERRED and do not block M17.
 
 # Immediate next action
 
-M0 through M8 are complete. M9 is READY; activate production transcript, tools, and composer in `WORKING.md` next.
+M0 through M15 are complete. M16 is READY; activate mobile product UX, visual system, and workflow integration in `WORKING.md` next.
 
-Do not start transcript polish, multi-session behavior, push notifications, session-tree UI, or plugin experimentation before their dependency checkpoints exit.
+Do not start accessibility/perf/privacy hardening (M17) or signed release (M18) before the M16 visual system and navigation contract exit. Do not touch Apple iOS release, APNs, or Live Activity hardware before Apple products return to the activated product scope.
