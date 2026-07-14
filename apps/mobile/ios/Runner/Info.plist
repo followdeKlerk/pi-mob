@@ -28,6 +28,12 @@
 	<true/>
 	<key>NSPhotoLibraryUsageDescription</key>
 	<string>Select images to attach to a Pi prompt. Images are sanitized before private upload.</string>
+	<key>NSSupportsLiveActivities</key>
+	<true/>
+	<key>UIBackgroundModes</key>
+	<array>
+		<string>remote-notification</string>
+	</array>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

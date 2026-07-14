@@ -80,6 +80,27 @@ CREATE TABLE IF NOT EXISTS extension_dialogs(dialog_id TEXT PRIMARY KEY, session
 CREATE INDEX IF NOT EXISTS extension_dialog_pending ON extension_dialogs(session_id,state,expires_at);
 `;
 const MIGRATION_V3_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2 + MIGRATION_V3).digest("hex");
+/**
+ * v4 additions (M15). The `notification_devices` table is the durable
+ * registry of mobile installs the bridge uses to fan out push
+ * notifications. It is keyed by an opaque `device_id` (UUID); the
+ * combination `(installation_id, platform)` is unique so the same
+ * mobile installation may only have one active install per platform
+ * at a time. Re-registration replaces the existing row atomically
+ * (the bridge never duplicates an install).
+ *
+ * `notification_dedup` is a small bounded table that prevents the
+ * same source event from producing two notifications on retry. The
+ * primary key is `source_event_id`, with a `created_at` index that
+ * the periodic sweeper prunes after the dedupe window.
+ */
+const MIGRATION_V4 = `
+CREATE TABLE IF NOT EXISTS notification_devices(device_id TEXT PRIMARY KEY, installation_id TEXT NOT NULL, platform TEXT NOT NULL CHECK(platform IN ('apns','fcm')), push_token TEXT NOT NULL, app_version TEXT NOT NULL, token_revision INTEGER NOT NULL DEFAULT 1, last_seen_at INTEGER NOT NULL, created_at INTEGER NOT NULL, rejected_reason TEXT, rejected_at INTEGER, UNIQUE(installation_id,platform));
+CREATE INDEX IF NOT EXISTS notification_devices_installation ON notification_devices(installation_id);
+CREATE TABLE IF NOT EXISTS notification_dedup(source_event_id TEXT PRIMARY KEY, kind TEXT NOT NULL, session_id TEXT NOT NULL, created_at INTEGER NOT NULL);
+CREATE INDEX IF NOT EXISTS notification_dedup_age ON notification_dedup(created_at);
+`;
+const MIGRATION_V4_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2 + MIGRATION_V3 + MIGRATION_V4).digest("hex");
 
 function canonicalCursor(value: string): bigint {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) throw new StoreError("conflict", "cursor is not canonical");
@@ -135,6 +156,14 @@ export class BridgeStore {
       this.transactionOn(db, () => {
         db.exec(MIGRATION_V3);
         db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(3,?,?)").run(MIGRATION_V3_CHECKSUM, this.now());
+      });
+    }
+    const existingV4 = db.query("SELECT checksum FROM schema_migrations WHERE version=4").get() as { checksum: string } | null;
+    if (existingV4 && existingV4.checksum !== MIGRATION_V4_CHECKSUM) throw new StoreError("corrupt", "migration checksum mismatch (v4)");
+    if (!existingV4) {
+      this.transactionOn(db, () => {
+        db.exec(MIGRATION_V4);
+        db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(4,?,?)").run(MIGRATION_V4_CHECKSUM, this.now());
       });
     }
   }
@@ -706,6 +735,135 @@ export class BridgeStore {
     const rows = this.db.query("SELECT dialog_id AS dialogId,session_id AS sessionId,upstream_id AS upstreamId,method,request_json AS requestJson,state,created_at AS createdAt,expires_at AS expiresAt FROM extension_dialogs WHERE state='pending' AND expires_at<=?").all(now) as Array<{dialogId:string;sessionId:string;upstreamId:string;method:StoredDialog["method"];requestJson:string;state:StoredDialog["state"];createdAt:number;expiresAt:number}>;
     if (rows.length) this.db.query("UPDATE extension_dialogs SET state='expired',updated_at=? WHERE state='pending' AND expires_at<=?").run(now,now);
     return rows.map(({requestJson,...row}) => ({...row,state:"expired",request:parseObject(requestJson)}));
+  }
+
+  // ---------------------------------------------------------------------
+  // M15 — durable device installation registry + dedupe table.
+  //
+  // The notification service uses these methods to register, replace,
+  // and unregister mobile device installs, and to dedupe retries from
+  // upstream events. Both tables are bounded and swept periodically.
+  // ---------------------------------------------------------------------
+
+  /**
+   * Register a device install. Idempotent on `(installationId, platform)`:
+   * a second call for the same pair replaces the row, atomically bumping
+   * the token revision. The bridge treats re-registration as the
+   * canonical "I just installed on a new phone" signal from mobile.
+   */
+  registerDeviceInstall(input: {
+    readonly deviceId?: string;
+    readonly installationId: string;
+    readonly platform: "apns" | "fcm";
+    readonly pushToken: string;
+    readonly appVersion: string;
+  }): { readonly device: import("../notifications/types").StoredDeviceInstall; readonly replaced: boolean } {
+    return this.transaction(() => {
+      const existing = this.db.query(
+        "SELECT device_id AS deviceId, installation_id AS installationId, platform, push_token AS pushToken, app_version AS appVersion, token_revision AS tokenRevision, last_seen_at AS lastSeenAt, created_at AS createdAt, rejected_reason AS rejectedReason, rejected_at AS rejectedAt FROM notification_devices WHERE installation_id=? AND platform=?",
+      ).get(input.installationId, input.platform) as (Omit<import("../notifications/types").StoredDeviceInstall, "rejectedReason" | "rejectedAt"> & { rejectedReason: string | null; rejectedAt: number | null }) | null;
+      if (existing) {
+        const replaced = existing.pushToken !== input.pushToken || existing.appVersion !== input.appVersion;
+        const revision = replaced ? existing.tokenRevision + 1 : existing.tokenRevision;
+        this.db.query(
+          "UPDATE notification_devices SET device_id=?, push_token=?, app_version=?, token_revision=?, last_seen_at=?, rejected_reason=NULL, rejected_at=NULL WHERE installation_id=? AND platform=?",
+        ).run(existing.deviceId, input.pushToken, input.appVersion, revision, this.now(), input.installationId, input.platform);
+        const updated = this.findDeviceInstallById(existing.deviceId)!;
+        return { device: updated, replaced };
+      }
+      const deviceId = input.deviceId ?? uuid();
+      const createdAt = this.now();
+      this.db.query(
+        "INSERT INTO notification_devices(device_id,installation_id,platform,push_token,app_version,token_revision,last_seen_at,created_at,rejected_reason,rejected_at) VALUES(?,?,?,?,?,?,?,?,NULL,NULL)",
+      ).run(deviceId, input.installationId, input.platform, input.pushToken, input.appVersion, 1, createdAt, createdAt);
+      return { device: this.findDeviceInstallById(deviceId)!, replaced: false };
+    });
+  }
+
+  /**
+   * Replace a token on an existing install. Idempotent. Returns `null`
+   * when the install no longer exists so the caller can distinguish a
+   * rotation from an unknown device.
+   */
+  replaceDeviceToken(input: { readonly deviceId: string; readonly pushToken: string; readonly appVersion: string }): import("../notifications/types").StoredDeviceInstall | null {
+    return this.transaction(() => {
+      const existing = this.findDeviceInstallById(input.deviceId);
+      if (!existing) return null;
+      const next = existing.pushToken === input.pushToken && existing.appVersion === input.appVersion ? existing.tokenRevision : existing.tokenRevision + 1;
+      this.db.query(
+        "UPDATE notification_devices SET push_token=?, app_version=?, token_revision=?, last_seen_at=?, rejected_reason=NULL, rejected_at=NULL WHERE device_id=?",
+      ).run(input.pushToken, input.appVersion, next, this.now(), input.deviceId);
+      return this.findDeviceInstallById(input.deviceId);
+    });
+  }
+
+  /** Unregister a single device install. Idempotent. */
+  unregisterDeviceInstall(deviceId: string): boolean {
+    return this.transaction(() => Boolean(this.db.query("DELETE FROM notification_devices WHERE device_id=?").run(deviceId).changes));
+  }
+
+  /** Unregister every install belonging to an installationId. */
+  unregisterInstallation(installationId: string): number {
+    return this.transaction(() => Number(this.db.query("DELETE FROM notification_devices WHERE installation_id=?").run(installationId).changes));
+  }
+
+  /**
+   * Mark a device as permanently rejected. The notification service
+   * calls this when APNs/FCM returns a permanent-failure reason; the
+   * device is removed from the active registry once the caller calls
+   * {@link unregisterDeviceInstall}.
+   */
+  markDeviceRejected(deviceId: string, reason: string): import("../notifications/types").StoredDeviceInstall | null {
+    return this.transaction(() => {
+      const existing = this.findDeviceInstallById(deviceId); if (!existing) return null;
+      this.db.query(
+        "UPDATE notification_devices SET rejected_reason=?, rejected_at=? WHERE device_id=?",
+      ).run(reason.slice(0, 200), this.now(), deviceId);
+      return this.findDeviceInstallById(deviceId);
+    });
+  }
+
+  /** Find a device install by id. */
+  findDeviceInstallById(deviceId: string): import("../notifications/types").StoredDeviceInstall | null {
+    const row = this.db.query(
+      "SELECT device_id AS deviceId, installation_id AS installationId, platform, push_token AS pushToken, app_version AS appVersion, token_revision AS tokenRevision, last_seen_at AS lastSeenAt, created_at AS createdAt, rejected_reason AS rejectedReason, rejected_at AS rejectedAt FROM notification_devices WHERE device_id=?",
+    ).get(deviceId) as (Omit<import("../notifications/types").StoredDeviceInstall, "rejectedReason" | "rejectedAt"> & { rejectedReason: string | null; rejectedAt: number | null }) | null;
+    if (!row) return null;
+    const { rejectedReason, rejectedAt, ...rest } = row;
+    return rejectedReason && rejectedAt !== null ? { ...rest, rejectedReason, rejectedAt } : rest;
+  }
+
+  /** List active device installs. Used by diagnostics + the service loop. */
+  listActiveDeviceInstalls(): readonly import("../notifications/types").StoredDeviceInstall[] {
+    return (this.db.query(
+      "SELECT device_id AS deviceId, installation_id AS installationId, platform, push_token AS pushToken, app_version AS appVersion, token_revision AS tokenRevision, last_seen_at AS lastSeenAt, created_at AS createdAt, rejected_reason AS rejectedReason, rejected_at AS rejectedAt FROM notification_devices WHERE rejected_reason IS NULL ORDER BY created_at",
+    ).all() as Array<Omit<import("../notifications/types").StoredDeviceInstall, "rejectedReason" | "rejectedAt"> & { rejectedReason: string | null; rejectedAt: number | null }>).map((row) => {
+      const { rejectedReason, rejectedAt, ...rest } = row;
+      return rejectedReason && rejectedAt !== null ? { ...rest, rejectedReason, rejectedAt } : rest;
+    });
+  }
+
+  /** Record that a source event produced (or was coalesced into) a notification. */
+  recordNotificationDedup(input: { readonly sourceEventId: string; readonly kind: string; readonly sessionId: string }): void {
+    this.transaction(() => {
+      this.db.query("INSERT OR IGNORE INTO notification_dedup(source_event_id,kind,session_id,created_at) VALUES(?,?,?,?)").run(input.sourceEventId, input.kind, input.sessionId, this.now());
+    });
+  }
+
+  /** Returns true when the source event has been recorded before. */
+  hasNotificationDedup(sourceEventId: string): boolean {
+    const row = this.db.query("SELECT 1 present FROM notification_dedup WHERE source_event_id=?").get(sourceEventId);
+    return row !== null;
+  }
+
+  /** Sweep dedupe records older than the dedupe window. */
+  sweepNotificationDedup(retentionMs: number, now = this.now()): number {
+    return this.transaction(() => Number(this.db.query("DELETE FROM notification_dedup WHERE created_at < ?").run(now - retentionMs).changes));
+  }
+
+  /** Update the last-seen timestamp on a device install (heartbeat). */
+  touchDeviceInstall(deviceId: string): void {
+    this.transaction(() => this.db.query("UPDATE notification_devices SET last_seen_at=? WHERE device_id=?").run(this.now(), deviceId));
   }
 
   integrityCheck(): boolean { const row = this.db.query("PRAGMA integrity_check").get() as Record<string, unknown> | null; return !!row && Object.values(row).includes("ok"); }

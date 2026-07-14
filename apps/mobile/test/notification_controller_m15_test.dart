@@ -1,0 +1,120 @@
+import 'dart:async';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pi_mob/src/notifications/notification_controller.dart';
+
+class FakePlatform implements NotificationPlatformAdapter {
+  @override
+  String platform = 'fcm';
+  NotificationPermission status = NotificationPermission.notDetermined;
+  String? token = 'token';
+  int prompts = 0;
+  bool? service;
+  bool? visible;
+  final tokens = StreamController<String>.broadcast();
+  final taps = StreamController<Uri>.broadcast();
+  @override
+  Future<NotificationPermission> permissionStatus() async => status;
+  @override
+  Future<NotificationPermission> requestPermission() async {
+    prompts++;
+    return status = NotificationPermission.authorized;
+  }
+
+  @override
+  Future<String?> currentToken() async => token;
+  @override
+  Stream<String> get tokenChanges => tokens.stream;
+  @override
+  Stream<Uri> get notificationTaps => taps.stream;
+  @override
+  Future<void> setForegroundServiceEnabled(
+    bool enabled, {
+    required bool appVisible,
+  }) async {
+    service = enabled;
+    visible = appVisible;
+  }
+
+  @override
+  Future<void> updateLiveActivity({
+    required String sessionId,
+    required String status,
+    required DateTime staleAt,
+  }) async {}
+  @override
+  Future<void> endLiveActivity(String sessionId) async {}
+  @override
+  Future<void> cleanupStaleActivities(DateTime now) async {}
+}
+
+void main() {
+  test(
+    'permission is requested only by explicit user action and token rotation registers',
+    () async {
+      final platform = FakePlatform();
+      final registrations = <String>[];
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (kind, token) async => registrations.add('$kind:$token'),
+        reconcile: (_) async => false,
+      );
+      await controller.initialize();
+      expect(platform.prompts, 0);
+      await controller.enableByUserAction();
+      expect(platform.prompts, 1);
+      expect(registrations, ['fcm:token']);
+      platform.tokens.add('rotated');
+      await Future<void>.delayed(Duration.zero);
+      expect(registrations.last, 'fcm:rotated');
+      controller.dispose();
+    },
+  );
+  test(
+    'deep links reconcile authoritative session and stale targets do not apply',
+    () async {
+      final platform = FakePlatform();
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (platform, token) async {},
+        reconcile: (id) async => id == 'current',
+      );
+      expect(
+        await controller.handleTap(
+          Uri.parse('pi-mob://session/stale?kind=settled'),
+        ),
+        false,
+      );
+      expect(
+        await controller.handleTap(
+          Uri.parse('pi-mob://session/current?kind=failed'),
+        ),
+        true,
+      );
+      expect(controller.lastReconciledSession, 'current');
+    },
+  );
+  test(
+    'foreground service can only start from visible app and no mutating action exists',
+    () async {
+      final platform = FakePlatform();
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (platform, token) async {},
+        reconcile: (_) async => true,
+      );
+      await expectLater(
+        controller.setForegroundService(true, appVisible: false),
+        throwsStateError,
+      );
+      await controller.setForegroundService(true, appVisible: true);
+      expect(platform.service, true);
+      expect(platform.visible, true);
+    },
+  );
+}

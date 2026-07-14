@@ -35,6 +35,11 @@ android {
     }
 }
 
+dependencies {
+    implementation("androidx.core:core-ktx:1.17.0")
+    implementation("com.google.firebase:firebase-messaging:25.0.1")
+}
+
 kotlin {
     compilerOptions {
         jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17

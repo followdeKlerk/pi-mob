@@ -36,6 +36,7 @@ import { normalizeCommandCatalogue } from "./command-catalogue";
 import { ExportRegistry, ExportRegistryInvalidInputError, type ExportMetadata } from "./export-registry";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
 import type { HostPolicyMode } from "../core/workspace-policy";
+import { classifyEvent, safePublishStatus, type NotificationService } from "../notifications";
 import {
   ProcessSupervisor,
   type ManagedProcess,
@@ -193,6 +194,8 @@ export interface OneSessionAdapterOptions {
   readonly exportRegistry?: ExportRegistry;
   /** M13 host-private attachment bytes, resolved only at Pi dispatch. */
   readonly attachmentStore?: AttachmentStore;
+  /** M15 best-effort status side-channel. */
+  readonly notificationService?: NotificationService;
 }
 
 // ---------------- Adapter ----------------
@@ -249,6 +252,7 @@ export class OneSessionPiAdapter {
   private readonly softDeleteRetentionMs: number;
   private readonly exportRegistry: ExportRegistry | null;
   private readonly attachmentStore: AttachmentStore | null;
+  private readonly notificationService: NotificationService | null;
 
   constructor(options: OneSessionAdapterOptions) {
     this.store = options.store;
@@ -262,6 +266,7 @@ export class OneSessionPiAdapter {
     this.reuseExistingOnCreate = options.reuseExistingOnCreate ?? false;
     this.softDeleteRetentionMs = 7 * 24 * 60 * 60 * 1000;
     this.attachmentStore = options.attachmentStore ?? null;
+    this.notificationService = options.notificationService ?? null;
     // Production injects a registry rooted in the bridge state directory.
     // Keeping this optional avoids filesystem side effects for adapters that
     // do not advertise export support (including read-only test fixtures).
@@ -400,6 +405,18 @@ export class OneSessionPiAdapter {
         return this.handleSessionPurge(command);
       case "session.export":
         return this.handleSessionExport(command);
+      case "notification.device.register": {
+        if(!this.notificationService) return;
+        const platform=command.payload.platform;
+        if(platform!=="apns"&&platform!=="fcm") throw new Error("invalid notification platform");
+        this.notificationService.registerDevice({deviceId:String(command.payload.deviceId??""),installationId:String(command.payload.installationId??""),platform,pushToken:String(command.payload.token??""),appVersion:String(command.payload.appVersion??"unknown")});
+        this.store.appendEvent(this.hostStream,"notification.capability",{available:true,registered:true,platform});
+        return;
+      }
+      case "notification.device.unregister":
+        this.notificationService?.unregisterDevice(String(command.payload.deviceId??""));
+        this.store.appendEvent(this.hostStream,"notification.capability",{available:Boolean(this.notificationService),registered:false});
+        return;
       default:
         // Session-scoped metadata commands (rename, policy.set, ...) are
         // local-only at this checkpoint; no Pi RPC call is required.
@@ -1351,7 +1368,9 @@ export class OneSessionPiAdapter {
     if (normalized.length === 0) return;
     for (const event of normalized) {
       if(["turn.failed","turn.aborted","turn.indeterminate"].includes(event.type)) this.store.orphanPendingDialogs(inferredSessionId);
-      this.store.appendEvent(streamId, event.type, { ...event.payload });
+      const storedEvent=this.store.appendEvent(streamId, event.type, { ...event.payload });
+      const notificationKind=classifyEvent({type:event.type,sessionId:inferredSessionId,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt,...(typeof event.payload.errorCode==="string"?{errorCode:event.payload.errorCode}:{}),...(typeof event.payload.attentionState==="string"?{attentionState:event.payload.attentionState}:{}),...(typeof event.payload.runtimeState==="string"?{runtimeState:event.payload.runtimeState}:{})});
+      if(notificationKind) safePublishStatus(this.notificationService,{sessionId:inferredSessionId,kind:notificationKind,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt});
       const prior = this.store.sessionState(inferredSessionId) ?? {};
       const runtimeState = event.type === "turn.started"
         ? "running"

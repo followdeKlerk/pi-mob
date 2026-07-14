@@ -9,6 +9,7 @@ import 'src/data/app_database.dart';
 import 'src/domain/mobile_state.dart';
 import 'src/domain/session_controls.dart' as control_domain;
 import 'src/interaction/interaction_panel.dart';
+import 'src/notifications/notification_controller.dart';
 import 'src/pairing/pairing_payload.dart';
 import 'src/pairing/pairing_screen.dart';
 import 'src/transcript/widgets/transcript_view.dart';
@@ -22,13 +23,35 @@ Future<void> main() async {
     database: database,
   );
   await coordinator.initialize();
-  runApp(PiMobApp(coordinator: coordinator));
+  final notifications = NotificationController(
+    adapter: MethodChannelNotificationAdapter(),
+    deviceId: coordinator.installationId,
+    appVersion: '0.0.0',
+    register: (platform, token) => coordinator.registerNotificationDevice(
+      deviceId: coordinator.installationId,
+      platform: platform,
+      token: token,
+      appVersion: '0.0.0',
+    ),
+    reconcile: (sessionId) async {
+      if (!coordinator.sessions.any(
+        (session) => session.sessionId == sessionId,
+      )) {
+        return false;
+      }
+      await coordinator.selectSession(sessionId);
+      return true;
+    },
+  );
+  await notifications.initialize();
+  runApp(PiMobApp(coordinator: coordinator, notifications: notifications));
 }
 
 class PiMobApp extends StatelessWidget {
-  const PiMobApp({required this.coordinator, super.key});
+  const PiMobApp({required this.coordinator, this.notifications, super.key});
 
   final ConnectionCoordinator coordinator;
+  final NotificationController? notifications;
 
   @override
   Widget build(BuildContext context) {
@@ -39,7 +62,7 @@ class PiMobApp extends StatelessWidget {
         colorScheme: ColorScheme.fromSeed(seedColor: Colors.deepPurple),
         useMaterial3: true,
       ),
-      home: _HomeRouter(coordinator: coordinator),
+      home: _HomeRouter(coordinator: coordinator, notifications: notifications),
     );
   }
 }
@@ -50,9 +73,10 @@ class PiMobApp extends StatelessWidget {
 /// a successful pair, the app switches to the diagnostic home and provides a
 /// visible "Forget host" action so the user can re-enter the pairing flow.
 class _HomeRouter extends StatefulWidget {
-  const _HomeRouter({required this.coordinator});
+  const _HomeRouter({required this.coordinator, this.notifications});
 
   final ConnectionCoordinator coordinator;
+  final NotificationController? notifications;
 
   @override
   State<_HomeRouter> createState() => _HomeRouterState();
@@ -93,6 +117,16 @@ class _HomeRouterState extends State<_HomeRouter> {
   }
 
   Future<void> _handleForget() async {
+    final notifications = widget.notifications;
+    if (notifications?.enabled == true) {
+      try {
+        await widget.coordinator.unregisterNotificationDevice(
+          notifications!.deviceId,
+        );
+      } catch (_) {
+        /* best effort when host is offline */
+      }
+    }
     await widget.coordinator.forgetHost();
   }
 
@@ -109,6 +143,7 @@ class _HomeRouterState extends State<_HomeRouter> {
     return DiagnosticHome(
       key: const ValueKey('diagnostic-home'),
       coordinator: widget.coordinator,
+      notifications: widget.notifications,
       onForgetHost: _handleForget,
     );
   }
@@ -118,10 +153,12 @@ class DiagnosticHome extends StatefulWidget {
   const DiagnosticHome({
     required this.coordinator,
     required this.onForgetHost,
+    this.notifications,
     super.key,
   });
 
   final ConnectionCoordinator coordinator;
+  final NotificationController? notifications;
   final Future<void> Function() onForgetHost;
 
   @override
@@ -164,6 +201,24 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
         text: remoteDraft,
         selection: TextSelection.collapsed(offset: remoteDraft.length),
       );
+    }
+    final notifications = widget.notifications;
+    final sessionId = widget.coordinator.selectedSessionId;
+    final status = widget.coordinator.selectedRuntimeState;
+    if (notifications?.adapter.platform == 'apns' &&
+        sessionId != null &&
+        status != null) {
+      if (status == 'idle' || status == 'stopped') {
+        unawaited(notifications!.adapter.endLiveActivity(sessionId));
+      } else {
+        unawaited(
+          notifications!.adapter.updateLiveActivity(
+            sessionId: sessionId,
+            status: status,
+            staleAt: DateTime.now().toUtc().add(const Duration(minutes: 5)),
+          ),
+        );
+      }
     }
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback(
@@ -224,6 +279,48 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
       appBar: AppBar(
         title: const Text('pi-mob'),
         actions: [
+          if (widget.notifications case final notifications?) ...[
+            ListenableBuilder(
+              listenable: notifications,
+              builder: (context, _) => IconButton(
+                key: const Key('enable-notifications'),
+                tooltip: notifications.enabled
+                    ? 'Notifications enabled'
+                    : 'Enable notifications',
+                onPressed: notifications.enabled
+                    ? null
+                    : () => unawaited(notifications.enableByUserAction()),
+                icon: Icon(
+                  notifications.enabled
+                      ? Icons.notifications_active
+                      : Icons.notifications_none,
+                ),
+              ),
+            ),
+            if (notifications.adapter.platform == 'fcm')
+              ListenableBuilder(
+                listenable: notifications,
+                builder: (context, _) => IconButton(
+                  key: const Key('toggle-foreground-service'),
+                  tooltip: notifications.foregroundServiceEnabled
+                      ? 'Disable background status'
+                      : 'Enable background status',
+                  onPressed: notifications.enabled
+                      ? () => unawaited(
+                          notifications.setForegroundService(
+                            !notifications.foregroundServiceEnabled,
+                            appVisible: true,
+                          ),
+                        )
+                      : null,
+                  icon: Icon(
+                    notifications.foregroundServiceEnabled
+                        ? Icons.sync_disabled
+                        : Icons.sync,
+                  ),
+                ),
+              ),
+          ],
           IconButton(
             key: const Key('forget-host-button'),
             tooltip: 'Forget this host and re-pair',

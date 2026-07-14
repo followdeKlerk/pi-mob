@@ -32,6 +32,7 @@ import { createBridgeServer, type BridgeServer } from "./core/server";
 import { AttachmentStore } from "./core/attachments";
 import { createBinaryHttpHandler } from "./core/binary-http";
 import { ExportRegistry } from "./pi/export-registry";
+import type { NotificationService } from "./notifications";
 import { createRedactingLogger, type RedactingLogger } from "./logger";
 import { parseInstallConfig } from "./ops/install-config";
 import {
@@ -70,6 +71,8 @@ export interface DaemonOptions {
   readonly allowedRoots?: readonly string[];
   /** Loadable host-policy Pi extension. Defaults to the monorepo extension in development. */
   readonly extensionPath?: string;
+  /** M15 configured host-side APNs/FCM service. Omit to advertise push unavailable. */
+  readonly notificationService?: NotificationService;
 }
 
 interface DaemonPolicyBootstrap {
@@ -256,7 +259,10 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   }, 15 * 60_000);
   attachmentSweepTimer.unref();
   const exports = new ExportRegistry({ rootDir: join(stateDir, "exports") });
-  const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports });
+  const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, ...(options.notificationService ? {notificationService:options.notificationService} : {}) });
+  if(options.notificationService) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:["apns","fcm"],bestEffort:true});
+  const notificationSweepTimer=setInterval(()=>{ try{options.notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
+  notificationSweepTimer.unref();
   const dialogSweepTimer=setInterval(()=>{ try{adapter.sweepExtensionDialogs();}catch{/* service outlives cleanup failure */} },30_000);
   dialogSweepTimer.unref();
   const runtime = new DurableBridgeRuntime({
@@ -291,6 +297,8 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     async close() {
       clearInterval(attachmentSweepTimer);
       clearInterval(dialogSweepTimer);
+      clearInterval(notificationSweepTimer);
+      try { options.notificationService?.sweep(); } catch { /* best effort */ }
       try { attachments.sweep(); } catch { /* best effort */ }
       try { adapter.sweepExtensionDialogs(); } catch { /* best effort */ }
       try { await rpc.drain(); } catch { /* best-effort drain event */ }

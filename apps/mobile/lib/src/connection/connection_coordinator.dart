@@ -966,6 +966,35 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
   }
 
+  Future<void> registerNotificationDevice({
+    required String deviceId,
+    required String platform,
+    required String token,
+    required String appVersion,
+  }) async {
+    await _sendCommand(
+      type: 'notification.device.register',
+      commandId: _id(),
+      payload: <String, Object?>{
+        'deviceId': deviceId,
+        'installationId': installationId,
+        'platform': platform,
+        'token': token,
+        'appVersion': appVersion,
+      },
+      requiresLease: false,
+    );
+  }
+
+  Future<void> unregisterNotificationDevice(String deviceId) async {
+    await _sendCommand(
+      type: 'notification.device.unregister',
+      commandId: _id(),
+      payload: <String, Object?>{'deviceId': deviceId},
+      requiresLease: false,
+    );
+  }
+
   Future<void> removeFollowUp(String queueItemId) async {
     final sessionId = selectedSessionId;
     if (sessionId == null) return;
