@@ -521,6 +521,15 @@ export class RpcProcess {
 
   // ---------------- Request / response ----------------
 
+  /** Send Pi's reverse extension UI response without awaiting a command response. */
+  async sendExtensionUiResponse(response: { id:string; value?:string; confirmed?:boolean; cancelled?:true }): Promise<void> {
+    if (!this.proc || this.state !== "running") throw new RpcProcessError("process not running");
+    const payload = { type:"extension_ui_response", ...response };
+    const json = JSON.stringify(payload);
+    if (json.length > 64 * 1024) throw new RpcInvalidOptionsError("extension UI response exceeds 64 KiB");
+    await this.writeToStdin(new TextEncoder().encode(`${json}\n`));
+  }
+
   /**
    * Send a JSON-RPC-shaped request and await the matching response.
    * Rejects with `RpcDuplicateIdError`, `RpcTimeoutError`,

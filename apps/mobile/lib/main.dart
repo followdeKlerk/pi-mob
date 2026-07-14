@@ -8,6 +8,7 @@ import 'src/controls/controls.dart' as control_ui;
 import 'src/data/app_database.dart';
 import 'src/domain/mobile_state.dart';
 import 'src/domain/session_controls.dart' as control_domain;
+import 'src/interaction/interaction_panel.dart';
 import 'src/pairing/pairing_payload.dart';
 import 'src/pairing/pairing_screen.dart';
 import 'src/transcript/widgets/transcript_view.dart';
@@ -130,6 +131,7 @@ class DiagnosticHome extends StatefulWidget {
 class _DiagnosticHomeState extends State<DiagnosticHome> {
   late final TextEditingController _endpointController;
   late final TextEditingController _draftController;
+  String? _presentedDialogId;
 
   @override
   void initState() {
@@ -139,6 +141,9 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
     );
     _draftController = TextEditingController(text: widget.coordinator.draft);
     widget.coordinator.addListener(_coordinatorChanged);
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _presentDialogIfNeeded(),
+    );
   }
 
   @override
@@ -161,6 +166,46 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
       );
     }
     setState(() {});
+    WidgetsBinding.instance.addPostFrameCallback(
+      (_) => _presentDialogIfNeeded(),
+    );
+  }
+
+  Future<void> _presentDialogIfNeeded({bool force = false}) async {
+    if (!mounted) return;
+    final dialog = widget.coordinator.selectedDialog;
+    if (dialog == null || (!force && _presentedDialogId == dialog.dialogId)) {
+      return;
+    }
+    _presentedDialogId = dialog.dialogId;
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      builder: (sheetContext) => Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(sheetContext).bottom,
+        ),
+        child: SingleChildScrollView(
+          child: ExtensionDialogPanel(
+            dialog: dialog,
+            now: DateTime.now,
+            onRespond:
+                ({String? value, bool? confirmed, bool cancelled = false}) {
+                  unawaited(
+                    widget.coordinator.respondToDialog(
+                      dialogId: dialog.dialogId,
+                      value: value,
+                      confirmed: confirmed,
+                      cancelled: cancelled,
+                    ),
+                  );
+                  Navigator.of(sheetContext).pop();
+                },
+          ),
+        ),
+      ),
+    );
   }
 
   @override
@@ -216,6 +261,7 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
               _Composer(
                 coordinator: coordinator,
                 draftController: _draftController,
+                onOpenDialog: () => _presentDialogIfNeeded(force: true),
               ),
             ],
           ),
@@ -870,13 +916,25 @@ class _TranscriptPanel extends StatelessWidget {
 }
 
 class _Composer extends StatelessWidget {
-  const _Composer({required this.coordinator, required this.draftController});
+  const _Composer({
+    required this.coordinator,
+    required this.draftController,
+    required this.onOpenDialog,
+  });
 
   final ConnectionCoordinator coordinator;
   final TextEditingController draftController;
+  final VoidCallback onOpenDialog;
 
   @override
   Widget build(BuildContext context) {
+    final prefill = coordinator.editorPrefill;
+    if (prefill != null && draftController.text != prefill) {
+      draftController.value = TextEditingValue(
+        text: prefill,
+        selection: TextSelection.collapsed(offset: prefill.length),
+      );
+    }
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -929,6 +987,24 @@ class _Composer extends StatelessWidget {
                     ),
                   );
                 },
+              ),
+              const SizedBox(height: 8),
+            ],
+            FollowUpQueuePanel(
+              items: coordinator.selectedFollowUps,
+              onRemove: (id) => unawaited(coordinator.removeFollowUp(id)),
+              onClear: () => unawaited(coordinator.clearFollowUps()),
+            ),
+            if (coordinator.selectedFollowUps.isNotEmpty)
+              const SizedBox(height: 8),
+            if (coordinator.selectedDialog != null) ...[
+              FilledButton.tonalIcon(
+                key: const Key('open-extension-dialog'),
+                onPressed: onOpenDialog,
+                icon: const Icon(Icons.open_in_new),
+                label: Text(
+                  'Open ${coordinator.selectedDialog!.method.name} request',
+                ),
               ),
               const SizedBox(height: 8),
             ],

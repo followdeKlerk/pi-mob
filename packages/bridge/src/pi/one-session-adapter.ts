@@ -86,6 +86,7 @@ export interface PiRpcClient {
   on(kind: "notification", handler: PiRpcNotificationHandler): () => void;
   markDispatchStart?(): void;
   manualRetry?(): Promise<void>;
+  sendExtensionUiResponse?(response: { id:string; value?:string; confirmed?:boolean; cancelled?:true }): Promise<void>;
   isDraining?(): boolean;
 }
 
@@ -272,6 +273,8 @@ export class OneSessionPiAdapter {
     } else {
       this.supervisor = this.buildDefaultSupervisor(options.capacity ?? 3, options.now);
     }
+    this.store.recoverDispatchingFollowUps();
+    this.store.expireDialogs(this.now());
     this.bootstrapExistingSessions();
   }
 
@@ -339,6 +342,12 @@ export class OneSessionPiAdapter {
         return this.handlePromptSubmit(command);
       case "turn.abort":
         return this.handleTurnAbort(command);
+      case "queue.remove":
+        this.store.removeFollowUp(String(command.payload.sessionId ?? ""), String(command.payload.queueItemId ?? "")); return;
+      case "queue.clear":
+        this.store.clearFollowUps(String(command.payload.sessionId ?? "")); return;
+      case "extension.respond":
+        return this.handleExtensionResponse(command);
       case "session.activate":
         return this.handleSessionActivate(command);
       case "session.policy.set":
@@ -399,7 +408,18 @@ export class OneSessionPiAdapter {
   }
 
   validateCommand(type: string, payload: Record<string, unknown>): void {
+    if (type === "extension.respond") {
+      const dialog = this.store.pendingDialog(String(payload.sessionId ?? ""), this.now());
+      if (!dialog || dialog.dialogId !== payload.dialogId) throw new Error("invalid_state");
+      return;
+    }
+    if (type === "queue.remove") {
+      const found=this.store.listFollowUps(String(payload.sessionId ?? "")).some((item)=>item.queueItemId===payload.queueItemId);
+      if(!found) throw new Error("queue_item_not_found");
+      return;
+    }
     if (type !== "prompt.submit") return;
+    if (payload.deliveryMode === "follow_up" && this.store.listFollowUps(String(payload.sessionId ?? "")).length >= 10) throw new Error("queue_full");
     const ids = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
     if (ids.length > 4) throw new Error("attachment_unavailable");
     let bytes = 0;
@@ -412,7 +432,11 @@ export class OneSessionPiAdapter {
     if (bytes > 25 * 1024 * 1024) throw new Error("attachment_unavailable");
   }
 
-  commandAccepted(type: string, payload: Record<string, unknown>): void {
+  commandAccepted(type: string, payload: Record<string, unknown>, commandId: string): void {
+    if (type === "prompt.submit" && payload.deliveryMode === "follow_up") {
+      const sessionId = String(payload.sessionId ?? "");
+      this.store.enqueueFollowUp({ sessionId, queueItemId:commandId, message:String(payload.message ?? ""), attachmentIds:Array.isArray(payload.attachmentIds) ? payload.attachmentIds.filter((id): id is string => typeof id === "string") : [] });
+    }
     if (type !== "prompt.submit" || !this.attachmentStore) return;
     const ids = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
     for (const id of ids) {
@@ -794,6 +818,7 @@ export class OneSessionPiAdapter {
   }
 
   private async handlePromptSubmit(command: StoredCommand): Promise<void> {
+    if (command.payload.deliveryMode === "follow_up") return;
     const payload = (command.payload ?? {}) as {
       sessionId?: string;
       message?: string;
@@ -1261,10 +1286,43 @@ export class OneSessionPiAdapter {
     }
   }
 
+  sweepExtensionDialogs(): number {
+    const expired=this.store.expireDialogs(this.now());
+    for(const dialog of expired){
+      this.store.appendEvent(`session:${dialog.sessionId}`,"extension.dialog",{sessionId:dialog.sessionId,dialogId:dialog.dialogId,method:dialog.method,state:"expired",expiresAt:new Date(dialog.expiresAt).toISOString()});
+      const prior=this.store.sessionState(dialog.sessionId) ?? {};
+      this.store.updateSessionState(dialog.sessionId,{...prior,pendingDialog:null});
+    }
+    return expired.length;
+  }
+
   listExports(sessionId: string): ExportMetadata[] { return this.exportRegistry?.list(sessionId) ?? []; }
   getExport(exportId: string): ExportMetadata | null { return this.exportRegistry?.get(exportId) ?? null; }
   deleteExport(exportId: string): ExportMetadata | null { return this.exportRegistry?.delete(exportId) ?? null; }
   exportFile(exportId: string): ReturnType<typeof Bun.file> | null { return this.exportRegistry?.file(exportId) ?? null; }
+
+  private async handleExtensionResponse(command: StoredCommand): Promise<void> {
+    const sessionId = String(command.payload.sessionId ?? "");
+    const dialog = this.store.claimDialogResponse(sessionId, String(command.payload.dialogId ?? ""), this.now());
+    const rpc = this.sessions.get(sessionId)?.rpc ?? this.rpc;
+    if (!rpc?.sendExtensionUiResponse) throw new Error("extension response transport unavailable");
+    const input = command.payload.response && typeof command.payload.response === "object" ? command.payload.response as Record<string,unknown> : {};
+    const response: { id:string; value?:string; confirmed?:boolean; cancelled?:true } = { id:dialog.upstreamId };
+    if (input.cancelled === true) response.cancelled = true;
+    else if (dialog.method === "confirm") response.confirmed = input.confirmed === true;
+    else if (typeof input.value === "string") response.value = input.value;
+    else throw new Error("invalid extension response");
+    await rpc.sendExtensionUiResponse(response);
+    this.store.appendEvent(`session:${sessionId}`, "extension.dialog", { sessionId, dialogId:dialog.dialogId, method:dialog.method, state:"responded", expiresAt:new Date(dialog.expiresAt).toISOString() });
+  }
+
+  private async dispatchNextFollowUp(sessionId:string): Promise<void> {
+    const item = this.store.claimNextFollowUp(sessionId); if (!item) return;
+    try {
+      await this.handlePromptSubmit({ commandId:item.queueItemId, type:"prompt.submit", scopeKey:`session:${sessionId}`, streamId:`session:${sessionId}`, semanticHash:"", state:"running", dispatchCount:1, payload:{ sessionId, message:item.message, attachmentIds:[...item.attachmentIds], deliveryMode:"immediate" } });
+      this.store.finishFollowUp(item.queueItemId);
+    } catch (error) { this.store.finishFollowUp(item.queueItemId, true); throw error; }
+  }
 
   private handleNotification(raw: unknown): void {
     if (!raw || typeof raw !== "object") return;
@@ -1275,12 +1333,24 @@ export class OneSessionPiAdapter {
     if (!inferredSessionId) return;
     const streamId = `session:${inferredSessionId}`;
     if (!this.store.streamPosition(streamId)) return;
+    if (type === "extension_ui_request" && ["select","confirm","input","editor"].includes(String(record.method ?? ""))) {
+      const timeout = typeof record.timeout === "number" && Number.isFinite(record.timeout) ? Math.max(0, Math.min(300_000, record.timeout)) : 300_000;
+      const method = String(record.method) as "select"|"confirm"|"input"|"editor";
+      const bound=(value:unknown,max:number)=>typeof value === "string" ? value.slice(0,max) : "";
+      const request:Record<string,unknown>={title:bound(record.title,512),message:bound(record.message,4096),placeholder:bound(record.placeholder,512),prefill:bound(record.prefill,64*1024),options:Array.isArray(record.options)?record.options.slice(0,100).map((value)=>bound(value,512)):[]};
+      const dialog = this.store.createDialog({ sessionId:inferredSessionId, upstreamId:String(record.id ?? "").slice(0,256), method, request, expiresAt:this.now()+timeout });
+      this.store.appendEvent(streamId, "extension.dialog", { sessionId:inferredSessionId, dialogId:dialog.dialogId, method, ...request, createdAt:new Date(dialog.createdAt).toISOString(), expiresAt:new Date(dialog.expiresAt).toISOString(), state:"pending" });
+      this.store.updateSessionState(inferredSessionId, { ...(this.store.sessionState(inferredSessionId) ?? {}), pendingDialog:{ dialogId:dialog.dialogId, method, ...request, expiresAt:new Date(dialog.expiresAt).toISOString() } });
+      return;
+    }
+    if (type === "agent_settled") void this.dispatchNextFollowUp(inferredSessionId).catch(() => undefined);
     const normalized = normalizePiEvent(record as RawPiEvent, {
       sessionId: inferredSessionId,
       toolOutputLimiter: this.toolOutputLimiter,
     });
     if (normalized.length === 0) return;
     for (const event of normalized) {
+      if(["turn.failed","turn.aborted","turn.indeterminate"].includes(event.type)) this.store.orphanPendingDialogs(inferredSessionId);
       this.store.appendEvent(streamId, event.type, { ...event.payload });
       const prior = this.store.sessionState(inferredSessionId) ?? {};
       const runtimeState = event.type === "turn.started"

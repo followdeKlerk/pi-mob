@@ -16,8 +16,8 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M0–M13 done; M14 activation ready
-shape: monorepo with executable protocol, durable multi-session/tree Pi adapter, private attachment/export transport, and Flutter mobile control client
+status: M0–M14 done; M15 activation ready
+shape: monorepo with executable protocol, durable multi-session/tree/queue Pi adapter, private attachment/export transport, and Flutter mobile control client
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
 host_floor: macOS 13.0+
@@ -31,10 +31,10 @@ protocol: 1.0, host/session streams, decimal-string cursors
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M14 — Extension UI and durable follow-up queue
-objective: add a durable bounded FIFO queue and persisted extension dialogs
-next_checkpoint: M15 — Notifications and background experience
-blockers: none requiring a product decision
+checkpoint: M15 — Notifications and background experience
+objective: add privacy-preserving best-effort push and authoritative foreground reconciliation
+next_checkpoint: M16 — Accessibility, performance, privacy, and operations hardening
+blockers: final proof requires push credentials, signing, permission interaction, and physical devices
 ```
 
 M0 evidence retained:
@@ -251,4 +251,4 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## next action
 
-Activate M14: implement the durable bounded follow-up queue, persisted extension dialogs, recovery/expiry semantics, and accessible mobile sheets. Do not begin notifications before M14 exits.
+Activate M15: implement durable device registration, APNs/FCM adapters, status-only policy, coalescing, deep-link reconciliation, and platform background surfaces. Final proof requires signed physical-device testing.

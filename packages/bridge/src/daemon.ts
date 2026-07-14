@@ -257,6 +257,8 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   attachmentSweepTimer.unref();
   const exports = new ExportRegistry({ rootDir: join(stateDir, "exports") });
   const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports });
+  const dialogSweepTimer=setInterval(()=>{ try{adapter.sweepExtensionDialogs();}catch{/* service outlives cleanup failure */} },30_000);
+  dialogSweepTimer.unref();
   const runtime = new DurableBridgeRuntime({
     store,
     adapter,
@@ -288,7 +290,9 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     },
     async close() {
       clearInterval(attachmentSweepTimer);
+      clearInterval(dialogSweepTimer);
       try { attachments.sweep(); } catch { /* best effort */ }
+      try { adapter.sweepExtensionDialogs(); } catch { /* best effort */ }
       try { await rpc.drain(); } catch { /* best-effort drain event */ }
       adapter.close();
       try { server.stop(true); } catch { /* ignore */ }

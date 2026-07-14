@@ -541,6 +541,11 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
         if ((error as Error).message === "attachment_unavailable") {
           throw new RuntimeProtocolError("attachment_unavailable", "one or more attachments are unavailable");
         }
+        if ((error as Error).message === "queue_full" || (error instanceof StoreError && error.code === "full")) {
+          throw new RuntimeProtocolError("queue_full", "follow-up queue is full");
+        }
+        if ((error as Error).message === "invalid_state") throw new RuntimeProtocolError("invalid_state", "command is no longer valid");
+        if ((error as Error).message === "queue_item_not_found") throw new RuntimeProtocolError("queue_item_not_found", "queued follow-up was not found");
         throw error;
       }
     }
@@ -552,7 +557,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       throw error;
     }
 
-    if (!submission.receipt.duplicate) this.options.adapter.commandAccepted?.(type, payload);
+    if (!submission.receipt.duplicate) this.options.adapter.commandAccepted?.(type, payload, commandId);
 
     // Mutate host policy only after lease validation and durable command
     // acceptance. A stale observer or conflicting command must have no side

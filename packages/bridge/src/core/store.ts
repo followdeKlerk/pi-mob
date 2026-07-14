@@ -13,6 +13,8 @@ export interface StoredEventPage { readonly items: readonly StoredEvent[]; reado
 export interface StoredCommand { readonly commandId: string; readonly type: string; readonly scopeKey: string; readonly streamId: string; readonly semanticHash: string; readonly payload: Record<string, unknown>; readonly state: string; readonly dispatchCount: number; }
 export type AcceptCommandResult = { readonly kind: "accepted" | "duplicate"; readonly command: StoredCommand; readonly event?: StoredEvent } | { readonly kind: "conflict" };
 export interface LeaseRecord { readonly scopeKey: string; readonly leaseId: string; readonly installationId: string; readonly connectionId: string; readonly expiresAt: number; readonly reclaimableUntil: number | null; readonly disconnectedAt: number | null; readonly revokedAt: number | null; readonly takeoverReason: string | null; }
+export interface StoredQueueItem { readonly queueItemId: string; readonly sessionId: string; readonly message: string; readonly attachmentIds: readonly string[]; readonly position: number; readonly state: "queued" | "dispatching"; readonly createdAt: number; }
+export interface StoredDialog { readonly dialogId: string; readonly sessionId: string; readonly upstreamId: string; readonly method: "select" | "confirm" | "input" | "editor"; readonly request: Record<string, unknown>; readonly state: "pending" | "responded" | "expired" | "cancelled" | "orphaned"; readonly createdAt: number; readonly expiresAt: number; }
 
 // M8: durable trust + host policy state records. Kept as plain structural
 // types so the bridge runtime can read them with zero extra dependencies.
@@ -71,6 +73,13 @@ CREATE TABLE IF NOT EXISTS workspace_trust(workspace_id TEXT PRIMARY KEY, root_p
 CREATE TABLE IF NOT EXISTS policy_state(singleton INTEGER PRIMARY KEY CHECK(singleton=1), mode TEXT NOT NULL CHECK(mode IN ('full','read_only')), policy_version TEXT NOT NULL, fingerprint TEXT NOT NULL, source TEXT NOT NULL, updated_at INTEGER NOT NULL, updated_by TEXT);
 `;
 const MIGRATION_V2_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2).digest("hex");
+const MIGRATION_V3 = `
+CREATE TABLE IF NOT EXISTS follow_up_queue(queue_item_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE, message TEXT NOT NULL, attachment_ids_json TEXT NOT NULL DEFAULT '[]', state TEXT NOT NULL CHECK(state IN ('queued','dispatching')), position INTEGER NOT NULL, created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(session_id,position));
+CREATE INDEX IF NOT EXISTS follow_up_queue_fifo ON follow_up_queue(session_id,state,position);
+CREATE TABLE IF NOT EXISTS extension_dialogs(dialog_id TEXT PRIMARY KEY, session_id TEXT NOT NULL REFERENCES sessions(session_id) ON DELETE CASCADE, upstream_id TEXT NOT NULL, method TEXT NOT NULL CHECK(method IN ('select','confirm','input','editor')), request_json TEXT NOT NULL, state TEXT NOT NULL CHECK(state IN ('pending','responded','expired','cancelled','orphaned')), created_at INTEGER NOT NULL, expires_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, UNIQUE(session_id,upstream_id));
+CREATE INDEX IF NOT EXISTS extension_dialog_pending ON extension_dialogs(session_id,state,expires_at);
+`;
+const MIGRATION_V3_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2 + MIGRATION_V3).digest("hex");
 
 function canonicalCursor(value: string): bigint {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) throw new StoreError("conflict", "cursor is not canonical");
@@ -118,6 +127,14 @@ export class BridgeStore {
       this.transactionOn(db, () => {
         db.exec(MIGRATION_V2);
         db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(2,?,?)").run(MIGRATION_V2_CHECKSUM, this.now());
+      });
+    }
+    const existingV3 = db.query("SELECT checksum FROM schema_migrations WHERE version=3").get() as { checksum: string } | null;
+    if (existingV3 && existingV3.checksum !== MIGRATION_V3_CHECKSUM) throw new StoreError("corrupt", "migration checksum mismatch (v3)");
+    if (!existingV3) {
+      this.transactionOn(db, () => {
+        db.exec(MIGRATION_V3);
+        db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(3,?,?)").run(MIGRATION_V3_CHECKSUM, this.now());
       });
     }
   }
@@ -593,6 +610,102 @@ export class BridgeStore {
         state.mode, state.policyVersion, state.fingerprint, state.source, state.updatedAt, state.updatedBy ?? null,
       );
     });
+  }
+
+  enqueueFollowUp(input: { sessionId: string; message: string; attachmentIds?: readonly string[]; queueItemId?: string }): StoredQueueItem {
+    return this.transaction(() => {
+      const count = Number((this.db.query("SELECT count(*) AS n FROM follow_up_queue WHERE session_id=? AND state='queued'").get(input.sessionId) as { n: number }).n);
+      if (count >= 10) throw new StoreError("full", "queue_full");
+      const position = Number((this.db.query("SELECT coalesce(max(position),0)+1 AS n FROM follow_up_queue WHERE session_id=?").get(input.sessionId) as { n: number }).n);
+      const item: StoredQueueItem = { queueItemId: input.queueItemId ?? uuid(), sessionId: input.sessionId, message: input.message, attachmentIds: [...(input.attachmentIds ?? [])], position, state: "queued", createdAt: this.now() };
+      this.db.query("INSERT INTO follow_up_queue(queue_item_id,session_id,message,attachment_ids_json,state,position,created_at,updated_at) VALUES(?,?,?,?,?,?,?,?)").run(item.queueItemId, item.sessionId, item.message, JSON.stringify(item.attachmentIds), item.state, item.position, item.createdAt, item.createdAt);
+      this.emitQueueStateTx(input.sessionId, "turn.queued", { sessionId: input.sessionId, queueItemId: item.queueItemId, position });
+      return item;
+    });
+  }
+  listFollowUps(sessionId: string): StoredQueueItem[] {
+    const rows = this.db.query("SELECT queue_item_id AS queueItemId,session_id AS sessionId,message,attachment_ids_json AS attachmentIdsJson,position,state,created_at AS createdAt FROM follow_up_queue WHERE session_id=? AND state='queued' ORDER BY position").all(sessionId) as Array<{ queueItemId:string;sessionId:string;message:string;attachmentIdsJson:string;position:number;state:"queued";createdAt:number }>;
+    return rows.map(({ attachmentIdsJson, ...row }) => ({ ...row, attachmentIds: JSON.parse(attachmentIdsJson) as string[] }));
+  }
+  removeFollowUp(sessionId: string, queueItemId: string): StoredQueueItem {
+    return this.transaction(() => {
+      const item = this.listFollowUps(sessionId).find((value) => value.queueItemId === queueItemId);
+      if (!item) throw new StoreError("not_found", "queue_item_not_found");
+      this.db.query("DELETE FROM follow_up_queue WHERE queue_item_id=? AND state='queued'").run(queueItemId);
+      this.emitQueueStateTx(sessionId, "queue.snapshot", { removedQueueItemId: queueItemId });
+      return item;
+    });
+  }
+  clearFollowUps(sessionId: string): StoredQueueItem[] {
+    return this.transaction(() => {
+      const items = this.listFollowUps(sessionId);
+      this.db.query("DELETE FROM follow_up_queue WHERE session_id=? AND state='queued'").run(sessionId);
+      this.emitQueueStateTx(sessionId, "queue.snapshot", { cleared: true });
+      return items;
+    });
+  }
+  claimNextFollowUp(sessionId: string): StoredQueueItem | null {
+    return this.transaction(() => {
+      const item = this.listFollowUps(sessionId)[0];
+      if (!item) return null;
+      const result = this.db.query("UPDATE follow_up_queue SET state='dispatching',updated_at=? WHERE queue_item_id=? AND state='queued'").run(this.now(), item.queueItemId);
+      if (result.changes !== 1) return null;
+      this.emitQueueStateTx(sessionId, "queue.snapshot", { dispatchedQueueItemId: item.queueItemId });
+      return { ...item, state: "dispatching" };
+    });
+  }
+  finishFollowUp(queueItemId: string, requeue = false): void {
+    this.transaction(() => {
+      const row = this.db.query("SELECT session_id AS sessionId FROM follow_up_queue WHERE queue_item_id=? AND state='dispatching'").get(queueItemId) as { sessionId:string } | null;
+      if (!row) return;
+      if (requeue) this.db.query("UPDATE follow_up_queue SET state='queued',updated_at=? WHERE queue_item_id=?").run(this.now(), queueItemId);
+      else this.db.query("DELETE FROM follow_up_queue WHERE queue_item_id=?").run(queueItemId);
+      this.emitQueueStateTx(row.sessionId, "queue.snapshot", requeue ? { recoveredQueueItemId: queueItemId } : { completedQueueItemId: queueItemId });
+    });
+  }
+  recoverDispatchingFollowUps(): number {
+    return this.transaction(() => Number(this.db.query("UPDATE follow_up_queue SET state='queued',updated_at=? WHERE state='dispatching'").run(this.now()).changes));
+  }
+  private emitQueueStateTx(sessionId: string, eventType: string, extra: Record<string, unknown>): void {
+    const items = this.listFollowUps(sessionId);
+    const payloadItems = items.map((item, index) => ({ queueItemId:item.queueItemId, position:index + 1, message:item.message, attachmentIds:item.attachmentIds, createdAt:new Date(item.createdAt).toISOString() }));
+    this.appendEventTx(`session:${sessionId}`, eventType, { sessionId, ...extra, items: payloadItems, queueCount: items.length });
+    if (eventType !== "queue.snapshot") this.appendEventTx(`session:${sessionId}`, "queue.snapshot", { sessionId, items: payloadItems, queueCount: items.length });
+    const prior = this.sessionState(sessionId) ?? { sessionId };
+    const next = { ...prior, queueCount: items.length, updatedAt: this.now() };
+    this.db.query("UPDATE sessions SET state_json=?,updated_at=? WHERE session_id=?").run(JSON.stringify(next), this.now(), sessionId);
+    this.appendEventTx(`host:${this.identity().hostId}`, "session.summary", { ...next, changedKeys:["queueCount"] });
+  }
+
+  createDialog(input: { sessionId:string; upstreamId:string; method:StoredDialog["method"]; request:Record<string,unknown>; expiresAt:number; dialogId?:string }): StoredDialog {
+    return this.transaction(() => {
+      this.db.query("UPDATE extension_dialogs SET state='orphaned',updated_at=? WHERE session_id=? AND state='pending'").run(this.now(), input.sessionId);
+      const dialog: StoredDialog = { dialogId:input.dialogId ?? uuid(), sessionId:input.sessionId, upstreamId:input.upstreamId, method:input.method, request:{...input.request}, state:"pending", createdAt:this.now(), expiresAt:input.expiresAt };
+      this.db.query("INSERT INTO extension_dialogs(dialog_id,session_id,upstream_id,method,request_json,state,created_at,expires_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?)").run(dialog.dialogId,dialog.sessionId,dialog.upstreamId,dialog.method,JSON.stringify(dialog.request),dialog.state,dialog.createdAt,dialog.expiresAt,dialog.createdAt);
+      return dialog;
+    });
+  }
+  pendingDialog(sessionId:string, now=this.now()): StoredDialog | null {
+    this.expireDialogs(now);
+    const row = this.db.query("SELECT dialog_id AS dialogId,session_id AS sessionId,upstream_id AS upstreamId,method,request_json AS requestJson,state,created_at AS createdAt,expires_at AS expiresAt FROM extension_dialogs WHERE session_id=? AND state='pending' ORDER BY created_at DESC LIMIT 1").get(sessionId) as ({dialogId:string;sessionId:string;upstreamId:string;method:StoredDialog["method"];requestJson:string;state:StoredDialog["state"];createdAt:number;expiresAt:number}) | null;
+    if (!row) return null; const { requestJson, ...rest } = row; return { ...rest, request:parseObject(requestJson) };
+  }
+  claimDialogResponse(sessionId:string, dialogId:string, now=this.now()): StoredDialog {
+    return this.transaction(() => {
+      const dialog = this.pendingDialog(sessionId, now);
+      if (!dialog || dialog.dialogId !== dialogId) throw new StoreError("conflict", "invalid_state");
+      const result = this.db.query("UPDATE extension_dialogs SET state='responded',updated_at=? WHERE dialog_id=? AND state='pending' AND expires_at>?").run(now,dialogId,now);
+      if (result.changes !== 1) throw new StoreError("conflict", "invalid_state");
+      return dialog;
+    });
+  }
+  orphanPendingDialogs(sessionId:string): number {
+    return this.transaction(()=>Number(this.db.query("UPDATE extension_dialogs SET state='orphaned',updated_at=? WHERE session_id=? AND state='pending'").run(this.now(),sessionId).changes));
+  }
+  expireDialogs(now=this.now()): StoredDialog[] {
+    const rows = this.db.query("SELECT dialog_id AS dialogId,session_id AS sessionId,upstream_id AS upstreamId,method,request_json AS requestJson,state,created_at AS createdAt,expires_at AS expiresAt FROM extension_dialogs WHERE state='pending' AND expires_at<=?").all(now) as Array<{dialogId:string;sessionId:string;upstreamId:string;method:StoredDialog["method"];requestJson:string;state:StoredDialog["state"];createdAt:number;expiresAt:number}>;
+    if (rows.length) this.db.query("UPDATE extension_dialogs SET state='expired',updated_at=? WHERE state='pending' AND expires_at<=?").run(now,now);
+    return rows.map(({requestJson,...row}) => ({...row,state:"expired",request:parseObject(requestJson)}));
   }
 
   integrityCheck(): boolean { const row = this.db.query("PRAGMA integrity_check").get() as Record<string, unknown> | null; return !!row && Object.values(row).includes("ok"); }

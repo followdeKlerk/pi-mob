@@ -14,7 +14,7 @@ export interface AdapterPort {
   /** Reject invalid external references before durable command acceptance. */
   validateCommand?(type: string, payload: Record<string, unknown>): void;
   /** Non-throwing post-acceptance retention hook. */
-  commandAccepted?(type: string, payload: Record<string, unknown>): void;
+  commandAccepted?(type: string, payload: Record<string, unknown>, commandId: string): void;
 }
 export class IndeterminateDispatchError extends Error {
   override readonly name = "IndeterminateDispatchError";

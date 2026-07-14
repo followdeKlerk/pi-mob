@@ -9,6 +9,7 @@ import '../../protocol_fixture.dart';
 import '../data/app_database.dart' hide StreamCursor;
 import '../domain/attachments.dart';
 import '../domain/controller_lease.dart';
+import '../domain/interaction_state.dart';
 import '../domain/mobile_state.dart';
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
@@ -138,6 +139,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   // submit path and the UI affordances read. Mirroring here means a fast
   // session switch never shows the wrong attachment list.
   final Map<String, List<AttachmentRef>> _attachmentsBySession = {};
+  final Map<String, List<FollowUpItem>> _followUpsBySession = {};
+  final Map<String, ExtensionDialogState> _dialogsBySession = {};
+  final Map<String, String> _expiredDialogInput = {};
+  String? editorPrefill;
   final SessionTreeProjection _sessionTree = SessionTreeProjection();
 
   BridgeSocket? _socket;
@@ -320,6 +325,11 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   List<SessionState> get sessions => List.unmodifiable(_sessions.values);
+  List<FollowUpItem> get selectedFollowUps =>
+      List.unmodifiable(_followUpsBySession[selectedSessionId] ?? const []);
+  ExtensionDialogState? get selectedDialog =>
+      selectedSessionId == null ? null : _dialogsBySession[selectedSessionId!];
+  String? expiredDialogInput(String dialogId) => _expiredDialogInput[dialogId];
   List<ModelOption> get configuredModels => List.unmodifiable(_models);
   SessionControlState? get selectedControls => selectedSessionId == null
       ? null
@@ -956,6 +966,66 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
   }
 
+  Future<void> removeFollowUp(String queueItemId) async {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return;
+    await _sendCommand(
+      type: 'queue.remove',
+      commandId: _id(),
+      payload: <String, Object?>{
+        'sessionId': sessionId,
+        'queueItemId': queueItemId,
+      },
+      requiresLease: true,
+    );
+  }
+
+  Future<void> clearFollowUps() async {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return;
+    await _sendCommand(
+      type: 'queue.clear',
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': sessionId},
+      requiresLease: true,
+    );
+  }
+
+  Future<void> respondToDialog({
+    required String dialogId,
+    String? value,
+    bool? confirmed,
+    bool cancelled = false,
+  }) async {
+    final sessionId = selectedSessionId;
+    final dialog = selectedDialog;
+    if (sessionId == null || dialog == null || dialog.dialogId != dialogId) {
+      return;
+    }
+    if (dialog.isExpired(_now())) {
+      if (value != null) _expiredDialogInput[dialogId] = value;
+      _notify();
+      return;
+    }
+    final response = <String, Object?>{
+      if (cancelled) 'cancelled': true,
+      if (!cancelled && value != null) 'value': value,
+      if (!cancelled && confirmed != null) 'confirmed': confirmed,
+    };
+    await _sendCommand(
+      type: 'extension.respond',
+      commandId: _id(),
+      payload: <String, Object?>{
+        'sessionId': sessionId,
+        'dialogId': dialogId,
+        'response': response,
+      },
+      requiresLease: true,
+    );
+    _dialogsBySession.remove(sessionId);
+    _notify();
+  }
+
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     final active = state == AppLifecycleState.resumed;
@@ -1389,6 +1459,30 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
     } else if (type == 'workspace.trust_state') {
       unawaited(_workspaceTrustStateEvent(payload));
+    } else if (type == 'queue.snapshot' || type == 'turn.queued') {
+      final id = payload['sessionId'];
+      final items = payload['items'];
+      if (id is String && items is List) {
+        _followUpsBySession[id] = items
+            .whereType<Map>()
+            .map(
+              (item) => FollowUpItem.fromWire(Map<String, Object?>.from(item)),
+            )
+            .toList(growable: false);
+        _mergeSession(<String, Object?>{
+          'sessionId': id,
+          'queueCount': _followUpsBySession[id]!.length,
+        });
+      }
+    } else if (type == 'extension.dialog') {
+      final id = payload['sessionId'];
+      if (id is String && payload['state'] != 'responded') {
+        _dialogsBySession[id] = ExtensionDialogState.fromWire(payload);
+      }
+    } else if (type == 'extension.editor_prefill') {
+      editorPrefill = payload['text']?.toString() ?? '';
+      draft = editorPrefill!;
+      unawaited(_persistDraft());
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final runtimeState =
           type == 'turn.failed' &&

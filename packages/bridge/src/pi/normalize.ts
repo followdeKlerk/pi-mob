@@ -453,12 +453,13 @@ function normalizeMessageUpdate(raw: RawPiEvent, sessionId: string): readonly No
 
 function normalizeExtensionUi(raw: RawPiEvent, sessionId: string): readonly NormalizedPiEvent[] {
   const method = String(raw.method ?? "");
-  const id = String(raw.id ?? "");
-  if (["select", "confirm", "input", "editor"].includes(method)) return [event("extension.dialog", sessionId, { dialogId: id, method, title: text(raw.title), options: safe(raw.options), placeholder: text(raw.placeholder), prefill: text(raw.prefill), timeout: raw.timeout })];
-  if (method === "notify") return [event("extension.notify", sessionId, { message: text(raw.message), notifyType: raw.notifyType })];
-  if (method === "setStatus") return [event("extension.status", sessionId, { statusKey: text(raw.statusKey), statusText: text(raw.statusText) })];
-  if (method === "setWidget") return [event("extension.widget", sessionId, { widgetKey: text(raw.widgetKey), widgetLines: safe(raw.widgetLines), placement: raw.widgetPlacement })];
-  if (method === "setTitle") return [event("extension.title", sessionId, { title: text(raw.title) })];
-  if (method === "set_editor_text") return [event("extension.editor_prefill", sessionId, { text: text(raw.text) })];
+  const id = identifier(raw.id);
+  const bounded=(value:unknown,max:number):string=>text(value).slice(0,max);
+  if (["select", "confirm", "input", "editor"].includes(method)) return [event("extension.dialog", sessionId, { dialogId: id, method, title: bounded(raw.title,512), options: Array.isArray(raw.options)?raw.options.slice(0,100).map((v)=>bounded(v,512)):[], message:bounded(raw.message,4096), placeholder: bounded(raw.placeholder,512), prefill: bounded(raw.prefill,64*1024), timeout: raw.timeout })];
+  if (method === "notify") return [event("extension.notify", sessionId, { message: bounded(raw.message,4096), notifyType: raw.notifyType })];
+  if (method === "setStatus") return [event("extension.status", sessionId, { statusKey: bounded(raw.statusKey,128), statusText: bounded(raw.statusText,1024) })];
+  if (method === "setWidget") return [event("extension.widget", sessionId, { widgetKey: bounded(raw.widgetKey,128), widgetLines: Array.isArray(raw.widgetLines)?raw.widgetLines.slice(0,20).map((v)=>bounded(v,512)):[], placement: raw.widgetPlacement })];
+  if (method === "setTitle") return [event("extension.title", sessionId, { title: bounded(raw.title,512) })];
+  if (method === "set_editor_text") return [event("extension.editor_prefill", sessionId, { text: bounded(raw.text,64*1024) })];
   return [];
 }

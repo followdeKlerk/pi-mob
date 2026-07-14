@@ -61,6 +61,12 @@ export class SupervisedRpcClient {
     return rpc.request(options as RpcRequestOptions);
   }
 
+  async sendExtensionUiResponse(response: { id:string; value?:string; confirmed?:boolean; cancelled?:true }): Promise<void> {
+    const rpc = this.current;
+    if (!rpc) throw new Error("Pi process unavailable");
+    await rpc.sendExtensionUiResponse(response);
+  }
+
   on(kind: "notification", handler: PiRpcNotificationHandler): () => void {
     if (kind !== "notification") return () => undefined;
     this.notifications.add(handler);

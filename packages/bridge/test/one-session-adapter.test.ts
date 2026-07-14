@@ -213,15 +213,18 @@ describe("OneSessionPiAdapter", () => {
     expect(rpc.requests[1]!.id).toBe("cmd-abort");
   });
 
-  test("prompt.submit steer/follow_up maps to the correct Pi RPC method", async () => {
+  test("prompt.submit steer dispatches while follow_up remains bridge-owned", async () => {
     const { store, rpc, adapter, hostStream } = setup();
     await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
     const sessionId = (store.listEvents(hostStream).find((e) => e.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
-    for (const [deliveryMode, method] of [["steer", "steer"], ["follow_up", "follow_up"]] as const) {
-      rpc.reset();
-      await adapter.dispatch(makeCommand(`c-${deliveryMode}`, "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, { sessionId, deliveryMode, message: "m", attachmentIds: [] }));
-      expect(rpc.requests[0]!.method).toBe(method);
-    }
+    rpc.reset();
+    await adapter.dispatch(makeCommand("c-steer", "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, { sessionId, deliveryMode: "steer", message: "m", attachmentIds: [] }));
+    expect(rpc.requests[0]!.method).toBe("steer");
+    rpc.reset();
+    adapter.commandAccepted("prompt.submit", { sessionId, deliveryMode: "follow_up", message: "later", attachmentIds: [] }, "c-follow");
+    await adapter.dispatch(makeCommand("c-follow", "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, { sessionId, deliveryMode: "follow_up", message: "later", attachmentIds: [] }));
+    expect(rpc.requests).toEqual([]);
+    expect(store.listFollowUps(sessionId)).toHaveLength(1);
   });
 
   test("rejects prompt.submit and turn.abort for unknown sessions", async () => {

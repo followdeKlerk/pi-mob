@@ -79,8 +79,8 @@ A task is Done when:
 | M11 | Multi-session control and controller leases | M10 | DONE |
 | M12 | Session tree, fork, clone, delete, and restore | M11 | DONE |
 | M13 | Attachments, export, and OS sharing | M12 | DONE |
-| M14 | Extension UI and durable follow-up queue | M13 | READY |
-| M15 | Notifications and background experience | M14 | PLANNED |
+| M14 | Extension UI and durable follow-up queue | M13 | DONE |
+| M15 | Notifications and background experience | M14 | READY |
 | M16 | Accessibility, performance, privacy, and operations hardening | M15 | PLANNED |
 | M17 | Signed personal MVP release candidate | M16 | PLANNED |
 
@@ -599,15 +599,15 @@ Retry an image upload, complete image prompt, expire an orphan, export HTML, and
 
 ## Tasks
 
-- [ ] **M14-01 P0 L** Durable FIFO queue state, positions, events, max ten.
-- [ ] **M14-02 P0 M** Add/remove/clear/dispatch transitions and attachment references.
-- [ ] **M14-03 P0 M** Queue restart recovery and settle-triggered dispatch.
-- [ ] **M14-04 P1 M** Queue UI/remove/clear; reorder only if fully transactional.
-- [ ] **M14-05 P0 L** Persist select/confirm/input/editor requests and upstream mapping.
-- [ ] **M14-06 P0 M** Normalize notify/status/widget/title/editor prefill.
-- [ ] **M14-07 P0 M** Expiry/cancel/orphan/reconnect replay/duplicate response.
-- [ ] **M14-08 P1 L** Native sheets with focus/keyboard/accessibility.
-- [ ] **M14-09 P1 S** Preserve expired typed input locally for copy; never send it.
+- [x] **M14-01 P0 L** Durable FIFO queue state, positions, events, max ten.
+- [x] **M14-02 P0 M** Add/remove/clear/dispatch transitions and attachment references.
+- [x] **M14-03 P0 M** Queue restart recovery and settle-triggered dispatch.
+- [x] **M14-04 P1 M** Queue UI/remove/clear; reorder only if fully transactional.
+- [x] **M14-05 P0 L** Persist select/confirm/input/editor requests and upstream mapping.
+- [x] **M14-06 P0 M** Normalize notify/status/widget/title/editor prefill.
+- [x] **M14-07 P0 M** Expiry/cancel/orphan/reconnect replay/duplicate response.
+- [x] **M14-08 P1 L** Native sheets with focus/keyboard/accessibility.
+- [x] **M14-09 P1 S** Preserve expired typed input locally for copy; never send it.
 
 ## Checkpoint demo
 
@@ -615,11 +615,11 @@ Queue/remove prompts and answer dialogs after reconnect; let one expire without 
 
 ## Exit criteria
 
-- [ ] Queue survives restart.
-- [ ] Removed item never dispatches.
-- [ ] Valid dialog replays after disconnect.
-- [ ] Expired dialog gets no default.
-- [ ] Accessibility focus passes.
+- [x] Queue survives restart.
+- [x] Removed item never dispatches.
+- [x] Valid dialog replays after disconnect.
+- [x] Expired dialog gets no default.
+- [x] Accessibility focus passes.
 
 **Evidence:** queue/dialog fault matrix.
 
