@@ -540,15 +540,32 @@ export class OneSessionPiAdapter {
     }
   }
 
+  /** Emits a schema-complete host summary even for partial lifecycle patches. */
+  private appendSessionSummary(sessionId: string, patch: Record<string, unknown>): void {
+    const prior = this.store.sessionState(sessionId) ?? {};
+    const runtimeState = typeof patch.runtimeState === "string"
+      ? patch.runtimeState
+      : typeof prior.runtimeState === "string" ? prior.runtimeState : "idle";
+    const candidateQueueCount = Number.isInteger(patch.queueCount) ? patch.queueCount : prior.queueCount;
+    const queueCount = Number.isInteger(candidateQueueCount) && Number(candidateQueueCount) >= 0
+      ? Number(candidateQueueCount)
+      : 0;
+    this.store.appendEvent(this.hostStream, "session.summary", {
+      ...patch,
+      sessionId,
+      workspaceId: typeof patch.workspaceId === "string" ? patch.workspaceId : this.workspace.workspaceId,
+      runtimeState,
+      queueCount,
+    });
+  }
+
   private publishSummaryChange(sessionId: string, payload: Record<string, unknown>): void {
     const prior = this.store.sessionState(sessionId) ?? {};
     const runtimeState = (payload.runtimeState as string | undefined) ?? prior.runtimeState;
     const attentionState = (payload.attentionState as string | undefined) ?? prior.attentionState ?? "ready";
     const next = { ...prior, runtimeState, attentionState, lastActivityAt: new Date(this.now()).toISOString() };
     this.store.updateSessionState(sessionId, next);
-    this.store.appendEvent(this.hostStream, "session.summary", {
-      sessionId,
-      workspaceId: this.workspace.workspaceId,
+    this.appendSessionSummary(sessionId, {
       runtimeState,
       attentionState,
       lastActivityAt: next.lastActivityAt,
@@ -575,7 +592,7 @@ export class OneSessionPiAdapter {
       const existing = this.store.sessionStates()[0];
       if (existing && typeof existing.sessionId === "string") {
         this.lastUsedSessionId = existing.sessionId;
-        this.store.appendEvent(this.hostStream, "session.summary", existing);
+        this.appendSessionSummary(existing.sessionId, existing);
         await this.refreshSessionCapabilities(existing.sessionId as string);
         return;
       }
@@ -631,8 +648,7 @@ export class OneSessionPiAdapter {
     };
     this.store.updateSessionState(sessionId, summary);
     // Host-stream summary so mobile clients learn the new session.
-    this.store.appendEvent(this.hostStream, "session.summary", {
-      sessionId,
+    this.appendSessionSummary(sessionId, {
       workspaceId,
       runtimeState: "idle",
       attentionState: "ready",
@@ -678,9 +694,7 @@ export class OneSessionPiAdapter {
       attentionState: "none",
       lastActivityAt: new Date(this.now()).toISOString(),
     });
-    this.store.appendEvent(this.hostStream, "session.summary", {
-      sessionId,
-      workspaceId: this.workspace.workspaceId,
+    this.appendSessionSummary(sessionId, {
       runtimeState: "stopped",
       attentionState: "none",
       change: "stopped",
@@ -729,9 +743,7 @@ export class OneSessionPiAdapter {
       manualRetry: true,
       restored,
     });
-    this.store.appendEvent(this.hostStream, "session.summary", {
-      sessionId,
-      workspaceId: this.workspace.workspaceId,
+    this.appendSessionSummary(sessionId, {
       runtimeState: "idle",
       attentionState: "ready",
       change: "restored",
@@ -969,9 +981,7 @@ export class OneSessionPiAdapter {
       previousName,
       renamedAt: new Date(this.now()).toISOString(),
     });
-    this.store.appendEvent(this.hostStream, "session.summary", {
-      sessionId: payload.sessionId,
-      workspaceId: this.workspace.workspaceId,
+    this.appendSessionSummary(payload.sessionId, {
       name: payload.name,
       previousName,
       change: "renamed",
@@ -1189,9 +1199,7 @@ export class OneSessionPiAdapter {
     });
     // Also keep the durable summary coherent with the removal so list
     // consumers see `runtimeState: stopped` until restore.
-    this.store.appendEvent(this.hostStream, "session.summary", {
-      sessionId: payload.sessionId,
-      workspaceId: this.workspace.workspaceId,
+    this.appendSessionSummary(payload.sessionId, {
       runtimeState: "stopped",
       attentionState: "none",
       deletedAt,
@@ -1229,9 +1237,7 @@ export class OneSessionPiAdapter {
       previousDeletedAt: prior.deletedAt,
       previousPurgeAfter: prior.purgeAfter,
     });
-    this.store.appendEvent(this.hostStream, "session.summary", {
-      sessionId: payload.sessionId,
-      workspaceId: this.workspace.workspaceId,
+    this.appendSessionSummary(payload.sessionId, {
       runtimeState: "stopped",
       attentionState: "none",
       restoredAt,

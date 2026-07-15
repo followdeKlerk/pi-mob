@@ -126,8 +126,17 @@ describe("M11 multi-session adapter", () => {
       expect(rpc).toBeDefined();
       expect(rpc!.notifications.size).toBe(1);
     }
+    // Every lifecycle summary must satisfy the public schema, including the
+    // transitional starting/idle events emitted by the process supervisor.
+    const summaryEvents = store.listEvents(hostStream).filter((event) => event.type === "session.summary");
+    for (const event of summaryEvents) {
+      const payload = event.payload as Record<string, unknown>;
+      expect(typeof payload.runtimeState).toBe("string");
+      expect(Number.isInteger(payload.queueCount)).toBe(true);
+      expect(Number(payload.queueCount)).toBeGreaterThanOrEqual(0);
+    }
     // Host stream emitted exactly one session.summary add per create.
-    const addEvents = store.listEvents(hostStream).filter((event) => event.type === "session.summary" && (event.payload as Record<string, unknown>).change === "added");
+    const addEvents = summaryEvents.filter((event) => (event.payload as Record<string, unknown>).change === "added");
     expect(addEvents).toHaveLength(3);
     // Each session has its own stream with session.metadata.
     for (const id of created) {

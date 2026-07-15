@@ -43,6 +43,25 @@ test("workspace trust approval is a host command that does not require a control
   })).toBe(true);
 });
 
+test("controller lease renewal has a declared response envelope", () => {
+  expect(validateFixture({
+    name: "controller-renew-result",
+    kind: "response",
+    valid: true,
+    message: {
+      protocol: { major: 1, minor: 0 },
+      messageId: "11111111-1111-4111-8111-111111111111",
+      requestId: "22222222-2222-4222-8222-222222222222",
+      type: "controller.renew.result",
+      sentAt: "2026-07-15T04:20:00.000Z",
+      payload: {
+        leaseId: "33333333-3333-4333-8333-333333333333",
+        expiresAt: 1784089300000,
+      },
+    },
+  })).toBe(true);
+});
+
 test("serializes semantic commands with sorted keys and stable SHA-256", () => {
   const command = { type: "session.rename" as const, payload: { z: "café", a: [true, null] } };
   expect(canonicalSemanticCommand(command)).toBe('{"payload":{"a":[true,null],"z":"café"},"type":"session.rename"}');

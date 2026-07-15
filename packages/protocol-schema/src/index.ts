@@ -44,7 +44,7 @@ export const EVENT_TYPES = [
 
 export const RESPONSE_TYPES = [
   "hello.accepted", "subscription.accepted", "stream.sync.complete", "stream.snapshot.begin", "stream.snapshot.part",
-  "stream.snapshot.end", "command.receipt", "command.current.result", "session.list.result", "session.history.page.result",
+  "stream.snapshot.end", "command.receipt", "command.current.result", "controller.renew.result", "session.list.result", "session.history.page.result",
   "workspace.list.result", "workspace.search.result", "model.list.result",
 ] as const;
 export const SUPPORTED_CAPABILITIES = [
@@ -203,6 +203,7 @@ const ResponsePayloads = {
   "stream.snapshot.end": Type.Object({ snapshotId: Uuid, partCount: Type.Integer({ minimum: 1 }) }, { additionalProperties: true }),
   "command.receipt": Type.Object({ state: Type.String({ minLength: 1 }), duplicate: Type.Boolean() }, { additionalProperties: true }),
   "command.current.result": Type.Object({ commandId: Uuid, state: Type.String() }, { additionalProperties: true }),
+  "controller.renew.result": Type.Object({ leaseId: Uuid, expiresAt: Type.Integer({ minimum: 0 }) }, { additionalProperties: true }),
   "session.list.result": Type.Object({ items: Type.Array(Payload), snapshotRevision: Type.String(), nextPageToken: Type.Optional(Type.String()) }, { additionalProperties: true }),
   "session.history.page.result": Type.Object({ items: Type.Array(Payload), snapshotRevision: Type.String(), nextPageToken: Type.Optional(Type.String()) }, { additionalProperties: true }),
   "workspace.list.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }), "workspace.search.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }), "model.list.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }),

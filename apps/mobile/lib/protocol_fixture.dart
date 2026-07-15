@@ -815,6 +815,7 @@ const _responseTypes = <String>{
   'stream.snapshot.end',
   'command.receipt',
   'command.current.result',
+  'controller.renew.result',
   'session.list.result',
   'session.history.page.result',
   'workspace.list.result',
@@ -1044,7 +1045,12 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
   if (type == 'session.summary') {
     _uuidString(payload, 'sessionId');
     _string(payload, 'runtimeState');
-    _nonNegativeInteger(payload, 'queueCount');
+    // Early M11 bridges emitted partial lifecycle summaries before the final
+    // schema-complete row. Accept those durable historical events while new
+    // bridges always publish queueCount; the projection defaults it safely.
+    if (payload['queueCount'] != null) {
+      _nonNegativeInteger(payload, 'queueCount');
+    }
   }
   if (type == 'controller.state') {
     final scope = _oneOf(payload, 'scope', const <String>{'host', 'session'});

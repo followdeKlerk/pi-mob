@@ -52,6 +52,7 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "stream.snapshot.end") return { snapshotId: ids.sessionId, partCount: 1 };
   if (type === "command.receipt") return { state: "accepted", duplicate: false };
   if (type === "command.current.result") return { commandId: ids.commandId, state: "accepted" };
+  if (type === "controller.renew.result") return { leaseId: ids.leaseId, expiresAt: 1784089300000 };
   if (type === "session.list.result" || type === "session.history.page.result") return { items: [], snapshotRevision: "1" };
   return { items: [] };
 }

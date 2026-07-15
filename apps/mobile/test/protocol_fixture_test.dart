@@ -41,6 +41,38 @@ void main() {
     }
   });
 
+  test('controller lease renew responses are recognized', () {
+    final decoded = validateProtocolFixture('response', <String, Object?>{
+      'protocol': const {'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'requestId': '22222222-2222-4222-8222-222222222222',
+      'type': 'controller.renew.result',
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': const {
+        'leaseId': '33333333-3333-4333-8333-333333333333',
+        'expiresAt': 1784089300000,
+      },
+    });
+    expect(decoded, isA<ProtocolEnvelope>());
+  });
+
+  test('legacy partial session summaries remain replayable', () {
+    final decoded = validateProtocolFixture('event', <String, Object?>{
+      'protocol': const {'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'eventId': '22222222-2222-4222-8222-222222222222',
+      'streamId': 'host:33333333-3333-4333-8333-333333333333',
+      'cursor': '49',
+      'type': 'session.summary',
+      'sentAt': '2026-07-15T04:08:45.772Z',
+      'payload': const {
+        'sessionId': '44444444-4444-4444-8444-444444444444',
+        'runtimeState': 'starting',
+      },
+    });
+    expect(decoded, isA<ProtocolEnvelope>());
+  });
+
   test('decimal cursors and shared semantic hashes match TypeScript', () async {
     expect(
       DecimalCursor.parse(

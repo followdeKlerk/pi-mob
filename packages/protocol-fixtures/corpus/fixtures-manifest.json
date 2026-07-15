@@ -840,6 +840,11 @@
     "kind": "response"
   },
   {
+    "file": "response-controller-renew-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
     "file": "response-hello-accepted-valid.json",
     "valid": true,
     "kind": "response"
