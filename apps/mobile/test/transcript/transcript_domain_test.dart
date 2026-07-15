@@ -127,4 +127,52 @@ void main() {
     expect(turns[0].finalAnswer?.viewData.markdown, 'First answer');
     expect(turns[1].finalAnswer?.viewData.markdown, 'Second answer');
   });
+
+  test('late event carrying an old turn id cannot modify the latest turn', () {
+    final events = <StreamEventState>[
+      event(1, 'turn.started', {'turnId': 'turn-1', 'message': 'First'}),
+      event(2, 'assistant.started', {
+        'turnId': 'turn-1',
+        'contentBlockId': '0',
+      }),
+      event(3, 'assistant.delta', {
+        'turnId': 'turn-1',
+        'contentBlockId': '0',
+        'text': 'First answer',
+      }),
+      event(4, 'assistant.completed', {
+        'turnId': 'turn-1',
+        'contentBlockId': '0',
+      }),
+      event(5, 'turn.started', {'turnId': 'turn-2', 'message': 'Second'}),
+      event(6, 'assistant.started', {
+        'turnId': 'turn-2',
+        'contentBlockId': '0',
+      }),
+      event(7, 'assistant.delta', {
+        'turnId': 'turn-2',
+        'contentBlockId': '0',
+        'text': 'Second answer',
+      }),
+      event(8, 'assistant.delta', {
+        'turnId': 'turn-1',
+        'contentBlockId': '0',
+        'text': ' late first fragment',
+      }),
+      event(9, 'assistant.completed', {
+        'turnId': 'turn-2',
+        'contentBlockId': '0',
+      }),
+    ];
+
+    const reducer = TranscriptReducer();
+    var state = TranscriptReducerState.empty('session:s');
+    for (final item in events) {
+      state = reducer.apply(state: state, event: item);
+    }
+
+    final turns = state.document.turns.whereType<AssistantTurn>().toList();
+    expect(turns, hasLength(2));
+    expect(turns[1].finalAnswer?.viewData.markdown, 'Second answer');
+  });
 }

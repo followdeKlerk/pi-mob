@@ -486,10 +486,11 @@ class TranscriptReducer {
     }
 
     // contentBlockId is scoped to one Pi message and is routinely reused by
-    // the next prompt (often as "0"). Always start a fresh accumulator here.
+    // the next prompt (often as "0"). Namespace it by the durable turn id.
     final answerId = parsed.answerId!;
+    final builderKey = _answerBuilderKey(turnId, answerId);
     final builders = Map<String, _AnswerBuilder>.of(state.answerBuilders);
-    builders[answerId] = _AnswerBuilder(
+    builders[builderKey] = _AnswerBuilder(
       assistantStepId: parsed.assistantStepId,
       answerId: answerId,
     );
@@ -506,30 +507,32 @@ class TranscriptReducer {
     StreamEventState event,
   ) {
     final parsed = _parser.parseAssistantDelta(event.payload);
-    final answerId = parsed.answerId ?? _latestAnswerId(state);
+    final turnId = _resolveAssistantTurnId(state, event);
+    final answerId = parsed.answerId;
     if (answerId == null) {
       return _recordDiagnostic(
         state,
         event,
         label: 'assistant_delta_no_answer',
-        detail: 'assistant.delta arrived without answerId and no builder',
+        detail: 'assistant.delta arrived without answerId',
       );
     }
+    final builderKey = _answerBuilderKey(turnId, answerId);
     final builders = Map<String, _AnswerBuilder>.of(state.answerBuilders);
-    final existing = builders[answerId];
+    final existing = builders[builderKey];
     final delta = parsed.delta ?? '';
     final step = parsed.assistantStepId.isNotEmpty
         ? parsed.assistantStepId
         : (existing?.assistantStepId ?? '');
     if (existing == null) {
-      builders[answerId] = _AnswerBuilder(
+      builders[builderKey] = _AnswerBuilder(
         assistantStepId: step,
         answerId: answerId,
         markdown: delta,
       );
     } else {
       final combined = existing.markdown + delta;
-      builders[answerId] = _AnswerBuilder(
+      builders[builderKey] = _AnswerBuilder(
         assistantStepId: step,
         answerId: answerId,
         markdown: _capString(combined, _kAnswerDeltaByteCap),
@@ -544,7 +547,8 @@ class TranscriptReducer {
     StreamEventState event,
   ) {
     final parsed = _parser.parseAssistantCompleted(event.payload);
-    final answerId = parsed.answerId ?? _latestAnswerId(state);
+    final turnId = _resolveAssistantTurnId(state, event);
+    final answerId = parsed.answerId;
     if (answerId == null) {
       return _recordDiagnostic(
         state,
@@ -553,8 +557,9 @@ class TranscriptReducer {
         detail: 'assistant.completed arrived without answerId',
       );
     }
+    final builderKey = _answerBuilderKey(turnId, answerId);
     final builders = Map<String, _AnswerBuilder>.of(state.answerBuilders);
-    final existing = builders[answerId];
+    final existing = builders[builderKey];
     final step = parsed.assistantStepId.isNotEmpty
         ? parsed.assistantStepId
         : (existing?.assistantStepId ?? '');
@@ -565,7 +570,7 @@ class TranscriptReducer {
       markdown: markdown,
       completed: true,
     );
-    builders[answerId] = builder;
+    builders[builderKey] = builder;
     final viewData = FinalAnswerViewData(
       answerId: answerId,
       markdown: markdown,
@@ -573,6 +578,7 @@ class TranscriptReducer {
     final nextState = state._withBuilders(answerBuilders: builders);
     return _addFinalAnswerItem(
       nextState,
+      turnId: turnId,
       assistantStepId: step,
       itemId: answerId,
       viewData: viewData,
@@ -954,11 +960,8 @@ class TranscriptReducer {
     return state.copyWith(document: state.document.withDiagnostics(trimmed));
   }
 
-  String? _latestAnswerId(TranscriptReducerState state) {
-    if (state.answerBuilders.isEmpty) return null;
-    // Map preserves insertion order, so the last key is the most recent.
-    return state.answerBuilders.keys.last;
-  }
+  String _answerBuilderKey(String turnId, String answerId) =>
+      '$turnId::$answerId';
 
   String _resolveAssistantTurnId(
     TranscriptReducerState state,
@@ -1093,13 +1096,17 @@ class TranscriptReducer {
 
   TranscriptReducerState _addFinalAnswerItem(
     TranscriptReducerState state, {
+    required String turnId,
     required String assistantStepId,
     required String itemId,
     required FinalAnswerViewData viewData,
     DateTime? completedAt,
   }) {
-    final turnId = _resolveTurnForStep(state, assistantStepId);
-    if (turnId == null) {
+    final explicitKey = TranscriptKeys.assistantTurnKey(turnId);
+    final resolvedTurnId = state.document.indexOfTurnByKey(explicitKey) >= 0
+        ? turnId
+        : _resolveTurnForStep(state, assistantStepId);
+    if (resolvedTurnId == null) {
       return _recordDiagnostic(
         state,
         _syntheticEvent(state, 'final_answer.orphan'),
@@ -1107,7 +1114,7 @@ class TranscriptReducer {
         detail: 'Final answer arrived before its assistant turn',
       );
     }
-    final assistantKey = TranscriptKeys.assistantTurnKey(turnId);
+    final assistantKey = TranscriptKeys.assistantTurnKey(resolvedTurnId);
     final turn = state.document.lastTurnWithKeyPrefix(assistantKey);
     if (turn is! AssistantTurn) {
       return _recordDiagnostic(
