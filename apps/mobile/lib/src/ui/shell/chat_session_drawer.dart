@@ -11,6 +11,13 @@ import '../theme/pi_theme.dart';
 
 enum _ChatAction { rename, delete }
 
+final class _ChatActionResult {
+  const _ChatActionResult(this.action, [this.name]);
+
+  final _ChatAction action;
+  final String? name;
+}
+
 /// Compact saved-chat navigation for the single-screen chat shell.
 class ChatSessionDrawer extends StatefulWidget {
   const ChatSessionDrawer({
@@ -120,81 +127,27 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     await widget.coordinator.takeControl(sessionId);
   }
 
-  Future<void> _renameSession(SessionState session) async {
-    final controller = TextEditingController(text: _title(session));
-    final name = await showDialog<String>(
+  Future<void> _openChatActions(SessionState session) async {
+    final result = await showDialog<_ChatActionResult>(
       context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Rename chat'),
-        content: TextField(
-          key: const Key('rename-chat-field'),
-          controller: controller,
-          autofocus: true,
-          maxLength: 120,
-          textCapitalization: TextCapitalization.sentences,
-          decoration: const InputDecoration(hintText: 'Chat name'),
-          onSubmitted: (value) {
-            final trimmed = value.trim();
-            if (trimmed.isNotEmpty) Navigator.pop(dialogContext, trimmed);
-          },
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const Key('confirm-rename-chat'),
-            onPressed: () {
-              final trimmed = controller.text.trim();
-              if (trimmed.isNotEmpty) Navigator.pop(dialogContext, trimmed);
-            },
-            child: const Text('Save'),
-          ),
-        ],
-      ),
+      builder: (dialogContext) =>
+          _ChatActionsDialog(initialName: _title(session)),
     );
-    controller.dispose();
-    if (name != null && name != session.name.trim()) {
-      await widget.coordinator.renameSession(session.sessionId, name);
+    // Route completion happens before its reverse transition has necessarily
+    // unmounted every inherited dependency. Dispatch on the following frame,
+    // after the dialog owns and disposes its own controller.
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted || result == null) return;
+    switch (result.action) {
+      case _ChatAction.rename:
+        final name = result.name?.trim();
+        if (name != null && name.isNotEmpty && name != session.name.trim()) {
+          await widget.coordinator.renameSession(session.sessionId, name);
+        }
+      case _ChatAction.delete:
+        await widget.coordinator.deleteSession(session.sessionId);
     }
   }
-
-  Future<void> _deleteSession(SessionState session) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Delete chat?'),
-        content: Text(
-          '“${_title(session)}” will be removed. Any active work in this chat will stop.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext, false),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            key: const Key('confirm-delete-chat'),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(dialogContext).colorScheme.error,
-              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
-            ),
-            onPressed: () => Navigator.pop(dialogContext, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await widget.coordinator.deleteSession(session.sessionId);
-    }
-  }
-
-  Future<void> _handleChatAction(SessionState session, _ChatAction action) =>
-      switch (action) {
-        _ChatAction.rename => _renameSession(session),
-        _ChatAction.delete => _deleteSession(session),
-      };
 
   @override
   Widget build(BuildContext context) {
@@ -304,30 +257,13 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            trailing: PopupMenuButton<_ChatAction>(
+                            trailing: IconButton(
                               key: Key('chat-actions-${session.sessionId}'),
                               tooltip: 'Chat actions',
-                              enabled: coordinator.isReady,
-                              onSelected: (action) =>
-                                  unawaited(_handleChatAction(session, action)),
-                              itemBuilder: (context) => const [
-                                PopupMenuItem(
-                                  value: _ChatAction.rename,
-                                  child: ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: Icon(Icons.edit_outlined),
-                                    title: Text('Rename'),
-                                  ),
-                                ),
-                                PopupMenuItem(
-                                  value: _ChatAction.delete,
-                                  child: ListTile(
-                                    contentPadding: EdgeInsets.zero,
-                                    leading: Icon(Icons.delete_outline),
-                                    title: Text('Delete'),
-                                  ),
-                                ),
-                              ],
+                              onPressed: coordinator.isReady
+                                  ? () => unawaited(_openChatActions(session))
+                                  : null,
+                              icon: const Icon(Icons.more_horiz),
                             ),
                             onTap: () =>
                                 unawaited(_selectSession(session.sessionId)),
@@ -381,6 +317,100 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
           ],
         ),
       ),
+    );
+  }
+}
+
+class _ChatActionsDialog extends StatefulWidget {
+  const _ChatActionsDialog({required this.initialName});
+
+  final String initialName;
+
+  @override
+  State<_ChatActionsDialog> createState() => _ChatActionsDialogState();
+}
+
+class _ChatActionsDialogState extends State<_ChatActionsDialog> {
+  late final TextEditingController _nameController;
+  bool _confirmingDelete = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameController = TextEditingController(text: widget.initialName);
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final name = _nameController.text.trim();
+    if (name.isNotEmpty) {
+      Navigator.of(context).pop(_ChatActionResult(_ChatAction.rename, name));
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    if (_confirmingDelete) {
+      return AlertDialog(
+        title: const Text('Delete chat?'),
+        content: Text(
+          '“${widget.initialName}” will be removed. Any active work in this chat will stop.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => setState(() => _confirmingDelete = false),
+            child: const Text('Back'),
+          ),
+          FilledButton(
+            key: const Key('confirm-delete-chat'),
+            style: FilledButton.styleFrom(
+              backgroundColor: colors.error,
+              foregroundColor: colors.onError,
+            ),
+            onPressed: () => Navigator.of(
+              context,
+            ).pop(const _ChatActionResult(_ChatAction.delete)),
+            child: const Text('Delete'),
+          ),
+        ],
+      );
+    }
+
+    return AlertDialog(
+      title: const Text('Chat options'),
+      content: TextField(
+        key: const Key('rename-chat-field'),
+        controller: _nameController,
+        autofocus: true,
+        maxLength: 120,
+        textCapitalization: TextCapitalization.sentences,
+        decoration: const InputDecoration(labelText: 'Chat name'),
+        onSubmitted: (_) => _save(),
+      ),
+      actions: [
+        TextButton(
+          onPressed: () => Navigator.of(context).pop(),
+          child: const Text('Cancel'),
+        ),
+        TextButton.icon(
+          key: const Key('delete-chat-action'),
+          style: TextButton.styleFrom(foregroundColor: colors.error),
+          onPressed: () => setState(() => _confirmingDelete = true),
+          icon: const Icon(Icons.delete_outline),
+          label: const Text('Delete'),
+        ),
+        FilledButton(
+          key: const Key('confirm-rename-chat'),
+          onPressed: _save,
+          child: const Text('Save'),
+        ),
+      ],
     );
   }
 }
