@@ -113,16 +113,50 @@ class Composer extends StatelessWidget {
               ),
               const SizedBox(height: PiSpacing.sm),
             ],
-            TextField(
-              key: const Key('draft-field'),
-              controller: draftController,
-              minLines: 2,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                hintText: 'Message Pi',
-                border: OutlineInputBorder(),
-              ),
-              onChanged: (value) => unawaited(coordinator.updateDraft(value)),
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Expanded(
+                  child: TextField(
+                    key: const Key('draft-field'),
+                    controller: draftController,
+                    minLines: 1,
+                    maxLines: 5,
+                    keyboardType: TextInputType.multiline,
+                    textInputAction: TextInputAction.newline,
+                    decoration: const InputDecoration(
+                      hintText: 'Message Pi',
+                      border: OutlineInputBorder(),
+                    ),
+                    onChanged: (value) =>
+                        unawaited(coordinator.updateDraft(value)),
+                  ),
+                ),
+                const SizedBox(width: PiSpacing.sm),
+                Tooltip(
+                  message: aborting ? 'Abort' : 'Send',
+                  child: Semantics(
+                    button: true,
+                    label: aborting ? 'Abort active Pi turn' : 'Send message',
+                    child: SizedBox.square(
+                      dimension: 52,
+                      child: FilledButton(
+                        key: const Key('send-button'),
+                        style: FilledButton.styleFrom(
+                          padding: EdgeInsets.zero,
+                          shape: const CircleBorder(),
+                        ),
+                        onPressed: aborting
+                            ? coordinator.abort
+                            : coordinator.canSend
+                            ? coordinator.submitPrompt
+                            : null,
+                        child: Icon(aborting ? Icons.stop : Icons.send),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
             Semantics(
               liveRegion: true,
@@ -131,48 +165,27 @@ class Composer extends StatelessWidget {
                   : 'Prompt ${coordinator.pendingState ?? 'pending'}',
               child: const SizedBox.shrink(),
             ),
-            const SizedBox(height: PiSpacing.sm),
-            if (coordinator.pendingCommandId != null)
+            if (coordinator.pendingCommandId != null) ...[
+              const SizedBox(height: PiSpacing.sm),
               Text(
                 'Pending ${coordinator.pendingState ?? 'unknown'} · '
                 '${coordinator.pendingCommandId}',
                 key: const Key('pending-command'),
                 overflow: TextOverflow.ellipsis,
               ),
-            Wrap(
-              alignment: WrapAlignment.end,
-              spacing: PiSpacing.sm,
-              runSpacing: PiSpacing.sm,
-              children: [
-                if (coordinator.pendingCommandId != null)
-                  OutlinedButton.icon(
-                    key: const Key('retry-command'),
-                    onPressed: coordinator.canRetry
-                        ? coordinator.retryPending
-                        : null,
-                    icon: const Icon(Icons.replay),
-                    label: const Text('Retry exact command'),
-                  ),
-                Semantics(
-                  button: true,
-                  label: aborting ? 'Abort active Pi turn' : 'Send message',
-                  child: FilledButton.icon(
-                    key: const Key('send-button'),
-                    onPressed: aborting
-                        ? coordinator.abort
-                        : coordinator.canSend
-                        ? coordinator.submitPrompt
-                        : null,
-                    icon: Icon(aborting ? Icons.stop : Icons.send),
-                    label: Text(
-                      aborting
-                          ? 'Abort'
-                          : deliveryModeLabel(coordinator.selectedDeliveryMode),
-                    ),
-                  ),
+              const SizedBox(height: PiSpacing.sm),
+              Align(
+                alignment: Alignment.centerRight,
+                child: OutlinedButton.icon(
+                  key: const Key('retry-command'),
+                  onPressed: coordinator.canRetry
+                      ? coordinator.retryPending
+                      : null,
+                  icon: const Icon(Icons.replay),
+                  label: const Text('Retry exact command'),
                 ),
-              ],
-            ),
+              ),
+            ],
           ],
         ),
       ),

@@ -235,7 +235,8 @@ Header actions:
 - model/thinking sheet,
 - details/menu.
 
-The composer uses one primary action: Send while idle, disabled when sending
+The composer is one compact row: an expanding message field and a fixed
+circular primary action. That action is Send while idle, disabled when sending
 is unavailable, and Abort while the agent is generating. No separate abort
 button or disabled-status sentence is shown.
 

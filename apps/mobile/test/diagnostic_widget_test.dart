@@ -80,7 +80,7 @@ void main() {
         isNull,
         reason: 'offline send must remain disabled',
       );
-      expect(find.text('Send'), findsOneWidget);
+      expect(find.byIcon(Icons.send), findsOneWidget);
       expect(find.byKey(const Key('abort-button')), findsNothing);
       expect(find.byKey(const Key('composer-disabled-reason')), findsNothing);
 
