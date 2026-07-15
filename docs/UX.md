@@ -213,6 +213,10 @@ Runtime state labels use plain language:
 
 ## 7. Transcript screen
 
+Selecting a saved session automatically requests and merges every available
+history page. The transcript never asks the user to manually load older
+messages.
+
 ### Header
 
 Shows:

@@ -69,6 +69,7 @@ void main() {
     );
     expect(find.text('No transcript yet'), findsOneWidget);
     expect(find.byKey(const Key('transcript-list')), findsNothing);
+    expect(find.byKey(const Key('load-older-transcript')), findsNothing);
   });
 
   testWidgets('renders one RepaintBoundary + stable ValueKey per turn', (

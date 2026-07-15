@@ -20,16 +20,9 @@ import 'tool_card.dart';
 /// ([FinalAnswerView], [ReasoningBlock], [ToolCard]) own their own
 /// horizontal rhythm.
 class TranscriptView extends StatefulWidget {
-  const TranscriptView({
-    required this.document,
-    this.onLoadOlder,
-    this.hasOlder = false,
-    super.key,
-  });
+  const TranscriptView({required this.document, super.key});
 
   final TranscriptDocument document;
-  final Future<void> Function()? onLoadOlder;
-  final bool hasOlder;
 
   @override
   State<TranscriptView> createState() => _TranscriptViewState();
@@ -39,7 +32,6 @@ class _TranscriptViewState extends State<TranscriptView> {
   final ScrollController _controller = ScrollController();
   bool _nearLatest = true;
   int _unread = 0;
-  bool _loadingOlder = false;
 
   @override
   void initState() {
@@ -71,23 +63,6 @@ class _TranscriptViewState extends State<TranscriptView> {
     if (!_controller.hasClients) return;
     _controller.jumpTo(_controller.position.maxScrollExtent);
     if (mounted) setState(() => _unread = 0);
-  }
-
-  Future<void> _loadOlder() async {
-    final callback = widget.onLoadOlder;
-    if (callback == null || _loadingOlder || !_controller.hasClients) return;
-    final oldExtent = _controller.position.maxScrollExtent;
-    final oldOffset = _controller.offset;
-    setState(() => _loadingOlder = true);
-    await callback();
-    if (!mounted) return;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (_controller.hasClients) {
-        final delta = _controller.position.maxScrollExtent - oldExtent;
-        _controller.jumpTo(oldOffset + delta);
-      }
-    });
-    setState(() => _loadingOlder = false);
   }
 
   @override
@@ -144,38 +119,6 @@ class _TranscriptViewState extends State<TranscriptView> {
                             ),
                           ),
                         ),
-                        if (widget.hasOlder)
-                          TextButton.icon(
-                            key: const Key('load-older-transcript'),
-                            onPressed: _loadingOlder ? null : _loadOlder,
-                            icon: _loadingOlder
-                                ? SizedBox.square(
-                                    dimension: 14,
-                                    child: CircularProgressIndicator(
-                                      strokeWidth: 2,
-                                      color: scheme.primary,
-                                    ),
-                                  )
-                                : Icon(
-                                    Icons.history,
-                                    size: 18,
-                                    color: scheme.onSurfaceVariant,
-                                  ),
-                            label: Text(
-                              'Load older history',
-                              style: text.labelLarge?.copyWith(
-                                color: scheme.onSurfaceVariant,
-                              ),
-                            ),
-                            style: TextButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                                vertical: 4,
-                              ),
-                              minimumSize: const Size(0, 32),
-                              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                            ),
-                          ),
                       ],
                     ),
                   ),
@@ -236,15 +179,11 @@ class TranscriptEventView extends StatefulWidget {
   const TranscriptEventView({
     required this.streamId,
     required this.events,
-    this.onLoadOlder,
-    this.hasOlder = false,
     super.key,
   });
 
   final String streamId;
   final List<StreamEventState> events;
-  final Future<void> Function()? onLoadOlder;
-  final bool hasOlder;
 
   @override
   State<TranscriptEventView> createState() => _TranscriptEventViewState();
@@ -301,11 +240,8 @@ class _TranscriptEventViewState extends State<TranscriptEventView> {
   }
 
   @override
-  Widget build(BuildContext context) => TranscriptView(
-    document: _state.document,
-    onLoadOlder: widget.onLoadOlder,
-    hasOlder: widget.hasOlder,
-  );
+  Widget build(BuildContext context) =>
+      TranscriptView(document: _state.document);
 }
 
 class _TurnView extends StatelessWidget {

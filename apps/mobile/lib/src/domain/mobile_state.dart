@@ -446,8 +446,8 @@ final class SessionHistoryState {
   /// Loaded pages preserve prior items even when a follow-up page errors.
   final String? error;
 
-  /// True while older pages remain available on the host. The UI binds this
-  /// to the "Load older history" affordance.
+  /// True while older pages remain available on the host. The coordinator
+  /// follows this token automatically while the session is selected.
   bool get hasOlder => nextPageToken != null;
 
   SessionHistoryState copyWith({

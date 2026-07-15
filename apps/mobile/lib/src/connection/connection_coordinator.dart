@@ -400,7 +400,8 @@ final class ConnectionCoordinator extends ChangeNotifier
       throw RangeError.range(pageSize, 1, kSessionHistoryPageSize, 'pageSize');
     }
     final current = historyFor(sessionId);
-    if (current.isLoading || (current.items.isNotEmpty && !current.hasOlder)) {
+    if (current.isLoading ||
+        (current.snapshotRevision != null && !current.hasOlder)) {
       return;
     }
     _history[sessionId] = current.copyWith(isLoading: true, error: null);
@@ -942,7 +943,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   Future<void> selectSession(String sessionId) async {
-    if (selectedSessionId == sessionId && isReady) return;
+    if (selectedSessionId == sessionId && isReady) {
+      await loadOlderHistory(sessionId);
+      return;
+    }
     selectedSessionId = sessionId;
     leaseId = null;
     final saved = hostId == null
@@ -973,6 +977,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     _notify();
     if (_socket != null && connectionId != null) await _subscribe();
+    await loadOlderHistory(sessionId);
   }
 
   Future<void> updateDraft(String value) async {
@@ -1780,17 +1785,21 @@ final class ConnectionCoordinator extends ChangeNotifier
       for (final event in existing.items) event.eventId: event,
       for (final event in decoded) event.eventId: event,
     }.values.toList()..sort((a, b) => a.cursor.compareTo(b.cursor));
+    final nextPageToken = payload['nextPageToken'] is String
+        ? payload['nextPageToken'] as String
+        : null;
     _history[request.sessionId] = existing.copyWith(
       items: merged,
       snapshotRevision: payload['snapshotRevision'] is String
           ? payload['snapshotRevision'] as String
           : existing.snapshotRevision,
-      nextPageToken: payload['nextPageToken'] is String
-          ? payload['nextPageToken'] as String
-          : null,
+      nextPageToken: nextPageToken,
       isLoading: false,
       error: null,
     );
+    if (selectedSessionId == request.sessionId && nextPageToken != null) {
+      unawaited(loadOlderHistory(request.sessionId));
+    }
   }
 
   void _workspaceList(Map<String, Object?> payload) {

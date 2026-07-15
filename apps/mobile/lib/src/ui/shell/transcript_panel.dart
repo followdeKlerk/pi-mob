@@ -47,8 +47,6 @@ class TranscriptPanel extends StatelessWidget {
             key: ValueKey(streamId),
             streamId: streamId,
             events: coordinator.transcriptEvents(sessionId),
-            hasOlder: coordinator.hasOlderHistory(sessionId),
-            onLoadOlder: () => coordinator.loadOlderHistory(sessionId),
           ),
         ),
       ],
