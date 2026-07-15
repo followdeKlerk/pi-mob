@@ -38,6 +38,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
+import { homedir } from "node:os";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 
 // ---------------------------------------------------------------------------
@@ -558,20 +559,50 @@ const KIND_ORDER: readonly TrustResourceKind[] = [
  *     walk never descends into a symlink and rejects the discovery
  *     entirely if any trust resource path resolves to a symlink that
  *     escapes the root.
- *   - A symlink encountered anywhere in the trust tree is treated as a
+ *   - A symlink encountered anywhere in a project trust tree is treated as a
  *     `symlink_escape` policy violation and aborts discovery.
+ *   - When the workspace root is the OS user's home directory, root-level
+ *     `.pi` and `.agents` are user-global configuration, not project-owned
+ *     resources, so this project-resource manifest is intentionally empty.
  *
  * The returned array is deterministically sorted by
  * `(kind, relativePath)`. Missing entries are silently skipped so
  * callers always get the truth about what is on disk.
  */
-export function discoverTrustResources(rootCanonical: CanonicalPath): readonly TrustResource[] {
+export function discoverTrustResources(
+  rootCanonical: CanonicalPath,
+  options: { readonly userHomeCanonical?: CanonicalPath } = {},
+): readonly TrustResource[] {
   if (!isAbsolute(rootCanonical)) {
     throw new WorkspacePolicyError(
       "not_absolute",
       `rootCanonical must be absolute: ${rootCanonical}`,
     );
   }
+
+  // When the user's home itself is the workspace boundary, ~/.pi and
+  // ~/.agents are user-global Pi configuration rather than project-owned
+  // resources. They apply to every workspace already and must not be
+  // misclassified as resources owned by the home workspace. Besides making
+  // that distinction honest, this keeps a legitimate global skill symlink
+  // from making the home directory impossible to expose as a browse root.
+  // Descendant workspaces still fingerprint their own .pi/.agents resources.
+  let userHomeCanonical = options.userHomeCanonical;
+  if (userHomeCanonical === undefined) {
+    try {
+      userHomeCanonical = normalizeCanonical(realpathSync(homedir()));
+    } catch {
+      // If the OS home cannot be resolved, fail back to normal project
+      // discovery rather than weakening trust classification.
+    }
+  }
+  if (
+    userHomeCanonical !== undefined &&
+    normalizeCanonical(rootCanonical) === normalizeCanonical(userHomeCanonical)
+  ) {
+    return [];
+  }
+
   const out: TrustResource[] = [];
   const configDir = joinPath(rootCanonical, ".pi");
   for (const entry of TRUST_REQUIRING_PROJECT_CONFIG_RESOURCES) {

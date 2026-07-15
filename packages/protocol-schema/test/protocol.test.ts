@@ -20,6 +20,29 @@ test("cursor comparison and fixture validation never crash on malformed inputs",
   for (const value of malformed) expect(() => validateFixture(value)).not.toThrow();
 });
 
+test("workspace trust approval is a host command that does not require a controller lease", () => {
+  const metadata = COMMAND_METADATA.find((item) => item.type === "workspace.trust.approve");
+  expect(metadata?.requiresLeaseId).toBe(false);
+  expect(validateFixture({
+    name: "workspace-trust-without-lease",
+    kind: "command",
+    valid: true,
+    message: {
+      protocol: { major: 1, minor: 0 },
+      messageId: "11111111-1111-4111-8111-111111111111",
+      requestId: "22222222-2222-4222-8222-222222222222",
+      connectionId: "33333333-3333-4333-8333-333333333333",
+      commandId: "44444444-4444-4444-8444-444444444444",
+      type: "workspace.trust.approve",
+      sentAt: "2026-07-15T00:00:00.000Z",
+      payload: {
+        workspaceId: "55555555-5555-4555-8555-555555555555",
+        fingerprint: "fixture",
+      },
+    },
+  })).toBe(true);
+});
+
 test("serializes semantic commands with sorted keys and stable SHA-256", () => {
   const command = { type: "session.rename" as const, payload: { z: "café", a: [true, null] } };
   expect(canonicalSemanticCommand(command)).toBe('{"payload":{"a":[true,null],"z":"café"},"type":"session.rename"}');

@@ -839,6 +839,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       },
       requiresLease: false,
     );
+    // The durable host-stream event remains authoritative. Also refresh the
+    // advertised workspace list on the same ordered socket so the root trust
+    // banner clears even if a live event was delayed while the app transitioned.
+    await _sendControl('workspace.list', const <String, Object?>{});
   }
 
   /// Sends `session.policy.set` to demote the active session to Read-only.

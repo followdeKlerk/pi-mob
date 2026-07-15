@@ -393,11 +393,6 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "type": "string"
         },
-        "leaseId": {
-          "$id": "pi-mob/protocol/uuid",
-          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
-          "type": "string"
-        },
         "messageId": {
           "$id": "pi-mob/protocol/uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -463,8 +458,7 @@
         "payload",
         "requestId",
         "connectionId",
-        "commandId",
-        "leaseId"
+        "commandId"
       ],
       "type": "object"
     },

@@ -299,20 +299,31 @@ void main() {
         );
         expect((approve['payload'] as Map)['workspaceId'], _wsA);
         expect((approve['payload'] as Map)['fingerprint'], _wsFingerprint);
-        // Simulate host approval so the entry becomes selectable.
+        await eventually(
+          () =>
+              socket.sent.any((message) => message['type'] == 'workspace.list'),
+        );
+        expect(find.byKey(const Key('trust-review-dialog')), findsNothing);
+
+        // Simulate the ordered workspace-list refresh. This is defensive in
+        // addition to the durable host-stream event, so a delayed live event
+        // cannot leave the trust-required banner stale.
         socket.server(
-          event(
-            type: 'workspace.trust_state',
-            streamId: 'host:$_hostId',
-            cursor: '1',
-            eventId: '99999999-9999-4999-8999-999999999999',
-            payload: {
-              'workspaceId': _wsA,
-              'trustState': 'approved',
-              'fingerprint': _wsFingerprint,
-              'policyVersion': '1',
-            },
-          ),
+          response('workspace.list.result', {
+            'items': [
+              {
+                'workspaceId': _wsA,
+                'displayName': 'mobile',
+                'rootLabel': 'Home',
+                'relativePath': '.',
+                'availability': 'available',
+                'trustState': 'approved',
+                'fingerprint': _wsFingerprint,
+                'policyVersion': '1',
+                'manifest': <Map<String, Object?>>[],
+              },
+            ],
+          }),
         );
         await _drainCoordinator(tester);
         await eventually(

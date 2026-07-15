@@ -46,6 +46,7 @@ import {
   computeFingerprint,
   createWorkspaceRootsConfig,
   defaultBoundedSearch,
+  discoverTrustResources,
   resolveTrustState,
   type PiRpcClient,
   type PiRpcRequestOptions,
@@ -337,6 +338,19 @@ describe("M8 approval invalidation", () => {
     mkdirSync(extensionDir, { recursive: true });
     symlinkSync(outside, join(extensionDir, "escape.ts"));
     expect(() => buildTrustManifest(b.trustedRoot.canonicalPath)).toThrow(/symlink/);
+  });
+
+  test("the OS home root does not misclassify global Pi resources as project resources", () => {
+    const syntheticHome = join(b.workspaceRoot, "synthetic-home");
+    const externalSkill = join(b.workspaceRoot, "external-skill");
+    mkdirSync(join(syntheticHome, ".agents", "skills"), { recursive: true });
+    mkdirSync(externalSkill, { recursive: true });
+    writeFileSync(join(externalSkill, "SKILL.md"), "global skill");
+    symlinkSync(externalSkill, join(syntheticHome, ".agents", "skills", "global"));
+    const canonicalHome = canonicalize(syntheticHome);
+
+    expect(() => discoverTrustResources(canonicalHome)).toThrow(/symlink/);
+    expect(discoverTrustResources(canonicalHome, { userHomeCanonical: canonicalHome })).toEqual([]);
   });
 });
 
