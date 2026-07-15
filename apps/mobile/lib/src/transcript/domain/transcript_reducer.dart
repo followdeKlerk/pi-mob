@@ -319,7 +319,10 @@ class TranscriptReducer {
       respondingToUserTurnId: parsed.turnId,
     );
     final finalDoc = _upsertTurn(nextDoc, assistantTurn, assistantKey);
-    return state.copyWith(document: finalDoc);
+    // Pi content-block indexes commonly restart from zero for every prompt.
+    // A turn boundary must therefore discard transient builders from the
+    // preceding turn instead of allowing an identical block id to continue.
+    return TranscriptReducerState(document: finalDoc);
   }
 
   TranscriptReducerState _handleTurnStatus(
@@ -460,29 +463,42 @@ class TranscriptReducer {
     final turnId = _resolveAssistantTurnId(state, event);
     final assistantKey = TranscriptKeys.assistantTurnKey(turnId);
     final existing = state.document.lastTurnWithKeyPrefix(assistantKey);
+    var document = state.document;
     if (existing is AssistantTurn) {
-      // First assistant step for the turn; we set the assistantStepId here
-      // if the placeholder used an empty id.
-      if (existing.assistantStepId.isEmpty) {
-        return state.copyWith(
-          document: state.document.replaceTurn(
-            existing.copyWith(assistantStepId: parsed.assistantStepId),
-          ),
+      // First assistant step for the turn; set its step id when available.
+      if (existing.assistantStepId.isEmpty &&
+          parsed.assistantStepId.isNotEmpty) {
+        document = document.replaceTurn(
+          existing.copyWith(assistantStepId: parsed.assistantStepId),
         );
       }
-      // Subsequent step: keep existing turn; treat as continuation.
-      return state;
+    } else {
+      // Defensive replay path: assistant started before turn.started.
+      document = document.appendTurn(
+        AssistantTurn(
+          turnId: turnId,
+          assistantStepId: parsed.assistantStepId,
+          status: AssistantTurnStatus.active,
+          items: const [],
+          startedAt: event.occurredAt,
+        ),
+      );
     }
-    // No turn placeholder yet (defensive: assistant started before
-    // turn.started, e.g. replay snapshot). Create one.
-    final newTurn = AssistantTurn(
-      turnId: turnId,
+
+    // contentBlockId is scoped to one Pi message and is routinely reused by
+    // the next prompt (often as "0"). Always start a fresh accumulator here.
+    final answerId = parsed.answerId!;
+    final builders = Map<String, _AnswerBuilder>.of(state.answerBuilders);
+    builders[answerId] = _AnswerBuilder(
       assistantStepId: parsed.assistantStepId,
-      status: AssistantTurnStatus.active,
-      items: const [],
-      startedAt: event.occurredAt,
+      answerId: answerId,
     );
-    return state.copyWith(document: state.document.appendTurn(newTurn));
+    return TranscriptReducerState(
+      document: document,
+      answerBuilders: builders,
+      toolBuilders: state.toolBuilders,
+      reasoningBuilders: state.reasoningBuilders,
+    );
   }
 
   TranscriptReducerState _handleAssistantDelta(

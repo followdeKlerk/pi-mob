@@ -95,4 +95,36 @@ void main() {
       expect(state.document.diagnostics, isEmpty);
     },
   );
+
+  test('reused Pi content block ids remain isolated between turns', () {
+    final events = <StreamEventState>[
+      event(1, 'turn.started', {'turnId': 'turn-1', 'message': 'First'}),
+      event(2, 'assistant.started', {'contentBlockId': '0'}),
+      event(3, 'assistant.delta', {
+        'contentBlockId': '0',
+        'text': 'First answer',
+      }),
+      event(4, 'assistant.completed', {'contentBlockId': '0'}),
+      event(5, 'turn.settled', {'turnId': 'turn-1'}),
+      event(6, 'turn.started', {'turnId': 'turn-2', 'message': 'Second'}),
+      event(7, 'assistant.started', {'contentBlockId': '0'}),
+      event(8, 'assistant.delta', {
+        'contentBlockId': '0',
+        'text': 'Second answer',
+      }),
+      event(9, 'assistant.completed', {'contentBlockId': '0'}),
+      event(10, 'turn.settled', {'turnId': 'turn-2'}),
+    ];
+
+    const reducer = TranscriptReducer();
+    var state = TranscriptReducerState.empty('session:s');
+    for (final item in events) {
+      state = reducer.apply(state: state, event: item);
+    }
+
+    final turns = state.document.turns.whereType<AssistantTurn>().toList();
+    expect(turns, hasLength(2));
+    expect(turns[0].finalAnswer?.viewData.markdown, 'First answer');
+    expect(turns[1].finalAnswer?.viewData.markdown, 'Second answer');
+  });
 }
