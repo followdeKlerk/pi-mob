@@ -117,6 +117,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   final List<ToolOutputNotice> _toolOutputNotices = [];
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
+  String? _deferredAutoSelectSessionId;
   WorkspaceSearchState _workspaceSearch = WorkspaceSearchState.idle();
   int _workspaceSearchEpoch = 0;
   String? _workspaceTrustRequiredFor;
@@ -533,6 +534,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     leaseId = null;
     connectionId = null;
     errorMessage = null;
+    _deferredAutoSelectSessionId = null;
 
     try {
       endpoint = normalizeHttpsEndpoint(endpointText);
@@ -698,6 +700,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _toolOutputNotices.clear();
     _forceSnapshot.clear();
     _syncPending.clear();
+    _deferredAutoSelectSessionId = null;
     phase = ConnectionPhase.unpaired;
     _notify();
   }
@@ -1385,6 +1388,17 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     _syncPending.remove(streamId);
     if (_syncPending.isEmpty) {
+      final deferredSessionId = _deferredAutoSelectSessionId;
+      _deferredAutoSelectSessionId = null;
+      if (deferredSessionId != null && selectedSessionId == null) {
+        // A host summary can announce the first session while the initial
+        // host-only subscription is still replaying. Stay synchronizing while
+        // selection loads its draft and starts the replacement subscription;
+        // exposing a transient ready phase can race notification registration
+        // or controller acquisition against the server readiness fence.
+        await selectSession(deferredSessionId);
+        return;
+      }
       phase = ConnectionPhase.ready;
       errorMessage = null;
       _startAckTimer();
@@ -1503,7 +1517,11 @@ final class ConnectionCoordinator extends ChangeNotifier
         }
       }
       if (id is String && selectedSessionId == null) {
-        unawaited(selectSession(id));
+        if (phase == ConnectionPhase.synchronizing) {
+          _deferredAutoSelectSessionId ??= id;
+        } else {
+          unawaited(selectSession(id));
+        }
       }
     } else if (type == 'session.removed') {
       final id = payload['sessionId'];
@@ -1909,17 +1927,27 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> payload,
   ) async {
     final code = payload['code']?.toString() ?? 'unknown';
-    errorMessage = '$code: ${payload['message'] ?? 'Bridge error'}';
+    if (code == 'host_not_ready') {
+      // This is a transient command-admission race, not evidence that the
+      // connected host is degraded. A pending sync will clear it at the next
+      // authoritative completion; outside sync, retain a retryable message.
+      if (_syncPending.isEmpty) {
+        errorMessage = 'Host is still synchronizing. Retry the action.';
+      }
+    } else {
+      errorMessage = '$code: ${payload['message'] ?? 'Bridge error'}';
+    }
     phase = switch (code) {
       'unsupported_protocol' ||
       'unsupported_capability' ||
       'pi_version_mismatch' => ConnectionPhase.incompatible,
       'host_draining' => ConnectionPhase.hostDraining,
-      'host_not_ready' ||
       'database_unavailable' ||
       'storage_full' ||
       'crash_loop' ||
       'provider_interrupted' => ConnectionPhase.degraded,
+      'host_not_ready' =>
+        _syncPending.isNotEmpty ? ConnectionPhase.synchronizing : phase,
       _ => phase,
     };
     if ((code == 'crash_loop' || code == 'provider_interrupted') &&

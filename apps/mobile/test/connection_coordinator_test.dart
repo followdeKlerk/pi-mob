@@ -85,6 +85,121 @@ void main() {
   );
 
   test(
+    'first session announced during initial sync defers selection and controller acquire',
+    () async {
+      await coordinator.initialize(autoConnect: false);
+      await coordinator.connect('https://fixture.test');
+      final socket = transport.sockets.single;
+      socket.server(helloAccepted());
+      await eventually(
+        () =>
+            socket.sent.any((message) => message['type'] == 'subscription.set'),
+      );
+      expect(
+        socket.sent.where((message) => message['type'] == 'subscription.set'),
+        hasLength(1),
+      );
+
+      socket.server(
+        response('subscription.accepted', {
+          'streams': [
+            {'streamId': 'host:$hostId', 'mode': 'replay'},
+          ],
+        }),
+      );
+      socket.server(
+        event(
+          type: 'session.summary',
+          streamId: 'host:$hostId',
+          cursor: '1',
+          eventId: '77777777-7777-4777-8777-777777777777',
+          payload: {
+            'sessionId': sessionId,
+            'workspaceId': workspaceId,
+            'name': 'New session',
+            'runtimeState': 'idle',
+            'queueCount': 0,
+          },
+        ),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(coordinator.selectedSessionId, isNull);
+      expect(
+        socket.sent.where((message) => message['type'] == 'subscription.set'),
+        hasLength(1),
+      );
+      expect(
+        socket.sent.where((message) => message['type'] == 'controller.acquire'),
+        isEmpty,
+      );
+
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'host:$hostId',
+          'currentCursor': '1',
+          'mode': 'replay',
+        }, requestId: null),
+      );
+      await eventually(
+        () =>
+            socket.sent
+                .where((message) => message['type'] == 'subscription.set')
+                .length ==
+            2,
+      );
+      expect(coordinator.selectedSessionId, sessionId);
+      expect(coordinator.phase, ConnectionPhase.synchronizing);
+      expect(
+        socket.sent.where((message) => message['type'] == 'controller.acquire'),
+        isEmpty,
+      );
+
+      // A late rejection from the superseded subscription must not poison the
+      // healthy replacement sync or label the host degraded.
+      socket.server(
+        response('error', {
+          'code': 'host_not_ready',
+          'message': 'Initial synchronization is incomplete.',
+          'retryable': true,
+          'details': <String, Object?>{},
+        }, commandId: '88888888-8888-4888-8888-888888888888'),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(coordinator.phase, ConnectionPhase.synchronizing);
+      expect(coordinator.errorMessage, isNull);
+
+      socket.server(
+        response('subscription.accepted', {
+          'streams': [
+            {'streamId': 'host:$hostId', 'mode': 'current'},
+            {'streamId': 'session:$sessionId', 'mode': 'current'},
+          ],
+        }),
+      );
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'host:$hostId',
+          'currentCursor': '1',
+          'mode': 'current',
+        }, requestId: null),
+      );
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'session:$sessionId',
+          'currentCursor': '0',
+          'mode': 'current',
+        }, requestId: null),
+      );
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'controller.acquire',
+        ),
+      );
+      expect(coordinator.phase, ConnectionPhase.ready);
+    },
+  );
+
+  test(
     'hello, mandatory host plus one session, ordered event and cursor ack',
     () async {
       await coordinator.initialize(autoConnect: false);
