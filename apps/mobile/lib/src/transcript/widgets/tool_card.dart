@@ -28,6 +28,7 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 
+import '../../ui/theme/pi_theme.dart';
 import '../widgets/transcript_status.dart';
 import 'view_data/tool_call_view_data.dart';
 
@@ -75,17 +76,22 @@ class _ToolCardState extends State<ToolCard> {
       container: true,
       label: 'Tool $toolLabel, ${_status.semanticLabel}',
       child: Card(
-        margin: EdgeInsets.zero,
+        margin: const EdgeInsets.symmetric(
+          horizontal: PiSpacing.lg,
+          vertical: PiSpacing.xs,
+        ),
         elevation: 0,
-        color: Colors.transparent,
+        color: scheme.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
-        shape: const RoundedRectangleBorder(),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(PiRadius.md),
+        ),
         child: DecoratedBox(
           decoration: BoxDecoration(
-            border: Border(
-              top: BorderSide(color: scheme.outlineVariant),
-              bottom: BorderSide(color: scheme.outlineVariant),
+            border: Border.all(
+              color: scheme.outlineVariant.withValues(alpha: 0.65),
             ),
+            borderRadius: BorderRadius.circular(PiRadius.md),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -94,7 +100,10 @@ class _ToolCardState extends State<ToolCard> {
               InkWell(
                 onTap: () => setState(() => _expanded = !_expanded),
                 child: Padding(
-                  padding: const EdgeInsets.fromLTRB(_contentInset, 10, 8, 10),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: PiSpacing.md,
+                    vertical: PiSpacing.sm,
+                  ),
                   child: Row(
                     children: [
                       Icon(_status.icon, color: statusColor, size: 16),

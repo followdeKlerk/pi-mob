@@ -39,7 +39,7 @@ Widget _wrap(Widget child) => MaterialApp(home: Scaffold(body: child));
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('active reasoning is expanded by default with spinner', (
+  testWidgets('active reasoning is a compact collapsed Thinking row', (
     tester,
   ) async {
     await tester.pumpWidget(
@@ -47,10 +47,9 @@ void main() {
         ReasoningBlock.forViewData(_reasoning(phase: ReasoningPhase.active)),
       ),
     );
-    expect(find.text('Reasoning in progress'), findsOneWidget);
+    expect(find.text('Thinking…'), findsOneWidget);
     expect(find.byType(CircularProgressIndicator), findsOneWidget);
-    // Steps list visible immediately.
-    expect(find.text('inspect code'), findsOneWidget);
+    expect(find.text('inspect code'), findsNothing);
     expect(find.byKey(const Key('reasoning-header')), findsOneWidget);
   });
 
@@ -60,7 +59,7 @@ void main() {
         ReasoningBlock.forViewData(_reasoning(phase: ReasoningPhase.completed)),
       ),
     );
-    expect(find.text('Reasoning'), findsOneWidget);
+    expect(find.text('Thinking'), findsOneWidget);
     expect(find.text('inspect code'), findsNothing);
     // No spinner in completed phase.
     expect(find.byType(CircularProgressIndicator), findsNothing);
@@ -126,7 +125,7 @@ void main() {
           ),
         ),
       );
-      // Active is expanded; user forced collapse.
+      // Active begins collapsed; the user can disclose it explicitly.
       await tester.tap(find.byKey(const Key('reasoning-header')));
       await tester.pump();
       expect(find.byType(CircularProgressIndicator), findsOneWidget);
@@ -160,7 +159,7 @@ void main() {
         ),
       ),
     );
-    expect(find.bySemanticsLabel('Reasoning: short summary'), findsOneWidget);
+    expect(find.bySemanticsLabel('Thinking complete'), findsOneWidget);
     handle.dispose();
   });
 }

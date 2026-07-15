@@ -10,9 +10,9 @@ library;
 /// Lifecycle of the reasoning block.
 ///
 ///   * [active] - the model is still emitting reasoning tokens. The widget
-///     forces expansion and shows a live indicator.
+///     shows a compact live indicator with details available on demand.
 ///   * [completed] - the model finished this reasoning block. The widget
-///     collapses by default but exposes a chevron to expand on demand.
+///     remains collapsed by default with a disclosure affordance.
 enum ReasoningPhase { active, completed }
 
 /// Immutable view-data for one reasoning block.
@@ -41,15 +41,13 @@ class ReasoningViewData {
   /// preview length when collapsed and expands it fully when expanded.
   final List<String> steps;
 
-  /// Returns true when the widget should be shown expanded by default.
-  ///
-  /// Active reasoning is always expanded. Completed reasoning is collapsed
-  /// so the transcript stays scannable.
-  bool get isExpandedByDefault => phase == ReasoningPhase.active;
+  /// Reasoning stays collapsed by default in every phase so active work does
+  /// not dominate the mobile transcript. Users can disclose it explicitly.
+  bool get isExpandedByDefault => false;
 
   /// Convenience: human label for the current phase.
   String get phaseLabel => switch (phase) {
-    ReasoningPhase.active => 'Reasoning in progress',
-    ReasoningPhase.completed => 'Reasoning',
+    ReasoningPhase.active => 'Thinking…',
+    ReasoningPhase.completed => 'Thinking',
   };
 }

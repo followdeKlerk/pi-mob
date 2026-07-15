@@ -251,11 +251,15 @@ Each assistant turn is composed of:
 
 Reasoning:
 
-- expanded while actively streaming unless the user collapsed it,
-- collapsed after completion by default,
-- labelled as model-provided reasoning,
+- presented as a compact `Thinking…` indicator while active,
+- collapsed by default in every phase and expandable on demand,
+- described as provider-supplied thinking rather than complete/private chain-of-thought,
 - copyable when visible,
 - hidden gracefully when the provider does not emit it.
+
+This follows the progressive-disclosure pattern documented for Claude mobile
+(an expandable Thinking section) and the low-chrome in-flight status used by
+Codex, while retaining Pi's useful tool transparency.
 
 Final answer:
 
