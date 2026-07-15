@@ -42,6 +42,29 @@ describe("M4 loopback server", () => {
     send(good.ws, command); expect((await good.next()).type).toBe("command.receipt"); good.ws.close();
   });
 
+  test("opens command admission before the final sync-complete frame is observable", async () => {
+    const hostStream = "host:11111111-1111-4111-8111-111111111111";
+    const special: BridgeRuntimePort = {
+      ...runtime(),
+      subscribe: () => ({
+        streams: [{ streamId: hostStream, mode: "current" }],
+        messages: [{
+          type: "stream.sync.complete",
+          payload: { streamId: hostStream, currentCursor: "0", mode: "current" },
+        }],
+      }),
+    };
+    const server = start(special); const client = await connect(server);
+    send(client.ws, hello()); const accepted = await client.next(); const connectionId = (accepted.payload as Record<string,unknown>).connectionId as string;
+    send(client.ws, baseControl("subscription.set", connectionId, { streams: [{ streamId: hostStream, detail: "full" }] }));
+    expect((await client.next()).type).toBe("subscription.accepted");
+    expect((await client.next()).type).toBe("stream.sync.complete");
+    const command = { protocol: { major: 1, minor: 0 }, messageId: crypto.randomUUID(), requestId: crypto.randomUUID(), connectionId, commandId: crypto.randomUUID(), leaseId: crypto.randomUUID(), type: "session.rename", sentAt: new Date().toISOString(), payload: { sessionId: "55555555-5555-4555-8555-555555555555", name: "n" } };
+    send(client.ws, command);
+    expect((await client.next()).type).toBe("command.receipt");
+    client.ws.close();
+  });
+
   test("rejects major/host/capability mismatch and rate limits controls", async () => {
     for (const mutation of [
       (value: any) => { value.protocol.major = 2; },

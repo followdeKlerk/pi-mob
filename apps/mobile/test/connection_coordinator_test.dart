@@ -200,6 +200,88 @@ void main() {
   );
 
   test(
+    'host_not_ready performs one bounded resubscribe without resending a command',
+    () async {
+      await coordinator.initialize(autoConnect: false);
+      await coordinator.connect('https://fixture.test');
+      final socket = transport.sockets.single;
+      socket.server(helloAccepted());
+      await eventually(
+        () =>
+            socket.sent.any((message) => message['type'] == 'subscription.set'),
+      );
+      socket.server(
+        response('subscription.accepted', {
+          'streams': [
+            {'streamId': 'host:$hostId', 'mode': 'current'},
+          ],
+        }),
+      );
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'host:$hostId',
+          'currentCursor': '0',
+          'mode': 'current',
+        }, requestId: null),
+      );
+      await eventually(() => coordinator.isReady);
+      final commandCount = socket.sent
+          .where((message) => message['commandId'] != null)
+          .length;
+
+      Map<String, Object?> hostNotReady() => response('error', {
+        'code': 'host_not_ready',
+        'message': 'Initial synchronization is incomplete.',
+        'retryable': true,
+        'details': <String, Object?>{},
+      }, commandId: '99999999-9999-4999-8999-999999999999');
+      socket.server(hostNotReady());
+      await eventually(
+        () =>
+            socket.sent
+                .where((message) => message['type'] == 'subscription.set')
+                .length ==
+            2,
+      );
+      expect(coordinator.phase, ConnectionPhase.synchronizing);
+      expect(coordinator.errorMessage, isNull);
+      expect(
+        socket.sent.where((message) => message['commandId'] != null),
+        hasLength(commandCount),
+      );
+
+      socket.server(hostNotReady());
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(
+        socket.sent.where((message) => message['type'] == 'subscription.set'),
+        hasLength(2),
+        reason: 'a repeated rejection during recovery must not resubscribe',
+      );
+
+      socket.server(
+        response('subscription.accepted', {
+          'streams': [
+            {'streamId': 'host:$hostId', 'mode': 'current'},
+          ],
+        }),
+      );
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'host:$hostId',
+          'currentCursor': '0',
+          'mode': 'current',
+        }, requestId: null),
+      );
+      await eventually(() => coordinator.isReady);
+      expect(coordinator.errorMessage, isNull);
+      expect(
+        socket.sent.where((message) => message['commandId'] != null),
+        hasLength(commandCount),
+      );
+    },
+  );
+
+  test(
     'hello, mandatory host plus one session, ordered event and cursor ack',
     () async {
       await coordinator.initialize(autoConnect: false);

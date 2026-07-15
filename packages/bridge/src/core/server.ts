@@ -113,18 +113,30 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
           const fixtureKind = message.commandId !== undefined ? "command" : "control";
           if (!validateFixture({ name: "live", kind: fixtureKind, valid: true, message })) { sendError(ws, "invalid_message", "Message does not match the protocol schema.", message.requestId, message.commandId); return; }
           if (type === "subscription.set") {
-            const previous = new Map(ws.data.subscriptions); ws.data.subscriptions.clear(); ws.data.syncing = true; ws.data.synchronized = false; ws.data.pendingEvents = [];
+            const previous = new Map(ws.data.subscriptions); const previousSynchronized = ws.data.synchronized; ws.data.subscriptions.clear(); ws.data.syncing = true; ws.data.synchronized = false; ws.data.pendingEvents = [];
             const streams = Array.isArray(payload.streams) ? payload.streams : [];
             for (const item of streams) if (item && typeof item === "object" && typeof (item as { streamId?: unknown }).streamId === "string") ws.data.subscriptions.set((item as { streamId: string }).streamId, (item as { detail?: unknown }).detail === "summary" ? "summary" : "full");
             try {
               const result = await options.runtime.subscribe(context(ws.data), payload);
-              const sentEventIds = new Set((result.messages ?? []).flatMap((item) => item.eventId ? [item.eventId] : []));
+              const resultMessages = result.messages ?? [];
+              const sentEventIds = new Set(resultMessages.flatMap((item) => item.eventId ? [item.eventId] : []));
               send(ws, envelope("subscription.accepted", { streams: result.streams }, message.requestId));
-              for (const item of result.messages ?? []) send(ws, { ...envelope(item.type, item.payload), ...(item.eventId ? { eventId: item.eventId } : {}), ...(item.streamId ? { streamId: item.streamId } : {}), ...(item.cursor ? { cursor: item.cursor } : {}) });
+              let finalSyncIndex = -1;
+              for (let index = 0; index < resultMessages.length; index += 1) if (resultMessages[index]!.type === "stream.sync.complete") finalSyncIndex = index;
+              for (let index = 0; index < resultMessages.length; index += 1) {
+                // Open the command-admission fence before queueing the final
+                // readiness marker. A client can react as soon as that frame
+                // arrives; setting this afterwards creates a real
+                // host_not_ready race on fast links.
+                if (index === finalSyncIndex) ws.data.synchronized = true;
+                const item = resultMessages[index]!;
+                send(ws, { ...envelope(item.type, item.payload), ...(item.eventId ? { eventId: item.eventId } : {}), ...(item.streamId ? { streamId: item.streamId } : {}), ...(item.cursor ? { cursor: item.cursor } : {}) });
+              }
+              if (finalSyncIndex < 0) ws.data.synchronized = true;
               const pending = ws.data.pendingEvents.filter((event) => !sentEventIds.has(event.eventId)).sort((left, right) => left.streamId === right.streamId ? compareCursor(left.cursor, right.cursor) : left.streamId.localeCompare(right.streamId));
-              ws.data.pendingEvents = []; ws.data.syncing = false; ws.data.synchronized = true;
+              ws.data.pendingEvents = []; ws.data.syncing = false;
               for (const event of pending) sendLiveEvent(ws, event);
-            } catch (error) { ws.data.subscriptions = previous; ws.data.pendingEvents = []; ws.data.syncing = false; throw error; }
+            } catch (error) { ws.data.subscriptions = previous; ws.data.pendingEvents = []; ws.data.syncing = false; ws.data.synchronized = previousSynchronized; throw error; }
             return;
           }
           if (message.commandId !== undefined) {

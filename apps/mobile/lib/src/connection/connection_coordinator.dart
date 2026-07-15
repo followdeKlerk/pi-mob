@@ -156,6 +156,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   int _eventsSinceAck = 0;
   bool _foreground = true;
   bool _carryDraftAfterGeneration = false;
+  bool _hostReadinessRecoveryInFlight = false;
   bool _initialized = false;
   bool _disposed = false;
 
@@ -535,6 +536,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     connectionId = null;
     errorMessage = null;
     _deferredAutoSelectSessionId = null;
+    _hostReadinessRecoveryInFlight = false;
 
     try {
       endpoint = normalizeHttpsEndpoint(endpointText);
@@ -1399,6 +1401,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         await selectSession(deferredSessionId);
         return;
       }
+      _hostReadinessRecoveryInFlight = false;
       phase = ConnectionPhase.ready;
       errorMessage = null;
       _startAckTimer();
@@ -1927,13 +1930,17 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> payload,
   ) async {
     final code = payload['code']?.toString() ?? 'unknown';
+    final shouldRecoverHostReadiness =
+        code == 'host_not_ready' &&
+        _syncPending.isEmpty &&
+        !_hostReadinessRecoveryInFlight &&
+        _socket != null &&
+        connectionId != null;
     if (code == 'host_not_ready') {
       // This is a transient command-admission race, not evidence that the
-      // connected host is degraded. A pending sync will clear it at the next
-      // authoritative completion; outside sync, retain a retryable message.
-      if (_syncPending.isEmpty) {
-        errorMessage = 'Host is still synchronizing. Retry the action.';
-      }
+      // connected host is degraded. Re-establish the subscription once; do
+      // not resend the rejected user command.
+      errorMessage = null;
     } else {
       errorMessage = '$code: ${payload['message'] ?? 'Bridge error'}';
     }
@@ -1947,9 +1954,20 @@ final class ConnectionCoordinator extends ChangeNotifier
       'crash_loop' ||
       'provider_interrupted' => ConnectionPhase.degraded,
       'host_not_ready' =>
-        _syncPending.isNotEmpty ? ConnectionPhase.synchronizing : phase,
+        _syncPending.isNotEmpty || shouldRecoverHostReadiness
+            ? ConnectionPhase.synchronizing
+            : phase,
       _ => phase,
     };
+    if (shouldRecoverHostReadiness) {
+      _hostReadinessRecoveryInFlight = true;
+      unawaited(
+        _subscribe().catchError((Object error, StackTrace stack) {
+          _hostReadinessRecoveryInFlight = false;
+          _socketEnded(error, _connectionEpoch);
+        }),
+      );
+    }
     if ((code == 'crash_loop' || code == 'provider_interrupted') &&
         selectedSessionId != null) {
       _mergeSession(<String, Object?>{
