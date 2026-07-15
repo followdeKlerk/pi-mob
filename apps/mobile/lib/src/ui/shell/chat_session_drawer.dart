@@ -117,7 +117,7 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
 
   Future<void> _selectSession(String sessionId) async {
     Navigator.of(context).pop();
-    await widget.coordinator.selectPrimarySession(sessionId);
+    await widget.coordinator.takeControl(sessionId);
   }
 
   Future<void> _renameSession(SessionState session) async {

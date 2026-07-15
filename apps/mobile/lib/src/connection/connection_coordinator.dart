@@ -198,6 +198,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   ///
   /// Read-only sessions are still allowed to send prompts here because the
   /// host enforces the tool hook; the mobile client must not block authoring.
+  DeliveryMode get _effectiveDeliveryMode => selectedRuntimeState == 'running'
+      ? selectedDeliveryMode
+      : DeliveryMode.immediate;
+
   bool get canSend {
     if (!isReady ||
         selectedSessionId == null ||
@@ -208,7 +212,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       return false;
     }
     return _deliveryModeMatchesRuntime(
-      selectedDeliveryMode,
+      _effectiveDeliveryMode,
       selectedRuntimeState,
     );
   }
@@ -991,7 +995,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final commandId = _id();
     final payload = <String, Object?>{
       'sessionId': selectedSessionId!,
-      'deliveryMode': deliveryModeWire(selectedDeliveryMode),
+      'deliveryMode': deliveryModeWire(_effectiveDeliveryMode),
       'message': draft,
       'attachmentIds': _activeReadyAttachmentIds(),
     };
