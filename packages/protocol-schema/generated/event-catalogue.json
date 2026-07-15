@@ -82,6 +82,11 @@
   {
     "class": "event",
     "stream": "session",
+    "type": "session.tree"
+  },
+  {
+    "class": "event",
+    "stream": "session",
     "type": "controller.state"
   },
   {

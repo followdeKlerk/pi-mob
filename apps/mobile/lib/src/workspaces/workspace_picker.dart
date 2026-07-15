@@ -118,7 +118,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
               children: [
                 Expanded(
                   child: Text(
-                    'Choose workspace',
+                    'Choose a folder',
                     key: const Key('workspace-picker-title'),
                     style: text.headlineSmall,
                   ),
@@ -133,8 +133,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Only host-allowed roots appear here. Read-only mode is a tool '
-              'guardrail, not an OS sandbox; Full mode may access paths outside the workspace.',
+              'Folders are indexed by your host under ${coordinator.workspaces.isEmpty ? 'your home folder' : coordinator.workspaces.first.rootLabel}. Select one as Pi’s working directory.',
               key: const Key('workspace-picker-guardrail-note'),
               style: text.bodySmall?.copyWith(color: colors.onSurfaceVariant),
             ),
@@ -143,7 +142,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
               key: const Key('workspace-search-field'),
               controller: _searchController,
               decoration: InputDecoration(
-                labelText: 'Search by directory name',
+                labelText: 'Filter indexed folders',
                 hintText: 'e.g. mobile, docs',
                 prefixIcon: const Icon(Icons.search),
                 border: const OutlineInputBorder(),
@@ -200,7 +199,7 @@ class _RecentList extends StatelessWidget {
     if (entries.isEmpty) {
       return const Center(
         key: Key('workspace-picker-empty'),
-        child: Text('No workspaces reported by host'),
+        child: Text('No indexed folders reported by host'),
       );
     }
     return ListView.separated(
@@ -259,7 +258,7 @@ class _SearchResults extends StatelessWidget {
       return const Padding(
         key: Key('workspace-search-empty'),
         padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: Text('No matches in workspace roots.')),
+        child: Center(child: Text('No matching indexed folders.')),
       );
     }
     return ListView.separated(

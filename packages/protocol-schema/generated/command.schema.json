@@ -669,6 +669,10 @@
               "$id": "pi-mob/protocol/uuid",
               "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
               "type": "string"
+            },
+            "workspaceRelativePath": {
+              "maxLength": 4096,
+              "type": "string"
             }
           },
           "required": [

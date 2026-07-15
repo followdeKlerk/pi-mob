@@ -353,7 +353,55 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     // for both platforms. New code should prefer `fcm` configuration.
     capabilityProviders = ["apns", "fcm"];
   }
-  const adapter = new OneSessionPiAdapter({ store, rpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, ...(notificationService ? {notificationService} : {}) });
+  const sessionRpcs = new Map<string, SupervisedRpcClient>();
+  const createSessionRpc = (sessionId: string): SupervisedRpcClient => {
+    const existing = sessionRpcs.get(sessionId);
+    if (existing) return existing;
+    const state = store.sessionState(sessionId) ?? {};
+    const cwd = typeof state.workspaceRootPath === "string"
+      ? state.workspaceRootPath
+      : options.workspace;
+    if (cwd === options.workspace) return rpc;
+    const client = new SupervisedRpcClient({
+      processId: sessionId,
+      beforeSpawn: () => {
+        const trust = bootstrap.handler.resolveTrust(
+          bootstrap.primaryRoot.canonicalPath,
+        );
+        if (trust.status !== "trusted") {
+          throw new Error("workspace_trust_required");
+        }
+      },
+      initialState: "stopped",
+      rpc: {
+        executable: options.executable,
+        args: ["--mode", "rpc", "--session-dir", sessionDir, "--extension", extensionPath, ...(options.rpcArgs ?? [])],
+        cwd,
+        environment: { ...(options.environment ?? {}), PI_MOB_HOST_POLICY_FILE: policyFile },
+        pathDirs: options.pathDirs ?? ["/usr/local/bin", "/usr/bin", "/bin"],
+        defaultRequestTimeoutMs: 30_000,
+        closeGracePeriodMs: 5_000,
+      },
+      emit(event) {
+        if (event.type.startsWith("host.")) {
+          store.appendEvent(hostStream, event.type, event.payload);
+          return;
+        }
+        const current = store.sessionState(sessionId) ?? {};
+        const payload: Record<string, unknown> = { ...event.payload, sessionId };
+        store.appendEvent(`session:${sessionId}`, event.type, payload);
+        if (event.type === "session.state" && typeof payload.runtimeState === "string") {
+          store.updateSessionState(sessionId, {
+            ...current,
+            runtimeState: payload.runtimeState,
+          });
+        }
+      },
+    });
+    sessionRpcs.set(sessionId, client);
+    return client;
+  };
+  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, ...(notificationService ? {notificationService} : {}) });
   if(notificationService && capabilityProviders) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:[...capabilityProviders],bestEffort:true});
   const notificationSweepTimer=setInterval(()=>{ try{notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
   notificationSweepTimer.unref();
@@ -396,8 +444,14 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       try { attachments.sweep(); } catch { /* best effort */ }
       try { adapter.sweepExtensionDialogs(); } catch { /* best effort */ }
       try { await rpc.drain(); } catch { /* best-effort drain event */ }
+      for (const client of sessionRpcs.values()) {
+        try { await client.drain(); } catch { /* best-effort */ }
+      }
       adapter.close();
       try { server.stop(true); } catch { /* ignore */ }
+      for (const client of sessionRpcs.values()) {
+        try { await client.close(); } catch { /* ignore */ }
+      }
       try { await rpc.close(); } catch { /* ignore */ }
       attachments.close();
       store.close();

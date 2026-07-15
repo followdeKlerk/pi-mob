@@ -839,6 +839,7 @@ const _eventTypes = <String>{
   'session.state',
   'session.metadata',
   'session.policy',
+  'session.tree',
   'controller.state',
   'turn.accepted',
   'turn.queued',
@@ -983,6 +984,9 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
   if (type == 'session.create') {
     _uuidString(payload, 'workspaceId');
     _oneOf(payload, 'policyMode', const <String>{'full', 'read_only'});
+    if (payload['workspaceRelativePath'] != null) {
+      _stringAllowEmpty(payload, 'workspaceRelativePath');
+    }
     if (payload['name'] != null) _stringAllowEmpty(payload, 'name');
     if (payload['modelIntent'] != null) {
       _stringAllowEmpty(payload, 'modelIntent');
@@ -1087,7 +1091,7 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
     }
   }
   if (type == 'tool.output') {
-    _uuidString(payload, 'toolCallId');
+    _string(payload, 'toolCallId');
     _nonNegativeInteger(payload, 'retainedBytes');
     _nonNegativeInteger(payload, 'totalBytes');
     _boolean(payload, 'isTruncated');

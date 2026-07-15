@@ -33,7 +33,7 @@ export const COMMAND_TYPES = [
 export const EVENT_TYPES = [
   "host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility",
   "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
-  "command.state", "error.event", "session.state", "session.metadata", "session.policy", "controller.state",
+  "command.state", "error.event", "session.state", "session.metadata", "session.policy", "session.tree", "controller.state",
   "turn.accepted", "turn.queued", "turn.started", "turn.waiting_for_input", "turn.retrying", "turn.compacting",
   "turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate", "assistant.started", "assistant.delta",
   "assistant.completed", "reasoning.started", "reasoning.delta", "reasoning.completed", "tool.started", "tool.output",
@@ -147,7 +147,7 @@ const CommandPayloads = {
   "workspace.trust.approve": Type.Object({ workspaceId: Uuid, fingerprint: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "notification.device.register": Type.Object({ deviceId: Uuid, platform: Type.String({ minLength: 1 }), token: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "notification.device.unregister": Type.Object({ deviceId: Uuid }, { additionalProperties: true }),
-  "session.create": Type.Object({ workspaceId: Uuid, policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]), name: Type.Optional(Type.String()), modelIntent: Type.Optional(Type.String()) }, { additionalProperties: true }),
+  "session.create": Type.Object({ workspaceId: Uuid, workspaceRelativePath: Type.Optional(Type.String({ maxLength: 4096 })), policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]), name: Type.Optional(Type.String()), modelIntent: Type.Optional(Type.String()) }, { additionalProperties: true }),
   "session.activate": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.stop": Type.Object({ sessionId: SessionId }, { additionalProperties: true }),
   "session.rename": Type.Object({ sessionId: SessionId, name: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "session.policy.set": Type.Object({ sessionId: SessionId, policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]) }, { additionalProperties: true }),
@@ -177,7 +177,7 @@ const EventPayloads = {
   "session.summary": Type.Object({ sessionId: SessionId, runtimeState: Type.String(), queueCount: Type.Integer({ minimum: 0 }) }, { additionalProperties: true }),
   "controller.state": LeaseStateSchema,
   "command.state": Type.Object({ commandId: Uuid, commandType: Type.Union(COMMAND_TYPES.map((value) => Type.Literal(value))), state: Type.String(), errorCode: Type.Union([Type.Union(ERROR_CODES.map((value) => Type.Literal(value))), Type.Null()]) }, { additionalProperties: true }),
-  "tool.output": Type.Object({ toolCallId: Uuid, retainedBytes: Type.Integer({ minimum: 0 }), totalBytes: Type.Integer({ minimum: 0 }), digest: Type.Optional(Type.String()), isTruncated: Type.Boolean() }, { additionalProperties: true }),
+  "tool.output": Type.Object({ toolCallId: Type.String({ minLength: 1, maxLength: 512 }), retainedBytes: Type.Integer({ minimum: 0 }), totalBytes: Type.Integer({ minimum: 0 }), digest: Type.Optional(Type.String()), isTruncated: Type.Boolean() }, { additionalProperties: true }),
   "extension.dialog": Type.Object({ dialogId: Uuid, method: Type.Union([Type.Literal("select"), Type.Literal("confirm"), Type.Literal("input"), Type.Literal("editor")]), expiresAt: Type.String({ pattern: ISO_UTC_PATTERN }) }, { additionalProperties: true }),
   "queue.snapshot": Type.Object({ items: Type.Array(Payload, { maxItems: LIMITS.maxQueuedFollowUps }) }, { additionalProperties: true }),
 } as const;

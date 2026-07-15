@@ -43,8 +43,7 @@ class SessionsDestination extends StatelessWidget {
           ),
           const SizedBox(height: PiSpacing.xs),
           Text(
-            'Pick a workspace, then a session. The host must be paired to '
-            'create new sessions.',
+            'Choose a folder in your home, then open or create a named session.',
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colors.onSurfaceVariant,
             ),

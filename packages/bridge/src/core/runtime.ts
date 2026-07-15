@@ -1,4 +1,5 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { relative } from "node:path";
 import { COMMAND_METADATA, semanticCommandSha256 } from "@pi-mob/protocol-schema";
 import { ControllerLeaseService, DurableCommandService, StreamService, type AdapterPort } from "./domain";
 import type { BridgeRuntimePort, ConnectionContext, SubscriptionMessage, SubscriptionResult } from "./server";
@@ -351,31 +352,72 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private listWorkspaceItems(): Record<string, unknown>[] {
     const seed = this.policy!.rootSeed();
     const trust = this.policy!.resolveTrust(seed.canonicalPath);
-    const session = this.options.store.sessionStates()[0] as Record<string, unknown> | undefined;
-    const sessionCount = session && typeof session.sessionId === "string" ? 1 : 0;
+    const sessions = this.options.store.sessionStates();
     const eff = this.policy!.hostPolicy.effective();
-    return [{
-      workspaceId: seed.id,
-      displayName: seed.label,
-      rootLabel: seed.label,
-      relativePath: ".",
-      availability: "available",
-      fingerprint: trust.fingerprint,
-      trustState: mobileTrustState(trust.status),
-      approved: trust.status === "trusted",
-      invalidatedReason: trust.invalidatedReason,
-      policyVersion: trust.policyVersion,
-      policyMode: eff.mode,
-      manifest: trust.manifest.resources.map((resource) => ({
-        relativePath: resource.relativePath,
-        kind: resource.kind,
-        sizeBytes: resource.size,
-        sha256: resource.sha256,
-      })),
-      availableSince: new Date().toISOString(),
-      lastSeenAt: new Date().toISOString(),
-      sessionCount,
-    }];
+    const indexed = this.policy!.search({
+      rootCanonical: seed.canonicalPath,
+      query: "*",
+      maxDepth: 2,
+      maxResults: 50,
+    });
+    const sessionCandidates = sessions.flatMap((session) =>
+      typeof session.workspaceId === "string" &&
+      typeof session.workspaceRootPath === "string" &&
+      typeof session.workspaceRelativePath === "string"
+        ? [{
+            canonicalPath: session.workspaceRootPath,
+            rootRelativePath: session.workspaceRelativePath,
+            name: typeof session.workspaceDisplayName === "string"
+              ? session.workspaceDisplayName
+              : session.workspaceRelativePath,
+            id: session.workspaceId,
+          }]
+        : [],
+    );
+    const candidateMap = new Map<string, {
+      canonicalPath: string;
+      rootRelativePath: string;
+      name: string;
+      id: string;
+    }>();
+    for (const candidate of [
+      { canonicalPath: seed.canonicalPath, rootRelativePath: ".", name: seed.label, id: seed.id },
+      ...sessionCandidates,
+      ...indexed.map((item) => ({ ...item, id: deriveRootId(item.canonicalPath) })),
+    ]) candidateMap.set(candidate.id, candidate);
+    return [...candidateMap.values()].map((candidate) => {
+      this.searchCandidates.set(candidate.id, {
+        canonicalPath: candidate.canonicalPath,
+        label: candidate.name,
+      });
+      // The configured home root is the authority boundary. Indexed child
+      // folders inherit that approval instead of requiring dozens of
+      // redundant per-folder trust prompts.
+      const candidateTrust = trust;
+      const sessionCount = sessions.filter((session) => session.workspaceId === candidate.id).length;
+      return {
+        workspaceId: candidate.id,
+        displayName: candidate.name,
+        rootLabel: seed.label,
+        relativePath: candidate.rootRelativePath,
+        availability: "available",
+        fingerprint: candidateTrust.fingerprint,
+        trustState: mobileTrustState(candidateTrust.status),
+        approved: candidateTrust.status === "trusted",
+        invalidatedReason: candidateTrust.invalidatedReason,
+        policyVersion: candidateTrust.policyVersion,
+        policyMode: eff.mode,
+        manifest: candidateTrust.manifest.resources.map((resource) => ({
+          relativePath: resource.relativePath,
+          kind: resource.kind,
+          sizeBytes: resource.size,
+          sha256: resource.sha256,
+        })),
+        availableSince: new Date().toISOString(),
+        lastSeenAt: new Date().toISOString(),
+        sessionCount,
+      };
+    });
   }
 
   private searchWorkspaces(payload: Record<string, unknown>): Record<string, unknown> {
@@ -394,7 +436,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     return { items: items.map((item) => {
       const workspaceId = deriveRootId(item.canonicalPath);
       this.searchCandidates.set(workspaceId, { canonicalPath: item.canonicalPath, label: item.name });
-      const trust = this.policy!.resolveTrust(item.canonicalPath, workspaceId);
+      const trust = this.policy!.resolveTrust(seed.canonicalPath, seed.id);
       return {
         workspaceId,
         displayName: item.name,
@@ -476,7 +518,31 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     // requested mode must be allowed by the host policy.
     if (this.policy && SESSION_GATING_COMMAND_TYPES.has(type)) {
       const seed = this.policy.rootSeed();
-      const trust = this.policy.resolveTrust(seed.canonicalPath);
+      const requestedWorkspaceId = typeof payload.workspaceId === "string"
+        ? payload.workspaceId
+        : seed.id;
+      const candidate = requestedWorkspaceId === seed.id
+        ? { canonicalPath: seed.canonicalPath, label: seed.label }
+        : this.searchCandidates.get(requestedWorkspaceId);
+      if (!candidate) {
+        throw new RuntimeProtocolError(
+          "workspace_not_allowed",
+          "workspace is not in the indexed home folders",
+        );
+      }
+      if (type === "session.create") {
+        const expectedRelativePath = relative(seed.canonicalPath, candidate.canonicalPath)
+          .split("\\").join("/") || ".";
+        const suppliedRelativePath = payload.workspaceRelativePath ??
+          (requestedWorkspaceId === seed.id ? "." : null);
+        if (suppliedRelativePath !== expectedRelativePath) {
+          throw new RuntimeProtocolError(
+            "workspace_not_allowed",
+            "workspace path does not match the indexed folder",
+          );
+        }
+      }
+      const trust = this.policy.resolveTrust(seed.canonicalPath, seed.id);
       if (trust.status !== "trusted") {
         throw new RuntimeProtocolError(
           "workspace_trust_required",

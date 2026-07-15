@@ -91,6 +91,14 @@ final class SessionControlState {
       'aborted' => CompactionPhase.aborted,
       _ => compactionPhase,
     };
+    int? integer(Object? value) => value is int
+        ? value
+        : value is num
+        ? value.toInt()
+        : null;
+    bool? boolean(Object? value) => value is bool ? value : null;
+    double? decimal(Object? value) => value is num ? value.toDouble() : null;
+    String? string(Object? value) => value is String ? value : null;
     final rawCommands = payload['commandCatalogue'];
     final nextCommands = rawCommands is List
         ? rawCommands
@@ -111,33 +119,33 @@ final class SessionControlState {
       sessionId: sessionId,
       modelId: payload['modelId']?.toString() ?? modelId,
       modelUnavailable:
-          payload['modelUnavailable'] as bool? ?? modelUnavailable,
+          boolean(payload['modelUnavailable']) ?? modelUnavailable,
       thinkingLevel: payload['thinkingLevel']?.toString() ?? thinkingLevel,
-      inputTokens: payload['inputTokens'] as int? ?? inputTokens,
-      outputTokens: payload['outputTokens'] as int? ?? outputTokens,
+      inputTokens: integer(payload['inputTokens']) ?? inputTokens,
+      outputTokens: integer(payload['outputTokens']) ?? outputTokens,
       contextTokens:
-          payload['contextTokens'] as int? ??
-          payload['tokens'] as int? ??
+          integer(payload['contextTokens']) ??
+          integer(payload['tokens']) ??
           contextTokens,
-      contextWindow: payload['contextWindow'] as int? ?? contextWindow,
-      cost: (payload['cost'] as num?)?.toDouble() ?? cost,
+      contextWindow: integer(payload['contextWindow']) ?? contextWindow,
+      cost: decimal(payload['cost']) ?? cost,
       retryPhase: type == 'retry.state'
-          ? retry(payload['state'] as String?)
+          ? retry(string(payload['state']))
           : retryPhase,
-      retryAttempt: payload['attempt'] as int? ?? retryAttempt,
-      retryMaxAttempts: payload['maxAttempts'] as int? ?? retryMaxAttempts,
-      retryDelayMs: payload['delayMs'] as int? ?? retryDelayMs,
-      autoRetryEnabled: payload['autoEnabled'] as bool? ?? autoRetryEnabled,
+      retryAttempt: integer(payload['attempt']) ?? retryAttempt,
+      retryMaxAttempts: integer(payload['maxAttempts']) ?? retryMaxAttempts,
+      retryDelayMs: integer(payload['delayMs']) ?? retryDelayMs,
+      autoRetryEnabled: boolean(payload['autoEnabled']) ?? autoRetryEnabled,
       compactionPhase: type == 'compaction.state'
-          ? compaction(payload['state'] as String?)
+          ? compaction(string(payload['state']))
           : compactionPhase,
       autoCompactionEnabled:
-          payload['autoCompactionEnabled'] as bool? ??
-          payload['autoEnabled'] as bool? ??
+          boolean(payload['autoCompactionEnabled']) ??
+          boolean(payload['autoEnabled']) ??
           autoCompactionEnabled,
       compactionSummary: payload['summary']?.toString() ?? compactionSummary,
-      steeringEnabled: payload['steeringEnabled'] as bool? ?? steeringEnabled,
-      followUpEnabled: payload['followUpEnabled'] as bool? ?? followUpEnabled,
+      steeringEnabled: boolean(payload['steeringEnabled']) ?? steeringEnabled,
+      followUpEnabled: boolean(payload['followUpEnabled']) ?? followUpEnabled,
       commands: nextCommands,
     );
   }

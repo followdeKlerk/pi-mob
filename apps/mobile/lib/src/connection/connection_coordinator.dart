@@ -118,6 +118,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
   String? _deferredAutoSelectSessionId;
+  String? _pendingCreatedWorkspaceId;
   WorkspaceSearchState _workspaceSearch = WorkspaceSearchState.idle();
   int _workspaceSearchEpoch = 0;
   String? _workspaceTrustRequiredFor;
@@ -550,6 +551,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     connectionId = null;
     errorMessage = null;
     _deferredAutoSelectSessionId = null;
+    _pendingCreatedWorkspaceId = null;
     _hostReadinessRecoveryInFlight = false;
 
     try {
@@ -717,8 +719,21 @@ final class ConnectionCoordinator extends ChangeNotifier
     _forceSnapshot.clear();
     _syncPending.clear();
     _deferredAutoSelectSessionId = null;
+    _pendingCreatedWorkspaceId = null;
     phase = ConnectionPhase.unpaired;
     _notify();
+  }
+
+  Future<void> selectWorkspaceEntry(WorkspaceEntry workspace) async {
+    final index = _workspaces.indexWhere(
+      (item) => item.workspaceId == workspace.workspaceId,
+    );
+    if (index < 0) {
+      _workspaces.add(workspace);
+    } else {
+      _workspaces[index] = workspace;
+    }
+    await selectWorkspace(workspace.workspaceId);
   }
 
   Future<void> selectWorkspace(String workspaceId) async {
@@ -731,14 +746,20 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> createSession({String? name}) async {
     if (!isReady || selectedWorkspaceId == null) return;
+    final workspace = selectedWorkspace;
+    if (workspace == null) return;
     final commandId = _id();
+    _pendingCreatedWorkspaceId = workspace.workspaceId;
     await _sendCommand(
       type: 'session.create',
       commandId: commandId,
       payload: <String, Object?>{
         'workspaceId': selectedWorkspaceId,
+        'workspaceRelativePath': workspace.relativePath,
         'policyMode': 'full',
-        if (name != null && name.isNotEmpty) 'name': name,
+        'name': name != null && name.trim().isNotEmpty
+            ? name.trim()
+            : workspace.displayName,
       },
       requiresLease: false,
     );
@@ -1406,7 +1427,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (_syncPending.isEmpty) {
       final deferredSessionId = _deferredAutoSelectSessionId;
       _deferredAutoSelectSessionId = null;
-      if (deferredSessionId != null && selectedSessionId == null) {
+      if (deferredSessionId != null && selectedSessionId != deferredSessionId) {
         // A host summary can announce the first session while the initial
         // host-only subscription is still replaying. Stay synchronizing while
         // selection loads its draft and starts the replacement subscription;
@@ -1533,11 +1554,19 @@ final class ConnectionCoordinator extends ChangeNotifier
           );
         }
       }
-      if (id is String && selectedSessionId == null) {
-        if (phase == ConnectionPhase.synchronizing) {
-          _deferredAutoSelectSessionId ??= id;
-        } else {
-          unawaited(selectSession(id));
+      if (id is String) {
+        final explicitlyCreated =
+            payload['change'] == 'added' &&
+            payload['workspaceId'] == _pendingCreatedWorkspaceId;
+        if (explicitlyCreated) {
+          _pendingCreatedWorkspaceId = null;
+        }
+        if (explicitlyCreated || selectedSessionId == null) {
+          if (phase == ConnectionPhase.synchronizing) {
+            _deferredAutoSelectSessionId = id;
+          } else {
+            unawaited(selectPrimarySession(id));
+          }
         }
       }
     } else if (type == 'session.removed') {
@@ -1656,7 +1685,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       sessionId: id,
       hostId: hostId!,
       workspaceId: payload['workspaceId'] as String? ?? old?.workspaceId,
-      name: payload['name'] as String? ?? old?.name ?? 'Session',
+      name: (payload['name'] as String?)?.trim().isNotEmpty == true
+          ? (payload['name'] as String).trim()
+          : old?.name.trim().isNotEmpty == true
+          ? old!.name
+          : '${payload['displayName'] as String? ?? 'Session'} #${id.substring(0, 6)}',
       runtimeState:
           payload['runtimeState'] as String? ?? old?.runtimeState ?? 'unknown',
       policyMode: payload['policyMode'] as String? ?? old?.policyMode,
@@ -1763,6 +1796,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   void _workspaceList(Map<String, Object?> payload) {
     final items = payload['items'];
     if (items is! List) return;
+    final selected = selectedWorkspace;
     _workspaces
       ..clear()
       ..addAll(
@@ -1770,7 +1804,17 @@ final class ConnectionCoordinator extends ChangeNotifier
           (raw) => _decodeWorkspaceEntry(Map<String, Object?>.from(raw)),
         ),
       );
-    if (_workspaces.isNotEmpty &&
+    if (selected != null &&
+        !_workspaces.any((item) => item.workspaceId == selected.workspaceId)) {
+      _workspaces.add(selected);
+    }
+    final sessionWorkspaceId = selectedSessionId == null
+        ? null
+        : _sessions[selectedSessionId]?.workspaceId;
+    if (sessionWorkspaceId != null &&
+        _workspaces.any((item) => item.workspaceId == sessionWorkspaceId)) {
+      selectedWorkspaceId = sessionWorkspaceId;
+    } else if (_workspaces.isNotEmpty &&
         !_workspaces.any((item) => item.workspaceId == selectedWorkspaceId)) {
       selectedWorkspaceId = _workspaces.first.workspaceId;
     }

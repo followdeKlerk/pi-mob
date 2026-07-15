@@ -108,14 +108,13 @@ void main() {
           find.byKey(const Key('workspace-picker-guardrail-note')),
           findsOneWidget,
         );
-        // The copy must distinguish a product guardrail from an OS sandbox.
         final note = tester
             .widget<Text>(
               find.byKey(const Key('workspace-picker-guardrail-note')),
             )
             .data!;
-        expect(note.toLowerCase(), contains('guardrail'));
-        expect(note.toLowerCase(), contains('not an os sandbox'));
+        expect(note.toLowerCase(), contains('indexed'));
+        expect(note.toLowerCase(), contains('working directory'));
         // Both server-reported workspaces render. No widget renders an
         // editable freeform root input that could be used to select
         // something outside the server's root list.
@@ -437,8 +436,30 @@ void main() {
       },
     );
 
+    testWidgets('folder session creation is named and always full policy', (
+      tester,
+    ) async {
+      final (coordinator, database, transport) = await bootstrap(
+        tester,
+        seedReady: true,
+      );
+      _seedWorkspaces(coordinator);
+
+      await coordinator.createSession();
+
+      final create = transport.sockets.last.sent.lastWhere(
+        (message) => message['type'] == 'session.create',
+      );
+      final payload = create['payload'] as Map;
+      expect(payload['workspaceId'], _wsA);
+      expect(payload['workspaceRelativePath'], '/');
+      expect(payload['name'], 'mobile (approved)');
+      expect(payload['policyMode'], 'full');
+      await tearDownWorkspace(coordinator, database);
+    });
+
     testWidgets(
-      'persistent Read-only indicator is visible and policy toggle emits command',
+      'session policy controls stay out of the folder-first Sessions surface',
       (tester) async {
         final (coordinator, database, transport) = await bootstrap(
           tester,
@@ -496,45 +517,16 @@ void main() {
         await tester.tap(find.byKey(const Key('shell-sessions')));
         await tester.pumpAndSettle();
 
-        // Persistent read-only indicator must be visible.
-        expect(find.byKey(const Key('read-only-indicator')), findsOneWidget);
-        // Any sandbox mention must explicitly disclaim OS sandboxing.
-        final sandboxText = tester
-            .widgetList<Text>(find.byType(Text))
-            .map((w) => w.data ?? '')
-            .where((t) => t.toLowerCase().contains('sandbox'));
+        expect(find.byKey(const Key('read-only-indicator')), findsNothing);
+        expect(find.byKey(const Key('policy-mode-toggle')), findsNothing);
+        expect(find.byKey(const Key('open-session-controls')), findsNothing);
+        expect(find.text('Pi controls'), findsNothing);
         expect(
-          sandboxText.every(
-            (text) => text.toLowerCase().contains('not an os sandbox'),
+          socket.sent.where(
+            (message) => message['type'] == 'session.policy.set',
           ),
-          isTrue,
+          isEmpty,
         );
-
-        // Switching the policy to Full must emit session.policy.set on the
-        // socket.
-        final beforeCount = socket.sent
-            .where((message) => message['type'] == 'session.policy.set')
-            .length;
-        final toggle = tester.widget<SegmentedButton<SessionPolicyMode>>(
-          find.byKey(const Key('policy-mode-toggle')),
-        );
-        expect(toggle.onSelectionChanged, isNotNull);
-        await tester.runAsync(
-          () => coordinator.setSessionPolicy(SessionPolicyMode.full),
-        );
-        await eventually(
-          () =>
-              socket.sent
-                  .where((message) => message['type'] == 'session.policy.set')
-                  .length >
-              beforeCount,
-          tester: tester,
-        );
-        final set = socket.sent.firstWhere(
-          (message) => message['type'] == 'session.policy.set',
-        );
-        expect((set['payload'] as Map)['policyMode'], 'full');
-        expect((set['payload'] as Map)['sessionId'], _sessionId);
 
         await tearDownWorkspace(coordinator, database);
       },

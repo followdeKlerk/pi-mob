@@ -106,7 +106,7 @@ Primary actions:
 
 - New session.
 - Open session list.
-- Choose workspace.
+- Choose indexed home folder.
 - Diagnostics.
 
 Host dashboard is driven by the replayable host stream.
@@ -115,9 +115,9 @@ Host dashboard is driven by the replayable host stream.
 
 Sections:
 
-1. Recent workspaces.
-2. Search configured roots.
-3. Unavailable recents.
+1. Indexed folders beneath the configured home root.
+2. Folder-name filter.
+3. Unavailable session folders.
 
 Each row shows:
 
@@ -130,9 +130,9 @@ Each row shows:
 
 Search:
 
-- starts after two characters or explicit submit,
+- filters the immediately visible bounded folder index,
 - is cancellable,
-- streams results incrementally,
+- refreshes results from the host,
 - never exposes paths outside configured roots,
 - does not search file contents.
 
@@ -144,13 +144,16 @@ Before starting Pi with changed or unknown trust-bearing resources, show:
 - root-relative filenames,
 - added/removed/changed status,
 - explanation that approval is not a sandbox,
-- Full mode and Read-only mode choices.
+- the fixed Full-policy behavior.
 
 Actions:
 
-- Trust and continue in Full mode.
-- Trust and continue Read-only.
+- Trust and continue.
 - Cancel.
+
+The normal mobile surface does not expose a policy toggle. Sessions created
+from the app always request Full policy; lower-level policy compatibility
+remains a protocol/host concern.
 
 No default countdown or auto-approval.
 
@@ -210,7 +213,6 @@ Shows:
 - runtime state,
 - controller/observer state,
 - model and thinking level,
-- read-only status,
 - queue count.
 
 Header actions:

@@ -471,6 +471,21 @@ describe("M8 search / path escape", () => {
     expect(names).not.toContain("match-name-agents");
   });
 
+  test("workspace.list directly indexes bounded folders under the home root", () => {
+    mkdirSync(join(b.workspaceRoot, "github", "pi-mob"), { recursive: true });
+    mkdirSync(join(b.workspaceRoot, "Documents"), { recursive: true });
+
+    const raw = b.runtime.control(connection(), "workspace.list", {});
+    expect(raw).toBeDefined();
+    const items = ((raw as Record<string, unknown>).items as Array<Record<string, unknown>>) ?? [];
+    const paths = items.map((item) => item.relativePath);
+    expect(paths).toContain(".");
+    expect(paths).toContain("github");
+    expect(paths).toContain("github/pi-mob");
+    expect(paths).toContain("Documents");
+    expect(items.every((item) => item.canonicalPath === undefined)).toBe(true);
+  });
+
   test("search results stay strictly inside the canonical root", () => {
     mkdirSync(join(b.workspaceRoot, "nested"), { recursive: true });
     mkdirSync(join(b.workspaceRoot, "nested", "alpha"), { recursive: true });

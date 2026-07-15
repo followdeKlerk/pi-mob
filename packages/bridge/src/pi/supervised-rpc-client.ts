@@ -79,6 +79,7 @@ export class SupervisedRpcClient {
     }
   }
   state(): string { return this.supervisor.state(this.processId); }
+  lifecycleState(): string { return this.state(); }
   snapshot() { return this.supervisor.snapshot(); }
   async manualRetry(): Promise<void> {
     const state = this.supervisor.state(this.processId);

@@ -610,6 +610,11 @@
     "kind": "event"
   },
   {
+    "file": "event-session-tree-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
     "file": "event-tool-cancelled-valid.json",
     "valid": true,
     "kind": "event"

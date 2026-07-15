@@ -1193,6 +1193,7 @@ export function searchDirectories(
 ): readonly SearchResult[] {
   const query = options.query.trim();
   if (query.length === 0) return [];
+  const matchAll = query === "*";
   const lowerQuery = query.toLowerCase();
   const maxDepth = Math.min(options.maxDepth ?? 4, MAX_SEARCH_DEPTH);
   const maxResults = Math.min(options.maxResults ?? 50, MAX_SEARCH_RESULTS);
@@ -1234,7 +1235,7 @@ export function searchDirectories(
       if (!lstat.isDirectory()) continue;
 
       const rootRelativePath = toPosixRelative(relative(rootCanonical, childPath));
-      if (name.toLowerCase().includes(lowerQuery)) {
+      if (matchAll || name.toLowerCase().includes(lowerQuery)) {
         collected.push({
           canonicalPath: childPath,
           rootRelativePath,

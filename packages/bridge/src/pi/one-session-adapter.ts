@@ -26,7 +26,8 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { basename, isAbsolute, relative, resolve } from "node:path";
 import type { StoredCommand } from "../core/store";
 import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
@@ -85,6 +86,9 @@ export type PiRpcNotificationHandler = (raw: unknown) => void;
 export interface PiRpcClient {
   request(opts: PiRpcRequestOptions): Promise<unknown>;
   on(kind: "notification", handler: PiRpcNotificationHandler): () => void;
+  start?(): Promise<void>;
+  close?(): Promise<void>;
+  lifecycleState?(): string;
   markDispatchStart?(): void;
   manualRetry?(): Promise<void>;
   sendExtensionUiResponse?(response: { id:string; value?:string; confirmed?:boolean; cancelled?:true }): Promise<void>;
@@ -242,6 +246,11 @@ export class OneSessionPiAdapter {
   private readonly processSpec: ((sessionId: string) => ProcessSpawnSpec) | null;
   private readonly sessions = new Map<string, SessionEntry>();
   private readonly slots = new Map<string, SessionSlot>();
+  private readonly startedRpcs = new Set<PiRpcClient>();
+  private readonly notificationBindings = new Map<
+    PiRpcClient,
+    { detach: () => void; refs: number }
+  >();
   private readonly toolOutputLimiter = new ToolOutputLimiter();
   private readonly policyBridge: OneSessionPolicyBridge | null;
   private readonly supervisor: ProcessSupervisor;
@@ -286,6 +295,7 @@ export class OneSessionPiAdapter {
     // token delta and terminal event by the session count.
     if (this.rpc && !this.createRpc) {
       const detach = this.rpc.on("notification", (raw) => this.handleNotification(raw));
+      this.notificationBindings.set(this.rpc, { detach, refs: 0 });
       this.globalDetach.add(detach);
     }
     this.bootstrapExistingSessions();
@@ -322,6 +332,7 @@ export class OneSessionPiAdapter {
   close(): void {
     for (const fn of this.globalDetach) fn();
     this.globalDetach.clear();
+    this.notificationBindings.clear();
     for (const entry of this.sessions.values()) entry.detach();
     this.sessions.clear();
   }
@@ -500,6 +511,21 @@ export class OneSessionPiAdapter {
     return this.rpc;
   }
 
+  private async ensureRpcStarted(rpc: PiRpcClient): Promise<void> {
+    if (!this.createRpc || !rpc.start || this.startedRpcs.has(rpc)) return;
+    if (rpc.lifecycleState && rpc.lifecycleState() !== "stopped") {
+      this.startedRpcs.add(rpc);
+      return;
+    }
+    this.startedRpcs.add(rpc);
+    try {
+      await rpc.start();
+    } catch (error) {
+      this.startedRpcs.delete(rpc);
+      throw error;
+    }
+  }
+
   private bindSession(sessionId: string): SessionEntry {
     const slot = this.slots.get(sessionId) ?? (() => {
       const rpc = this.createRpc ? this.createRpc(sessionId) : this.rpc!;
@@ -508,12 +534,32 @@ export class OneSessionPiAdapter {
       return fresh;
     })();
     if (slot.bound) return slot.bound;
-    const handler: PiRpcNotificationHandler = (raw) => this.handleNotification(raw);
-    const detach = this.createRpc
-      ? slot.rpc.on("notification", handler)
-      : () => undefined;
-    if (this.createRpc) this.globalDetach.add(detach);
-    const entry: SessionEntry = { rpc: slot.rpc, detach, state: "idle" };
+    let binding = this.notificationBindings.get(slot.rpc);
+    if (!binding) {
+      const handler: PiRpcNotificationHandler = (raw) => this.handleNotification(raw);
+      const detach = slot.rpc.on("notification", handler);
+      binding = { detach, refs: 0 };
+      this.notificationBindings.set(slot.rpc, binding);
+      this.globalDetach.add(detach);
+    }
+    binding.refs += 1;
+    let attached = true;
+    const entry: SessionEntry = {
+      rpc: slot.rpc,
+      detach: () => {
+        if (!attached) return;
+        attached = false;
+        const current = this.notificationBindings.get(slot.rpc);
+        if (!current) return;
+        current.refs -= 1;
+        if (current.refs <= 0) {
+          current.detach();
+          this.globalDetach.delete(current.detach);
+          this.notificationBindings.delete(slot.rpc);
+        }
+      },
+      state: "idle",
+    };
     slot.bound = entry;
     this.sessions.set(sessionId, entry);
     return entry;
@@ -563,7 +609,16 @@ export class OneSessionPiAdapter {
     this.store.appendEvent(this.hostStream, "session.summary", {
       ...patch,
       sessionId,
-      workspaceId: typeof patch.workspaceId === "string" ? patch.workspaceId : this.workspace.workspaceId,
+      workspaceId: typeof patch.workspaceId === "string"
+        ? patch.workspaceId
+        : typeof prior.workspaceId === "string"
+        ? prior.workspaceId
+        : this.workspace.workspaceId,
+      name: typeof patch.name === "string" ? patch.name : prior.name,
+      displayName: typeof patch.displayName === "string" ? patch.displayName : prior.displayName,
+      workspaceRelativePath: typeof patch.workspaceRelativePath === "string"
+        ? patch.workspaceRelativePath
+        : prior.workspaceRelativePath,
       runtimeState,
       queueCount,
     });
@@ -588,12 +643,30 @@ export class OneSessionPiAdapter {
       workspaceId?: string;
       policyMode?: WorkspacePolicyMode;
       name?: string;
+      workspaceRelativePath?: string;
     };
     const workspaceId = typeof payload.workspaceId === "string" && payload.workspaceId.length > 0
       ? payload.workspaceId
       : this.workspace.workspaceId;
     const baseMode: WorkspacePolicyMode = payload.policyMode
       ?? (this.policyBridge ? this.policyBridge.hostMode() : this.workspace.policyMode);
+    let sessionRoot = this.workspace.rootPath;
+    let workspaceRelativePath = ".";
+    let workspaceDisplayName = this.workspace.displayName;
+    if (typeof payload.workspaceRelativePath === "string") {
+      const workspaceRoot = realpathSync(this.workspace.rootPath);
+      sessionRoot = realpathSync(resolve(workspaceRoot, payload.workspaceRelativePath));
+      const containedRelativePath = relative(workspaceRoot, sessionRoot);
+      if (containedRelativePath.startsWith("..") || isAbsolute(containedRelativePath)) {
+        throw new Error("workspace_not_allowed");
+      }
+      workspaceRelativePath = containedRelativePath.length === 0
+        ? "."
+        : containedRelativePath.split("\\").join("/");
+      workspaceDisplayName = workspaceRelativePath === "."
+        ? this.workspace.displayName
+        : basename(sessionRoot);
+    }
 
     // M11 — backwards-compat shim only. By default a repeated
     // session.create admits a new session, matching the multi-session
@@ -617,6 +690,9 @@ export class OneSessionPiAdapter {
       workspaceId,
       runtimeState: "starting",
       attentionState: "ready",
+      workspaceRelativePath,
+      workspaceDisplayName,
+      workspaceRootPath: sessionRoot,
       createdAt,
     });
     this.store.ensureStream(`session:${sessionId}`, "session", sessionId);
@@ -628,7 +704,7 @@ export class OneSessionPiAdapter {
     const spec = this.processSpec?.(sessionId);
     try {
       if (spec) this.supervisor.configure(sessionId, spec);
-      await this.supervisor.start(sessionId, spec ?? { executable: "pi", args: [], cwd: this.workspace.rootPath });
+      await this.supervisor.start(sessionId, spec ?? { executable: "pi", args: [], cwd: sessionRoot });
     } catch (error) {
       this.store.discardSession(sessionId);
       if (error instanceof ProcessSupervisorError && error.code === "host_capacity") {
@@ -639,15 +715,20 @@ export class OneSessionPiAdapter {
       throw error;
     }
 
-    this.resolveRpc(sessionId);
+    const rpc = this.resolveRpc(sessionId);
+    await this.ensureRpcStarted(rpc);
     this.bindSession(sessionId);
     this.lastUsedSessionId = sessionId;
 
     const summary = {
       sessionId,
       workspaceId,
-      displayName: this.workspace.displayName,
-      name: typeof payload.name === "string" ? payload.name : null,
+      displayName: workspaceDisplayName,
+      workspaceRelativePath,
+      workspaceRootPath: sessionRoot,
+      name: typeof payload.name === "string" && payload.name.trim().length > 0
+        ? payload.name.trim()
+        : workspaceDisplayName,
       policyMode: baseMode,
       runtimeState: "idle",
       attentionState: "ready",
@@ -666,6 +747,8 @@ export class OneSessionPiAdapter {
       modelSummary: null,
       policyMode: baseMode,
       name: summary.name,
+      displayName: workspaceDisplayName,
+      workspaceRelativePath,
       createdAt,
       change: "added",
     });
@@ -673,6 +756,8 @@ export class OneSessionPiAdapter {
       sessionId,
       workspaceId,
       name: summary.name,
+      displayName: workspaceDisplayName,
+      workspaceRelativePath,
       policyMode: baseMode,
       runtimeState: "idle",
       attentionState: "ready",
@@ -737,7 +822,11 @@ export class OneSessionPiAdapter {
       this.bindSession(sessionId);
     }
     const rpc = this.sessions.get(sessionId)!.rpc;
-    if (rpc.manualRetry) await rpc.manualRetry();
+    await this.ensureRpcStarted(rpc);
+    if (rpc.manualRetry &&
+        (!rpc.lifecycleState || rpc.lifecycleState() !== "idle")) {
+      await rpc.manualRetry();
+    }
     this.lastUsedSessionId = sessionId;
     const next = {
       ...prior,
@@ -870,6 +959,7 @@ export class OneSessionPiAdapter {
     this.lastUsedSessionId = payload.sessionId;
     const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
     if (!rpc) throw new Error("prompt.submit no RPC available");
+    await this.ensureRpcStarted(rpc);
     const policySnapshot = this.policyBridge?.snapshotModeFor(payload.sessionId);
     if (this.policyBridge && !policySnapshot) throw new Error("prompt.submit requires a durable policy snapshot");
     this.policyBridge?.publish?.(policySnapshot ?? undefined);

@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -120,6 +120,29 @@ describe("OneSessionPiAdapter", () => {
     const sessionEvents = store.listEvents(`session:${sessionId}`);
     expect(sessionEvents.find((event) => event.type === "session.metadata")).toBeDefined();
     expect(adapter.getActiveSessionId()).toBe(sessionId);
+  });
+
+  test("session.create binds indexed folder context and a useful default name", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mob-workspaces-"));
+    const folder = join(root, "github", "pi-mob");
+    mkdirSync(folder, { recursive: true });
+    const { store, adapter, hostStream } = setup({
+      workspace: { rootPath: root, displayName: "Home" },
+    });
+
+    await adapter.dispatch(makeCommand("c-folder", "session.create", hostStream, hostStream, {
+      workspaceId: "22222222-2222-4222-8222-222222222222",
+      workspaceRelativePath: "github/pi-mob",
+      policyMode: "full",
+    }));
+
+    const state = store.sessionStates()[0]!;
+    expect(state.name).toBe("pi-mob");
+    expect(state.displayName).toBe("pi-mob");
+    expect(state.workspaceRelativePath).toBe("github/pi-mob");
+    expect(state.workspaceRootPath).toBe(realpathSync(folder));
+    const summary = store.listEvents(hostStream).filter((event) => event.type === "session.summary").at(-1)!;
+    expect((summary.payload as Record<string, unknown>).name).toBe("pi-mob");
   });
 
   test("host snapshot durably contains the one session summary", async () => {
