@@ -6,19 +6,10 @@ import 'package:pi_mob/main.dart';
 import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
 import 'package:pi_mob/src/data/app_database.dart';
-import 'package:pi_mob/src/ui/shell/app_shell.dart';
 import 'package:pi_mob/src/domain/mobile_state.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
-
-  Future<void> selectDestination(
-    WidgetTester tester,
-    AppShellDestination destination,
-  ) async {
-    await tester.tap(find.byKey(Key('shell-${destination.name}')));
-    await tester.pumpAndSettle();
-  }
 
   testWidgets(
     'diagnostic UI retains offline draft and exposes explicit controls',
@@ -71,12 +62,10 @@ void main() {
       await tester.pump();
       await tester.pump();
 
-      // Default landing with a saved session is the Activity destination.
-      expect(find.byKey(const Key('shell-sessions')), findsOneWidget);
-      expect(find.byKey(const Key('shell-activity')), findsOneWidget);
-      expect(find.byKey(const Key('shell-host')), findsOneWidget);
+      // The product lands directly in the single Chat surface.
+      expect(find.byKey(const Key('open-chat-drawer')), findsOneWidget);
+      expect(find.byType(NavigationBar), findsNothing);
       expect(find.byKey(const Key('composer-card')), findsOneWidget);
-      expect(find.text('Saved session'), findsWidgets);
 
       // The draft was preserved end-to-end through the coordinator.
       final draft = tester.widget<TextField>(
@@ -107,23 +96,15 @@ void main() {
       final persisted = await database.draft(hostId, sessionId);
       expect(persisted!.draftText, 'Changed offline');
 
-      // Diagnostics are now deliberately hidden from the default Sessions /
-      // Activity landing surface — they live behind the Host destination.
+      // Host diagnostics remain implemented but are absent from primary UI.
       expect(find.byKey(const Key('endpoint-field')), findsNothing);
       expect(find.textContaining('Bridge: m5'), findsNothing);
-      expect(find.textContaining('Pi: 0.80.6'), findsNothing);
       expect(find.byKey(const Key('raw-event-list')), findsNothing);
 
-      // Switch to the Host destination to verify diagnostics keys/values.
-      await selectDestination(tester, AppShellDestination.host);
-      expect(find.byKey(const Key('endpoint-field')), findsOneWidget);
-      expect(find.textContaining('Bridge: m5'), findsOneWidget);
-      expect(find.textContaining('Pi: 0.80.6'), findsOneWidget);
-      expect(find.textContaining('Protocol: 1.0'), findsOneWidget);
-      expect(find.byKey(const Key('retry-connection')), findsOneWidget);
-
-      // The AppBar stays reachable from any destination.
-      expect(find.byKey(const Key('forget-host-button')), findsOneWidget);
+      await tester.tap(find.byKey(const Key('open-chat-drawer')));
+      await tester.pumpAndSettle();
+      expect(find.text('Saved session'), findsOneWidget);
+      expect(find.byKey(const Key('drawer-forget-host')), findsOneWidget);
 
       coordinator.dispose();
       await database.close();
@@ -185,14 +166,15 @@ void main() {
     await tester.pumpWidget(PiMobApp(coordinator: coordinator));
     await tester.pump();
 
-    // Sessions destination shows the broken session picker with the runtime
-    // state badge.
-    await selectDestination(tester, AppShellDestination.sessions);
-    expect(find.textContaining('Repeated crashes'), findsWidgets);
+    // The saved-chat drawer shows the broken session runtime state.
+    await tester.tap(find.byKey(const Key('open-chat-drawer')));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Repeated crashes'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('close-chat-drawer')));
+    await tester.pumpAndSettle();
 
-    // Activity destination hosts the indeterminate warning, transcript
-    // truncation chip, and the persistent composer.
-    await selectDestination(tester, AppShellDestination.activity);
+    // Chat hosts the indeterminate warning, transcript truncation chip, and
+    // persistent composer.
     expect(find.byKey(const Key('indeterminate-warning')), findsOneWidget);
     expect(
       find.textContaining('will not run again automatically'),

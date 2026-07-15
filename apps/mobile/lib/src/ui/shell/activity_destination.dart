@@ -8,9 +8,8 @@ import 'transcript_panel.dart';
 /// Body for the Activity destination — focused transcript + bottom composer.
 ///
 /// The structure is intentionally simple: a stretch transcript on top of a
-/// fixed-bottom composer card. The empty state nudges the user to the
-/// Sessions tab when there is no active session, which mirrors the M15
-/// "draft retention" rule (composer is only useful once a session exists).
+/// fixed-bottom composer card. With no active session, the empty state opens
+/// the saved-chat drawer; drafts remain durable across switches and reconnects.
 ///
 /// Both children are still keyed exactly as before
 /// (`activity-empty-state`, `composer-card`, and the inner transcript events
@@ -29,9 +28,7 @@ class ActivityDestination extends StatelessWidget {
   final TextEditingController draftController;
   final VoidCallback onOpenDialog;
 
-  /// Invoked when the user taps the empty-state "Browse sessions" button.
-  /// Lets the parent shell flip the destination without coupling the
-  /// destination to the shell's state object directly.
+  /// Invoked when the user opens saved chats from the empty state.
   final VoidCallback onGoToSessions;
 
   @override
@@ -107,8 +104,8 @@ class _ActivityEmpty extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: PiSpacing.xl),
           child: Text(
-            'Head to the Sessions tab to pick or create one. Your draft is '
-            'kept safe across sessions and reconnects.',
+            'Open your chats to continue a conversation or start a new one. '
+            'Your draft stays safe across switches and reconnects.',
             textAlign: TextAlign.center,
             style: theme.textTheme.bodyMedium?.copyWith(
               color: colors.onSurfaceVariant,
@@ -120,8 +117,8 @@ class _ActivityEmpty extends StatelessWidget {
           child: FilledButton.tonalIcon(
             key: const Key('activity-empty-go-sessions'),
             onPressed: onGoToSessions,
-            icon: const Icon(Icons.list_alt),
-            label: const Text('Browse sessions'),
+            icon: const Icon(Icons.menu_rounded),
+            label: const Text('Open chats'),
           ),
         ),
       ],

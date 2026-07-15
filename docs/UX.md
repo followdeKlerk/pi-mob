@@ -91,6 +91,10 @@ The user confirms before the host is saved.
 
 ## 4. Host dashboard
 
+The mobile primary navigation does not expose a Host tab. This diagnostic
+surface and its underlying logic remain implemented for recovery and future
+settings work, but the normal product shell is a single Chat screen.
+
 Displays:
 
 - host name and connection state,
@@ -158,6 +162,11 @@ remains a protocol/host concern.
 No default countdown or auto-approval.
 
 ## 6. Session list
+
+On mobile, saved sessions live in a leading hamburger drawer on the Chat
+screen. Rows read like saved conversations: the session title is primary,
+folder and runtime state are secondary, and the already-known host name is
+not repeated. The drawer also provides New chat and folder selection.
 
 Default sort:
 
