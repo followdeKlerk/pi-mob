@@ -13,9 +13,9 @@ import '../theme/pi_theme.dart';
 /// The composer is intentionally a single fixed-height surface anchored at the
 /// bottom of the Activity destination. It owns its own `LiveRegion`
 /// semantics node so screen-readers announce state transitions, and exposes
-/// the original keys (`draft-field`, `send-button`, `abort-button`,
-/// `retry-command`, `composer-disabled-reason`, `delivery-mode-selector`,
-/// `open-extension-dialog`, `pending-command`) that downstream tests rely on.
+/// stable keys (`draft-field`, `send-button`, `retry-command`,
+/// `delivery-mode-selector`, `open-extension-dialog`, `pending-command`) used
+/// by downstream integrations.
 class Composer extends StatelessWidget {
   const Composer({
     required this.coordinator,
@@ -31,6 +31,7 @@ class Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final prefill = coordinator.editorPrefill;
+    final aborting = coordinator.canAbort;
     if (prefill != null && draftController.text != prefill) {
       draftController.value = TextEditingValue(
         text: prefill,
@@ -118,20 +119,11 @@ class Composer extends StatelessWidget {
               minLines: 2,
               maxLines: 5,
               decoration: const InputDecoration(
-                labelText: 'Persistent prompt draft',
+                hintText: 'Message Pi',
                 border: OutlineInputBorder(),
               ),
               onChanged: (value) => unawaited(coordinator.updateDraft(value)),
             ),
-            if (!coordinator.canSend &&
-                coordinator.composerDisabledReason != null) ...[
-              const SizedBox(height: PiSpacing.sm),
-              Text(
-                coordinator.composerDisabledReason!,
-                key: const Key('composer-disabled-reason'),
-                style: Theme.of(context).textTheme.bodySmall,
-              ),
-            ],
             Semantics(
               liveRegion: true,
               label: coordinator.pendingCommandId == null
@@ -163,24 +155,20 @@ class Composer extends StatelessWidget {
                   ),
                 Semantics(
                   button: true,
-                  label: 'Abort active Pi turn',
-                  child: OutlinedButton.icon(
-                    key: const Key('abort-button'),
-                    onPressed: coordinator.canAbort ? coordinator.abort : null,
-                    icon: const Icon(Icons.stop),
-                    label: const Text('Abort'),
-                  ),
-                ),
-                FilledButton.icon(
-                  key: const Key('send-button'),
-                  onPressed: coordinator.canSend
-                      ? coordinator.submitPrompt
-                      : null,
-                  icon: const Icon(Icons.send),
-                  label: Text(
-                    !coordinator.isReady
-                        ? 'Send (offline)'
-                        : deliveryModeLabel(coordinator.selectedDeliveryMode),
+                  label: aborting ? 'Abort active Pi turn' : 'Send message',
+                  child: FilledButton.icon(
+                    key: const Key('send-button'),
+                    onPressed: aborting
+                        ? coordinator.abort
+                        : coordinator.canSend
+                        ? coordinator.submitPrompt
+                        : null,
+                    icon: Icon(aborting ? Icons.stop : Icons.send),
+                    label: Text(
+                      aborting
+                          ? 'Abort'
+                          : deliveryModeLabel(coordinator.selectedDeliveryMode),
+                    ),
                   ),
                 ),
               ],

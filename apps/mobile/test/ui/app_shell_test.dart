@@ -46,6 +46,12 @@ void main() {
     expect(find.textContaining('Fixture host'), findsNothing);
     expect(find.byKey(const Key('new-chat-button')), findsOneWidget);
     expect(find.byKey(const Key('change-chat-folder')), findsOneWidget);
+    expect(
+      find.byKey(
+        const Key('chat-actions-22222222-2222-4222-8222-222222222222'),
+      ),
+      findsOneWidget,
+    );
   });
 
   testWidgets('empty Chat opens the same saved-chat drawer', (tester) async {

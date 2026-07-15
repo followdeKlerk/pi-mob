@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
+import '../../domain/session_tree.dart';
 import '../../notifications/notification_controller.dart';
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
+
+enum _ChatAction { rename, delete }
 
 /// Compact saved-chat navigation for the single-screen chat shell.
 class ChatSessionDrawer extends StatefulWidget {
@@ -117,18 +120,99 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     await widget.coordinator.selectPrimarySession(sessionId);
   }
 
+  Future<void> _renameSession(SessionState session) async {
+    final controller = TextEditingController(text: _title(session));
+    final name = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rename chat'),
+        content: TextField(
+          key: const Key('rename-chat-field'),
+          controller: controller,
+          autofocus: true,
+          maxLength: 120,
+          textCapitalization: TextCapitalization.sentences,
+          decoration: const InputDecoration(hintText: 'Chat name'),
+          onSubmitted: (value) {
+            final trimmed = value.trim();
+            if (trimmed.isNotEmpty) Navigator.pop(dialogContext, trimmed);
+          },
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-rename-chat'),
+            onPressed: () {
+              final trimmed = controller.text.trim();
+              if (trimmed.isNotEmpty) Navigator.pop(dialogContext, trimmed);
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (name != null && name != session.name.trim()) {
+      await widget.coordinator.renameSession(session.sessionId, name);
+    }
+  }
+
+  Future<void> _deleteSession(SessionState session) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Delete chat?'),
+        content: Text(
+          '“${_title(session)}” will be removed. Any active work in this chat will stop.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext, false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-delete-chat'),
+            style: FilledButton.styleFrom(
+              backgroundColor: Theme.of(dialogContext).colorScheme.error,
+              foregroundColor: Theme.of(dialogContext).colorScheme.onError,
+            ),
+            onPressed: () => Navigator.pop(dialogContext, true),
+            child: const Text('Delete'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await widget.coordinator.deleteSession(session.sessionId);
+    }
+  }
+
+  Future<void> _handleChatAction(SessionState session, _ChatAction action) =>
+      switch (action) {
+        _ChatAction.rename => _renameSession(session),
+        _ChatAction.delete => _deleteSession(session),
+      };
+
   @override
   Widget build(BuildContext context) {
     final coordinator = widget.coordinator;
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final sessions = [...coordinator.sessions]
-      ..sort(
-        (a, b) => (b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
-            .compareTo(
-              a.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0),
-            ),
-      );
+    final sessions =
+        coordinator.sessions.where((session) {
+          final lifecycle =
+              coordinator.sessionTree[session.sessionId]?.lifecycle;
+          return lifecycle != SessionLifecycleState.softDeleted &&
+              lifecycle != SessionLifecycleState.purged;
+        }).toList()..sort(
+          (a, b) => (b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+              .compareTo(
+                a.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+              ),
+        );
 
     return Drawer(
       key: const Key('chat-session-drawer'),
@@ -219,6 +303,31 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                               _context(session),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
+                            ),
+                            trailing: PopupMenuButton<_ChatAction>(
+                              key: Key('chat-actions-${session.sessionId}'),
+                              tooltip: 'Chat actions',
+                              enabled: coordinator.isReady,
+                              onSelected: (action) =>
+                                  unawaited(_handleChatAction(session, action)),
+                              itemBuilder: (context) => const [
+                                PopupMenuItem(
+                                  value: _ChatAction.rename,
+                                  child: ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: Icon(Icons.edit_outlined),
+                                    title: Text('Rename'),
+                                  ),
+                                ),
+                                PopupMenuItem(
+                                  value: _ChatAction.delete,
+                                  child: ListTile(
+                                    contentPadding: EdgeInsets.zero,
+                                    leading: Icon(Icons.delete_outline),
+                                    title: Text('Delete'),
+                                  ),
+                                ),
+                              ],
                             ),
                             onTap: () =>
                                 unawaited(_selectSession(session.sessionId)),

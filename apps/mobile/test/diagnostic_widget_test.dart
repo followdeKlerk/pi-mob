@@ -80,13 +80,9 @@ void main() {
         isNull,
         reason: 'offline send must remain disabled',
       );
-      expect(find.text('Send (offline)'), findsOneWidget);
-      expect(
-        tester
-            .widget<OutlinedButton>(find.byKey(const Key('abort-button')))
-            .onPressed,
-        isNull,
-      );
+      expect(find.text('Send'), findsOneWidget);
+      expect(find.byKey(const Key('abort-button')), findsNothing);
+      expect(find.byKey(const Key('composer-disabled-reason')), findsNothing);
 
       await tester.enterText(
         find.byKey(const Key('draft-field')),

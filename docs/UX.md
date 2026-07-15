@@ -166,7 +166,8 @@ No default countdown or auto-approval.
 On mobile, saved sessions live in a leading hamburger drawer on the Chat
 screen. Rows read like saved conversations: the session title is primary,
 folder and runtime state are secondary, and the already-known host name is
-not repeated. The drawer also provides New chat and folder selection.
+not repeated. Each row provides rename and confirmation-protected delete
+actions. The drawer also provides New chat and folder selection.
 
 Default sort:
 
@@ -232,8 +233,11 @@ Header actions:
 
 - session switcher,
 - model/thinking sheet,
-- details/menu,
-- abort while active.
+- details/menu.
+
+The composer uses one primary action: Send while idle, disabled when sending
+is unavailable, and Abort while the agent is generating. No separate abort
+button or disabled-status sentence is shown.
 
 ### Turn composition
 
