@@ -372,11 +372,13 @@ export function normalizePiEvent(raw: RawPiEvent, context: PiNormalizationContex
     case "turn_end": return [event("assistant.completed", sessionId, { summary: safe(raw.message), toolResultCount: Array.isArray(raw.toolResults) ? raw.toolResults.length : 0 })];
     case "message_start": {
       const message = object(raw.message);
-      return [event(message.role === "assistant" ? "assistant.started" : "reasoning.started", sessionId, { contentBlockId: message.id ?? raw.messageId ?? "message" })];
+      if (message.role !== "assistant") return [];
+      return [event("assistant.started", sessionId, { contentBlockId: message.id ?? raw.messageId ?? "message" })];
     }
     case "message_update": return normalizeMessageUpdate(raw, sessionId);
     case "message_end": {
       const message = object(raw.message);
+      if (message.role !== "assistant") return [];
       if (message.stopReason === "aborted") {
         return [event("turn.aborted", sessionId, { reason: "aborted" })];
       }

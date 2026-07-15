@@ -136,6 +136,7 @@ class UserTurn extends Turn {
     required this.status,
     super.startedAt,
     super.endedAt,
+    this.message,
     this.respondingToTurnId,
   });
 
@@ -150,6 +151,9 @@ class UserTurn extends Turn {
 
   /// Current lifecycle phase. See [UserTurnStatus].
   final UserTurnStatus status;
+
+  /// Prompt text durably associated with this turn.
+  final String? message;
 
   /// Identifier of the turn this user prompt steers or follows up to.
   /// `null` when the prompt was a fresh `immediate` submission.
@@ -174,6 +178,7 @@ class UserTurn extends Turn {
     UserTurnStatus? status,
     DateTime? startedAt,
     DateTime? endedAt,
+    String? message,
     String? respondingToTurnId,
   }) => UserTurn(
     turnId: turnId,
@@ -182,6 +187,7 @@ class UserTurn extends Turn {
     status: status ?? this.status,
     startedAt: startedAt ?? this.startedAt,
     endedAt: endedAt ?? this.endedAt,
+    message: message ?? this.message,
     respondingToTurnId: respondingToTurnId ?? this.respondingToTurnId,
   );
 
@@ -194,6 +200,7 @@ class UserTurn extends Turn {
       other.status == status &&
       other.startedAt == startedAt &&
       other.endedAt == endedAt &&
+      other.message == message &&
       other.respondingToTurnId == respondingToTurnId;
 
   @override
@@ -204,6 +211,7 @@ class UserTurn extends Turn {
     status,
     startedAt,
     endedAt,
+    message,
     respondingToTurnId,
   );
 }

@@ -100,6 +100,11 @@ class ConnectionPanel extends StatelessWidget {
                   Text('Pi: ${coordinator.piVersion ?? '—'}'),
                   Text('Protocol: ${coordinator.protocolVersion}'),
                   Text('Generation: ${coordinator.hostGeneration ?? '—'}'),
+                  if (coordinator.pendingSynchronizationStreams.isNotEmpty)
+                    Text(
+                      'Waiting for: ${coordinator.pendingSynchronizationStreams.join(', ')}',
+                      key: const Key('pending-sync-streams'),
+                    ),
                 ],
               ),
             ),

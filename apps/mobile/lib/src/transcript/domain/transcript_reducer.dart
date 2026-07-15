@@ -305,6 +305,7 @@ class TranscriptReducer {
         deliveryMode: parsed.deliveryMode,
         status: UserTurnStatus.dispatched,
         startedAt: event.occurredAt,
+        message: parsed.message,
         respondingToTurnId: parsed.respondingToTurnId,
       ),
       userKey,

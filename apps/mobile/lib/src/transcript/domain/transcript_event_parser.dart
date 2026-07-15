@@ -4,21 +4,21 @@ import 'transcript_truncation.dart';
 
 /// Parsed payload of a `turn.queued` / `turn.accepted` event.
 ///
-/// The reducer uses this to lower the durable command states into the
-/// user-turn lifecycle. The bridge never carries the prompt body in the
-/// journal; the reducer therefore exposes the `commandId` only and lets
-/// the caller resolve prompt text from its local command context.
+/// The reducer uses this to lower the durable command state and prompt into
+/// the user-turn lifecycle.
 class ParsedTurnStarted {
   const ParsedTurnStarted({
     required this.turnId,
     required this.commandId,
     required this.deliveryMode,
+    this.message,
     this.respondingToTurnId,
   });
 
   final String turnId;
   final String commandId;
   final String deliveryMode;
+  final String? message;
   final String? respondingToTurnId;
 }
 
@@ -107,6 +107,7 @@ class TranscriptEventParser {
       turnId: turnId,
       commandId: commandId,
       deliveryMode: deliveryMode,
+      message: _optionalString(payload['message']),
       respondingToTurnId: respondingTo is String ? respondingTo : null,
     );
   }

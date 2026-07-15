@@ -6,6 +6,8 @@ import '../../controls/controls.dart' as control_ui;
 import '../../connection/connection_coordinator.dart';
 import '../../domain/session_controls.dart' as control_domain;
 import '../../domain/mobile_state.dart';
+import '../../sessions/observer_banner.dart';
+import '../../sessions/session_view_data.dart' as session_ui;
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
 import 'policy_mode_row.dart';
@@ -245,6 +247,12 @@ class _WorkspaceSessionPanelState extends State<WorkspaceSessionPanel> {
         ? coordinator.selectedSessionId
         : null;
     final selectedWorkspace = coordinator.selectedWorkspace;
+    final selectedSessionMatches = coordinator.sessions.where(
+      (item) => item.sessionId == sessionValue,
+    );
+    final selectedSession = selectedSessionMatches.isEmpty
+        ? null
+        : selectedSessionMatches.first;
     final policy = coordinator.activePolicyMode;
     final trustRequired = coordinator.requiresTrustApproval;
     return Card(
@@ -298,7 +306,9 @@ class _WorkspaceSessionPanelState extends State<WorkspaceSessionPanel> {
                         ),
                     ],
                     onChanged: (value) {
-                      if (value != null) coordinator.selectSession(value);
+                      if (value != null) {
+                        coordinator.selectPrimarySession(value);
+                      }
                     },
                   ),
                 ),
@@ -333,6 +343,34 @@ class _WorkspaceSessionPanelState extends State<WorkspaceSessionPanel> {
                   ),
               ],
             ),
+            if (coordinator.isReady &&
+                selectedSession != null &&
+                coordinator.leaseId == null) ...[
+              const SizedBox(height: PiSpacing.sm),
+              ObserverBanner(
+                data: session_ui.ObserverBannerViewData(
+                  session: session_ui.SessionSummaryData(
+                    sessionId: selectedSession.sessionId,
+                    displayName: selectedSession.name,
+                    workspaceLabel: selectedWorkspace?.displayName,
+                    runtime: session_ui.SessionRuntime.fromLabel(
+                      selectedSession.runtimeState,
+                    ),
+                    attention: selectedSession.unreadState == 'needs_attention'
+                        ? session_ui.SessionAttention.attention
+                        : session_ui.SessionAttention.none,
+                    background: session_ui.SessionBackground.foreground,
+                    lastActivityAt: selectedSession.lastActivityAt,
+                  ),
+                  reason: session_ui.ObserverReason.anotherClient,
+                  controllerClientName: 'Another connected device',
+                ),
+                callbacks: session_ui.ObserverBannerCallbacks(
+                  onTakeControl: (session) =>
+                      unawaited(coordinator.takeControl(session.sessionId)),
+                ),
+              ),
+            ],
             const SizedBox(height: PiSpacing.sm),
             PolicyModeRow(
               coordinator: coordinator,

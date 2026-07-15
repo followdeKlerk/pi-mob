@@ -395,8 +395,9 @@ class _TurnView extends StatelessWidget {
           vertical: 6,
         ),
         child: ListTile(
-          title: const Text('Prompt'),
-          subtitle: Text('${user.deliveryMode} · ${user.status.name}'),
+          leading: const Icon(Icons.person_outline),
+          title: Text(user.message ?? 'Prompt'),
+          subtitle: Text('You · ${user.deliveryMode} · ${user.status.name}'),
         ),
       );
     }

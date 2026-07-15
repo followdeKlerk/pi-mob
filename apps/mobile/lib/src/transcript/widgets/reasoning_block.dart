@@ -76,6 +76,9 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
   @override
   Widget build(BuildContext context) {
     final active = _data.phase == ReasoningPhase.active;
+    if (!active && _data.summary.trim().isEmpty && _data.steps.isEmpty) {
+      return const SizedBox.shrink();
+    }
     final phaseLabel = _data.phaseLabel;
     final scheme = _colors;
     final text = _text;

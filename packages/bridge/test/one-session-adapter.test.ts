@@ -255,6 +255,37 @@ describe("OneSessionPiAdapter", () => {
     expect(JSON.stringify(store.listEvents(streamId))).not.toContain("/private/repo");
   });
 
+  test("shared RPC binds one notification listener across durable sessions", async () => {
+    const { store, adapter, hostStream, rpc } = setup();
+    await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    await adapter.dispatch(makeCommand("c2", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const summaries = store.listEvents(hostStream).filter((event) => event.type === "session.summary");
+    const sessionId = (summaries.at(-1)!.payload as Record<string, unknown>).sessionId as string;
+    expect(rpc.notifications.size).toBe(1);
+
+    rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_delta", delta: "once" } });
+
+    const deltas = store.listEvents(`session:${sessionId}`).filter((event) => event.type === "assistant.delta");
+    expect(deltas).toHaveLength(1);
+    expect((deltas[0]!.payload as Record<string, unknown>).text).toBe("once");
+  });
+
+  test("assigns each submitted prompt a distinct durable turn id", async () => {
+    const { store, adapter, hostStream, rpc } = setup();
+    await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
+
+    for (const commandId of ["prompt-one", "prompt-two"]) {
+      await adapter.dispatch(makeCommand(commandId, "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, { sessionId, deliveryMode: "immediate", message: commandId, attachmentIds: [] }));
+      rpc.emit({ type: "turn_start", sessionId });
+      rpc.emit({ type: "agent_settled", sessionId });
+    }
+
+    const starts = store.listEvents(`session:${sessionId}`).filter((event) => event.type === "turn.started");
+    expect(starts.map((event) => (event.payload as Record<string, unknown>).turnId)).toEqual(["prompt-one", "prompt-two"]);
+    expect(starts.map((event) => (event.payload as Record<string, unknown>).commandId)).toEqual(["prompt-one", "prompt-two"]);
+  });
+
   test("routes notifications to the active session when sessionId is omitted on the wire", async () => {
     const { store, adapter, hostStream } = setup();
     await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));

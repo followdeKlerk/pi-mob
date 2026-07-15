@@ -52,6 +52,10 @@ class SessionRuntime {
   static const providerInterrupted = SessionRuntime._('provider_interrupted');
   static const deleted = SessionRuntime._('deleted');
 
+  /// Preserves the host's runtime label while keeping widget construction
+  /// out of protocol/domain internals.
+  factory SessionRuntime.fromLabel(String label) => SessionRuntime._(label);
+
   static const known = <String>{
     'idle',
     'running',

@@ -66,6 +66,15 @@ void main() {
     await db.close();
   });
 
+  test('takeControl repairs a missing foreground subscription', () async {
+    expect(coordinator.subscriptionSet.isEmpty, isTrue);
+
+    await coordinator.takeControl('restored-session');
+
+    expect(coordinator.subscriptionSet.full?.sessionId, 'restored-session');
+    expect(coordinator.selectedSessionId, 'restored-session');
+  });
+
   test('subscription set starts empty and gains a summary row', () async {
     expect(coordinator.subscriptionSet.isEmpty, isTrue);
     await coordinator.addSummarySubscription('sA');

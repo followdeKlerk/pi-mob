@@ -182,6 +182,11 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   bool get isReady => phase == ConnectionPhase.ready && _socket != null;
 
+  /// Stream identifiers still awaiting an authoritative sync-complete frame.
+  /// Exposed for Host diagnostics; callers receive an immutable snapshot.
+  List<String> get pendingSynchronizationStreams =>
+      List<String>.unmodifiable(_syncPending);
+
   /// True when the composer can submit the current draft. In addition to the
   /// connection / session prerequisites, the selected [DeliveryMode] must be
   /// compatible with the current session runtime state:
@@ -239,7 +244,16 @@ final class ConnectionCoordinator extends ChangeNotifier
       leaseId != null &&
       pendingCommandId != null &&
       pendingPayload != null;
-  bool get canAbort => isReady && selectedSessionId != null && leaseId != null;
+  bool get canAbort =>
+      isReady &&
+      selectedSessionId != null &&
+      leaseId != null &&
+      const {
+        'running',
+        'waiting_for_input',
+        'retrying',
+        'finishing',
+      }.contains(selectedRuntimeState);
   String? get selectedRuntimeState => selectedSessionId == null
       ? null
       : _sessions[selectedSessionId]?.runtimeState;
@@ -2543,6 +2557,20 @@ final class ConnectionCoordinator extends ChangeNotifier
         .then((_) {
           _notify();
         }, onError: (_) {});
+  }
+
+  /// Makes [sessionId] the foreground subscription and acquires control.
+  ///
+  /// A restored selection can predate the durable multi-session set. In that
+  /// case, first repair the foreground subscription; its sync-complete path
+  /// performs acquisition after the server readiness fence opens. When the
+  /// subscription is already full, this is an explicit takeover request.
+  Future<void> takeControl(String sessionId) async {
+    if (!_subscriptionSet.isFull(sessionId)) {
+      await selectPrimarySession(sessionId);
+      return;
+    }
+    await acquireController(sessionId);
   }
 
   /// Explicit controller acquire. Returns when the host acknowledges

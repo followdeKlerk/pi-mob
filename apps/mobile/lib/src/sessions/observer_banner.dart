@@ -102,12 +102,13 @@ class ObserverBanner extends StatelessWidget {
                   icon: const Icon(Icons.ads_click),
                   label: const Text(ObserverBannerText.confirmAffirm),
                 ),
-                TextButton.icon(
-                  key: const Key('observer-dismiss'),
-                  onPressed: () => callbacks.onDismiss?.call(data.session),
-                  icon: const Icon(Icons.close),
-                  label: const Text('Dismiss'),
-                ),
+                if (callbacks.onDismiss != null)
+                  TextButton.icon(
+                    key: const Key('observer-dismiss'),
+                    onPressed: () => callbacks.onDismiss!(data.session),
+                    icon: const Icon(Icons.close),
+                    label: const Text('Dismiss'),
+                  ),
               ],
             ),
           ],

@@ -247,6 +247,7 @@ export class OneSessionPiAdapter {
   private readonly supervisor: ProcessSupervisor;
   private readonly reuseExistingOnCreate: boolean;
   private lastUsedSessionId: string | null = null;
+  private readonly activeTurns = new Map<string, { turnId: string; deliveryMode: string; message: string }>();
   private readonly globalDetach = new Set<() => void>();
   /** M12 — soft-deletion retention window (7 days) for `session.delete`. */
   private readonly softDeleteRetentionMs: number;
@@ -280,6 +281,13 @@ export class OneSessionPiAdapter {
     }
     this.store.recoverDispatchingFollowUps();
     this.store.expireDialogs(this.now());
+    // The legacy production transport is a single shared RPC emitter. Bind it
+    // exactly once: attaching one handler per durable session multiplies every
+    // token delta and terminal event by the session count.
+    if (this.rpc && !this.createRpc) {
+      const detach = this.rpc.on("notification", (raw) => this.handleNotification(raw));
+      this.globalDetach.add(detach);
+    }
     this.bootstrapExistingSessions();
   }
 
@@ -501,8 +509,10 @@ export class OneSessionPiAdapter {
     })();
     if (slot.bound) return slot.bound;
     const handler: PiRpcNotificationHandler = (raw) => this.handleNotification(raw);
-    const detach = slot.rpc.on("notification", handler);
-    this.globalDetach.add(detach);
+    const detach = this.createRpc
+      ? slot.rpc.on("notification", handler)
+      : () => undefined;
+    if (this.createRpc) this.globalDetach.add(detach);
     const entry: SessionEntry = { rpc: slot.rpc, detach, state: "idle" };
     slot.bound = entry;
     this.sessions.set(sessionId, entry);
@@ -869,6 +879,11 @@ export class OneSessionPiAdapter {
       payload.deliveryMode === "follow_up" ? "follow_up" : "prompt";
     const attachmentIds = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
     if (attachmentIds.length > 4) throw new Error("prompt.submit supports at most four attachments");
+    this.activeTurns.set(payload.sessionId, {
+      turnId: command.commandId,
+      deliveryMode: payload.deliveryMode ?? "immediate",
+      message: payload.message,
+    });
     const images: Array<{ type: "image"; data: string; mimeType: string }> = [];
     let attachmentBytes = 0;
     for (const attachmentId of attachmentIds) {
@@ -890,6 +905,7 @@ export class OneSessionPiAdapter {
         params: { message: payload.message, ...(images.length ? { images } : {}) },
       });
     } catch (error) {
+      this.activeTurns.delete(payload.sessionId);
       const streamId = `session:${payload.sessionId}`;
       this.store.appendEvent(streamId, "turn.indeterminate", {
         sessionId: payload.sessionId,
@@ -1366,16 +1382,23 @@ export class OneSessionPiAdapter {
       this.store.updateSessionState(inferredSessionId, { ...(this.store.sessionState(inferredSessionId) ?? {}), pendingDialog:{ dialogId:dialog.dialogId, method, ...request, expiresAt:new Date(dialog.expiresAt).toISOString() } });
       return;
     }
-    if (type === "agent_settled") void this.dispatchNextFollowUp(inferredSessionId).catch(() => undefined);
     const normalized = normalizePiEvent(record as RawPiEvent, {
       sessionId: inferredSessionId,
       toolOutputLimiter: this.toolOutputLimiter,
     });
     if (normalized.length === 0) return;
+    const activeTurn = this.activeTurns.get(inferredSessionId);
     for (const event of normalized) {
       if(["turn.failed","turn.aborted","turn.indeterminate"].includes(event.type)) this.store.orphanPendingDialogs(inferredSessionId);
-      const storedEvent=this.store.appendEvent(streamId, event.type, { ...event.payload });
-      const notificationKind=classifyEvent({type:event.type,sessionId:inferredSessionId,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt,...(typeof event.payload.errorCode==="string"?{errorCode:event.payload.errorCode}:{}),...(typeof event.payload.attentionState==="string"?{attentionState:event.payload.attentionState}:{}),...(typeof event.payload.runtimeState==="string"?{runtimeState:event.payload.runtimeState}:{})});
+      const enrichedPayload: Record<string, unknown> = {
+        ...event.payload,
+        ...(activeTurn ? { turnId: activeTurn.turnId } : {}),
+        ...(activeTurn && event.type === "turn.started"
+          ? { commandId: activeTurn.turnId, deliveryMode: activeTurn.deliveryMode, message: activeTurn.message }
+          : {}),
+      };
+      const storedEvent=this.store.appendEvent(streamId, event.type, enrichedPayload);
+      const notificationKind=classifyEvent({type:event.type,sessionId:inferredSessionId,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt,...(typeof enrichedPayload.errorCode==="string"?{errorCode:enrichedPayload.errorCode}:{}),...(typeof enrichedPayload.attentionState==="string"?{attentionState:enrichedPayload.attentionState}:{}),...(typeof enrichedPayload.runtimeState==="string"?{runtimeState:enrichedPayload.runtimeState}:{})});
       if(notificationKind) safePublishStatus(this.notificationService,{sessionId:inferredSessionId,kind:notificationKind,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt});
       const prior = this.store.sessionState(inferredSessionId) ?? {};
       const runtimeState = event.type === "turn.started"
@@ -1387,10 +1410,14 @@ export class OneSessionPiAdapter {
         : event.payload.runtimeState;
       this.store.updateSessionState(inferredSessionId, {
         ...prior,
-        ...event.payload,
+        ...enrichedPayload,
         ...(typeof runtimeState === "string" ? { runtimeState } : {}),
         lastActivityAt: new Date(this.now()).toISOString(),
       });
+    }
+    if (type === "agent_settled") {
+      this.activeTurns.delete(inferredSessionId);
+      void this.dispatchNextFollowUp(inferredSessionId).catch(() => undefined);
     }
   }
 

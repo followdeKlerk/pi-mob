@@ -22,7 +22,10 @@ void main() {
     'real normalized sparse events compose reasoning, tools, and answer',
     () {
       final events = <StreamEventState>[
-        event(1, 'turn.started', {'turnIndex': 1}),
+        event(1, 'turn.started', {
+          'turnIndex': 1,
+          'message': 'Inspect the repository',
+        }),
         event(2, 'reasoning.started', {'contentBlockId': 'reason-1'}),
         event(3, 'reasoning.delta', {
           'contentBlockId': 'reason-1',
@@ -76,6 +79,8 @@ void main() {
         state = reducer.apply(state: state, event: item);
       }
 
+      final userTurn = state.document.turns.whereType<UserTurn>().single;
+      expect(userTurn.message, 'Inspect the repository');
       final turn = state.document.turns.whereType<AssistantTurn>().single;
       expect(turn.status, AssistantTurnStatus.completed);
       final reasoning = turn.items.whereType<ReasoningItem>().single;
