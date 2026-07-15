@@ -343,7 +343,7 @@ void main() {
           event(
             type: 'workspace.trust_state',
             streamId: 'host:$_hostId',
-            cursor: '2',
+            cursor: '1',
             eventId: '88888888-8888-4888-8888-888888888888',
             payload: {
               'workspaceId': _wsA,
@@ -355,6 +355,11 @@ void main() {
           ),
         );
         await _drainCoordinator(tester);
+        expect(
+          coordinator.streams['host:$_hostId']?.lastContiguousCursor.value,
+          '1',
+          reason: 'typed trust events must advance the durable host cursor',
+        );
         expect(
           find.byKey(Key('workspace-tile-fingerprint-$_wsA')),
           findsOneWidget,
@@ -468,7 +473,7 @@ void main() {
           event(
             type: 'controller.state',
             streamId: 'session:$_sessionId',
-            cursor: '1',
+            cursor: '2',
             eventId: '55555555-5555-4555-8555-555555555555',
             payload: {
               'scope': 'session',

@@ -1139,6 +1139,18 @@ final class ConnectionCoordinator extends ChangeNotifier
     final payload = Map<String, Object?>.from(payloadValue);
     _appendRaw(message);
 
+    // Every durable event must advance its stream cursor before any
+    // type-specific projection runs. Handling selected event types directly
+    // here used to skip their cursors, so the next sync completed with an
+    // apparent gap and incorrectly marked the connection incompatible.
+    if (message['eventId'] is String &&
+        message['streamId'] is String &&
+        message['cursor'] is String) {
+      await _journalEvent(message, type, payload);
+      _notify();
+      return;
+    }
+
     switch (type) {
       case 'hello.accepted':
         await _helloAccepted(payload);
@@ -1175,11 +1187,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       case 'session.state':
         _mergeSession(payload);
       default:
-        if (message['eventId'] is String &&
-            message['streamId'] is String &&
-            message['cursor'] is String) {
-          await _journalEvent(message, type, payload);
-        }
+        break;
     }
     _notify();
   }
@@ -1433,7 +1441,11 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   void _handleEventPayload(String type, Map<String, Object?> payload) {
-    if (type == 'host.degraded') {
+    if (type == 'host.state') {
+      if (payload['ready'] == false) {
+        errorMessage = 'Host reported not ready';
+      }
+    } else if (type == 'host.degraded') {
       phase = ConnectionPhase.degraded;
       errorMessage = payload['reason']?.toString() ?? 'Host degraded';
     } else if (type == 'host.draining') {
