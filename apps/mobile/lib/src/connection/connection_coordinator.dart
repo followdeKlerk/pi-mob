@@ -206,9 +206,18 @@ final class ConnectionCoordinator extends ChangeNotifier
       : DeliveryMode.immediate;
 
   bool get canAttemptSend {
+    final sessionId = selectedSessionId;
+    final selected = sessionId == null ? null : _sessions[sessionId];
+    final lifecycle = sessionId == null
+        ? null
+        : _sessionTree[sessionId]?.lifecycle;
     if (_sendRecoveryInFlight ||
         !isReady ||
-        selectedSessionId == null ||
+        sessionId == null ||
+        selected == null ||
+        _locallyDeletedSessionIds.contains(sessionId) ||
+        lifecycle == SessionLifecycleState.softDeleted ||
+        lifecycle == SessionLifecycleState.purged ||
         draft.trim().isEmpty ||
         pendingCommandId != null ||
         requiresTrustApproval) {
@@ -814,6 +823,19 @@ final class ConnectionCoordinator extends ChangeNotifier
     // controller acquisition. A transport failure or delete_failed event
     // restores the row.
     _locallyDeletedSessionIds.add(sessionId);
+    if (selectedSessionId == sessionId) {
+      final replacements = sessions;
+      if (replacements.isNotEmpty) {
+        unawaited(selectPrimarySession(replacements.first.sessionId));
+      } else {
+        selectedSessionId = null;
+        leaseId = null;
+        draft = '';
+        pendingCommandId = null;
+        pendingPayload = null;
+        pendingState = null;
+      }
+    }
     _notify();
     try {
       await _sendSessionLifecycle(
@@ -1071,6 +1093,9 @@ final class ConnectionCoordinator extends ChangeNotifier
     _notify();
     try {
       if (leaseId == null) await _ensureControllerForMutation(sessionId);
+      if (selectedSessionId != sessionId) {
+        throw StateError('The selected chat changed before Send completed');
+      }
       if (!canSend) {
         throw StateError(composerDisabledReason ?? 'Send is unavailable');
       }
@@ -2192,6 +2217,16 @@ final class ConnectionCoordinator extends ChangeNotifier
       leaseId = null;
       _leaseTimer?.cancel();
     }
+    if (code == 'controller_conflict' &&
+        _sendRecoveryInFlight &&
+        selectedSessionId != null) {
+      // A user-tapped Send is an explicit request to control this chat. Reclaim
+      // a lease left by an older app connection instead of timing out behind
+      // the ordinary acquire conflict.
+      errorMessage = null;
+      unawaited(takeoverController(selectedSessionId!));
+      return;
+    }
     if (code == 'command_not_found' && pendingCommandId != null) {
       // The host authoritatively has no durable record for this command. It
       // cannot execute later, so retaining its local pending marker only
@@ -2946,7 +2981,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       case ControllerMode.primary:
         if (lease == null) return;
         controller.adoptAcquire(lease);
-        if (id == selectedSessionId) leaseId = lease;
+        if (id == selectedSessionId) {
+          leaseId = lease;
+          if (_sendRecoveryInFlight) errorMessage = null;
+        }
         final waiter = _controllerWaiters.remove(id);
         if (waiter != null && !waiter.isCompleted) waiter.complete();
         if (hostId != null) {
