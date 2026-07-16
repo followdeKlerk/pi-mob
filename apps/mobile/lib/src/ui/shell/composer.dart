@@ -28,6 +28,34 @@ class Composer extends StatelessWidget {
   final TextEditingController draftController;
   final VoidCallback onOpenDialog;
 
+  Future<void> _discardIndeterminate(BuildContext context) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Discard uncertain message?'),
+        content: const Text(
+          'This message may already have completed. Discarding will not '
+          'cancel or undo it. Pi will restart without sending it again, and '
+          'you can compose a new message.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Keep'),
+          ),
+          FilledButton(
+            key: const Key('confirm-discard-indeterminate'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Discard and continue'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true) {
+      await coordinator.discardIndeterminateAndContinue();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final prefill = coordinator.editorPrefill;
@@ -50,11 +78,38 @@ class Composer extends StatelessWidget {
                 coordinator.selectedRuntimeState == 'indeterminate') ...[
               Card(
                 key: const Key('indeterminate-warning'),
-                color: const Color(0xFFFFF3CD),
-                child: const Padding(
-                  padding: EdgeInsets.all(PiSpacing.sm + 2),
-                  child: Text(
-                    'Completion is unknown. The command will not run again automatically. Inspect the session before deciding what to do.',
+                color: Theme.of(context).colorScheme.errorContainer,
+                child: Padding(
+                  padding: const EdgeInsets.all(PiSpacing.md),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Completion is unknown',
+                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      const SizedBox(height: PiSpacing.xs),
+                      Text(
+                        'The previous message will not run again automatically.',
+                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: Theme.of(context).colorScheme.onErrorContainer,
+                        ),
+                      ),
+                      const SizedBox(height: PiSpacing.sm),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton(
+                          key: const Key('discard-indeterminate'),
+                          onPressed: () =>
+                              unawaited(_discardIndeterminate(context)),
+                          child: const Text('Discard and continue'),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

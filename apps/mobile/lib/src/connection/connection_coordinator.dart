@@ -1041,6 +1041,25 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
   }
 
+  /// Explicitly abandons local retry tracking for an uncertain prompt and
+  /// restarts the Pi session without resending that prompt. The submitted
+  /// draft is cleared so a duplicate cannot be sent accidentally.
+  Future<void> discardIndeterminateAndContinue() async {
+    if (pendingState != 'indeterminate' &&
+        selectedRuntimeState != 'indeterminate') {
+      return;
+    }
+    final submittedText = pendingPayload?['message'];
+    if (draft == submittedText || pendingState == 'indeterminate') draft = '';
+    pendingCommandId = null;
+    pendingPayload = null;
+    pendingState = null;
+    selectedDeliveryMode = DeliveryMode.immediate;
+    await _persistDraft();
+    _notify();
+    await retrySession();
+  }
+
   Future<void> retrySession() async {
     if (!canRetrySession) return;
     await _sendCommand(
