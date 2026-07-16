@@ -436,6 +436,13 @@ final class ConnectionCoordinator extends ChangeNotifier
   SessionHistoryState historyFor(String sessionId) =>
       _history[sessionId] ?? SessionHistoryState.empty(sessionId);
 
+  bool isHistorySyncing(String sessionId) {
+    final state = historyFor(sessionId);
+    return state.isLoading || state.hasOlder;
+  }
+
+  int historyEventCount(String sessionId) => historyFor(sessionId).items.length;
+
   List<StreamEventState> transcriptEvents(String sessionId) {
     final byId = <String, StreamEventState>{};
     for (final event
@@ -2041,7 +2048,17 @@ final class ConnectionCoordinator extends ChangeNotifier
       error: null,
     );
     if (selectedSessionId == request.sessionId && nextPageToken != null) {
-      unawaited(loadOlderHistory(request.sessionId));
+      // The bridge allows a burst of controls but refills at 10/sec. Pace
+      // large transcript scans so pagination cannot starve cursor/lease work
+      // or wedge on a rate_limited response.
+      unawaited(
+        Future<void>.delayed(const Duration(milliseconds: 150), () async {
+          if (request.epoch == _connectionEpoch &&
+              selectedSessionId == request.sessionId) {
+            await loadOlderHistory(request.sessionId);
+          }
+        }),
+      );
     }
   }
 
@@ -2240,6 +2257,32 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> payload,
   ) async {
     final code = payload['code']?.toString() ?? 'unknown';
+    final requestId = message['requestId'];
+    final historyRequest = requestId is String
+        ? _historyRequests.remove(requestId)
+        : null;
+    if (historyRequest != null) {
+      final current = historyFor(historyRequest.sessionId);
+      _history[historyRequest.sessionId] = current.copyWith(
+        isLoading: false,
+        error: '$code: ${payload['message'] ?? 'History sync failed'}',
+      );
+      // History is a repeatable read. A rate-limited page was rejected before
+      // dispatch, so retrying its same opaque token cannot duplicate data.
+      if (code == 'rate_limited' && historyRequest.epoch == _connectionEpoch) {
+        errorMessage = null;
+        unawaited(
+          Future<void>.delayed(const Duration(milliseconds: 350), () async {
+            if (historyRequest.epoch == _connectionEpoch &&
+                selectedSessionId == historyRequest.sessionId) {
+              await loadOlderHistory(historyRequest.sessionId);
+            }
+          }),
+        );
+      }
+      _notify();
+      return;
+    }
     final shouldRecoverHostReadiness =
         code == 'host_not_ready' &&
         _syncPending.isEmpty &&

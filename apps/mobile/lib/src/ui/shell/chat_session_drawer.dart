@@ -164,6 +164,9 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     final semantic = context.piSemanticColors;
     final connectionHealthy =
         coordinator.isReady && coordinator.errorMessage == null;
+    final selectedSessionId = coordinator.selectedSessionId;
+    final transcriptSyncing = selectedSessionId != null &&
+        coordinator.isHistorySyncing(selectedSessionId);
     final sessions =
         coordinator.sessions.where((session) {
           final lifecycle =
@@ -260,7 +263,39 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                 label: const Text('New chat'),
               ),
             ),
-            const SizedBox(height: PiSpacing.md),
+            const SizedBox(height: PiSpacing.sm),
+            if (transcriptSyncing)
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md),
+                child: Container(
+                  key: const Key('drawer-transcript-sync-indicator'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: PiSpacing.md,
+                    vertical: PiSpacing.sm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius: BorderRadius.circular(PiRadius.md),
+                  ),
+                  child: Row(
+                    children: [
+                      const SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      ),
+                      const SizedBox(width: PiSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          'Syncing open chat · ${coordinator.historyEventCount(selectedSessionId!)} events',
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            const SizedBox(height: PiSpacing.sm),
             Expanded(
               child: sessions.isEmpty
                   ? Center(

@@ -25,12 +25,82 @@ class TranscriptPanel extends StatelessWidget {
       );
     }
     final streamId = 'session:$sessionId';
+    final history = coordinator.historyFor(sessionId);
+    final syncing = coordinator.isHistorySyncing(sessionId);
     final truncated = coordinator.toolOutputNotices.where(
       (item) => item.isTruncated,
     );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
+        if (syncing)
+          Semantics(
+            liveRegion: true,
+            label:
+                'Syncing transcript, ${coordinator.historyEventCount(sessionId)} events loaded',
+            child: Container(
+              key: const Key('transcript-sync-indicator'),
+              margin: const EdgeInsets.fromLTRB(
+                PiSpacing.md,
+                PiSpacing.sm,
+                PiSpacing.md,
+                PiSpacing.xs,
+              ),
+              padding: const EdgeInsets.symmetric(
+                horizontal: PiSpacing.md,
+                vertical: PiSpacing.sm,
+              ),
+              decoration: BoxDecoration(
+                color: Theme.of(context).colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(PiRadius.md),
+              ),
+              child: Row(
+                children: [
+                  const SizedBox(
+                    width: 16,
+                    height: 16,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                  const SizedBox(width: PiSpacing.sm),
+                  Expanded(
+                    child: Text(
+                      'Syncing transcript · ${coordinator.historyEventCount(sessionId)} events loaded',
+                      style: Theme.of(context).textTheme.labelMedium,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          )
+        else if (history.error != null)
+          Container(
+            key: const Key('transcript-sync-error'),
+            margin: const EdgeInsets.fromLTRB(
+              PiSpacing.md,
+              PiSpacing.sm,
+              PiSpacing.md,
+              PiSpacing.xs,
+            ),
+            padding: const EdgeInsets.symmetric(
+              horizontal: PiSpacing.md,
+              vertical: PiSpacing.sm,
+            ),
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.errorContainer,
+              borderRadius: BorderRadius.circular(PiRadius.md),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.sync_problem, size: 18),
+                const SizedBox(width: PiSpacing.sm),
+                const Expanded(child: Text('Transcript sync paused')),
+                TextButton(
+                  onPressed: () => coordinator.selectSession(sessionId),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
+          ),
         if (truncated.isNotEmpty)
           for (final notice in truncated)
             ListTile(
