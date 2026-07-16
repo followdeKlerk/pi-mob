@@ -161,6 +161,9 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     final coordinator = widget.coordinator;
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
+    final semantic = context.piSemanticColors;
+    final connectionHealthy =
+        coordinator.isReady && coordinator.errorMessage == null;
     final sessions =
         coordinator.sessions.where((session) {
           final lifecycle =
@@ -199,6 +202,46 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                       ),
                     ),
                   ),
+                  Semantics(
+                    label: connectionHealthy
+                        ? 'Connected'
+                        : 'Connection issue: ${coordinator.errorMessage ?? coordinator.phase.name}',
+                    child: Container(
+                      key: const Key('drawer-connection-indicator'),
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: PiSpacing.sm,
+                        vertical: PiSpacing.xs,
+                      ),
+                      decoration: BoxDecoration(
+                        color: colors.surfaceContainerHighest,
+                        borderRadius: BorderRadius.circular(PiRadius.pill),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Container(
+                            width: 8,
+                            height: 8,
+                            decoration: BoxDecoration(
+                              color: connectionHealthy
+                                  ? semantic.connectionReady
+                                  : semantic.connectionOffline,
+                              shape: BoxShape.circle,
+                            ),
+                          ),
+                          const SizedBox(width: PiSpacing.xs),
+                          Text(
+                            connectionHealthy ? 'Connected' : 'Issue',
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: colors.onSurfaceVariant,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: PiSpacing.xs),
                   IconButton(
                     key: const Key('close-chat-drawer'),
                     tooltip: 'Close',

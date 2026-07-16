@@ -130,6 +130,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   SessionSubscriptionSet _subscriptionSet = SessionSubscriptionSet.empty();
   final ControllerBook _controllers = ControllerBook();
   final Map<String, Completer<void>> _controllerWaiters = {};
+  bool _sendRecoveryInFlight = false;
   final Map<String, SessionAttentionState> _attention = {};
   final Map<String, String> _attentionWire = {};
   final Map<String, int> _unreadCount = {};
@@ -203,6 +204,21 @@ final class ConnectionCoordinator extends ChangeNotifier
   DeliveryMode get _effectiveDeliveryMode => selectedRuntimeState == 'running'
       ? selectedDeliveryMode
       : DeliveryMode.immediate;
+
+  bool get canAttemptSend {
+    if (_sendRecoveryInFlight ||
+        !isReady ||
+        selectedSessionId == null ||
+        draft.trim().isEmpty ||
+        pendingCommandId != null ||
+        requiresTrustApproval) {
+      return false;
+    }
+    return _deliveryModeMatchesRuntime(
+      _effectiveDeliveryMode,
+      selectedRuntimeState,
+    );
+  }
 
   bool get canSend {
     if (!isReady ||
@@ -1042,6 +1058,29 @@ final class ConnectionCoordinator extends ChangeNotifier
     draft = value;
     _notify();
     await _persistDraft();
+  }
+
+  /// User-facing send path. A missing lease is recoverable: foreground the
+  /// selected session, wait for the host's authoritative controller event,
+  /// then submit exactly once through the normal durability barrier.
+  Future<void> submitPromptWithRecovery() async {
+    if (!canAttemptSend) return;
+    final sessionId = selectedSessionId!;
+    _sendRecoveryInFlight = true;
+    errorMessage = null;
+    _notify();
+    try {
+      if (leaseId == null) await _ensureControllerForMutation(sessionId);
+      if (!canSend) {
+        throw StateError(composerDisabledReason ?? 'Send is unavailable');
+      }
+      await submitPrompt();
+    } on Object catch (error) {
+      errorMessage = error.toString();
+    } finally {
+      _sendRecoveryInFlight = false;
+      _notify();
+    }
   }
 
   Future<void> submitPrompt() async {

@@ -203,8 +203,8 @@ class Composer extends StatelessWidget {
                         ),
                         onPressed: aborting
                             ? coordinator.abort
-                            : coordinator.canSend
-                            ? coordinator.submitPrompt
+                            : coordinator.canAttemptSend
+                            ? coordinator.submitPromptWithRecovery
                             : null,
                         child: Icon(aborting ? Icons.stop : Icons.send),
                       ),
