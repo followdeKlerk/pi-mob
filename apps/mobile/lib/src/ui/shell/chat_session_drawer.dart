@@ -138,14 +138,21 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     // after the dialog owns and disposes its own controller.
     await WidgetsBinding.instance.endOfFrame;
     if (!mounted || result == null) return;
-    switch (result.action) {
-      case _ChatAction.rename:
-        final name = result.name?.trim();
-        if (name != null && name.isNotEmpty && name != session.name.trim()) {
-          await widget.coordinator.renameSession(session.sessionId, name);
-        }
-      case _ChatAction.delete:
-        await widget.coordinator.deleteSession(session.sessionId);
+    try {
+      switch (result.action) {
+        case _ChatAction.rename:
+          final name = result.name?.trim();
+          if (name != null && name.isNotEmpty && name != session.name.trim()) {
+            await widget.coordinator.renameSession(session.sessionId, name);
+          }
+        case _ChatAction.delete:
+          await widget.coordinator.deleteSession(session.sessionId);
+      }
+    } on Object catch (error) {
+      if (!mounted) return;
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text('Could not update chat: $error')));
     }
   }
 

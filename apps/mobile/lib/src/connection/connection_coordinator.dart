@@ -128,6 +128,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   // stall the foreground session.
   SessionSubscriptionSet _subscriptionSet = SessionSubscriptionSet.empty();
   final ControllerBook _controllers = ControllerBook();
+  final Map<String, Completer<void>> _controllerWaiters = {};
   final Map<String, SessionAttentionState> _attention = {};
   final Map<String, String> _attentionWire = {};
   final Map<String, int> _unreadCount = {};
@@ -772,21 +773,28 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   SessionTreeProjection get sessionTree => _sessionTree;
 
-  Future<void> renameSession(String sessionId, String name) =>
-      _sendSessionLifecycle('session.rename', sessionId, <String, Object?>{
-        'name': name.trim(),
-      });
+  Future<void> renameSession(String sessionId, String name) async {
+    await _ensureControllerForMutation(sessionId);
+    await _sendSessionLifecycle('session.rename', sessionId, <String, Object?>{
+      'name': name.trim(),
+    });
+  }
+
   Future<void> forkSession(String sessionId, String entryId) =>
       _sendSessionLifecycle('session.fork', sessionId, <String, Object?>{
         'entryId': entryId,
       });
   Future<void> cloneSession(String sessionId) =>
       _sendSessionLifecycle('session.clone', sessionId);
-  Future<void> deleteSession(String sessionId) => _sendSessionLifecycle(
-    'session.delete',
-    sessionId,
-    const <String, Object?>{'abortActive': true, 'cancelQueued': true},
-  );
+  Future<void> deleteSession(String sessionId) async {
+    await _ensureControllerForMutation(sessionId);
+    await _sendSessionLifecycle(
+      'session.delete',
+      sessionId,
+      const <String, Object?>{'abortActive': true, 'cancelQueued': true},
+    );
+  }
+
   Future<void> restoreSession(String sessionId) =>
       _sendSessionLifecycle('session.restore', sessionId);
   Future<void> purgeSession(String sessionId, {required bool confirmed}) {
@@ -794,6 +802,33 @@ final class ConnectionCoordinator extends ChangeNotifier
       throw StateError('Permanent delete requires explicit confirmation');
     }
     return _sendSessionLifecycle('session.purge', sessionId);
+  }
+
+  Future<void> _ensureControllerForMutation(String sessionId) async {
+    if (sessionId.isEmpty) throw ArgumentError.value(sessionId, 'sessionId');
+    if (!isReady) throw StateError('Host is not ready');
+    if (selectedSessionId == sessionId && leaseId != null) return;
+
+    final waiter = _controllerWaiters.putIfAbsent(
+      sessionId,
+      Completer<void>.new,
+    );
+    try {
+      await takeControl(sessionId);
+      if (selectedSessionId == sessionId && leaseId != null) {
+        if (!waiter.isCompleted) waiter.complete();
+      }
+      await waiter.future.timeout(
+        const Duration(seconds: 15),
+        onTimeout: () => throw StateError(
+          'Could not acquire control of this chat. Select it and try again.',
+        ),
+      );
+    } finally {
+      if (identical(_controllerWaiters[sessionId], waiter)) {
+        _controllerWaiters.remove(sessionId);
+      }
+    }
   }
 
   Future<void> _sendSessionLifecycle(
@@ -1616,6 +1651,27 @@ final class ConnectionCoordinator extends ChangeNotifier
           unawaited(
             _database.upsertSessionTreeNode(hostId: currentHost, node: node),
           );
+        }
+      }
+      if (id is String && selectedSessionId == id) {
+        final replacements = _sessions.values
+            .where((session) {
+              if (session.sessionId == id) return false;
+              final lifecycle = _sessionTree[session.sessionId]?.lifecycle;
+              return lifecycle != SessionLifecycleState.softDeleted &&
+                  lifecycle != SessionLifecycleState.purged;
+            })
+            .toList(growable: false);
+        final replacement = replacements.isEmpty ? null : replacements.first;
+        if (replacement != null) {
+          unawaited(selectPrimarySession(replacement.sessionId));
+        } else {
+          selectedSessionId = null;
+          leaseId = null;
+          draft = '';
+          pendingCommandId = null;
+          pendingPayload = null;
+          pendingState = null;
         }
       }
     } else if (type == 'session.delete_failed') {
@@ -2815,6 +2871,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         if (lease == null) return;
         controller.adoptAcquire(lease);
         if (id == selectedSessionId) leaseId = lease;
+        final waiter = _controllerWaiters.remove(id);
+        if (waiter != null && !waiter.isCompleted) waiter.complete();
         if (hostId != null) {
           _database.upsertControllerState(
             hostId: hostId!,
