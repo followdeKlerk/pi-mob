@@ -866,14 +866,37 @@ export class OneSessionPiAdapter {
     const unwrap = (value: unknown): unknown => value && typeof value === "object" && "data" in value
       ? (value as Record<string, unknown>).data : value;
     const modelsValue = unwrap(modelsRaw);
-    const availableModels = Array.isArray(modelsValue)
-      ? modelsValue.filter((item) => item && typeof item === "object").slice(0, 500)
+    const modelsList = modelsValue && typeof modelsValue === "object" &&
+        Array.isArray((modelsValue as Record<string, unknown>).models)
+      ? (modelsValue as Record<string, unknown>).models
+      : modelsValue;
+    const availableModels = Array.isArray(modelsList)
+      ? modelsList.filter((item) => item && typeof item === "object").slice(0, 500)
       : [];
     const state = unwrap(stateRaw);
     const stats = unwrap(statsRaw);
     const stateObject = state && typeof state === "object" ? state as Record<string, unknown> : {};
     const statsObject = stats && typeof stats === "object" ? stats as Record<string, unknown> : {};
     const commandCatalogue = normalizeCommandCatalogue(unwrap(commandsRaw));
+    const tokenStats = statsObject.tokens && typeof statsObject.tokens === "object"
+      ? statsObject.tokens as Record<string, unknown>
+      : {};
+    const contextUsage = statsObject.contextUsage && typeof statsObject.contextUsage === "object"
+      ? statsObject.contextUsage as Record<string, unknown>
+      : {};
+    // Pi 0.80+ returns nested token/context objects. Keep accepting the older
+    // flat fixture shape while publishing one stable mobile event shape.
+    const normalizedStats = {
+      inputTokens: typeof tokenStats.input === "number" ? tokenStats.input : statsObject.inputTokens ?? null,
+      outputTokens: typeof tokenStats.output === "number" ? tokenStats.output : statsObject.outputTokens ?? null,
+      contextTokens: typeof contextUsage.tokens === "number" ? contextUsage.tokens : statsObject.contextTokens ?? null,
+      contextWindow: typeof contextUsage.contextWindow === "number" ? contextUsage.contextWindow : statsObject.contextWindow ?? null,
+      cost: typeof statsObject.cost === "number" ? statsObject.cost : null,
+      userMessages: statsObject.userMessages ?? null,
+      assistantMessages: statsObject.assistantMessages ?? null,
+      toolCalls: statsObject.toolCalls ?? null,
+      totalMessages: statsObject.totalMessages ?? null,
+    };
     const boundTree = (value: unknown, depth = 0): unknown => {
       if (depth >= 12) return "[depth limited]";
       if (typeof value === "string") return value.slice(0, 2_000);
@@ -888,21 +911,29 @@ export class OneSessionPiAdapter {
       ? forkValue.filter((item) => item && typeof item === "object").slice(0, 500).map((item) => boundTree(item))
       : [];
     const prior = this.store.sessionState(sessionId) ?? {};
+    const stateModel = stateObject.model && typeof stateObject.model === "object"
+      ? stateObject.model as Record<string, unknown>
+      : null;
     const patch = {
       availableModels,
       commandCatalogue,
-      modelId: typeof stateObject.model === "string" ? stateObject.model : null,
+      modelId: typeof stateObject.model === "string"
+        ? stateObject.model
+        : typeof stateModel?.id === "string"
+        ? stateModel.id
+        : null,
       thinkingLevel: typeof stateObject.thinkingLevel === "string" ? stateObject.thinkingLevel : null,
       steeringMode: stateObject.steeringMode ?? null,
       followUpMode: stateObject.followUpMode ?? null,
       autoCompactionEnabled: stateObject.autoCompactionEnabled ?? null,
       sessionTree,
       eligibleForkMessages,
+      latestStats: normalizedStats,
     };
     this.store.updateSessionState(sessionId, { ...prior, ...patch });
     this.store.appendEvent(`session:${sessionId}`, "session.tree", { sessionId, tree: sessionTree, eligibleForkMessages });
     this.store.appendEvent(`session:${sessionId}`, "model.state", { sessionId, ...patch });
-    this.store.appendEvent(`session:${sessionId}`, "context.state", { sessionId, ...statsObject });
+    this.store.appendEvent(`session:${sessionId}`, "context.state", { sessionId, ...normalizedStats });
   }
 
   private async handleSessionControl(

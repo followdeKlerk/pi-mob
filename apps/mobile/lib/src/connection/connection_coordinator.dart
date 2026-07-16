@@ -596,6 +596,19 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
+  Future<void> loadSessionControlData() async {
+    final sessionId = selectedSessionId;
+    if (!isReady || sessionId == null) return;
+    await _ensureControllerForMutation(sessionId);
+    await _sendCommand(
+      type: 'session.activate',
+      commandId: _id(),
+      payload: <String, Object?>{'sessionId': sessionId},
+      requiresLease: true,
+    );
+    await requestModels();
+  }
+
   Future<void> requestModels() async {
     await _sendControl('model.list', <String, Object?>{
       if (selectedSessionId != null) 'sessionId': selectedSessionId,
@@ -2154,6 +2167,16 @@ final class ConnectionCoordinator extends ChangeNotifier
         );
       }
     }
+    for (final event in decoded) {
+      if (const {
+        'model.state',
+        'context.state',
+        'retry.state',
+        'compaction.state',
+      }.contains(event.type)) {
+        _handleEventPayload(event.type, event.payload);
+      }
+    }
     final existingIds = existing.items.map((event) => event.eventId).toSet();
     final overlapsDurableCache = decoded.any(
       (event) => existingIds.contains(event.eventId),
@@ -2926,6 +2949,14 @@ final class ConnectionCoordinator extends ChangeNotifier
       if (event.streamId.startsWith('session:')) {
         final sessionId = event.streamId.substring('session:'.length);
         (cachedHistory[sessionId] ??= <StreamEventState>[]).add(normalized);
+        if (const {
+          'model.state',
+          'context.state',
+          'retry.state',
+          'compaction.state',
+        }.contains(event.type)) {
+          _handleEventPayload(event.type, payload);
+        }
         continue;
       }
       final state =
