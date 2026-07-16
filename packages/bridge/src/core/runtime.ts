@@ -47,6 +47,34 @@ interface SessionListToken {
 
 function canonicalDecimal(value: unknown): value is string { return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value); }
 
+/** Preserve structural identifiers while placing one shared UTF-8 budget over
+ * large historical text/arguments. Live events remain untouched. */
+function boundHistoryPayload(payload: Record<string, unknown>): Record<string, unknown> {
+  if (Buffer.byteLength(JSON.stringify(payload)) <= 64 * 1024) return payload;
+  const budget = { remaining: 60 * 1024 };
+  const visit = (value: unknown): unknown => {
+    if (typeof value === "string") {
+      const bytes = Buffer.from(value);
+      if (bytes.length <= budget.remaining) {
+        budget.remaining -= bytes.length;
+        return value;
+      }
+      if (budget.remaining <= 0) return "[truncated]";
+      const retained = bytes.subarray(0, budget.remaining).toString("utf8");
+      budget.remaining = 0;
+      return `${retained}\n[truncated]`;
+    }
+    if (Array.isArray(value)) return value.map(visit);
+    if (value && typeof value === "object") {
+      return Object.fromEntries(
+        Object.entries(value as Record<string, unknown>).map(([key, child]) => [key, visit(child)]),
+      );
+    }
+    return value;
+  };
+  return visit(payload) as Record<string, unknown>;
+}
+
 function mobileTrustState(status: TrustState["status"]): "approved" | "unapproved" | "fingerprint_changed" {
   if (status === "trusted") return "approved";
   if (status === "changed") return "fingerprint_changed";
@@ -273,23 +301,41 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       if (error instanceof StoreError && error.code === "not_found") throw new RuntimeProtocolError("session_not_found", "session not found");
       throw error;
     }
+    // History payloads contain completed assistant/tool text rather than the
+    // small live deltas. Bound both each event and the complete response by
+    // bytes so a page can never exceed the WebSocket JSON frame limit.
+    const candidates = page.items.map((event) => ({
+      eventId: event.eventId,
+      streamId: event.streamId,
+      cursor: event.cursor,
+      type: event.type,
+      payload: boundHistoryPayload(event.payload),
+      createdAt: event.createdAt,
+    }));
+    const selectedNewestFirst: typeof candidates = [];
+    let retainedBytes = 0;
+    for (let index = candidates.length - 1; index >= 0; index -= 1) {
+      const candidate = candidates[index]!;
+      const bytes = Buffer.byteLength(JSON.stringify(candidate));
+      if (selectedNewestFirst.length > 0 && retainedBytes + bytes > 700 * 1024) break;
+      selectedNewestFirst.push(candidate);
+      retainedBytes += bytes;
+    }
+    const items = selectedNewestFirst.reverse();
+    const trimmed = items.length < candidates.length;
+    const nextBeforeCursor = (trimmed || page.nextBeforeCursor)
+      ? items[0]?.cursor
+      : undefined;
     return {
-      items: page.items.map((event) => ({
-        eventId: event.eventId,
-        streamId: event.streamId,
-        cursor: event.cursor,
-        type: event.type,
-        payload: event.payload,
-        createdAt: event.createdAt,
-      })),
+      items,
       snapshotRevision: page.snapshotRevision,
-      ...(page.nextBeforeCursor ? { nextPageToken: this.encodeHistoryPageToken({
+      ...(nextBeforeCursor ? { nextPageToken: this.encodeHistoryPageToken({
         version: 1,
         kind: HISTORY_TOKEN_KIND,
         hostId: this.identity().hostId,
         sessionId,
         pageSize: pageSize as number,
-        beforeCursor: page.nextBeforeCursor,
+        beforeCursor: nextBeforeCursor,
       }) } : {}),
     };
   }

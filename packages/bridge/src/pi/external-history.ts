@@ -6,7 +6,7 @@ import {
 } from "@earendil-works/pi-coding-agent";
 import { BridgeStore } from "../core/store";
 
-const MAX_TEXT_BYTES = 512 * 1024;
+const MAX_TEXT_BYTES = 48 * 1024;
 
 function boundedText(value: string): string {
   const bytes = Buffer.from(value);
@@ -157,11 +157,17 @@ export function importExternalSessionHistory(
       continue;
     }
     if (role === "toolResult" && typeof message.toolCallId === "string") {
-      const output = boundedText(textContent(message.content));
+      const rawOutput = textContent(message.content);
+      const output = boundedText(rawOutput);
+      const totalBytes = Buffer.byteLength(rawOutput);
+      const retainedBytes = Buffer.byteLength(output);
       if (output) append("tool.output", {
         toolCallId: message.toolCallId,
         toolName: typeof message.toolName === "string" ? message.toolName : "tool",
         output,
+        retainedBytes,
+        totalBytes,
+        isTruncated: retainedBytes < totalBytes,
       });
       append(message.isError === true ? "tool.failed" : "tool.completed", {
         toolCallId: message.toolCallId,

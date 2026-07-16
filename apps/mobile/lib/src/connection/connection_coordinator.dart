@@ -627,6 +627,18 @@ final class ConnectionCoordinator extends ChangeNotifier
     leaseId = null;
     connectionId = null;
     errorMessage = null;
+    // History requests are connection-epoch bound. Never carry a loading
+    // latch or an HMAC page token across reconnects/bridge restarts.
+    _historyRequests.clear();
+    for (final entry in _history.entries.toList()) {
+      if (entry.value.isLoading) {
+        _history[entry.key] = entry.value.copyWith(
+          isLoading: false,
+          snapshotRevision: null,
+          nextPageToken: null,
+        );
+      }
+    }
     _deferredAutoSelectSessionId = null;
     _pendingCreatedWorkspaceId = null;
     _hostReadinessRecoveryInFlight = false;
@@ -1089,10 +1101,14 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> selectSession(String sessionId) async {
     if (selectedSessionId == sessionId && isReady) {
+      // A previous empty/failed page is not authoritative forever: the host
+      // may have imported TUI history since that response.
+      _history.remove(sessionId);
       await loadOlderHistory(sessionId);
       return;
     }
     selectedSessionId = sessionId;
+    _history.remove(sessionId);
     leaseId = null;
     final saved = hostId == null
         ? null
@@ -1637,7 +1653,17 @@ final class ConnectionCoordinator extends ChangeNotifier
       errorMessage = null;
       _startAckTimer();
       await _sendControl('workspace.list', const <String, Object?>{});
-      if (selectedSessionId != null) await _acquireController();
+      final sessionId = selectedSessionId;
+      if (sessionId != null) {
+        final streamRevision =
+            _streams['session:$sessionId']?.lastContiguousCursor.value;
+        final historyRevision = _history[sessionId]?.snapshotRevision;
+        if (streamRevision != historyRevision) {
+          _history.remove(sessionId);
+        }
+        unawaited(loadOlderHistory(sessionId));
+        await _acquireController();
+      }
       await _reconcilePending();
     }
   }
