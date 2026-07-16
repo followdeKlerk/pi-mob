@@ -2136,7 +2136,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       pendingCommandId = null;
       pendingPayload = null;
       pendingState = null;
-      selectedDeliveryMode = DeliveryMode.immediate;
+      errorMessage = null;
       await _persistDraft();
       _notify();
       return;
