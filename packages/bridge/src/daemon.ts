@@ -23,8 +23,8 @@
  *   --help                            print usage
  */
 
-import { existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { isAbsolute, basename, join, resolve } from "node:path";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { isAbsolute, basename, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
 import { OneSessionPiAdapter, type OneSessionPolicyBridge, type OneSessionWorkspaceConfig } from "./pi/one-session-adapter";
@@ -185,6 +185,96 @@ function assertAbsolute(label: string, value: string): void {
   if (!isAbsolute(value)) throw new Error(`${label} must be an absolute path (got ${JSON.stringify(value)})`);
 }
 
+interface DiscoveredPiSession {
+  readonly sessionId: string;
+  readonly path: string;
+  readonly cwd: string;
+  readonly name: string;
+  readonly createdAt: string;
+  readonly modifiedAt: string;
+}
+
+function previewUserText(message: unknown): string {
+  if (!message || typeof message !== "object") return "";
+  const value = message as Record<string, unknown>;
+  if (value.role !== "user") return "";
+  const content = value.content;
+  if (typeof content === "string") return content;
+  if (!Array.isArray(content)) return "";
+  return content.map((item) => {
+    if (!item || typeof item !== "object") return "";
+    const part = item as Record<string, unknown>;
+    return part.type === "text" && typeof part.text === "string" ? part.text : "";
+  }).filter(Boolean).join(" ");
+}
+
+function compactSessionName(value: string, fallback: string): string {
+  const singleLine = value.replace(/\s+/g, " ").trim();
+  if (!singleLine) return fallback;
+  return singleLine.length > 72 ? `${singleLine.slice(0, 69)}…` : singleLine;
+}
+
+function discoverPiSessions(workspaceRoot: string): DiscoveredPiSession[] {
+  const home = process.env.HOME;
+  if (!home) return [];
+  const root = join(home, ".pi", "agent", "sessions");
+  if (!existsSync(root)) return [];
+  const files: string[] = [];
+  for (const directory of readdirSync(root, { withFileTypes: true })) {
+    if (!directory.isDirectory()) continue;
+    const parent = join(root, directory.name);
+    for (const entry of readdirSync(parent, { withFileTypes: true })) {
+      if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+        files.push(join(parent, entry.name));
+      }
+    }
+  }
+  const discovered: DiscoveredPiSession[] = [];
+  for (const path of files.slice(0, 500)) {
+    try {
+      const stats = statSync(path);
+      const bytes = Math.min(stats.size, 1024 * 1024);
+      const buffer = Buffer.alloc(bytes);
+      const fd = openSync(path, "r");
+      try { readSync(fd, buffer, 0, bytes, 0); } finally { closeSync(fd); }
+      const lines = buffer.toString("utf8").split("\n");
+      const header = JSON.parse(lines[0] ?? "{}") as Record<string, unknown>;
+      if (header.type !== "session" || typeof header.id !== "string" ||
+          typeof header.cwd !== "string") continue;
+      const sessionId = header.id;
+      if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionId)) continue;
+      const cwd = resolve(header.cwd);
+      const relativePath = relative(workspaceRoot, cwd);
+      if (relativePath.startsWith("..") || isAbsolute(relativePath)) continue;
+      let explicitName = "";
+      let firstMessage = "";
+      for (const line of lines.slice(1)) {
+        if (!line.trim()) continue;
+        let entry: Record<string, unknown>;
+        try { entry = JSON.parse(line) as Record<string, unknown>; }
+        catch { continue; }
+        if (entry.type === "session_info" && typeof entry.name === "string") {
+          explicitName = entry.name;
+        }
+        if (!firstMessage && entry.type === "message") {
+          firstMessage = previewUserText(entry.message);
+        }
+      }
+      discovered.push({
+        sessionId,
+        path,
+        cwd,
+        name: compactSessionName(explicitName || firstMessage, basename(cwd) || "Untitled chat"),
+        createdAt: typeof header.timestamp === "string" ? header.timestamp : stats.birthtime.toISOString(),
+        modifiedAt: stats.mtime.toISOString(),
+      });
+    } catch {
+      // A partially-written or malformed TUI session must not block the host.
+    }
+  }
+  return discovered.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
+}
+
 export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   assertAbsolute("workspace", options.workspace);
   assertAbsolute("executable", options.executable);
@@ -255,6 +345,47 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     })}\n`, { mode: 0o600 });
   };
   publishPolicy();
+
+  // Pi's normal TUI and pi-mob historically used separate session
+  // directories. Import the canonical TUI index into the bridge directory so
+  // mobile can discover and resume existing conversations. The JSONL remains
+  // Pi-owned; only bounded metadata and the absolute resume path are stored.
+  const effectivePolicy = bootstrap.hostPolicy.effective();
+  const primaryTrust = bootstrap.handler.resolveTrust(
+    bootstrap.primaryRoot.canonicalPath,
+  );
+  for (const session of discoverPiSessions(canonicalWorkspacePath)) {
+    if (store.sessionExists(session.sessionId)) continue;
+    let sessionWorkspaceId: WorkspaceRootId;
+    try { sessionWorkspaceId = deriveRootId(canonicalize(session.cwd)); }
+    catch { continue; }
+    const relativePath = relative(canonicalWorkspacePath, session.cwd) || ".";
+    const state: Record<string, unknown> = {
+      sessionId: session.sessionId,
+      name: session.name,
+      runtimeState: "stopped",
+      attentionState: "none",
+      controllerState: "none",
+      queueCount: 0,
+      policyMode: effectivePolicy.mode,
+      policyVersion: effectivePolicy.rules.policyVersion,
+      trustFingerprint: primaryTrust.fingerprint,
+      lastPolicySnapshotAt: new Date().toISOString(),
+      workspaceId: sessionWorkspaceId,
+      workspaceRootPath: session.cwd,
+      workspaceRelativePath: relativePath,
+      workspaceDisplayName: basename(session.cwd) || displayName,
+      piSessionPath: session.path,
+      externalSession: true,
+      createdAt: session.createdAt,
+      lastActivityAt: session.modifiedAt,
+      deletionState: "active",
+      lifecycleState: "active",
+    };
+    store.ensureSession(session.sessionId, state);
+    store.ensureStream(`session:${session.sessionId}`, "session", session.sessionId);
+  }
+
   const developmentExtension = resolve(import.meta.dir, "../../pi-extension/src/extension.ts");
   const extensionPath = options.extensionPath ?? (existsSync(developmentExtension) ? developmentExtension : undefined);
   if (!extensionPath) throw new Error("host policy extension path is required");
@@ -361,8 +492,11 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     const cwd = typeof state.workspaceRootPath === "string"
       ? state.workspaceRootPath
       : options.workspace;
-    if (cwd === options.workspace) return rpc;
-    const client = new SupervisedRpcClient({
+    const externalSessionPath = typeof state.piSessionPath === "string"
+      ? state.piSessionPath
+      : null;
+    if (cwd === options.workspace && !externalSessionPath) return rpc;
+    const client = new SupervisedRpcClient({ 
       processId: sessionId,
       beforeSpawn: () => {
         const trust = bootstrap.handler.resolveTrust(
@@ -375,7 +509,14 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       initialState: "stopped",
       rpc: {
         executable: options.executable,
-        args: ["--mode", "rpc", "--session-dir", sessionDir, "--extension", extensionPath, ...(options.rpcArgs ?? [])],
+        args: [
+          "--mode", "rpc",
+          ...(externalSessionPath
+            ? ["--session", externalSessionPath, "--session-dir", sessionDir]
+            : ["--session-dir", sessionDir]),
+          "--extension", extensionPath,
+          ...(options.rpcArgs ?? []),
+        ],
         cwd,
         environment: { ...(options.environment ?? {}), PI_MOB_HOST_POLICY_FILE: policyFile },
         pathDirs: options.pathDirs ?? ["/usr/local/bin", "/usr/bin", "/bin"],
