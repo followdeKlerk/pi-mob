@@ -859,24 +859,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   Future<void> cloneSession(String sessionId) =>
       _sendSessionLifecycle('session.clone', sessionId);
   Future<void> deleteSession(String sessionId) async {
-    // Deletion is an authenticated owner lifecycle action, not a turn-control
-    // action. Hide immediately and do not block on foreground subscription or
-    // controller acquisition. A transport failure or delete_failed event
-    // restores the row.
+    // Hide immediately, but keep the current selection intact until the wire
+    // send succeeds so a transport failure can roll back without losing its
+    // draft. Once sent, prune the deleted stream from the subscription set;
+    // deleting the last chat must leave a healthy host-only subscription.
+    final wasSelected = selectedSessionId == sessionId;
     _locallyDeletedSessionIds.add(sessionId);
-    if (selectedSessionId == sessionId) {
-      final replacements = sessions;
-      if (replacements.isNotEmpty) {
-        unawaited(selectPrimarySession(replacements.first.sessionId));
-      } else {
-        selectedSessionId = null;
-        leaseId = null;
-        draft = '';
-        pendingCommandId = null;
-        pendingPayload = null;
-        pendingState = null;
-      }
-    }
     _notify();
     try {
       await _sendSessionLifecycle(
@@ -890,6 +878,26 @@ final class ConnectionCoordinator extends ChangeNotifier
       _notify();
       rethrow;
     }
+
+    _subscriptionSet = _subscriptionSet.remove(sessionId);
+    await _persistSubscriptionSet();
+    if (wasSelected) {
+      final replacements = sessions;
+      if (replacements.isNotEmpty) {
+        await selectPrimarySession(replacements.first.sessionId);
+        return;
+      }
+      selectedSessionId = null;
+      leaseId = null;
+      draft = '';
+      pendingCommandId = null;
+      pendingPayload = null;
+      pendingState = null;
+      selectedDeliveryMode = DeliveryMode.immediate;
+    }
+    errorMessage = null;
+    _notify();
+    await _pushSubscriptions();
   }
 
   Future<void> restoreSession(String sessionId) =>
