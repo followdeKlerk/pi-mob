@@ -90,15 +90,6 @@ class _TranscriptViewState extends State<TranscriptView> {
     final text = Theme.of(context).textTheme;
     return LayoutBuilder(
       builder: (context, constraints) {
-        if (constraints.maxHeight < 96) {
-          return Padding(
-            padding: const EdgeInsets.symmetric(horizontal: _contentInset),
-            child: Align(
-              alignment: Alignment.center,
-              child: Text('Transcript', style: text.titleSmall),
-            ),
-          );
-        }
         return ColoredBox(
           color: scheme.surface,
           child: Stack(
@@ -106,33 +97,6 @@ class _TranscriptViewState extends State<TranscriptView> {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(
-                      _contentInset,
-                      12,
-                      _contentInset,
-                      8,
-                    ),
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Transcript',
-                            style: text.titleSmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                              fontWeight: FontWeight.w600,
-                              letterSpacing: 0.4,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  Divider(
-                    height: 1,
-                    thickness: 1,
-                    color: scheme.outlineVariant,
-                  ),
                   Expanded(
                     child: turns.isEmpty
                         ? Center(

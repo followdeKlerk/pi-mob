@@ -1,7 +1,7 @@
 /// Material 3 theme foundation for Pi Mob.
 ///
 /// Provides [piLightTheme] and [piDarkTheme] built on top of an indigo-seeded
-/// [ColorScheme] with a restrained cyan accent and calm, cool neutral
+/// [ColorScheme] with a warm terracotta accent and paper-like neutral
 /// surfaces. Component themes (cards, inputs, buttons, navigation bars) are
 /// configured to keep the surface visually quiet so transcript content and
 /// controls carry the focus.
@@ -19,16 +19,10 @@ import 'pi_tokens.dart';
 export 'pi_semantic_colors.dart';
 export 'pi_tokens.dart';
 
-/// Indigo seed for the primary hue. Indigo conveys focus and reliability
-/// without leaning on the project-blue of typical developer tooling; it
-/// also pairs well with cyan accents without looking mismatched.
-const Color _piSeed = Color(0xFF4F46E5);
-
-/// Cyan accent restraint: the secondary hue shifts away from pure cyan so
-/// that combined surfaces (e.g. an indigo primary on a cyan-tinted card)
-/// stay low-contrast. Material's tonal palette algorithm honors this on
-/// its own when the seed is provided.
-const Color _piAccent = Color(0xFF0E7490);
+/// Warm clay accent and supporting neutrals, inspired by editorial paper
+/// interfaces rather than the default cool-blue developer palette.
+const Color _piSeed = Color(0xFFC96442);
+const Color _piAccent = Color(0xFF7D6757);
 
 /// Constructs the light Material 3 theme for Pi Mob.
 ThemeData piLightTheme() {
@@ -36,6 +30,23 @@ ThemeData piLightTheme() {
     seedColor: _piSeed,
     secondary: _piAccent,
     brightness: Brightness.light,
+  ).copyWith(
+    primary: const Color(0xFFC96442),
+    onPrimary: const Color(0xFFFAF9F5),
+    primaryContainer: const Color(0xFFFCE4D8),
+    onPrimaryContainer: const Color(0xFF3A1D10),
+    secondary: const Color(0xFF7D6757),
+    onSecondary: const Color(0xFFFAF9F5),
+    secondaryContainer: const Color(0xFFEFE0D2),
+    onSecondaryContainer: const Color(0xFF2A1F17),
+    tertiary: const Color(0xFF6F7F4F),
+    surface: const Color(0xFFFAF9F5),
+    onSurface: const Color(0xFF141413),
+    onSurfaceVariant: const Color(0xFF5E5D59),
+    outline: const Color(0xFF87867F),
+    outlineVariant: const Color(0xFFE8E6DC),
+    error: const Color(0xFFB53333),
+    errorContainer: const Color(0xFFFADDD7),
   );
   return _buildTheme(
     colorScheme: colorScheme,
@@ -49,6 +60,23 @@ ThemeData piDarkTheme() {
     seedColor: _piSeed,
     secondary: _piAccent,
     brightness: Brightness.dark,
+  ).copyWith(
+    primary: const Color(0xFFD97757),
+    onPrimary: const Color(0xFF2A1208),
+    primaryContainer: const Color(0xFF7A3D23),
+    onPrimaryContainer: const Color(0xFFFCE4D8),
+    secondary: const Color(0xFFCFC0B1),
+    onSecondary: const Color(0xFF3A2F25),
+    secondaryContainer: const Color(0xFF5E4D40),
+    onSecondaryContainer: const Color(0xFFEFE0D2),
+    tertiary: const Color(0xFFBCC99A),
+    surface: const Color(0xFF1F1E1B),
+    onSurface: const Color(0xFFEAE6DA),
+    onSurfaceVariant: const Color(0xFFB0AEA5),
+    outline: const Color(0xFF73726C),
+    outlineVariant: const Color(0xFF3D3D3A),
+    error: const Color(0xFFE8836F),
+    errorContainer: const Color(0xFF7A2018),
   );
   return _buildTheme(colorScheme: colorScheme, semantic: PiSemanticColors.dark);
 }
@@ -60,12 +88,11 @@ ThemeData _buildTheme({
   final brightness = colorScheme.brightness;
   final isDark = brightness == Brightness.dark;
 
-  // Calm neutral surfaces. Pure white/black is jarring on long sessions, so
-  // we nudge the surface toward the cool end of the gray scale.
+  // Warm paper in light mode and warm near-black in dark mode.
   final surfaceTint = isDark
-      ? const Color(0xFF0F172A)
-      : const Color(0xFFF8FAFC);
-  final canvas = isDark ? const Color(0xFF111827) : const Color(0xFFF1F5F9);
+      ? const Color(0xFF1F1E1B)
+      : const Color(0xFFFAF9F5);
+  final canvas = isDark ? const Color(0xFF141413) : const Color(0xFFF5F4ED);
 
   final textTheme =
       Typography.material2021(
@@ -89,22 +116,24 @@ ThemeData _buildTheme({
     brightness: brightness,
     colorScheme: colorScheme.copyWith(
       surface: surfaceTint,
-      surfaceContainerLowest: canvas,
+      surfaceContainerLowest: isDark
+          ? const Color(0xFF0F0F0E)
+          : const Color(0xFFFFFFFF),
       surfaceContainerLow: isDark
-          ? const Color(0xFF111827)
-          : const Color(0xFFF8FAFC),
+          ? const Color(0xFF1A1917)
+          : const Color(0xFFF5F4ED),
       surfaceContainer: isDark
-          ? const Color(0xFF1F2937)
-          : const Color(0xFFEEF2F7),
+          ? const Color(0xFF1E1D1A)
+          : const Color(0xFFF0EEE5),
       surfaceContainerHigh: isDark
-          ? const Color(0xFF273449)
-          : const Color(0xFFE2E8F0),
+          ? const Color(0xFF272621)
+          : const Color(0xFFEBE8DE),
       surfaceContainerHighest: isDark
-          ? const Color(0xFF334155)
-          : const Color(0xFFCBD5E1),
+          ? const Color(0xFF322F2A)
+          : const Color(0xFFE5E2D7),
       outlineVariant: isDark
-          ? const Color(0xFF334155)
-          : const Color(0xFFCBD5E1),
+          ? const Color(0xFF3D3D3A)
+          : const Color(0xFFE8E6DC),
     ),
     scaffoldBackgroundColor: canvas,
     textTheme: isDark ? darkTextTheme : textTheme,
@@ -130,7 +159,7 @@ ThemeData _buildTheme({
       ),
     ),
     cardTheme: CardThemeData(
-      color: isDark ? const Color(0xFF111827) : const Color(0xFFFFFFFF),
+      color: isDark ? const Color(0xFF1F1E1B) : const Color(0xFFFAF9F5),
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       margin: EdgeInsets.zero,
@@ -142,7 +171,7 @@ ThemeData _buildTheme({
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: isDark ? const Color(0xFF0F172A) : const Color(0xFFFFFFFF),
+      fillColor: isDark ? const Color(0xFF1A1917) : const Color(0xFFFAF9F5),
       contentPadding: const EdgeInsets.symmetric(
         horizontal: PiSpacing.md,
         vertical: PiSpacing.md,

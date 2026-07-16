@@ -5,7 +5,6 @@ import '../../connection/connection_coordinator.dart';
 import '../../controls/compaction_controls.dart';
 import '../../controls/context_stats_card.dart';
 import '../../controls/control_view_data.dart' as view;
-import '../../controls/model_thinking_selector.dart';
 import '../../controls/retry_controls.dart';
 import '../../controls/supported_command_list.dart';
 import '../../domain/session_controls.dart' as domain;
@@ -34,9 +33,6 @@ class _ChatControlCenterState extends State<ChatControlCenter> {
   void initState() {
     super.initState();
     widget.coordinator.addListener(_changed);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (widget.coordinator.isReady) widget.coordinator.requestModels();
-    });
   }
 
   void _changed() {
@@ -87,24 +83,6 @@ class _ChatControlCenterState extends State<ChatControlCenter> {
     }
     final runtime = coordinator.selectedRuntimeState;
     final mutable = runtime == null || runtime == 'idle' || runtime == 'stopped';
-    final models = coordinator.configuredModels
-        .where((model) => model.available)
-        .map(
-          (model) => view.ModelOptionData(
-            id: model.id,
-            label: model.label,
-            provider: model.provider ?? 'Configured',
-            thinkingLevels: const [
-              'off',
-              'minimal',
-              'low',
-              'medium',
-              'high',
-              'xhigh',
-            ],
-          ),
-        )
-        .toList(growable: false);
     final sessionTokens = controls.inputTokens == null &&
             controls.outputTokens == null
         ? null
@@ -143,26 +121,6 @@ class _ChatControlCenterState extends State<ChatControlCenter> {
                     ),
                   ),
                   const SizedBox(height: PiSpacing.md),
-                  ModelThinkingSelector(
-                    data: view.ModelThinkingViewData(
-                      models: models,
-                      selectedModelId: controls.modelId,
-                      selectedThinkingLevel: controls.thinkingLevel,
-                      unavailableRestoredModel: controls.modelUnavailable
-                          ? controls.modelId
-                          : null,
-                      enabled: mutable,
-                      disabledReason: mutable
-                          ? null
-                          : 'Model controls are available when Pi is idle.',
-                    ),
-                    callbacks: view.ModelThinkingCallbacks(
-                      onModelSelected: mutable ? coordinator.setModel : null,
-                      onThinkingSelected: mutable
-                          ? coordinator.setThinking
-                          : null,
-                    ),
-                  ),
                   ContextStatsCard(
                     data: view.ContextStatsViewData(
                       sessionTokens: sessionTokens,

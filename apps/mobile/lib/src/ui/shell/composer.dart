@@ -6,6 +6,8 @@ import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
 import '../../interaction/interaction_panel.dart';
 import '../theme/pi_theme.dart';
+import 'chat_control_center.dart';
+import 'model_picker_sheet.dart';
 
 /// Prompt composer with delivery-mode selector, follow-up queue, extension
 /// dialog opener, and the persistent draft `TextField`.
@@ -27,6 +29,39 @@ class Composer extends StatelessWidget {
   final ConnectionCoordinator coordinator;
   final TextEditingController draftController;
   final VoidCallback onOpenDialog;
+
+  Future<void> _clearDraft() async {
+    draftController.clear();
+    await coordinator.updateDraft('');
+  }
+
+  Future<void> _submitOrRunCommand(BuildContext context) async {
+    if (coordinator.canAbort && coordinator.draft.trim().isEmpty) {
+      await coordinator.abort();
+      return;
+    }
+    final command = coordinator.draft.trim().toLowerCase();
+    switch (command) {
+      case '/model':
+        await _clearDraft();
+        if (context.mounted) await showModelPickerSheet(context, coordinator);
+        return;
+      case '/compact':
+        await _clearDraft();
+        await coordinator.compactNow();
+        return;
+      case '/export':
+        await _clearDraft();
+        await coordinator.requestSessionExport();
+        return;
+      case '/controls':
+        await _clearDraft();
+        if (context.mounted) await showChatControlCenter(context, coordinator);
+        return;
+      default:
+        await coordinator.submitPromptWithRecovery();
+    }
+  }
 
   Future<void> _discardIndeterminate(BuildContext context) async {
     final confirmed = await showDialog<bool>(
@@ -60,6 +95,9 @@ class Composer extends StatelessWidget {
   Widget build(BuildContext context) {
     final prefill = coordinator.editorPrefill;
     final aborting = coordinator.canAbort && coordinator.draft.trim().isEmpty;
+    final slashQuery = coordinator.draft.startsWith('/')
+        ? coordinator.draft.toLowerCase()
+        : null;
     if (prefill != null && draftController.text != prefill) {
       draftController.value = TextEditingValue(
         text: prefill,
@@ -186,6 +224,40 @@ class Composer extends StatelessWidget {
               ),
               const SizedBox(height: PiSpacing.sm),
             ],
+            if (slashQuery != null && !slashQuery.contains(' ')) ...[
+              Wrap(
+                spacing: PiSpacing.xs,
+                runSpacing: PiSpacing.xs,
+                children: [
+                  for (final command in <String>[
+                    '/model',
+                    '/compact',
+                    '/export',
+                    '/controls',
+                    ...?coordinator.selectedControls?.commands
+                        .map((item) => '/${item.name}')
+                        .where((item) => !const {
+                              '/model',
+                              '/compact',
+                              '/export',
+                            }.contains(item)),
+                  ].where((item) => item.startsWith(slashQuery)).take(8))
+                    ActionChip(
+                      label: Text(command),
+                      onPressed: () {
+                        draftController.value = TextEditingValue(
+                          text: command,
+                          selection: TextSelection.collapsed(
+                            offset: command.length,
+                          ),
+                        );
+                        unawaited(coordinator.updateDraft(command));
+                      },
+                    ),
+                ],
+              ),
+              const SizedBox(height: PiSpacing.sm),
+            ],
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -238,10 +310,8 @@ class Composer extends StatelessWidget {
                           padding: EdgeInsets.zero,
                           shape: const CircleBorder(),
                         ),
-                        onPressed: aborting
-                            ? coordinator.abort
-                            : coordinator.canAttemptSend
-                            ? coordinator.submitPromptWithRecovery
+                        onPressed: aborting || coordinator.canAttemptSend
+                            ? () => _submitOrRunCommand(context)
                             : null,
                         child: Icon(aborting ? Icons.stop : Icons.send),
                       ),

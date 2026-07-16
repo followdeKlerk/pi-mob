@@ -148,7 +148,7 @@ const CommandPayloads = {
   "workspace.trust.approve": Type.Object({ workspaceId: Uuid, fingerprint: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "notification.device.register": Type.Object({ deviceId: Uuid, platform: Type.String({ minLength: 1 }), token: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "notification.device.unregister": Type.Object({ deviceId: Uuid }, { additionalProperties: true }),
-  "session.create": Type.Object({ workspaceId: Uuid, workspaceRelativePath: Type.Optional(Type.String({ maxLength: 4096 })), policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]), name: Type.Optional(Type.String()), modelIntent: Type.Optional(Type.String()) }, { additionalProperties: true }),
+  "session.create": Type.Object({ workspaceId: Uuid, workspaceRelativePath: Type.Optional(Type.String({ maxLength: 4096 })), policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]), name: Type.Optional(Type.String()), modelIntent: Type.Optional(Type.String()), modelId: Type.Optional(Type.String({ minLength: 1 })), provider: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: true }),
   "session.activate": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.stop": Type.Object({ sessionId: SessionId }, { additionalProperties: true }),
   "session.rename": Type.Object({ sessionId: SessionId, name: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "session.policy.set": Type.Object({ sessionId: SessionId, policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]) }, { additionalProperties: true }),

@@ -57,6 +57,12 @@ class ToolCard extends StatefulWidget {
 class _ToolCardState extends State<ToolCard> {
   bool _expanded = false;
 
+  @override
+  void initState() {
+    super.initState();
+    _expanded = widget.data.toolName == 'Agent';
+  }
+
   ToolCallViewData get _data => widget.data;
   TranscriptToolStatus get _status => _data.status;
   ColorScheme get _colors => Theme.of(context).colorScheme;
@@ -70,7 +76,7 @@ class _ToolCardState extends State<ToolCard> {
   Widget build(BuildContext context) {
     final scheme = _colors;
     final statusColor = _status.resolveColor(scheme);
-    final toolLabel = _toolLabel(_data.toolName);
+    final toolLabel = _toolLabel(_data.toolName, _data.arguments);
     final muted = scheme.onSurfaceVariant;
     return Semantics(
       container: true,
@@ -244,6 +250,33 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _renderArgs() {
     switch (_data.toolName) {
+      case 'Agent':
+        return _kv([
+          if (_data.arguments['description'] != null)
+            MapEntry('task', _data.arguments['description']!),
+          if (_data.arguments['subagent_type'] != null)
+            MapEntry('agent', _data.arguments['subagent_type']!),
+          if (_data.arguments['model'] != null)
+            MapEntry('model', _data.arguments['model']!),
+          if (_data.arguments['thinking'] != null)
+            MapEntry('thinking', _data.arguments['thinking']!),
+          if (_data.arguments['run_in_background'] != null)
+            MapEntry('background', _data.arguments['run_in_background']!),
+        ]);
+      case 'get_subagent_result':
+        return _kv([
+          if (_data.arguments['agent_id'] != null)
+            MapEntry('agent', _data.arguments['agent_id']!),
+          if (_data.arguments['wait'] != null)
+            MapEntry('wait', _data.arguments['wait']!),
+        ]);
+      case 'steer_subagent':
+        return _kv([
+          if (_data.arguments['agent_id'] != null)
+            MapEntry('agent', _data.arguments['agent_id']!),
+          if (_data.arguments['message'] != null)
+            MapEntry('direction', _data.arguments['message']!),
+        ]);
       case BuiltInToolName.read:
         final args = ReadToolArgs.fromMap(_data.arguments);
         return _kv([
@@ -606,10 +639,23 @@ class _ToolCardState extends State<ToolCard> {
     ),
   );
 
-  static String _toolLabel(String toolName) {
-    if (BuiltInToolName.isBuiltIn(toolName)) {
-      return toolName;
-    }
-    return 'Unknown tool: $toolName';
+  static String _toolLabel(
+    String toolName,
+    Map<String, Object?> arguments,
+  ) {
+    if (BuiltInToolName.isBuiltIn(toolName)) return toolName;
+    return switch (toolName) {
+      'Agent' => arguments['description'] is String
+          ? 'Agent · ${arguments['description']}'
+          : 'Agent',
+      'get_subagent_result' => 'Agent result',
+      'steer_subagent' => 'Steer agent',
+      'web_search' => 'Web search',
+      'fetch_content' => 'Fetch content',
+      'get_search_content' => 'Search result',
+      'goal_complete' => 'Goal completed',
+      'goal_blocked' => 'Goal blocked',
+      _ => toolName.replaceAll('_', ' '),
+    };
   }
 }

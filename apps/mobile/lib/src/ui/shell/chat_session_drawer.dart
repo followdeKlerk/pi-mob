@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
+import '../../domain/session_controls.dart';
 import '../../domain/session_directory.dart';
 import '../../domain/session_tree.dart';
 import '../../notifications/notification_controller.dart';
@@ -105,15 +106,77 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
         ),
       );
 
+  Future<ModelOption?> _chooseAgent() async {
+    await widget.coordinator.requestModels();
+    if (!mounted) return null;
+    final models = widget.coordinator.configuredModels
+        .where((model) => model.available && model.provider != null)
+        .toList(growable: false);
+    if (models.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(content: Text('No configured agents are available')),
+      );
+      return null;
+    }
+    ModelOption selected = models.first;
+    return showDialog<ModelOption>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          title: const Text('Choose agent'),
+          content: DropdownButtonFormField<String>(
+            key: const Key('new-chat-agent-picker'),
+            initialValue: selected.id,
+            isExpanded: true,
+            decoration: const InputDecoration(
+              labelText: 'Agent',
+              border: OutlineInputBorder(),
+            ),
+            items: [
+              for (final model in models)
+                DropdownMenuItem(
+                  value: model.id,
+                  child: Text(
+                    '${model.provider} · ${model.label}',
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (id) {
+              if (id == null) return;
+              setDialogState(
+                () => selected = models.firstWhere((model) => model.id == id),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const Key('confirm-new-chat-agent'),
+              onPressed: () => Navigator.of(dialogContext).pop(selected),
+              child: const Text('Continue'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Future<void> _newChat() async {
-    var workspace = widget.coordinator.selectedWorkspace;
-    workspace ??= await _chooseFolder();
+    final workspace = await _chooseFolder();
     if (workspace == null) return;
     await widget.coordinator.selectWorkspaceEntry(workspace);
-    if (!widget.coordinator.requiresTrustApproval) {
-      await widget.coordinator.createSession();
-      if (mounted) Navigator.of(context).pop();
-    }
+    if (widget.coordinator.requiresTrustApproval) return;
+    final agent = await _chooseAgent();
+    if (agent == null || agent.provider == null) return;
+    await widget.coordinator.createSession(
+      modelId: agent.id,
+      provider: agent.provider,
+    );
+    if (mounted) Navigator.of(context).pop();
   }
 
   Future<void> _changeFolder() async {

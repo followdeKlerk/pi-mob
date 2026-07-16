@@ -646,6 +646,8 @@ export class OneSessionPiAdapter {
       policyMode?: WorkspacePolicyMode;
       name?: string;
       workspaceRelativePath?: string;
+      modelId?: string;
+      provider?: string;
     };
     const workspaceId = typeof payload.workspaceId === "string" && payload.workspaceId.length > 0
       ? payload.workspaceId
@@ -722,6 +724,15 @@ export class OneSessionPiAdapter {
     this.bindSession(sessionId);
     this.lastUsedSessionId = sessionId;
 
+    if (typeof payload.modelId === "string" &&
+        typeof payload.provider === "string") {
+      await rpc.request({
+        id: `${command.commandId}-model`,
+        method: "set_model",
+        params: { provider: payload.provider, modelId: payload.modelId },
+      });
+    }
+
     const summary = {
       sessionId,
       workspaceId,
@@ -735,7 +746,7 @@ export class OneSessionPiAdapter {
       runtimeState: "idle",
       attentionState: "ready",
       queueCount: 0,
-      modelSummary: null,
+      modelSummary: payload.modelId ?? null,
       createdAt,
       lastActivityAt: createdAt,
     };
@@ -746,7 +757,7 @@ export class OneSessionPiAdapter {
       runtimeState: "idle",
       attentionState: "ready",
       queueCount: 0,
-      modelSummary: null,
+      modelSummary: payload.modelId ?? null,
       policyMode: baseMode,
       name: summary.name,
       displayName: workspaceDisplayName,

@@ -1008,7 +1008,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     _notify();
   }
 
-  Future<void> createSession({String? name}) async {
+  Future<void> createSession({
+    String? name,
+    String? modelId,
+    String? provider,
+  }) async {
     if (!isReady || selectedWorkspaceId == null) return;
     final workspace = selectedWorkspace;
     if (workspace == null) return;
@@ -1024,6 +1028,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         'name': name != null && name.trim().isNotEmpty
             ? name.trim()
             : workspace.displayName,
+        if (modelId != null) 'modelId': modelId,
+        if (provider != null) 'provider': provider,
       },
       requiresLease: false,
     );
