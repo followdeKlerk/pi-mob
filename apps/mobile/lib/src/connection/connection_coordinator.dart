@@ -456,14 +456,25 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     final result =
         byId.values
-            .where(
-              (event) => const <String>{
+            .where((event) {
+              final family = event.type.split('.').first;
+              if (!const <String>{
                 'turn',
                 'assistant',
                 'reasoning',
                 'tool',
-              }.contains(event.type.split('.').first),
-            )
+              }.contains(family)) {
+                return false;
+              }
+              // Imported TUI sessions can contain thousands of historical
+              // tool/reasoning lifecycle records for only a few dozen chat
+              // turns. Replaying those into immutable widget models on every
+              // older-page insertion overwhelms the conversation surface.
+              // Preserve user/assistant history; live activity remains fully
+              // detailed with thinking and tool cards.
+              final historical = event.payload['historical'] == true;
+              return !historical || (family != 'reasoning' && family != 'tool');
+            })
             .toList()
           ..sort((a, b) => a.cursor.compareTo(b.cursor));
     return List<StreamEventState>.unmodifiable(result);
