@@ -50,6 +50,17 @@ class _HistoryRequest {
   final int epoch;
 }
 
+class _TranscriptEventsCache {
+  const _TranscriptEventsCache({
+    required this.history,
+    required this.live,
+    required this.result,
+  });
+  final List<StreamEventState> history;
+  final List<StreamEventState> live;
+  final List<StreamEventState> result;
+}
+
 /// Owns the foreground bridge socket and the durable one-session M5 state.
 ///
 /// The transport is injected so synchronization, lost-receipt recovery, and
@@ -111,6 +122,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, SessionControlState> _sessionControls = {};
   final List<ModelOption> _models = [];
   final Map<String, SessionHistoryState> _history = {};
+  final Map<String, _TranscriptEventsCache> _transcriptEventsCache = {};
   // In-flight `session.history.page` requests. The host may take several
   // seconds to return a large page; without bookkeeping we could apply a
   // response from a stale epoch after the user has reconnected.
@@ -177,6 +189,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   bool _foreground = true;
   bool _carryDraftAfterGeneration = false;
   bool _hostReadinessRecoveryInFlight = false;
+  bool _notifyScheduled = false;
   bool _initialized = false;
   bool _disposed = false;
 
@@ -470,14 +483,21 @@ final class ConnectionCoordinator extends ChangeNotifier
   int historyEventCount(String sessionId) => historyFor(sessionId).items.length;
 
   List<StreamEventState> transcriptEvents(String sessionId) {
+    final history =
+        _history[sessionId]?.items ?? const <StreamEventState>[];
+    final live =
+        _streams['session:$sessionId']?.events ?? const <StreamEventState>[];
+    final cached = _transcriptEventsCache[sessionId];
+    if (cached != null &&
+        identical(cached.history, history) &&
+        identical(cached.live, live)) {
+      return cached.result;
+    }
     final byId = <String, StreamEventState>{};
-    for (final event
-        in _history[sessionId]?.items ?? const <StreamEventState>[]) {
+    for (final event in history) {
       byId[event.eventId] = event;
     }
-    for (final event
-        in _streams['session:$sessionId']?.events ??
-            const <StreamEventState>[]) {
+    for (final event in live) {
       byId[event.eventId] = event;
     }
     final result =
@@ -503,7 +523,13 @@ final class ConnectionCoordinator extends ChangeNotifier
             })
             .toList()
           ..sort((a, b) => a.cursor.compareTo(b.cursor));
-    return List<StreamEventState>.unmodifiable(result);
+    final immutable = List<StreamEventState>.unmodifiable(result);
+    _transcriptEventsCache[sessionId] = _TranscriptEventsCache(
+      history: history,
+      live: live,
+      result: immutable,
+    );
+    return immutable;
   }
 
   bool hasOlderHistory(String sessionId) {
@@ -2193,17 +2219,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final overlapsDurableCache = decoded.any(
       (event) => existingIds.contains(event.eventId),
     );
-    for (final event in decoded) {
-      await _database.insertEvent(
-        eventId: event.eventId,
-        hostId: event.hostId,
-        streamId: event.streamId,
-        cursor: event.cursor.value,
-        type: event.type,
-        payloadJson: event.payloadJson,
-        occurredAt: event.occurredAt,
-      );
-    }
+    await _database.insertHistoryEvents(decoded);
     final merged = <String, StreamEventState>{
       for (final event in existing.items) event.eventId: event,
       for (final event in decoded) event.eventId: event,
@@ -3113,7 +3129,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   String _id() => _uuid.v4().toLowerCase();
 
   void _notify() {
-    if (!_disposed) notifyListeners();
+    if (_disposed || _notifyScheduled) return;
+    _notifyScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _notifyScheduled = false;
+      if (!_disposed) notifyListeners();
+    });
   }
 
   @override

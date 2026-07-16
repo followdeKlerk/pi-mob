@@ -143,17 +143,15 @@ class _TranscriptViewState extends State<TranscriptView> {
                               ),
                             ),
                           )
-                        : SelectionArea(
-                            child: ListView.builder(
-                              key: const Key('transcript-list'),
-                              controller: _controller,
-                              itemCount: turns.length,
-                              itemBuilder: (context, index) => RepaintBoundary(
-                                key: ValueKey(turns[index].widgetKey),
-                                child: _TurnView(
-                                  turn: turns[index],
-                                  onEditUserMessage: widget.onEditUserMessage,
-                                ),
+                        : ListView.builder(
+                            key: const Key('transcript-list'),
+                            controller: _controller,
+                            itemCount: turns.length,
+                            itemBuilder: (context, index) => RepaintBoundary(
+                              key: ValueKey(turns[index].widgetKey),
+                              child: _TurnView(
+                                turn: turns[index],
+                                onEditUserMessage: widget.onEditUserMessage,
                               ),
                             ),
                           ),
@@ -203,7 +201,9 @@ class TranscriptEventView extends StatefulWidget {
 class _TranscriptEventViewState extends State<TranscriptEventView> {
   static const _reducer = TranscriptReducer();
   late TranscriptReducerState _state;
-  List<String> _eventIds = const [];
+  int _eventCount = 0;
+  String? _firstEventId;
+  String? _lastEventId;
 
   @override
   void initState() {
@@ -218,20 +218,23 @@ class _TranscriptEventViewState extends State<TranscriptEventView> {
       _rebuild();
       return;
     }
-    for (var index = _eventIds.length; index < widget.events.length; index++) {
+    for (var index = _eventCount; index < widget.events.length; index++) {
       _apply(widget.events[index]);
     }
-    _eventIds = List<String>.unmodifiable(
-      widget.events.map((event) => event.eventId),
-    );
+    _captureEventBounds();
   }
 
   bool _isAppendOnly() {
-    if (widget.events.length < _eventIds.length) return false;
-    for (var index = 0; index < _eventIds.length; index++) {
-      if (widget.events[index].eventId != _eventIds[index]) return false;
-    }
-    return true;
+    if (widget.events.length < _eventCount) return false;
+    if (_eventCount == 0) return true;
+    return widget.events.first.eventId == _firstEventId &&
+        widget.events[_eventCount - 1].eventId == _lastEventId;
+  }
+
+  void _captureEventBounds() {
+    _eventCount = widget.events.length;
+    _firstEventId = widget.events.isEmpty ? null : widget.events.first.eventId;
+    _lastEventId = widget.events.isEmpty ? null : widget.events.last.eventId;
   }
 
   void _rebuild() {
@@ -239,9 +242,7 @@ class _TranscriptEventViewState extends State<TranscriptEventView> {
     for (final event in widget.events) {
       _apply(event);
     }
-    _eventIds = List<String>.unmodifiable(
-      widget.events.map((event) => event.eventId),
-    );
+    _captureEventBounds();
   }
 
   void _apply(StreamEventState event) {

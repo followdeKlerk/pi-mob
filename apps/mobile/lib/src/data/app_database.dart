@@ -292,6 +292,33 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  /// Inserts one history page in a single transaction. History rows do not
+  /// advance the live stream cursor until the complete page chain is durable.
+  Future<void> insertHistoryEvents(Iterable<StreamEventState> events) async {
+    final values = events
+        .map(
+          (event) => CachedEventsCompanion.insert(
+            eventId: event.eventId,
+            hostId: event.hostId,
+            streamId: event.streamId,
+            cursor: event.cursor.value,
+            type: event.type,
+            payloadJson: event.payloadJson,
+            occurredAt: event.occurredAt,
+            storedAt: DateTime.now().toUtc(),
+          ),
+        )
+        .toList(growable: false);
+    if (values.isEmpty) return;
+    await batch((batch) {
+      batch.insertAll(
+        cachedEvents,
+        values,
+        mode: InsertMode.insertOrIgnore,
+      );
+    });
+  }
+
   /// Advances the last-contiguous cursor for a stream iff the event extended it.
   Future<void> advanceCursor({
     required String streamId,

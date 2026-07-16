@@ -980,8 +980,9 @@ export class OneSessionPiAdapter {
     const params = command.type === "steering_mode.set" || command.type === "follow_up_mode.set"
       ? { mode: command.payload.enabled === true ? "all" : "one-at-a-time" }
       : Object.fromEntries(Object.entries(command.payload).filter(([key]) => key !== "sessionId"));
-    const rpc = this.sessions.get(sessionId)?.rpc ?? this.rpc;
+    const rpc = this.sessions.get(sessionId)?.rpc ?? this.resolveRpc(sessionId) ?? this.rpc;
     if (!rpc) throw new Error(`${command.type} no RPC available`);
+    await this.ensureRpcStarted(rpc);
     await rpc.request({ id: command.commandId, method, params });
     const patch = {
       sessionId,
