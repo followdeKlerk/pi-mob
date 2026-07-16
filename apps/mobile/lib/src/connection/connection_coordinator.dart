@@ -2128,8 +2128,20 @@ final class ConnectionCoordinator extends ChangeNotifier
       leaseId = null;
       _leaseTimer?.cancel();
     }
-    if (message['commandId'] == pendingCommandId ||
-        (code == 'command_not_found' && pendingCommandId != null)) {
+    if (code == 'command_not_found' && pendingCommandId != null) {
+      // The host authoritatively has no durable record for this command. It
+      // cannot execute later, so retaining its local pending marker only
+      // deadlocks the composer. Preserve the draft and let the next explicit
+      // Send create a fresh command id.
+      pendingCommandId = null;
+      pendingPayload = null;
+      pendingState = null;
+      selectedDeliveryMode = DeliveryMode.immediate;
+      await _persistDraft();
+      _notify();
+      return;
+    }
+    if (message['commandId'] == pendingCommandId) {
       pendingState = code;
       await _persistDraft();
     }
