@@ -105,6 +105,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, SnapshotAssembler> _snapshots = {};
   final Map<String, String> _snapshotStreams = {};
   final Map<String, SessionState> _sessions = {};
+  final Set<String> _locallyDeletedSessionIds = {};
   final Map<String, SessionControlState> _sessionControls = {};
   final List<ModelOption> _models = [];
   final Map<String, SessionHistoryState> _history = {};
@@ -346,7 +347,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
-  List<SessionState> get sessions => List.unmodifiable(_sessions.values);
+  List<SessionState> get sessions => List.unmodifiable(
+    _sessions.values.where(
+      (session) => !_locallyDeletedSessionIds.contains(session.sessionId),
+    ),
+  );
   List<FollowUpItem> get selectedFollowUps =>
       List.unmodifiable(_followUpsBySession[selectedSessionId] ?? const []);
   ExtensionDialogState? get selectedDialog =>
@@ -712,6 +717,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     errorMessage = null;
     _streams.clear();
     _sessions.clear();
+    _locallyDeletedSessionIds.clear();
     _sessionControls.clear();
     _models.clear();
     _history.clear();
@@ -793,6 +799,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       sessionId,
       const <String, Object?>{'abortActive': true, 'cancelQueued': true},
     );
+    // Command transport is fire-and-journal: do not leave a confirmed delete
+    // visibly stuck while waiting for host-stream projection. A later
+    // delete_failed event rolls this back; durable session.removed confirms it.
+    _locallyDeletedSessionIds.add(sessionId);
+    _notify();
   }
 
   Future<void> restoreSession(String sessionId) =>
@@ -1334,6 +1345,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
       _streams.clear();
       _sessions.clear();
+      _locallyDeletedSessionIds.clear();
       _sessionControls.clear();
       _models.clear();
       _history.clear();
@@ -1634,6 +1646,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
     } else if (type == 'session.removed') {
       final id = payload['sessionId'];
+      if (id is String) _locallyDeletedSessionIds.add(id);
       if (id is String && payload['permanent'] == true) {
         _sessions.remove(id);
         _sessionTree.remove(id);
@@ -1677,6 +1690,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     } else if (type == 'session.delete_failed') {
       final id = payload['sessionId'];
       if (id is String) {
+        _locallyDeletedSessionIds.remove(id);
         final existing = _sessionTree[id];
         final node = SessionTreeNode.fromWire(<String, Object?>{
           if (existing != null) ...existing.toWire(),
@@ -1692,6 +1706,9 @@ final class ConnectionCoordinator extends ChangeNotifier
           );
         }
       }
+    } else if (type == 'session.restored') {
+      final id = payload['sessionId'];
+      if (id is String) _locallyDeletedSessionIds.remove(id);
     } else if (type == 'workspace.trust_state') {
       unawaited(_workspaceTrustStateEvent(payload));
     } else if (type == 'queue.snapshot' || type == 'turn.queued') {
