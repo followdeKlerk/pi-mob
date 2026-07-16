@@ -27,6 +27,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, rea
 import { isAbsolute, basename, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
+import { importExternalSessionHistory } from "./pi/external-history";
 import { OneSessionPiAdapter, type OneSessionPolicyBridge, type OneSessionWorkspaceConfig } from "./pi/one-session-adapter";
 import { BridgeStore } from "./core/store";
 import { DurableBridgeRuntime, type RuntimePolicyHandler } from "./core/runtime";
@@ -384,6 +385,16 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     };
     store.ensureSession(session.sessionId, state);
     store.ensureStream(`session:${session.sessionId}`, "session", session.sessionId);
+  }
+  for (const state of store.sessionStates()) {
+    if (state.externalSession !== true || typeof state.sessionId !== "string" ||
+        typeof state.piSessionPath !== "string") continue;
+    try {
+      importExternalSessionHistory(store, state.sessionId, state.piSessionPath);
+    } catch {
+      // Corrupt or concurrently-written TUI history must not prevent the host
+      // from starting; the next daemon launch retries because no marker moved.
+    }
   }
 
   const developmentExtension = resolve(import.meta.dir, "../../pi-extension/src/extension.ts");
