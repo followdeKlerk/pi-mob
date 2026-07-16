@@ -98,7 +98,11 @@ final class SessionSubscriptionSet {
       throw ArgumentError.value(sessionId, 'sessionId', 'must not be empty');
     }
     final filtered = _items
-        .where((item) => item.detail != SubscriptionDetail.full)
+        .where(
+          (item) =>
+              item.detail != SubscriptionDetail.full &&
+              item.sessionId != sessionId,
+        )
         .toList(growable: true);
     filtered.add(
       SessionSubscription(

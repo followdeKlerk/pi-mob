@@ -163,8 +163,25 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final semantic = context.piSemanticColors;
-    final connectionHealthy =
-        coordinator.isReady && coordinator.errorMessage == null;
+    final connectionLabel = switch (coordinator.phase) {
+      ConnectionPhase.ready => 'Connected',
+      ConnectionPhase.probing ||
+      ConnectionPhase.connecting ||
+      ConnectionPhase.handshaking => 'Connecting',
+      ConnectionPhase.synchronizing => 'Syncing',
+      ConnectionPhase.disconnected => 'Reconnecting',
+      ConnectionPhase.background => 'Background',
+      _ => 'Issue',
+    };
+    final connectionHealthy = coordinator.phase == ConnectionPhase.ready;
+    final connectionBusy = const {
+      ConnectionPhase.probing,
+      ConnectionPhase.connecting,
+      ConnectionPhase.handshaking,
+      ConnectionPhase.synchronizing,
+      ConnectionPhase.disconnected,
+      ConnectionPhase.background,
+    }.contains(coordinator.phase);
     final selectedSessionId = coordinator.selectedSessionId;
     final transcriptSyncing = selectedSessionId != null &&
         coordinator.isHistorySyncing(selectedSessionId);
@@ -215,9 +232,9 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                     ),
                   ),
                   Semantics(
-                    label: connectionHealthy
-                        ? 'Connected'
-                        : 'Connection issue: ${coordinator.errorMessage ?? coordinator.phase.name}',
+                    label: connectionLabel == 'Issue'
+                        ? 'Connection issue: ${coordinator.errorMessage ?? coordinator.phase.name}'
+                        : connectionLabel,
                     child: Container(
                       key: const Key('drawer-connection-indicator'),
                       padding: const EdgeInsets.symmetric(
@@ -237,13 +254,15 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                             decoration: BoxDecoration(
                               color: connectionHealthy
                                   ? semantic.connectionReady
+                                  : connectionBusy
+                                  ? semantic.connectionDegraded
                                   : semantic.connectionOffline,
                               shape: BoxShape.circle,
                             ),
                           ),
                           const SizedBox(width: PiSpacing.xs),
                           Text(
-                            connectionHealthy ? 'Connected' : 'Issue',
+                            connectionLabel,
                             style: theme.textTheme.labelSmall?.copyWith(
                               color: colors.onSurfaceVariant,
                               fontWeight: FontWeight.w600,

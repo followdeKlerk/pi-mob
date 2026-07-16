@@ -764,8 +764,20 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
-  Future<void> connect(String endpointText) async {
+  Future<void> connect(String endpointText, {bool force = false}) async {
     if (!_foreground || _disposed) return;
+    final normalized = normalizeHttpsEndpoint(endpointText);
+    if (!force &&
+        _socket != null &&
+        connectionId != null &&
+        endpoint == normalized &&
+        const {
+          ConnectionPhase.handshaking,
+          ConnectionPhase.synchronizing,
+          ConnectionPhase.ready,
+        }.contains(phase)) {
+      return;
+    }
     final int epoch = ++_connectionEpoch;
     _cancelReconnect();
     await _closeSocket();
@@ -775,6 +787,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     // History requests are connection-epoch bound. Never carry a loading
     // latch or an HMAC page token across reconnects/bridge restarts.
     _historyRequests.clear();
+    if (!_historyGateComplete) {
+      _historySyncCurrentSessionId = null;
+      _historySyncQueue.clear();
+      _historySyncLocalRevisions.clear();
+    }
     for (final entry in _history.entries.toList()) {
       if (entry.value.isLoading) {
         _history[entry.key] = entry.value.copyWith(
@@ -789,7 +806,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _hostReadinessRecoveryInFlight = false;
 
     try {
-      endpoint = normalizeHttpsEndpoint(endpointText);
+      endpoint = normalized;
       phase = ConnectionPhase.probing;
       _notify();
       final probe = await _transport.probe(endpoint!);
@@ -898,7 +915,7 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> retryConnection() async {
     final target = endpoint;
-    if (target != null) await connect(target.toString());
+    if (target != null) await connect(target.toString(), force: true);
   }
 
   /// Forget the currently paired host and return to the unpaired state.
@@ -945,6 +962,18 @@ final class ConnectionCoordinator extends ChangeNotifier
     _models.clear();
     _history.clear();
     _historyRequests.clear();
+    _historyGateComplete = false;
+    _historySyncCurrentSessionId = null;
+    _historySyncQueue.clear();
+    _historySyncLocalRevisions.clear();
+    _historyGateError = null;
+    _subscriptionSet = SessionSubscriptionSet.empty();
+    for (final sessionId in _controllers.sessions.toList()) {
+      _controllers.drop(sessionId);
+    }
+    _attention.clear();
+    _attentionWire.clear();
+    _unreadCount.clear();
     _workspaces.clear();
     _workspaceSearch = WorkspaceSearchState.idle();
     _workspaceSearchEpoch += 1;
@@ -1517,9 +1546,19 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    final active = state == AppLifecycleState.resumed;
-    _foreground = active;
-    if (!active) {
+    if (state == AppLifecycleState.resumed) {
+      _foreground = true;
+      if (_socket == null && endpoint != null) {
+        unawaited(connect(endpoint.toString()));
+      }
+      return;
+    }
+    _foreground = false;
+    // Inactive/hidden/paused are normal transient mobile states (system
+    // sheets, notification shade, image picker, app switch). Keep the socket
+    // and controller lease alive; the OS will close it if the process is
+    // suspended, and resume reconnects only when that actually happened.
+    if (state == AppLifecycleState.detached) {
       ++_connectionEpoch;
       _cancelReconnect();
       unawaited(_closeSocket());
@@ -1527,8 +1566,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       leaseId = null;
       phase = ConnectionPhase.background;
       _notify();
-    } else if (endpoint != null) {
-      unawaited(connect(endpoint.toString()));
     }
   }
 
@@ -1650,6 +1687,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       _models.clear();
       _history.clear();
       _historyRequests.clear();
+      _historyGateComplete = false;
+      _historySyncCurrentSessionId = null;
+      _historySyncQueue.clear();
+      _historySyncLocalRevisions.clear();
       _rawEvents.clear();
       _toolOutputNotices.clear();
       _forceSnapshot.add('host:$newHostId');
@@ -1682,24 +1723,28 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> _subscribe() async {
     if (_socket == null || connectionId == null || hostId == null) return;
-    final streamIds = <String>[
-      'host:$hostId',
-      if (_historyGateComplete && selectedSessionId != null)
-        'session:$selectedSessionId',
+    final desired = <({String streamId, String detail})>[
+      (streamId: 'host:$hostId', detail: 'full'),
+      if (_historyGateComplete)
+        for (final item in _subscriptionSet.items)
+          (
+            streamId: item.streamId,
+            detail: item.detail == SubscriptionDetail.full ? 'full' : 'summary',
+          ),
     ];
     _syncPending
       ..clear()
-      ..addAll(streamIds);
+      ..addAll(desired.map((item) => item.streamId));
     phase = ConnectionPhase.synchronizing;
     final streams = <Map<String, Object?>>[];
-    for (final streamId in streamIds) {
+    for (final item in desired) {
       final cursor =
-          _streams[streamId]?.lastContiguousCursor.value ??
-          await _database.cursor(streamId);
+          _streams[item.streamId]?.lastContiguousCursor.value ??
+          await _database.cursor(item.streamId);
       streams.add(<String, Object?>{
-        'streamId': streamId,
-        'detail': 'full',
-        if (!_forceSnapshot.remove(streamId) && cursor != null)
+        'streamId': item.streamId,
+        'detail': item.detail,
+        if (!_forceSnapshot.remove(item.streamId) && cursor != null)
           'afterCursor': cursor,
       });
     }
@@ -2609,12 +2654,19 @@ final class ConnectionCoordinator extends ChangeNotifier
   void _startLeaseRenewal() {
     _leaseTimer?.cancel();
     if (leaseId == null || !isReady) return;
+    final renewalEpoch = _connectionEpoch;
     _leaseTimer = Timer.periodic(const Duration(seconds: 10), (_) {
       final currentLease = leaseId;
       if (isReady && currentLease != null) {
         unawaited(
           _sendControl('controller.renew', <String, Object?>{
             'leaseId': currentLease,
+          }).catchError((Object error, StackTrace stack) {
+            if (renewalEpoch == _connectionEpoch &&
+                currentLease == leaseId) {
+              _socketEnded(error, renewalEpoch);
+            }
+            return '';
           }),
         );
       }
@@ -3071,9 +3123,20 @@ final class ConnectionCoordinator extends ChangeNotifier
   void _socketEnded(Object? error, int epoch) {
     if (epoch != _connectionEpoch || _disposed) return;
     ++_connectionEpoch;
+    if (!_historyGateComplete) {
+      _historySyncCurrentSessionId = null;
+      _historySyncQueue.clear();
+      _historySyncLocalRevisions.clear();
+    }
+    for (final waiter in _controllerWaiters.values) {
+      if (!waiter.isCompleted) {
+        waiter.completeError(StateError('Connection changed'));
+      }
+    }
+    _controllerWaiters.clear();
     _ackTimer?.cancel();
     _leaseTimer?.cancel();
-    _socket = null;
+    unawaited(_closeSocket());
     connectionId = null;
     leaseId = null;
     phase = _foreground
@@ -3327,7 +3390,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     _subscriptionSet = next;
     await _persistSubscriptionSet();
     await selectSession(sessionId);
-    await _pushSubscriptions();
   }
 
   /// Adds `sessionId` as a summary subscription. Throws when the cap
@@ -3375,22 +3437,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// Pushes the subscription set to the host. The host stream is
   /// always part of the wire-level subscription; the session rows
   /// come from the active set.
-  Future<void> _pushSubscriptions() async {
-    if (_socket == null || connectionId == null || hostId == null) return;
-    _syncPending
-      ..clear()
-      ..add('host:$hostId');
-    for (final item in _subscriptionSet.items) {
-      _syncPending.add(item.streamId);
-    }
-    phase = ConnectionPhase.synchronizing;
-    final wire = <Map<String, Object?>>[
-      <String, Object?>{'streamId': 'host:$hostId', 'detail': 'full'},
-      ..._subscriptionSet.toWire(),
-    ];
-    _notify();
-    await _sendControl('subscription.set', <String, Object?>{'streams': wire});
-  }
+  Future<void> _pushSubscriptions() => _subscribe();
 
   /// Returns the highest known cursor for `sessionId` across the live
   /// stream and the durable cache. Defaults to zero.

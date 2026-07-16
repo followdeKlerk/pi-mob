@@ -150,7 +150,7 @@ class SessionSyncScreen extends StatelessWidget {
                               ),
                         trailing: ready ? const Icon(Icons.chevron_right) : null,
                         onTap: ready
-                            ? () => coordinator.selectSession(session.sessionId)
+                            ? () => coordinator.takeControl(session.sessionId)
                             : null,
                       );
                     },
