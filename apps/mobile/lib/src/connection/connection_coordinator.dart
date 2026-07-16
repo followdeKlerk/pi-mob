@@ -201,9 +201,49 @@ final class ConnectionCoordinator extends ChangeNotifier
   ///
   /// Read-only sessions are still allowed to send prompts here because the
   /// host enforces the tool hook; the mobile client must not block authoring.
-  DeliveryMode get _effectiveDeliveryMode => selectedRuntimeState == 'running'
-      ? selectedDeliveryMode
-      : DeliveryMode.immediate;
+  bool get _selectedHasActiveTurnEvidence {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return false;
+    final events = _streams['session:$sessionId']?.events;
+    if (events == null) return false;
+    for (final event in events.reversed) {
+      switch (event.type) {
+        case 'turn.settled':
+        case 'turn.aborted':
+        case 'turn.failed':
+        case 'turn.indeterminate':
+        case 'turn.interrupted':
+          return false;
+        case 'turn.started':
+        case 'turn.waiting_for_input':
+        case 'turn.retrying':
+        case 'turn.compacting':
+          return true;
+      }
+    }
+    return false;
+  }
+
+  String? get _effectiveRuntimeState {
+    final state = selectedRuntimeState;
+    if (const {
+          'running',
+          'waiting_for_input',
+          'retrying',
+          'finishing',
+        }.contains(state) &&
+        !_selectedHasActiveTurnEvidence) {
+      return 'idle';
+    }
+    return state;
+  }
+
+  DeliveryMode get _effectiveDeliveryMode {
+    if (_effectiveRuntimeState != 'running') return DeliveryMode.immediate;
+    return selectedDeliveryMode == DeliveryMode.immediate
+        ? DeliveryMode.followUp
+        : selectedDeliveryMode;
+  }
 
   bool get canAttemptSend {
     final sessionId = selectedSessionId;
@@ -225,7 +265,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     return _deliveryModeMatchesRuntime(
       _effectiveDeliveryMode,
-      selectedRuntimeState,
+      _effectiveRuntimeState,
     );
   }
 
@@ -240,7 +280,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     return _deliveryModeMatchesRuntime(
       _effectiveDeliveryMode,
-      selectedRuntimeState,
+      _effectiveRuntimeState,
     );
   }
 
@@ -255,9 +295,9 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (leaseId == null) return 'Acquire the controller lease.';
     if (draft.trim().isEmpty) return 'Compose a message before sending.';
     if (pendingCommandId != null) return 'A command is already in flight.';
-    final state = selectedRuntimeState;
-    if (!_deliveryModeMatchesRuntime(selectedDeliveryMode, state)) {
-      return _deliveryModeMismatchReason(selectedDeliveryMode, state);
+    final state = _effectiveRuntimeState;
+    if (!_deliveryModeMatchesRuntime(_effectiveDeliveryMode, state)) {
+      return _deliveryModeMismatchReason(_effectiveDeliveryMode, state);
     }
     return null;
   }
@@ -280,6 +320,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       isReady &&
       selectedSessionId != null &&
       leaseId != null &&
+      _selectedHasActiveTurnEvidence &&
       const {
         'running',
         'waiting_for_input',

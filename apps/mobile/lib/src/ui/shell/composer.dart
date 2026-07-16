@@ -59,7 +59,7 @@ class Composer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final prefill = coordinator.editorPrefill;
-    final aborting = coordinator.canAbort;
+    final aborting = coordinator.canAbort && coordinator.draft.trim().isEmpty;
     if (prefill != null && draftController.text != prefill) {
       draftController.value = TextEditingValue(
         text: prefill,
