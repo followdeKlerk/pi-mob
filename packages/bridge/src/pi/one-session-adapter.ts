@@ -200,6 +200,8 @@ export interface OneSessionAdapterOptions {
   readonly attachmentStore?: AttachmentStore;
   /** M15 best-effort status side-channel. */
   readonly notificationService?: NotificationService;
+  /** Host-wide configured catalogue discovered without starting a session. */
+  readonly hostModels?: ReadonlyArray<Record<string, unknown>>;
 }
 
 // ---------------- Adapter ----------------
@@ -263,6 +265,7 @@ export class OneSessionPiAdapter {
   private readonly exportRegistry: ExportRegistry | null;
   private readonly attachmentStore: AttachmentStore | null;
   private readonly notificationService: NotificationService | null;
+  private readonly hostModels: ReadonlyArray<Record<string, unknown>>;
 
   constructor(options: OneSessionAdapterOptions) {
     this.store = options.store;
@@ -277,6 +280,7 @@ export class OneSessionPiAdapter {
     this.softDeleteRetentionMs = 7 * 24 * 60 * 60 * 1000;
     this.attachmentStore = options.attachmentStore ?? null;
     this.notificationService = options.notificationService ?? null;
+    this.hostModels = (options.hostModels ?? []).map((model) => ({ ...model }));
     // Production injects a registry rooted in the bridge state directory.
     // Keeping this optional avoids filesystem side effects for adapters that
     // do not advertise export support (including read-only test fixtures).
@@ -378,9 +382,7 @@ export class OneSessionPiAdapter {
         this.policyBridge?.publish?.();
         return;
       case "model.set":
-        return this.handleSessionControl(command, "set_model", "model.state", {
-          modelId: command.payload.modelId,
-        }, true);
+        return this.handleModelSet(command);
       case "thinking.set":
         return this.handleSessionControl(command, "set_thinking_level", "model.state", {
           level: command.payload.level,
@@ -936,6 +938,32 @@ export class OneSessionPiAdapter {
     this.store.appendEvent(`session:${sessionId}`, "context.state", { sessionId, ...normalizedStats });
   }
 
+  private async handleModelSet(command: StoredCommand): Promise<void> {
+    const sessionId = String(command.payload.sessionId ?? "");
+    const modelId = String(command.payload.modelId ?? "");
+    const state = this.store.sessionState(sessionId) ?? {};
+    const candidates = [
+      ...(Array.isArray(state.availableModels) ? state.availableModels : []),
+      ...this.hostModels,
+    ].filter((item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object");
+    const match = candidates.find((item) =>
+      item.id === modelId || item.modelId === modelId);
+    const provider = typeof command.payload.provider === "string"
+      ? command.payload.provider
+      : typeof match?.provider === "string"
+      ? match.provider
+      : null;
+    if (!provider) throw new Error("model.set provider unavailable");
+    await this.handleSessionControl(
+      command,
+      "set_model",
+      "model.state",
+      { provider, modelId },
+      true,
+    );
+  }
+
   private async handleSessionControl(
     command: StoredCommand,
     method: string,
@@ -972,7 +1000,10 @@ export class OneSessionPiAdapter {
     const id = sessionId ?? this.lastUsedSessionId;
     if (!id) return { items: [] };
     const state = this.store.sessionState(id) ?? {};
-    const models = Array.isArray(state.availableModels) ? state.availableModels : [];
+    const sessionModels = Array.isArray(state.availableModels)
+      ? state.availableModels
+      : [];
+    const models = sessionModels.length > 0 ? sessionModels : this.hostModels;
     return { items: models.filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object").map((item) => ({ ...item })) };
   }
 

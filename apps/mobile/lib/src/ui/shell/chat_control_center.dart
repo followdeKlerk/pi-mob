@@ -105,12 +105,6 @@ class _ChatControlCenterState extends State<ChatControlCenter> {
           ),
         )
         .toList(growable: false);
-    final statsAvailable = controls.inputTokens != null ||
-        controls.outputTokens != null ||
-        controls.contextTokens != null ||
-        controls.contextWindow != null ||
-        controls.cost != null;
-    final needsControlRefresh = models.isEmpty || !statsAvailable;
     final sessionTokens = controls.inputTokens == null &&
             controls.outputTokens == null
         ? null
@@ -149,35 +143,6 @@ class _ChatControlCenterState extends State<ChatControlCenter> {
                     ),
                   ),
                   const SizedBox(height: PiSpacing.md),
-                  if (needsControlRefresh)
-                    Card(
-                      color: Theme.of(context).colorScheme.secondaryContainer,
-                      child: Padding(
-                        padding: const EdgeInsets.all(PiSpacing.md),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Model or statistics snapshot unavailable',
-                              style: TextStyle(fontWeight: FontWeight.w600),
-                            ),
-                            const SizedBox(height: PiSpacing.xs),
-                            const Text(
-                              'Pi reports configured models, token usage, context usage, and cost through its live session RPC. Imported or stopped chats may not have reported a snapshot yet. Once reported, the latest values are stored on this device; token and cost values remain estimates.',
-                            ),
-                            const SizedBox(height: PiSpacing.sm),
-                            FilledButton.tonalIcon(
-                              key: const Key('load-session-control-data'),
-                              onPressed: coordinator.isReady
-                                  ? coordinator.loadSessionControlData
-                                  : null,
-                              icon: const Icon(Icons.sync),
-                              label: const Text('Load from Pi'),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
                   ModelThinkingSelector(
                     data: view.ModelThinkingViewData(
                       models: models,

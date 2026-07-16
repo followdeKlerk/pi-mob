@@ -615,11 +615,23 @@ final class ConnectionCoordinator extends ChangeNotifier
     });
   }
 
-  Future<void> setModel(String modelId) => _sendSessionControl(
-    'model.set',
-    <String, Object?>{'modelId': modelId},
-    idleOnly: true,
-  );
+  Future<void> setModel(String modelId) {
+    ModelOption? selected;
+    for (final model in _models) {
+      if (model.id == modelId) {
+        selected = model;
+        break;
+      }
+    }
+    return _sendSessionControl(
+      'model.set',
+      <String, Object?>{
+        'modelId': modelId,
+        if (selected?.provider != null) 'provider': selected!.provider,
+      },
+      idleOnly: true,
+    );
+  }
   Future<void> setThinking(String level) => _sendSessionControl(
     'thinking.set',
     <String, Object?>{'level': level},

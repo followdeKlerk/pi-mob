@@ -215,6 +215,46 @@ function compactSessionName(value: string, fallback: string): string {
   return singleLine.length > 72 ? `${singleLine.slice(0, 69)}…` : singleLine;
 }
 
+function discoverHostModels(
+  executable: string,
+  cwd: string,
+  environment: Record<string, string | undefined> = {},
+): Array<Record<string, unknown>> {
+  try {
+    const result = Bun.spawnSync({
+      cmd: [executable, "--list-models"],
+      cwd,
+      env: { ...process.env, ...environment },
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    if (result.exitCode !== 0) return [];
+    const lines = result.stdout.toString().split("\n").slice(1);
+    const models: Array<Record<string, unknown>> = [];
+    for (const line of lines) {
+      const columns = line.trim().split(/\s+/);
+      if (columns.length < 6) continue;
+      const [provider, id, contextWindow, maxOutput, thinking, images] = columns;
+      if (!provider || !id) continue;
+      models.push({
+        id,
+        modelId: id,
+        name: id,
+        label: id,
+        provider,
+        contextWindow,
+        maxOutput,
+        thinking: thinking === "yes",
+        images: images === "yes",
+        available: true,
+      });
+    }
+    return models.slice(0, 500);
+  } catch {
+    return [];
+  }
+}
+
 function discoverPiSessions(workspaceRoot: string): DiscoveredPiSession[] {
   const home = process.env.HOME;
   if (!home) return [];
@@ -553,7 +593,12 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     sessionRpcs.set(sessionId, client);
     return client;
   };
-  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, ...(notificationService ? {notificationService} : {}) });
+  const hostModels = discoverHostModels(
+    options.executable,
+    options.workspace,
+    options.environment ?? {},
+  );
+  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, hostModels, ...(notificationService ? {notificationService} : {}) });
   if(notificationService && capabilityProviders) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:[...capabilityProviders],bestEffort:true});
   const notificationSweepTimer=setInterval(()=>{ try{notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
   notificationSweepTimer.unref();

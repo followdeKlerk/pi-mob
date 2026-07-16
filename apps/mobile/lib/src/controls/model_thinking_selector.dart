@@ -22,10 +22,6 @@ class ModelThinkingSelector extends StatelessWidget {
         explanation: 'The host did not report any configured models.',
       );
     }
-    final grouped = <String, List<ModelOptionData>>{};
-    for (final model in data.models) {
-      grouped.putIfAbsent(model.provider, () => <ModelOptionData>[]).add(model);
-    }
     final selected = data.selectedModel;
     final enabled = data.enabled && callbacks.onModelSelected != null;
     return Semantics(
@@ -75,30 +71,33 @@ class ModelThinkingSelector extends StatelessWidget {
                 ),
               ],
               const SizedBox(height: 8),
-              for (final entry in grouped.entries) ...[
-                Text(entry.key, style: Theme.of(context).textTheme.labelLarge),
-                const SizedBox(height: 4),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    for (final model in entry.value)
-                      ChoiceChip(
-                        key: ValueKey('model-${model.id}'),
-                        label: Text(model.label),
-                        selected: selected?.id == model.id,
-                        onSelected: enabled
-                            ? (chosen) {
-                                if (chosen) {
-                                  callbacks.onModelSelected!(model.id);
-                                }
-                              }
-                            : null,
-                      ),
-                  ],
+              DropdownButtonFormField<String>(
+                key: const Key('model-selector-dropdown'),
+                initialValue: selected?.id,
+                isExpanded: true,
+                decoration: const InputDecoration(
+                  labelText: 'Configured model',
+                  border: OutlineInputBorder(),
                 ),
-                const SizedBox(height: 8),
-              ],
+                items: [
+                  for (final model in data.models)
+                    DropdownMenuItem(
+                      value: model.id,
+                      child: Text(
+                        '${model.provider} · ${model.label}',
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                ],
+                onChanged: enabled
+                    ? (modelId) {
+                        if (modelId != null) {
+                          callbacks.onModelSelected!(modelId);
+                        }
+                      }
+                    : null,
+              ),
+              const SizedBox(height: 12),
               if (selected != null) ...[
                 const SizedBox(height: 4),
                 if (selected.thinkingLevels.isEmpty)
