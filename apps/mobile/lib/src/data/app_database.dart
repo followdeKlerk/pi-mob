@@ -152,6 +152,7 @@ class AppDatabase extends _$AppDatabase {
       await _ensureM11Schema();
       await _ensureM12Schema();
       await _ensureM13Schema();
+      await _ensureHistorySyncSchema();
       if (details.wasCreated) {
         await batch((b) {
           b.insert(
@@ -197,6 +198,10 @@ class AppDatabase extends _$AppDatabase {
       await resetM11Caches(hostId);
       await resetM12Caches(hostId);
       await resetM13Caches(hostId);
+      await customStatement(
+        'DELETE FROM session_history_sync WHERE host_id = ?',
+        [hostId],
+      );
     });
   }
 
@@ -339,14 +344,13 @@ class AppDatabase extends _$AppDatabase {
         ),
       );
 
-      // The diagnostic cache is intentionally bounded. A later restart with a
-      // compacted prefix requests an atomic bridge snapshot rather than
-      // pretending the remaining suffix is complete.
+      // Keep complete local transcripts for normal sessions while retaining a
+      // high defensive ceiling for pathological streams.
       final old =
           await (select(cachedEvents)
                 ..where((row) => row.streamId.equals(event.streamId))
                 ..orderBy([(row) => OrderingTerm.desc(row.storedAt)])
-                ..limit(100000, offset: 500))
+                ..limit(100000, offset: 100000))
               .get();
       if (old.isNotEmpty) {
         await (delete(
@@ -435,6 +439,42 @@ class AppDatabase extends _$AppDatabase {
   Future<List<HostEntry>> allHosts() => select(hostEntries).get();
   Future<List<SessionEntry>> allSessions() => select(sessionEntries).get();
   Future<List<DraftEntry>> allDrafts() => select(draftEntries).get();
+
+  Future<void> _ensureHistorySyncSchema() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS session_history_sync (
+        host_id TEXT NOT NULL,
+        session_id TEXT NOT NULL,
+        snapshot_revision TEXT NOT NULL,
+        completed_at INTEGER NOT NULL,
+        PRIMARY KEY (host_id, session_id)
+      )
+    ''');
+  }
+
+  Future<String?> historySyncRevision(String hostId, String sessionId) async {
+    final row = await customSelect(
+      'SELECT snapshot_revision FROM session_history_sync '
+      'WHERE host_id = ? AND session_id = ?',
+      variables: [Variable<String>(hostId), Variable<String>(sessionId)],
+    ).getSingleOrNull();
+    return row?.read<String>('snapshot_revision');
+  }
+
+  Future<void> saveHistorySyncRevision({
+    required String hostId,
+    required String sessionId,
+    required String snapshotRevision,
+  }) async {
+    await customStatement(
+      'INSERT INTO session_history_sync '
+      '(host_id, session_id, snapshot_revision, completed_at) '
+      'VALUES (?, ?, ?, ?) ON CONFLICT(host_id, session_id) DO UPDATE SET '
+      'snapshot_revision = excluded.snapshot_revision, '
+      'completed_at = excluded.completed_at',
+      [hostId, sessionId, snapshotRevision, DateTime.now().toUtc().millisecondsSinceEpoch],
+    );
+  }
 
   // ---------------------------------------------------------------------
   // M11 multi-session support: per-session controller state, attention

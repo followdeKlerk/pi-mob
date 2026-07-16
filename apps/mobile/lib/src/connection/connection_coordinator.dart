@@ -113,6 +113,13 @@ final class ConnectionCoordinator extends ChangeNotifier
   // seconds to return a large page; without bookkeeping we could apply a
   // response from a stale epoch after the user has reconnected.
   final Map<String, _HistoryRequest> _historyRequests = {};
+  final List<String> _historySyncQueue = [];
+  final Map<String, String?> _historySyncLocalRevisions = {};
+  String? _historySyncCurrentSessionId;
+  int _historySyncTotal = 0;
+  int _historySyncCompleted = 0;
+  bool _historyGateComplete = false;
+  String? _historyGateError;
   final List<WorkspaceEntry> _workspaces = [];
   final List<String> _rawEvents = [];
   final List<ToolOutputNotice> _toolOutputNotices = [];
@@ -185,6 +192,16 @@ final class ConnectionCoordinator extends ChangeNotifier
   DeliveryMode selectedDeliveryMode = DeliveryMode.immediate;
 
   bool get isReady => phase == ConnectionPhase.ready && _socket != null;
+  bool get historyGateComplete => _historyGateComplete;
+  bool get historyGateRunning =>
+      !_historyGateComplete && _historySyncCurrentSessionId != null;
+  String? get historyGateError => _historyGateError;
+  int get historySyncTotal => _historySyncTotal;
+  int get historySyncCompleted => _historySyncCompleted;
+  String? get historySyncCurrentSessionId => _historySyncCurrentSessionId;
+  double get historySyncProgress => _historySyncTotal == 0
+      ? (_historyGateComplete ? 1 : 0)
+      : _historySyncCompleted / _historySyncTotal;
 
   /// Stream identifiers still awaiting an authoritative sync-complete frame.
   /// Exposed for Host diagnostics; callers receive an immutable snapshot.
@@ -483,6 +500,56 @@ final class ConnectionCoordinator extends ChangeNotifier
   bool hasOlderHistory(String sessionId) {
     final state = _history[sessionId];
     return state == null || state.hasOlder;
+  }
+
+  Future<void> retryHistoryGate() async {
+    if (!isReady) return;
+    _historyGateComplete = false;
+    _historyGateError = null;
+    await _startHistoryGate();
+  }
+
+  Future<void> _startHistoryGate() async {
+    if (!isReady || _historySyncCurrentSessionId != null) return;
+    _historyGateError = null;
+    _historySyncQueue
+      ..clear()
+      ..addAll(
+        _sessions.keys.where(
+          (id) => !_locallyDeletedSessionIds.contains(id),
+        ),
+      );
+    _historySyncTotal = _historySyncQueue.length;
+    _historySyncCompleted = 0;
+    _historySyncLocalRevisions.clear();
+    selectedSessionId = null;
+    _notify();
+    await _syncNextHistorySession();
+  }
+
+  Future<void> _syncNextHistorySession() async {
+    if (!isReady) return;
+    if (_historySyncQueue.isEmpty) {
+      _historySyncCurrentSessionId = null;
+      _historyGateComplete = true;
+      _historyGateError = null;
+      _notify();
+      return;
+    }
+    final sessionId = _historySyncQueue.removeAt(0);
+    _historySyncCurrentSessionId = sessionId;
+    final cached = historyFor(sessionId);
+    _historySyncLocalRevisions[sessionId] = hostId == null
+        ? null
+        : await _database.historySyncRevision(hostId!, sessionId);
+    _history[sessionId] = cached.copyWith(
+      snapshotRevision: null,
+      nextPageToken: null,
+      isLoading: false,
+      error: null,
+    );
+    _notify();
+    await loadOlderHistory(sessionId);
   }
 
   Future<void> loadOlderHistory(
@@ -1118,15 +1185,9 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   Future<void> selectSession(String sessionId) async {
-    if (selectedSessionId == sessionId && isReady) {
-      // A previous empty/failed page is not authoritative forever: the host
-      // may have imported TUI history since that response.
-      _history.remove(sessionId);
-      await loadOlderHistory(sessionId);
-      return;
-    }
+    if (!_historyGateComplete) return;
+    if (selectedSessionId == sessionId && isReady) return;
     selectedSessionId = sessionId;
-    _history.remove(sessionId);
     leaseId = null;
     final saved = hostId == null
         ? null
@@ -1156,7 +1217,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     _notify();
     if (_socket != null && connectionId != null) await _subscribe();
-    await loadOlderHistory(sessionId);
   }
 
   Future<void> updateDraft(String value) async {
@@ -1440,7 +1500,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       case 'model.list.result':
         _modelListResult(payload);
       case 'session.history.page.result':
-        _sessionHistoryPageResult(message, payload);
+        await _sessionHistoryPageResult(message, payload);
       case 'workspace.trust_state':
         await _workspaceTrustStateEvent(payload);
       case 'command.current.result':
@@ -1511,6 +1571,13 @@ final class ConnectionCoordinator extends ChangeNotifier
     } else {
       await _loadCachedStreams(newHostId);
     }
+    if (!_historyGateComplete) {
+      // Initial connection is deliberately host-only. Session streams can
+      // contain very large imported replays; history is fetched through the
+      // bounded pager before a chat becomes selectable.
+      selectedSessionId = null;
+      leaseId = null;
+    }
     await _database.upsertHost(
       HostEntriesCompanion.insert(
         hostId: newHostId,
@@ -1532,7 +1599,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (_socket == null || connectionId == null || hostId == null) return;
     final streamIds = <String>[
       'host:$hostId',
-      if (selectedSessionId != null) 'session:$selectedSessionId',
+      if (_historyGateComplete && selectedSessionId != null)
+        'session:$selectedSessionId',
     ];
     _syncPending
       ..clear()
@@ -1657,12 +1725,9 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (_syncPending.isEmpty) {
       final deferredSessionId = _deferredAutoSelectSessionId;
       _deferredAutoSelectSessionId = null;
-      if (deferredSessionId != null && selectedSessionId != deferredSessionId) {
-        // A host summary can announce the first session while the initial
-        // host-only subscription is still replaying. Stay synchronizing while
-        // selection loads its draft and starts the replacement subscription;
-        // exposing a transient ready phase can race notification registration
-        // or controller acquisition against the server readiness fence.
+      if (_historyGateComplete &&
+          deferredSessionId != null &&
+          selectedSessionId != deferredSessionId) {
         await selectSession(deferredSessionId);
         return;
       }
@@ -1671,17 +1736,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       errorMessage = null;
       _startAckTimer();
       await _sendControl('workspace.list', const <String, Object?>{});
-      final sessionId = selectedSessionId;
-      if (sessionId != null) {
-        final streamRevision =
-            _streams['session:$sessionId']?.lastContiguousCursor.value;
-        final historyRevision = _history[sessionId]?.snapshotRevision;
-        if (streamRevision != historyRevision) {
-          _history.remove(sessionId);
-        }
-        unawaited(loadOlderHistory(sessionId));
-        await _acquireController();
+      if (!_historyGateComplete) {
+        unawaited(_startHistoryGate());
+        return;
       }
+      if (selectedSessionId != null) await _acquireController();
       await _reconcilePending();
     }
   }
@@ -2000,10 +2059,10 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
-  void _sessionHistoryPageResult(
+  Future<void> _sessionHistoryPageResult(
     Map<String, Object?> message,
     Map<String, Object?> payload,
-  ) {
+  ) async {
     final requestId = message['requestId'];
     if (requestId is! String) return;
     final request = _historyRequests.remove(requestId);
@@ -2042,33 +2101,84 @@ final class ConnectionCoordinator extends ChangeNotifier
         );
       }
     }
+    final existingIds = existing.items.map((event) => event.eventId).toSet();
+    final overlapsDurableCache = decoded.any(
+      (event) => existingIds.contains(event.eventId),
+    );
+    for (final event in decoded) {
+      await _database.insertEvent(
+        eventId: event.eventId,
+        hostId: event.hostId,
+        streamId: event.streamId,
+        cursor: event.cursor.value,
+        type: event.type,
+        payloadJson: event.payloadJson,
+        occurredAt: event.occurredAt,
+      );
+    }
     final merged = <String, StreamEventState>{
       for (final event in existing.items) event.eventId: event,
       for (final event in decoded) event.eventId: event,
     }.values.toList()..sort((a, b) => a.cursor.compareTo(b.cursor));
-    final nextPageToken = payload['nextPageToken'] is String
+    final responseRevision = payload['snapshotRevision'] is String
+        ? payload['snapshotRevision'] as String
+        : existing.snapshotRevision;
+    final rawNextPageToken = payload['nextPageToken'] is String
         ? payload['nextPageToken'] as String
         : null;
+    final localRevision = _historySyncLocalRevisions[request.sessionId];
+    final alreadyFresh = localRevision != null &&
+        localRevision == responseRevision &&
+        existing.items.isNotEmpty;
+    final reachedDurablePrefix = localRevision != null &&
+        overlapsDurableCache;
+    final nextPageToken = alreadyFresh || reachedDurablePrefix
+        ? null
+        : rawNextPageToken;
     _history[request.sessionId] = existing.copyWith(
       items: merged,
-      snapshotRevision: payload['snapshotRevision'] is String
-          ? payload['snapshotRevision'] as String
-          : existing.snapshotRevision,
+      snapshotRevision: responseRevision,
       nextPageToken: nextPageToken,
       isLoading: false,
       error: null,
     );
-    if (selectedSessionId == request.sessionId && nextPageToken != null) {
-      // The bridge allows a burst of controls but refills at 10/sec. Pace
-      // large transcript scans so pagination cannot starve cursor/lease work
-      // or wedge on a rate_limited response.
+    if (_historySyncCurrentSessionId == request.sessionId &&
+        nextPageToken != null) {
       unawaited(
         Future<void>.delayed(const Duration(milliseconds: 150), () async {
           if (request.epoch == _connectionEpoch &&
-              selectedSessionId == request.sessionId) {
+              _historySyncCurrentSessionId == request.sessionId) {
             await loadOlderHistory(request.sessionId);
           }
         }),
+      );
+      return;
+    }
+    if (_historySyncCurrentSessionId == request.sessionId) {
+      if (responseRevision != null && hostId != null) {
+        await _database.advanceCursor(
+          streamId: 'session:${request.sessionId}',
+          hostId: hostId!,
+          cursor: responseRevision,
+        );
+        await _database.saveHistorySyncRevision(
+          hostId: hostId!,
+          sessionId: request.sessionId,
+          snapshotRevision: responseRevision,
+        );
+        _streams['session:${request.sessionId}'] = StreamViewState.initial(
+          'session:${request.sessionId}',
+          cursor: StreamCursor.parse(responseRevision),
+        );
+      }
+      _historySyncCompleted += 1;
+      _historySyncCurrentSessionId = null;
+      _notify();
+      unawaited(
+        Future<void>.delayed(
+          const Duration(milliseconds: 150),
+          _syncNextHistorySession,
+        ),
       );
     }
   }
@@ -2285,11 +2395,15 @@ final class ConnectionCoordinator extends ChangeNotifier
         unawaited(
           Future<void>.delayed(const Duration(milliseconds: 350), () async {
             if (historyRequest.epoch == _connectionEpoch &&
-                selectedSessionId == historyRequest.sessionId) {
+                _historySyncCurrentSessionId == historyRequest.sessionId) {
               await loadOlderHistory(historyRequest.sessionId);
             }
           }),
         );
+      } else if (_historySyncCurrentSessionId == historyRequest.sessionId) {
+        _historyGateError =
+            '$code: ${payload['message'] ?? 'History sync failed'}';
+        _historySyncCurrentSessionId = null;
       }
       _notify();
       return;
@@ -2690,6 +2804,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       _hydrateSnapshot(saved.streamId, items);
     }
 
+    final cursorByStream = <String, String>{
+      for (final cursor in await _database.cursorsForHost(forHost))
+        cursor.streamId: cursor.lastContiguousCursor,
+    };
+    final cachedHistory = <String, List<StreamEventState>>{};
     for (final event in await _database.eventsForHost(forHost)) {
       final payload = Map<String, Object?>.from(
         jsonDecode(event.payloadJson) as Map,
@@ -2712,6 +2831,11 @@ final class ConnectionCoordinator extends ChangeNotifier
         payload: payload,
         occurredAt: event.occurredAt,
       );
+      if (event.streamId.startsWith('session:')) {
+        final sessionId = event.streamId.substring('session:'.length);
+        (cachedHistory[sessionId] ??= <StreamEventState>[]).add(normalized);
+        continue;
+      }
       final state =
           _streams[event.streamId] ?? StreamViewState.initial(event.streamId);
       final reduction = _reducer.apply(state, normalized);
@@ -2724,6 +2848,29 @@ final class ConnectionCoordinator extends ChangeNotifier
       } else if (reduction.disposition == EventDisposition.gap ||
           reduction.disposition == EventDisposition.conflict) {
         _forceSnapshot.add(event.streamId);
+      }
+    }
+    for (final entry in cachedHistory.entries) {
+      entry.value.sort((a, b) => a.cursor.compareTo(b.cursor));
+      final streamId = 'session:${entry.key}';
+      final streamRevision = cursorByStream[streamId];
+      final historyRevision = await _database.historySyncRevision(
+        forHost,
+        entry.key,
+      );
+      _history[entry.key] = SessionHistoryState(
+        sessionId: entry.key,
+        items: entry.value,
+        snapshotRevision: historyRevision,
+        nextPageToken: null,
+        isLoading: false,
+        error: null,
+      );
+      if (streamRevision != null) {
+        _streams[streamId] = StreamViewState.initial(
+          streamId,
+          cursor: StreamCursor.parse(streamRevision),
+        );
       }
     }
   }

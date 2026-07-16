@@ -4,6 +4,7 @@ import '../../connection/connection_coordinator.dart';
 import '../../notifications/notification_controller.dart';
 import 'activity_destination.dart';
 import 'chat_session_drawer.dart';
+import 'session_sync_screen.dart';
 
 /// Single-screen chat shell.
 ///
@@ -66,26 +67,31 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
+    final chatOpen = widget.coordinator.historyGateComplete &&
+        widget.coordinator.selectedSessionId != null;
     return Scaffold(
       key: _scaffoldKey,
-      drawer: ChatSessionDrawer(
+      drawer: chatOpen ? ChatSessionDrawer(
         coordinator: widget.coordinator,
         notifications: widget.notifications,
         onForgetHost: widget.onForgetHost,
-      ),
+      ) : null,
       appBar: AppBar(
+        automaticallyImplyLeading: false,
         leadingWidth: 52,
-        leading: IconButton(
-          key: const Key('open-chat-drawer'),
-          tooltip: 'Open chats',
-          onPressed: _openChats,
-          icon: const Icon(Icons.menu_rounded, size: 22),
-        ),
-        titleSpacing: 0,
-        title: const Text(
-          'Chat',
-          key: Key('shell-app-bar-title'),
-          style: TextStyle(fontWeight: FontWeight.w600),
+        leading: chatOpen
+            ? IconButton(
+                key: const Key('open-chat-drawer'),
+                tooltip: 'Open chats',
+                onPressed: _openChats,
+                icon: const Icon(Icons.menu_rounded, size: 22),
+              )
+            : null,
+        titleSpacing: chatOpen ? 0 : 16,
+        title: Text(
+          chatOpen ? 'Chat' : 'Chats',
+          key: const Key('shell-app-bar-title'),
+          style: const TextStyle(fontWeight: FontWeight.w600),
         ),
         centerTitle: false,
         surfaceTintColor: Colors.transparent,
@@ -93,12 +99,14 @@ class _AppShellState extends State<AppShell> {
       ),
       body: SafeArea(
         top: false,
-        child: ActivityDestination(
-          coordinator: widget.coordinator,
-          draftController: widget.draftController,
-          onOpenDialog: widget.onOpenDialog,
-          onGoToSessions: _openChats,
-        ),
+        child: chatOpen
+            ? ActivityDestination(
+                coordinator: widget.coordinator,
+                draftController: widget.draftController,
+                onOpenDialog: widget.onOpenDialog,
+                onGoToSessions: _openChats,
+              )
+            : SessionSyncScreen(coordinator: widget.coordinator),
       ),
     );
   }
