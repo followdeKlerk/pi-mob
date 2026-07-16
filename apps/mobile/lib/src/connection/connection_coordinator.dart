@@ -6,6 +6,8 @@ import 'package:flutter/widgets.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../protocol_fixture.dart';
+import '../attachments/attachment_transport.dart';
+import '../attachments/image_attachment_picker.dart';
 import '../data/app_database.dart' hide StreamCursor;
 import '../domain/attachments.dart';
 import '../domain/controller_lease.dart';
@@ -155,6 +157,13 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, ExtensionDialogState> _dialogsBySession = {};
   final Map<String, String> _expiredDialogInput = {};
   String? editorPrefill;
+  String? extensionStatus;
+  String? extensionTitle;
+  String? extensionWidgetText;
+  String? latestExtensionNotice;
+  String? latestExportId;
+  String? latestExportState;
+  int? latestExportBytes;
   final SessionTreeProjection _sessionTree = SessionTreeProjection();
 
   BridgeSocket? _socket;
@@ -955,6 +964,31 @@ final class ConnectionCoordinator extends ChangeNotifier
       });
   Future<void> cloneSession(String sessionId) =>
       _sendSessionLifecycle('session.clone', sessionId);
+
+  Future<void> requestSessionExport() async {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return;
+    await _ensureControllerForMutation(sessionId);
+    latestExportState = 'pending';
+    _notify();
+    await _sendSessionLifecycle(
+      'session.export',
+      sessionId,
+      const <String, Object?>{'format': 'html'},
+    );
+  }
+
+  Future<String> downloadLatestExport() async {
+    final origin = endpoint;
+    final exportId = latestExportId;
+    if (origin == null || exportId == null || latestExportState != 'completed') {
+      throw StateError('No completed export is available');
+    }
+    return PrivateBinaryTransport().downloadExport(
+      hostOrigin: origin,
+      exportId: exportId,
+    );
+  }
   Future<void> deleteSession(String sessionId) async {
     // Hide immediately, but keep the current selection intact until the wire
     // send succeeds so a transport failure can roll back without losing its
@@ -1840,6 +1874,13 @@ final class ConnectionCoordinator extends ChangeNotifier
           });
         }
       }
+    } else if (type == 'session.export') {
+      final completion = payload['completion'];
+      latestExportId = payload['exportId'] as String?;
+      latestExportBytes = payload['bytes'] as int?;
+      latestExportState = completion is Map
+          ? completion['state']?.toString()
+          : payload['state']?.toString();
     } else if (type == 'session.summary') {
       _mergeSession(payload);
       final id = payload['sessionId'];
@@ -1959,6 +2000,18 @@ final class ConnectionCoordinator extends ChangeNotifier
       editorPrefill = payload['text']?.toString() ?? '';
       draft = editorPrefill!;
       unawaited(_persistDraft());
+    } else if (type == 'extension.status') {
+      extensionStatus = (payload['text'] ?? payload['status'])?.toString();
+    } else if (type == 'extension.title') {
+      extensionTitle = payload['title']?.toString();
+    } else if (type == 'extension.widget') {
+      extensionWidgetText =
+          (payload['text'] ?? payload['content'] ?? payload['widget'])
+              ?.toString();
+    } else if (type == 'extension.notify') {
+      latestExtensionNotice =
+          (payload['message'] ?? payload['text'] ?? payload['title'])
+              ?.toString();
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final runtimeState =
           type == 'turn.failed' &&
@@ -2675,6 +2728,45 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   /// IDs the wire payload would carry if the user submitted right now.
   List<String> get draftAttachmentIds => _activeReadyAttachmentIds();
+
+  Future<void> pickAndUploadImage() async {
+    final origin = endpoint;
+    final sessionId = selectedSessionId;
+    if (!isReady || origin == null || sessionId == null) {
+      throw StateError('Connect and select a chat before attaching an image');
+    }
+    if (draftAttachments.length >= AttachmentLimits.maxCount) {
+      throw StateError(
+        'A draft supports at most ${AttachmentLimits.maxCount} images',
+      );
+    }
+    final image = await ImageAttachmentPicker(
+      PlatformImagePicker(),
+    ).pickAndSanitize();
+    if (image == null) return;
+    final uploaded = await PrivateBinaryTransport().upload(
+      hostOrigin: origin,
+      installationId: await _database.installationIdentifier(),
+      clientUploadId: _uuid.v4(),
+      image: image,
+      intendedSessionId: sessionId,
+    );
+    final ref = AttachmentRef(
+      id: uploaded.attachmentId,
+      kind: AttachmentKind.fromMimeType(uploaded.mimeType),
+      filename: image.fileName,
+      sizeBytes: uploaded.bytes,
+      mimeType: uploaded.mimeType,
+      status: AttachmentStatus.ready,
+      createdAt: _now(),
+      expiresAt: uploaded.expiresAt,
+      sha256: uploaded.sha256,
+      width: uploaded.width,
+      height: uploaded.height,
+    );
+    final error = await addDraftAttachment(ref);
+    if (error != null) throw StateError(error);
+  }
 
   /// Admit a new draft attachment. Returns the rejection reason on failure
   /// (e.g. quota exceeded, duplicate id). On success the registry and the

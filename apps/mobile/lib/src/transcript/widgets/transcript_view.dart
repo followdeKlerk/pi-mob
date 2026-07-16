@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../domain/mobile_state.dart';
 import '../domain/transcript_document.dart';
@@ -20,9 +21,14 @@ import 'tool_card.dart';
 /// ([FinalAnswerView], [ReasoningBlock], [ToolCard]) own their own
 /// horizontal rhythm.
 class TranscriptView extends StatefulWidget {
-  const TranscriptView({required this.document, super.key});
+  const TranscriptView({
+    required this.document,
+    this.onEditUserMessage,
+    super.key,
+  });
 
   final TranscriptDocument document;
+  final ValueChanged<String>? onEditUserMessage;
 
   @override
   State<TranscriptView> createState() => _TranscriptViewState();
@@ -144,7 +150,10 @@ class _TranscriptViewState extends State<TranscriptView> {
                               itemCount: turns.length,
                               itemBuilder: (context, index) => RepaintBoundary(
                                 key: ValueKey(turns[index].widgetKey),
-                                child: _TurnView(turn: turns[index]),
+                                child: _TurnView(
+                                  turn: turns[index],
+                                  onEditUserMessage: widget.onEditUserMessage,
+                                ),
                               ),
                             ),
                           ),
@@ -179,11 +188,13 @@ class TranscriptEventView extends StatefulWidget {
   const TranscriptEventView({
     required this.streamId,
     required this.events,
+    this.onEditUserMessage,
     super.key,
   });
 
   final String streamId;
   final List<StreamEventState> events;
+  final ValueChanged<String>? onEditUserMessage;
 
   @override
   State<TranscriptEventView> createState() => _TranscriptEventViewState();
@@ -240,17 +251,52 @@ class _TranscriptEventViewState extends State<TranscriptEventView> {
   }
 
   @override
-  Widget build(BuildContext context) =>
-      TranscriptView(document: _state.document);
+  Widget build(BuildContext context) => TranscriptView(
+    document: _state.document,
+    onEditUserMessage: widget.onEditUserMessage,
+  );
 }
 
 class _TurnView extends StatelessWidget {
-  const _TurnView({required this.turn});
+  const _TurnView({required this.turn, this.onEditUserMessage});
   final Turn turn;
+  final ValueChanged<String>? onEditUserMessage;
 
   /// Horizontal inset shared with the inner widgets so system / user rows
   /// align with the rest of the transcript.
   static const double _contentInset = 16;
+
+  Future<void> _showUserActions(BuildContext context, String message) async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: Wrap(
+          children: [
+            ListTile(
+              leading: const Icon(Icons.copy_outlined),
+              title: const Text('Copy prompt'),
+              onTap: () async {
+                await Clipboard.setData(ClipboardData(text: message));
+                if (sheetContext.mounted) Navigator.of(sheetContext).pop();
+              },
+            ),
+            if (onEditUserMessage != null)
+              ListTile(
+                key: const Key('edit-user-message-as-draft'),
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('Edit as new draft'),
+                subtitle: const Text('Nothing is sent automatically'),
+                onTap: () {
+                  Navigator.of(sheetContext).pop();
+                  onEditUserMessage!(message);
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -325,15 +371,20 @@ class _TurnView extends StatelessWidget {
     }
     if (turn is UserTurn) {
       final user = turn as UserTurn;
+      final message = user.message ?? 'Prompt';
       return Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: _contentInset,
           vertical: 6,
         ),
-        child: ListTile(
-          leading: const Icon(Icons.person_outline),
-          title: Text(user.message ?? 'Prompt'),
-          subtitle: Text('You · ${user.deliveryMode} · ${user.status.name}'),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(12),
+          onLongPress: () => _showUserActions(context, message),
+          child: ListTile(
+            leading: const Icon(Icons.person_outline),
+            title: Text(message),
+            subtitle: Text('You · ${user.deliveryMode} · ${user.status.name}'),
+          ),
         ),
       );
     }

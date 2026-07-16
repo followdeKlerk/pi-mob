@@ -18,6 +18,8 @@
 library;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:share_plus/share_plus.dart';
 
 import 'view_data/final_answer_view_data.dart';
 import 'view_data/safe_markdown.dart';
@@ -106,7 +108,35 @@ class FinalAnswerView extends StatelessWidget {
             // Loose line height keeps multi-paragraph answers readable at
             // 100% and 200% without forcing a horizontal scroll.
             mainAxisSize: MainAxisSize.min,
-            children: widgets,
+            children: [
+              Align(
+                alignment: Alignment.centerRight,
+                child: Wrap(
+                  spacing: 4,
+                  children: [
+                    IconButton(
+                      key: ValueKey('copy-answer-${data.answerId}'),
+                      tooltip: 'Copy answer',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => Clipboard.setData(
+                        ClipboardData(text: data.markdown),
+                      ),
+                      icon: const Icon(Icons.copy_outlined, size: 18),
+                    ),
+                    IconButton(
+                      key: ValueKey('share-answer-${data.answerId}'),
+                      tooltip: 'Share answer',
+                      visualDensity: VisualDensity.compact,
+                      onPressed: () => SharePlus.instance.share(
+                        ShareParams(text: data.markdown),
+                      ),
+                      icon: const Icon(Icons.share_outlined, size: 18),
+                    ),
+                  ],
+                ),
+              ),
+              ...widgets,
+            ],
           ),
         ),
       ),

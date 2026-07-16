@@ -3,8 +3,10 @@ import 'package:flutter/material.dart';
 import '../../connection/connection_coordinator.dart';
 import '../../notifications/notification_controller.dart';
 import 'activity_destination.dart';
+import 'chat_control_center.dart';
 import 'chat_session_drawer.dart';
 import 'session_sync_screen.dart';
+import 'transcript_search_sheet.dart';
 
 /// Single-screen chat shell.
 ///
@@ -69,6 +71,12 @@ class _AppShellState extends State<AppShell> {
   Widget build(BuildContext context) {
     final chatOpen = widget.coordinator.historyGateComplete &&
         widget.coordinator.selectedSessionId != null;
+    final selectedId = widget.coordinator.selectedSessionId;
+    final selected = selectedId == null
+        ? null
+        : widget.coordinator.sessions
+              .where((session) => session.sessionId == selectedId)
+              .firstOrNull;
     return Scaffold(
       key: _scaffoldKey,
       drawer: chatOpen ? ChatSessionDrawer(
@@ -88,12 +96,53 @@ class _AppShellState extends State<AppShell> {
               )
             : null,
         titleSpacing: chatOpen ? 0 : 16,
-        title: Text(
-          chatOpen ? 'Chat' : 'Chats',
-          key: const Key('shell-app-bar-title'),
-          style: const TextStyle(fontWeight: FontWeight.w600),
-        ),
+        title: chatOpen
+            ? Column(
+                key: const Key('shell-app-bar-title'),
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    selected?.name ?? 'Chat',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  Text(
+                    '${widget.coordinator.selectedRuntimeState ?? 'idle'} · '
+                    '${widget.coordinator.leaseId == null ? 'observer' : 'controller'}',
+                    style: Theme.of(context).textTheme.labelSmall,
+                  ),
+                ],
+              )
+            : const Text(
+                'Chats',
+                key: Key('shell-app-bar-title'),
+                style: TextStyle(fontWeight: FontWeight.w600),
+              ),
         centerTitle: false,
+        actions: [
+          if (chatOpen)
+            IconButton(
+              key: const Key('open-transcript-search'),
+              tooltip: 'Search this chat',
+              onPressed: () => showTranscriptSearch(
+                context,
+                widget.coordinator,
+              ),
+              icon: const Icon(Icons.search_rounded),
+            ),
+          if (chatOpen)
+            IconButton(
+              key: const Key('open-chat-controls'),
+              tooltip: 'Session controls',
+              onPressed: () => showChatControlCenter(
+                context,
+                widget.coordinator,
+              ),
+              icon: const Icon(Icons.tune_rounded),
+            ),
+        ],
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,
       ),

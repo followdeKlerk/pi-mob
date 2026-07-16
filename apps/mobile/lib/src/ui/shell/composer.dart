@@ -157,6 +157,24 @@ class Composer extends StatelessWidget {
             ),
             if (coordinator.selectedFollowUps.isNotEmpty)
               const SizedBox(height: PiSpacing.sm),
+            if (coordinator.draftAttachments.isNotEmpty) ...[
+              Wrap(
+                spacing: PiSpacing.xs,
+                runSpacing: PiSpacing.xs,
+                children: [
+                  for (final attachment in coordinator.draftAttachments)
+                    InputChip(
+                      key: ValueKey('draft-attachment-${attachment.id}'),
+                      avatar: const Icon(Icons.image_outlined, size: 18),
+                      label: Text(attachment.filename),
+                      onDeleted: () => unawaited(
+                        coordinator.removeDraftAttachment(attachment.id),
+                      ),
+                    ),
+                ],
+              ),
+              const SizedBox(height: PiSpacing.sm),
+            ],
             if (coordinator.selectedDialog != null) ...[
               FilledButton.tonalIcon(
                 key: const Key('open-extension-dialog'),
@@ -171,6 +189,25 @@ class Composer extends StatelessWidget {
             Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
+                IconButton.filledTonal(
+                  key: const Key('attach-image-button'),
+                  tooltip: 'Attach image',
+                  onPressed: coordinator.isReady
+                      ? () async {
+                          try {
+                            await coordinator.pickAndUploadImage();
+                          } on Object catch (error) {
+                            if (context.mounted) {
+                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+                                SnackBar(content: Text('Could not attach image: $error')),
+                              );
+                            }
+                          }
+                        }
+                      : null,
+                  icon: const Icon(Icons.add_photo_alternate_outlined),
+                ),
+                const SizedBox(width: PiSpacing.sm),
                 Expanded(
                   child: TextField(
                     key: const Key('draft-field'),

@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
+import '../../domain/session_directory.dart';
 import '../../domain/session_tree.dart';
 import '../../notifications/notification_controller.dart';
 import '../../workspaces/workspace_picker.dart';
@@ -173,12 +174,20 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
               coordinator.sessionTree[session.sessionId]?.lifecycle;
           return lifecycle != SessionLifecycleState.softDeleted &&
               lifecycle != SessionLifecycleState.purged;
-        }).toList()..sort(
-          (a, b) => (b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+        }).toList()..sort((a, b) {
+          int rank(String id) => switch (coordinator.attentionFor(id)) {
+            SessionAttentionState.needsAttention => 0,
+            SessionAttentionState.unread => 1,
+            SessionAttentionState.background => 2,
+            SessionAttentionState.none => 3,
+          };
+          final attention = rank(a.sessionId).compareTo(rank(b.sessionId));
+          if (attention != 0) return attention;
+          return (b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
               .compareTo(
                 a.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0),
-              ),
-        );
+              );
+        });
 
     return Drawer(
       key: const Key('chat-session-drawer'),
