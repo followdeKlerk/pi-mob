@@ -87,6 +87,7 @@ const leaseFreeCommands = new Set<CommandType>([
   ...controllerCommands,
   "workspace.trust.approve",
   "session.create",
+  "session.delete",
   "notification.device.register",
   "notification.device.unregister",
 ]);

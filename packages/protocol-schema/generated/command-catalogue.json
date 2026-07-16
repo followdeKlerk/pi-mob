@@ -349,7 +349,7 @@
     "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
     "requiredCapability": "commands.v1",
     "requiresCommandId": true,
-    "requiresLeaseId": true,
+    "requiresLeaseId": false,
     "scope": "session",
     "semanticHashFields": [
       "type",

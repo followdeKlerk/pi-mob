@@ -793,17 +793,24 @@ final class ConnectionCoordinator extends ChangeNotifier
   Future<void> cloneSession(String sessionId) =>
       _sendSessionLifecycle('session.clone', sessionId);
   Future<void> deleteSession(String sessionId) async {
-    await _ensureControllerForMutation(sessionId);
-    await _sendSessionLifecycle(
-      'session.delete',
-      sessionId,
-      const <String, Object?>{'abortActive': true, 'cancelQueued': true},
-    );
-    // Command transport is fire-and-journal: do not leave a confirmed delete
-    // visibly stuck while waiting for host-stream projection. A later
-    // delete_failed event rolls this back; durable session.removed confirms it.
+    // Deletion is an authenticated owner lifecycle action, not a turn-control
+    // action. Hide immediately and do not block on foreground subscription or
+    // controller acquisition. A transport failure or delete_failed event
+    // restores the row.
     _locallyDeletedSessionIds.add(sessionId);
     _notify();
+    try {
+      await _sendSessionLifecycle(
+        'session.delete',
+        sessionId,
+        const <String, Object?>{'abortActive': true, 'cancelQueued': true},
+        false,
+      );
+    } on Object {
+      _locallyDeletedSessionIds.remove(sessionId);
+      _notify();
+      rethrow;
+    }
   }
 
   Future<void> restoreSession(String sessionId) =>
@@ -846,13 +853,14 @@ final class ConnectionCoordinator extends ChangeNotifier
     String type,
     String sessionId, [
     Map<String, Object?> extra = const <String, Object?>{},
+    bool requiresLease = true,
   ]) async {
     if (sessionId.isEmpty) throw ArgumentError.value(sessionId, 'sessionId');
     await _sendCommand(
       type: type,
       commandId: _id(),
       payload: <String, Object?>{'sessionId': sessionId, ...extra},
-      requiresLease: true,
+      requiresLease: requiresLease,
     );
   }
 
