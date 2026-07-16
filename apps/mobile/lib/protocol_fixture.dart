@@ -805,6 +805,7 @@ const _leaseFreeCommands = <String>{
   'controller.takeover',
   'controller.release',
   'session.create',
+  'session.delete',
 };
 const _responseTypes = <String>{
   'hello.accepted',
