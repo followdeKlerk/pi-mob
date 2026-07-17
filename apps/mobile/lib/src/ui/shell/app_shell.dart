@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import '../../connection/connection_coordinator.dart';
 import '../../notifications/notification_controller.dart';
 import 'activity_destination.dart';
-import 'chat_control_center.dart';
 import 'chat_session_drawer.dart';
 import 'session_sync_screen.dart';
 import 'transcript_search_sheet.dart';
@@ -131,16 +130,6 @@ class _AppShellState extends State<AppShell> {
                 widget.coordinator,
               ),
               icon: const Icon(Icons.search_rounded),
-            ),
-          if (chatOpen)
-            IconButton(
-              key: const Key('open-chat-controls'),
-              tooltip: 'Session controls',
-              onPressed: () => showChatControlCenter(
-                context,
-                widget.coordinator,
-              ),
-              icon: const Icon(Icons.tune_rounded),
             ),
         ],
         surfaceTintColor: Colors.transparent,

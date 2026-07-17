@@ -246,7 +246,8 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
       ConnectionPhase.background,
     }.contains(coordinator.phase);
     final selectedSessionId = coordinator.selectedSessionId;
-    final transcriptSyncing = selectedSessionId != null &&
+    final transcriptSyncing =
+        selectedSessionId != null &&
         coordinator.isHistorySyncing(selectedSessionId);
     final sessions =
         coordinator.sessions.where((session) {
@@ -378,7 +379,7 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                       const SizedBox(width: PiSpacing.sm),
                       Expanded(
                         child: Text(
-                          'Syncing open chat · ${coordinator.historyEventCount(selectedSessionId!)} events',
+                          'Syncing open chat · ${coordinator.historyEventCount(selectedSessionId)} events',
                           style: theme.textTheme.labelSmall,
                         ),
                       ),

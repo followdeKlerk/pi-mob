@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../../domain/mobile_state.dart';
@@ -37,38 +38,109 @@ class TranscriptView extends StatefulWidget {
 class _TranscriptViewState extends State<TranscriptView> {
   final ScrollController _controller = ScrollController();
   bool _nearLatest = true;
+  bool _pendingFollow = true;
+  bool _initialPosition = true;
+  bool _autoFollowing = false;
+  int _followGeneration = 0;
   int _unread = 0;
+
+  static const double _followThreshold = 48;
+  static const double _leaveThreshold = 96;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onScroll);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToLatest());
   }
 
   @override
   void didUpdateWidget(covariant TranscriptView oldWidget) {
     super.didUpdateWidget(oldWidget);
-    final added = widget.document.length - oldWidget.document.length;
-    if (added <= 0) return;
-    if (_nearLatest) {
-      WidgetsBinding.instance.addPostFrameCallback((_) => _jumpToLatest());
-    } else {
-      setState(() => _unread += added);
+    if (widget.document.streamId != oldWidget.document.streamId) {
+      _nearLatest = true;
+      _pendingFollow = true;
+      _initialPosition = true;
+      _unread = 0;
+      return;
+    }
+    if (!_contentChanged(oldWidget.document, widget.document)) return;
+    final added =
+        _activityCount(widget.document) - _activityCount(oldWidget.document);
+    if (_nearLatest || _autoFollowing) {
+      _pendingFollow = true;
+    } else if (added > 0) {
+      _unread += added;
     }
   }
 
-  void _onScroll() {
-    if (!_controller.hasClients) return;
-    final near = _controller.position.maxScrollExtent - _controller.offset < 96;
-    if (near != _nearLatest) setState(() => _nearLatest = near);
-    if (near && _unread != 0) setState(() => _unread = 0);
+  bool _contentChanged(TranscriptDocument oldDoc, TranscriptDocument newDoc) {
+    if (oldDoc.turns.length != newDoc.turns.length) return true;
+    if (oldDoc.turns.isEmpty) return false;
+    return oldDoc.turns.last != newDoc.turns.last;
   }
 
-  void _jumpToLatest() {
+  int _activityCount(TranscriptDocument document) {
+    var count = document.turns.length;
+    for (final turn in document.turns) {
+      if (turn is AssistantTurn) count += turn.items.length;
+    }
+    return count;
+  }
+
+  bool _onUserScroll(UserScrollNotification notification) {
+    if (_autoFollowing && notification.direction != ScrollDirection.idle) {
+      _followGeneration++;
+      _autoFollowing = false;
+    }
+    return false;
+  }
+
+  void _onScroll() {
+    if (!_controller.hasClients || _autoFollowing) return;
+    final after = _controller.position.extentAfter;
+    final near = _nearLatest
+        ? after <= _leaveThreshold
+        : after <= _followThreshold;
+    if (near == _nearLatest && (!near || _unread == 0)) return;
+    setState(() {
+      _nearLatest = near;
+      if (near) _unread = 0;
+    });
+  }
+
+  Future<void> _scrollToLatest({bool userInitiated = false}) async {
     if (!_controller.hasClients) return;
-    _controller.jumpTo(_controller.position.maxScrollExtent);
-    if (mounted) setState(() => _unread = 0);
+    final generation = ++_followGeneration;
+    final reduceMotion = MediaQuery.disableAnimationsOf(context);
+    if (_initialPosition || reduceMotion) {
+      _controller.jumpTo(_controller.position.maxScrollExtent);
+      _initialPosition = false;
+    } else {
+      _autoFollowing = true;
+      try {
+        // A lazily-built list can refine maxScrollExtent as rows are laid
+        // out. Follow that refinement rather than stopping one screen short.
+        for (var attempt = 0; attempt < 4; attempt++) {
+          if (!_controller.hasClients || generation != _followGeneration) {
+            return;
+          }
+          await _controller.animateTo(
+            _controller.position.maxScrollExtent,
+            duration: Duration(milliseconds: userInitiated ? 280 : 180),
+            curve: userInitiated ? Curves.easeOutCubic : Curves.easeOut,
+          );
+          await WidgetsBinding.instance.endOfFrame;
+          if (_controller.position.extentAfter < 1) break;
+        }
+      } finally {
+        if (generation == _followGeneration) _autoFollowing = false;
+      }
+    }
+    if (!mounted || generation != _followGeneration) return;
+    setState(() {
+      _nearLatest = true;
+      _unread = 0;
+    });
   }
 
   @override
@@ -79,12 +151,14 @@ class _TranscriptViewState extends State<TranscriptView> {
     super.dispose();
   }
 
-  /// Horizontal inset shared with the inner widgets so headings, prose and
-  /// tool cards line up consistently.
-  static const double _contentInset = 16;
-
   @override
   Widget build(BuildContext context) {
+    if (_pendingFollow) {
+      _pendingFollow = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _scrollToLatest();
+      });
+    }
     final turns = widget.document.turns;
     final scheme = Theme.of(context).colorScheme;
     final text = Theme.of(context).textTheme;
@@ -107,15 +181,18 @@ class _TranscriptViewState extends State<TranscriptView> {
                               ),
                             ),
                           )
-                        : ListView.builder(
-                            key: const Key('transcript-list'),
-                            controller: _controller,
-                            itemCount: turns.length,
-                            itemBuilder: (context, index) => RepaintBoundary(
-                              key: ValueKey(turns[index].widgetKey),
-                              child: _TurnView(
-                                turn: turns[index],
-                                onEditUserMessage: widget.onEditUserMessage,
+                        : NotificationListener<UserScrollNotification>(
+                            onNotification: _onUserScroll,
+                            child: ListView.builder(
+                              key: const Key('transcript-list'),
+                              controller: _controller,
+                              itemCount: turns.length,
+                              itemBuilder: (context, index) => RepaintBoundary(
+                                key: ValueKey(turns[index].widgetKey),
+                                child: _TurnView(
+                                  turn: turns[index],
+                                  onEditUserMessage: widget.onEditUserMessage,
+                                ),
                               ),
                             ),
                           ),
@@ -128,7 +205,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                   bottom: 12,
                   child: FloatingActionButton.small(
                     key: const Key('jump-to-latest'),
-                    onPressed: _jumpToLatest,
+                    onPressed: () => _scrollToLatest(userInitiated: true),
                     tooltip:
                         'Jump to latest${_unread == 0 ? '' : ', $_unread new'}',
                     child: Badge(

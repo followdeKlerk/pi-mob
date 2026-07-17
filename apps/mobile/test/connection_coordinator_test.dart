@@ -970,7 +970,7 @@ void main() {
     },
   );
 
-  test('history pages merge older events with stable deduplication', () async {
+  test('history keeps reasoning and tools while merging stable pages', () async {
     await makeReady(coordinator, transport);
     final socket = transport.sockets.single;
 
@@ -986,6 +986,22 @@ void main() {
           'snapshotRevision': '4',
           'nextPageToken': 'opaque-next',
           'items': [
+            {
+              'eventId': 'history-reasoning',
+              'streamId': 'session:$sessionId',
+              'cursor': '1',
+              'type': 'reasoning.delta',
+              'payload': {'historical': true, 'text': 'considering'},
+              'createdAt': 0,
+            },
+            {
+              'eventId': 'history-tool',
+              'streamId': 'session:$sessionId',
+              'cursor': '2',
+              'type': 'tool.started',
+              'payload': {'historical': true, 'toolName': 'read'},
+              'createdAt': 0,
+            },
             {
               'eventId': 'history-3',
               'streamId': 'session:$sessionId',
@@ -1007,7 +1023,7 @@ void main() {
         requestId: firstRequest['requestId'] as String,
       ),
     );
-    await eventually(() => coordinator.transcriptEvents(sessionId).length == 2);
+    await eventually(() => coordinator.transcriptEvents(sessionId).length == 4);
     expect(coordinator.historyFor(sessionId).snapshotRevision, '4');
     expect(coordinator.hasOlderHistory(sessionId), isTrue);
 
@@ -1043,12 +1059,12 @@ void main() {
         requestId: secondRequest['requestId'] as String,
       ),
     );
-    await eventually(() => coordinator.transcriptEvents(sessionId).length == 3);
+    await eventually(() => coordinator.transcriptEvents(sessionId).length == 5);
     expect(
       coordinator
           .transcriptEvents(sessionId)
           .map((event) => event.cursor.value),
-      ['2', '3', '4'],
+      ['1', '2', '2', '3', '4'],
     );
     expect(coordinator.historyFor(sessionId).snapshotRevision, '5');
     expect(coordinator.hasOlderHistory(sessionId), isFalse);

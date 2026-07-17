@@ -512,14 +512,11 @@ final class ConnectionCoordinator extends ChangeNotifier
               }.contains(family)) {
                 return false;
               }
-              // Imported TUI sessions can contain thousands of historical
-              // tool/reasoning lifecycle records for only a few dozen chat
-              // turns. Replaying those into immutable widget models on every
-              // older-page insertion overwhelms the conversation surface.
-              // Preserve user/assistant history; live activity remains fully
-              // detailed with thinking and tool cards.
-              final historical = event.payload['historical'] == true;
-              return !historical || (family != 'reasoning' && family != 'tool');
+              // Reasoning and tool lifecycle records are part of the durable
+              // conversation. Keep imported and locally-created activity so
+              // session switches, reconnects, and app restarts reconstruct
+              // the same transcript instead of silently dropping work.
+              return true;
             })
             .toList()
           ..sort((a, b) => a.cursor.compareTo(b.cursor));
@@ -1028,8 +1025,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         'name': name != null && name.trim().isNotEmpty
             ? name.trim()
             : workspace.displayName,
-        if (modelId != null) 'modelId': modelId,
-        if (provider != null) 'provider': provider,
+        'modelId': ?modelId,
+        'provider': ?provider,
       },
       requiresLease: false,
     );

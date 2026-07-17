@@ -142,9 +142,9 @@ void main() {
       await tester.pump();
       expect(find.byKey(const Key('jump-to-latest')), findsOneWidget);
 
-      // Tap it: should jump back to bottom and clear the FAB.
+      // Tap it: should gently return to the bottom and clear the FAB.
       await tester.tap(find.byKey(const Key('jump-to-latest')));
-      await tester.pump();
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('jump-to-latest')), findsNothing);
     },
   );

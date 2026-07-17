@@ -21,6 +21,8 @@ void main() {
 
     expect(find.text('Chat'), findsOneWidget);
     expect(find.byKey(const Key('open-chat-drawer')), findsOneWidget);
+    expect(find.byKey(const Key('open-transcript-search')), findsOneWidget);
+    expect(find.byKey(const Key('open-chat-controls')), findsNothing);
     expect(find.byType(NavigationBar), findsNothing);
     expect(find.byKey(const Key('shell-sessions')), findsNothing);
     expect(find.byKey(const Key('shell-activity')), findsNothing);

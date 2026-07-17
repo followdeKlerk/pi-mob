@@ -136,10 +136,10 @@ void main() {
       // FAB should now be visible because we scrolled away from the tail.
       expect(find.byKey(const Key('jump-to-latest')), findsOneWidget);
 
-      // Jumping to latest must snap back to the bottom without repainting
-      // every turn; the offset should land at maxScrollExtent.
+      // Returning to latest animates gently without repainting every turn;
+      // the offset should settle at maxScrollExtent.
       await tester.tap(find.byKey(const Key('jump-to-latest')));
-      await tester.pump();
+      await tester.pumpAndSettle();
       final controllerAfter = (tester.widget<ListView>(listFinder).controller)!;
       expect(
         controllerAfter.offset,

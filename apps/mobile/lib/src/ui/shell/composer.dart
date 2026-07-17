@@ -6,7 +6,6 @@ import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
 import '../../interaction/interaction_panel.dart';
 import '../theme/pi_theme.dart';
-import 'chat_control_center.dart';
 import 'model_picker_sheet.dart';
 
 /// Prompt composer with delivery-mode selector, follow-up queue, extension
@@ -54,13 +53,95 @@ class Composer extends StatelessWidget {
         await _clearDraft();
         await coordinator.requestSessionExport();
         return;
-      case '/controls':
+      case '/take-control':
+      case '/takeover':
         await _clearDraft();
-        if (context.mounted) await showChatControlCenter(context, coordinator);
+        final sessionId = coordinator.selectedSessionId;
+        if (sessionId != null) {
+          await coordinator.takeControl(sessionId);
+        }
+        return;
+      case '/clone':
+        await _clearDraft();
+        final sessionId = coordinator.selectedSessionId;
+        if (sessionId != null) {
+          await coordinator.cloneSession(sessionId);
+        }
+        return;
+      case '/restart':
+      case '/recover':
+        await _clearDraft();
+        if (coordinator.canRetrySession) {
+          await coordinator.retrySession();
+        }
         return;
       default:
         await coordinator.submitPromptWithRecovery();
     }
+  }
+
+  List<_SlashCommand> _slashCommands() {
+    final commands = <_SlashCommand>[
+      const _SlashCommand(
+        '/model',
+        'Choose the model and thinking level',
+        'Control',
+      ),
+      const _SlashCommand(
+        '/compact',
+        'Compact this session context',
+        'Control',
+      ),
+      const _SlashCommand('/export', 'Export and share this chat', 'Chat'),
+      const _SlashCommand(
+        '/clone',
+        'Clone this chat into a new session',
+        'Chat',
+      ),
+      const _SlashCommand(
+        '/take-control',
+        'Take the controller lease',
+        'Recovery',
+      ),
+      const _SlashCommand(
+        '/restart',
+        'Restart an unavailable Pi session',
+        'Recovery',
+      ),
+      for (final command in coordinator.selectedControls?.commands ?? const [])
+        _SlashCommand(
+          '/${command.name}',
+          command.description,
+          switch (command.category) {
+            'skill' => 'Skill',
+            'template' => 'Template',
+            _ => 'Extension',
+          },
+          requiresInput: command.requiresInput,
+        ),
+    ];
+    final unique = <String, _SlashCommand>{};
+    for (final command in commands) {
+      unique.putIfAbsent(command.invocation.toLowerCase(), () => command);
+    }
+    return unique.values.toList(growable: false);
+  }
+
+  Future<void> _selectSlashCommand(
+    BuildContext context,
+    _SlashCommand command,
+  ) async {
+    if (command.invocation == '/model') {
+      await _clearDraft();
+      if (context.mounted) await showModelPickerSheet(context, coordinator);
+      return;
+    }
+    final value = '${command.invocation}${command.requiresInput ? ' ' : ''}';
+    draftController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+    await coordinator.updateDraft(value);
   }
 
   Future<void> _discardIndeterminate(BuildContext context) async {
@@ -225,36 +306,56 @@ class Composer extends StatelessWidget {
               const SizedBox(height: PiSpacing.sm),
             ],
             if (slashQuery != null && !slashQuery.contains(' ')) ...[
-              Wrap(
-                spacing: PiSpacing.xs,
-                runSpacing: PiSpacing.xs,
-                children: [
-                  for (final command in <String>[
-                    '/model',
-                    '/compact',
-                    '/export',
-                    '/controls',
-                    ...?coordinator.selectedControls?.commands
-                        .map((item) => '/${item.name}')
-                        .where((item) => !const {
-                              '/model',
-                              '/compact',
-                              '/export',
-                            }.contains(item)),
-                  ].where((item) => item.startsWith(slashQuery)).take(8))
-                    ActionChip(
-                      label: Text(command),
-                      onPressed: () {
-                        draftController.value = TextEditingValue(
-                          text: command,
-                          selection: TextSelection.collapsed(
-                            offset: command.length,
-                          ),
-                        );
-                        unawaited(coordinator.updateDraft(command));
-                      },
+              Builder(
+                builder: (context) {
+                  final query = slashQuery.substring(1);
+                  final matches = _slashCommands()
+                      .where(
+                        (command) =>
+                            query.isEmpty ||
+                            command.invocation.substring(1).contains(query) ||
+                            command.description.toLowerCase().contains(query) ||
+                            command.category.toLowerCase().contains(query),
+                      )
+                      .toList(growable: false);
+                  return Container(
+                    key: const Key('slash-command-list'),
+                    constraints: const BoxConstraints(maxHeight: 260),
+                    decoration: BoxDecoration(
+                      color: Theme.of(context).colorScheme.surfaceContainerLow,
+                      border: Border.all(
+                        color: Theme.of(context).colorScheme.outlineVariant,
+                      ),
+                      borderRadius: BorderRadius.circular(PiRadius.md),
                     ),
-                ],
+                    child: matches.isEmpty
+                        ? const Padding(
+                            padding: EdgeInsets.all(PiSpacing.md),
+                            child: Text('No matching commands'),
+                          )
+                        : ListView.separated(
+                            key: const Key('slash-command-results'),
+                            shrinkWrap: true,
+                            itemCount: matches.length,
+                            separatorBuilder: (_, _) =>
+                                const Divider(height: 1),
+                            itemBuilder: (context, index) {
+                              final command = matches[index];
+                              return ListTile(
+                                dense: true,
+                                title: Text(command.invocation),
+                                subtitle: Text(
+                                  '${command.category} · ${command.description}',
+                                  maxLines: 2,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                onTap: () =>
+                                    _selectSlashCommand(context, command),
+                              );
+                            },
+                          ),
+                  );
+                },
               ),
               const SizedBox(height: PiSpacing.sm),
             ],
@@ -271,7 +372,11 @@ class Composer extends StatelessWidget {
                           } on Object catch (error) {
                             if (context.mounted) {
                               ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                                SnackBar(content: Text('Could not attach image: $error')),
+                                SnackBar(
+                                  content: Text(
+                                    'Could not attach image: $error',
+                                  ),
+                                ),
                               );
                             }
                           }
@@ -353,4 +458,18 @@ class Composer extends StatelessWidget {
       ),
     );
   }
+}
+
+class _SlashCommand {
+  const _SlashCommand(
+    this.invocation,
+    this.description,
+    this.category, {
+    this.requiresInput = false,
+  });
+
+  final String invocation;
+  final String description;
+  final String category;
+  final bool requiresInput;
 }
