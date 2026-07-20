@@ -750,8 +750,13 @@ export class OneSessionPiAdapter {
       createdAt,
       lastActivityAt: createdAt,
     };
-    this.store.updateSessionState(sessionId, summary);
-    // Host-stream summary so mobile clients learn the new session.
+    this.store.updateSessionState(sessionId, { ...summary, createdByCommandId: command.commandId });
+    // Host-stream summary so mobile clients learn the new session. The
+    // `createdByCommandId` field lets observers correlate this summary back
+    // to the originating `session.create` command without having to fall
+    // back on workspace/name/path matching. It is only populated on the
+    // fresh-session path (change === "added"); other lifecycle changes
+    // leave it absent.
     this.appendSessionSummary(sessionId, {
       workspaceId,
       runtimeState: "idle",
@@ -763,6 +768,7 @@ export class OneSessionPiAdapter {
       displayName: workspaceDisplayName,
       workspaceRelativePath,
       createdAt,
+      createdByCommandId: command.commandId,
       change: "added",
     });
     this.store.appendEvent(`session:${sessionId}`, "session.metadata", {

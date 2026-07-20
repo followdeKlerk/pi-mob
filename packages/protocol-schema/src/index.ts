@@ -175,7 +175,7 @@ export const LeaseStateSchema = Type.Union([
   Type.Object({ ...LeaseStateFields, scope: Type.Literal("session"), sessionId: SessionId }, { additionalProperties: true }),
 ], { $id: "pi-mob/protocol/lease-state" });
 const EventPayloads = {
-  "session.summary": Type.Object({ sessionId: SessionId, runtimeState: Type.String(), queueCount: Type.Integer({ minimum: 0 }) }, { additionalProperties: true }),
+  "session.summary": Type.Object({ sessionId: SessionId, runtimeState: Type.String(), queueCount: Type.Integer({ minimum: 0 }), createdByCommandId: Type.Optional(Uuid) }, { additionalProperties: true }),
   "controller.state": LeaseStateSchema,
   "command.state": Type.Object({ commandId: Uuid, commandType: Type.Union(COMMAND_TYPES.map((value) => Type.Literal(value))), state: Type.String(), errorCode: Type.Union([Type.Union(ERROR_CODES.map((value) => Type.Literal(value))), Type.Null()]) }, { additionalProperties: true }),
   "tool.output": Type.Object({ toolCallId: Type.String({ minLength: 1, maxLength: 512 }), retainedBytes: Type.Integer({ minimum: 0 }), totalBytes: Type.Integer({ minimum: 0 }), digest: Type.Optional(Type.String()), isTruncated: Type.Boolean() }, { additionalProperties: true }),

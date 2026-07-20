@@ -122,6 +122,28 @@ describe("OneSessionPiAdapter", () => {
     expect(adapter.getActiveSessionId()).toBe(sessionId);
   });
 
+  test("session.create host-stream added summary carries the originating command id alongside the fresh session id", async () => {
+    const { store, adapter, hostStream } = setup();
+    const commandId = "aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee";
+    await adapter.dispatch(makeCommand(commandId, "session.create", hostStream, hostStream, {
+      workspaceId: "11111111-1111-4111-8111-111111111111",
+      policyMode: "full",
+      name: "correlated",
+    }));
+    const summaries = store.listEvents(hostStream).filter((event) => event.type === "session.summary");
+    const added = summaries.map((event) => event.payload as Record<string, unknown>)
+      .find((payload) => payload.change === "added")!;
+    expect(added).toBeDefined();
+    // Fresh UUID session id (not the command id, not a workspace/name/path fallback).
+    expect(typeof added.sessionId).toBe("string");
+    expect(added.sessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(added.sessionId).not.toBe(commandId);
+    // Authoritative correlation: the originating session.create command id.
+    expect(added.createdByCommandId).toBe(commandId);
+    // Stored session state carries the same provenance marker.
+    expect(store.sessionState(added.sessionId as string)?.createdByCommandId).toBe(commandId);
+  });
+
   test("session.create binds indexed folder context and a useful default name", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-workspaces-"));
     const folder = join(root, "github", "pi-mob");
