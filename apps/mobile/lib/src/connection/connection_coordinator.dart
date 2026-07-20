@@ -37,6 +37,60 @@ enum ConnectionPhase {
   background,
 }
 
+enum SessionCreationPhase { idle, creating, created, failed }
+
+@immutable
+final class SessionCreationState {
+  const SessionCreationState._({
+    required this.phase,
+    this.commandId,
+    this.workspaceId,
+    this.sessionId,
+    this.error,
+  });
+
+  const SessionCreationState.idle() : this._(phase: SessionCreationPhase.idle);
+
+  const SessionCreationState.creating({
+    required String commandId,
+    required String workspaceId,
+  }) : this._(
+         phase: SessionCreationPhase.creating,
+         commandId: commandId,
+         workspaceId: workspaceId,
+       );
+
+  const SessionCreationState.created({
+    required String commandId,
+    required String workspaceId,
+    required String sessionId,
+  }) : this._(
+         phase: SessionCreationPhase.created,
+         commandId: commandId,
+         workspaceId: workspaceId,
+         sessionId: sessionId,
+       );
+
+  const SessionCreationState.failed({
+    required String commandId,
+    required String workspaceId,
+    required String error,
+  }) : this._(
+         phase: SessionCreationPhase.failed,
+         commandId: commandId,
+         workspaceId: workspaceId,
+         error: error,
+       );
+
+  final SessionCreationPhase phase;
+  final String? commandId;
+  final String? workspaceId;
+  final String? sessionId;
+  final String? error;
+
+  bool get isCreating => phase == SessionCreationPhase.creating;
+}
+
 /// Server-reported workspace entry. Kept here as a re-export of the domain
 /// type so existing callers continue to compile.
 typedef WorkspaceInfo = WorkspaceEntry;
@@ -156,7 +210,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
   String? _deferredAutoSelectSessionId;
-  String? _pendingCreatedWorkspaceId;
+  SessionCreationState _sessionCreation = const SessionCreationState.idle();
+  Completer<void>? _sessionCreationCompleter;
+  Timer? _sessionCreationTimer;
+  String? _creationSelectingSessionId;
   WorkspaceSearchState _workspaceSearch = WorkspaceSearchState.idle();
   int _workspaceSearchEpoch = 0;
   String? _workspaceTrustRequiredFor;
@@ -419,6 +476,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   List<WorkspaceInfo> get workspaces => List.unmodifiable(_workspaces);
   WorkspaceSearchState get workspaceSearch => _workspaceSearch;
   String? get workspaceTrustRequiredFor => _workspaceTrustRequiredFor;
+  SessionCreationState get sessionCreation => _sessionCreation;
 
   /// True while the active workspace is missing an approved trust record, a
   /// fingerprint change invalidated the previous approval, or the workspace is
@@ -484,11 +542,21 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
-  List<SessionState> get sessions => List.unmodifiable(
-    _sessions.values.where(
-      (session) => !_locallyDeletedSessionIds.contains(session.sessionId),
-    ),
-  );
+  bool _isActiveChat(String sessionId) {
+    if (!_sessions.containsKey(sessionId) ||
+        _locallyDeletedSessionIds.contains(sessionId)) {
+      return false;
+    }
+    final lifecycle = _sessionTree[sessionId]?.lifecycle;
+    return lifecycle != SessionLifecycleState.softDeleted &&
+        lifecycle != SessionLifecycleState.purged;
+  }
+
+  List<SessionState> get _activeChats => _sessions.values
+      .where((session) => _isActiveChat(session.sessionId))
+      .toList(growable: false);
+
+  List<SessionState> get sessions => List.unmodifiable(_activeChats);
   List<FollowUpItem> get selectedFollowUps =>
       List.unmodifiable(_followUpsBySession[selectedSessionId] ?? const []);
   ExtensionDialogState? get selectedDialog =>
@@ -582,32 +650,63 @@ final class ConnectionCoordinator extends ChangeNotifier
   Future<void> _startHistoryGate() async {
     if (!isReady || _historySyncCurrentSessionId != null) return;
     _historyGateError = null;
+    final subscriptionsRepaired = _pruneInactiveSubscriptions();
+    if (subscriptionsRepaired) await _persistSubscriptionSet();
+    final activeIds = _activeChats
+        .map((session) => session.sessionId)
+        .toList(growable: false);
     _historySyncQueue
       ..clear()
-      ..addAll(
-        _sessions.keys.where((id) => !_locallyDeletedSessionIds.contains(id)),
-      );
+      ..addAll(activeIds);
     _historySyncTotal = _historySyncQueue.length;
     _historySyncCompleted = 0;
     _historySyncLocalRevisions.clear();
-    _deferredAutoSelectSessionId ??= selectedSessionId;
+    final selected = selectedSessionId;
+    _deferredAutoSelectSessionId = selected != null && _isActiveChat(selected)
+        ? selected
+        : (activeIds.isEmpty ? null : activeIds.first);
     selectedSessionId = null;
+    leaseId = null;
+    if (activeIds.isEmpty) {
+      _clearSelectedChatProjection();
+    }
     _notify();
     await _syncNextHistorySession();
   }
 
   Future<void> _syncNextHistorySession() async {
     if (!isReady) return;
+    while (_historySyncQueue.isNotEmpty &&
+        !_isActiveChat(_historySyncQueue.first)) {
+      _historySyncQueue.removeAt(0);
+      if (_historySyncTotal > 0) _historySyncTotal -= 1;
+    }
     if (_historySyncQueue.isEmpty) {
       _historySyncCurrentSessionId = null;
       _historyGateComplete = true;
       _historyGateError = null;
-      _notify();
       final deferredSessionId = _deferredAutoSelectSessionId;
       _deferredAutoSelectSessionId = null;
-      if (deferredSessionId != null && selectedSessionId != deferredSessionId) {
-        await selectSession(deferredSessionId);
+      if (deferredSessionId != null && _isActiveChat(deferredSessionId)) {
+        final creation = _sessionCreation;
+        if (creation.isCreating &&
+            _creationSelectingSessionId == deferredSessionId) {
+          await _selectCreatedSession(creation.commandId!, deferredSessionId);
+        } else {
+          await selectPrimarySession(deferredSessionId);
+        }
+        return;
       }
+      if (_activeChats.isEmpty) {
+        _historySyncTotal = 0;
+        _historySyncCompleted = 0;
+        _subscriptionSet = SessionSubscriptionSet.empty();
+        await _persistSubscriptionSet();
+        _clearSelectedChatProjection();
+        phase = ConnectionPhase.ready;
+        errorMessage = null;
+      }
+      _notify();
       return;
     }
     final sessionId = _historySyncQueue.removeAt(0);
@@ -777,17 +876,20 @@ final class ConnectionCoordinator extends ChangeNotifier
     final hostDrafts = hostId == null
         ? const <DraftEntry>[]
         : drafts.where((entry) => entry.hostId == hostId).toList();
-    for (final saved in hostDrafts) {
+    final activeHostDrafts = hostDrafts
+        .where((entry) => _isActiveChat(entry.sessionId))
+        .toList(growable: false);
+    for (final saved in activeHostDrafts) {
       _restorePendingPrompt(saved);
     }
-    if (hostDrafts.isNotEmpty) {
-      final saved = hostDrafts.reduce(
+    if (activeHostDrafts.isNotEmpty) {
+      final saved = activeHostDrafts.reduce(
         (a, b) => a.updatedAt.isAfter(b.updatedAt) ? a : b,
       );
       selectedSessionId = saved.sessionId;
       _restoreDraft(saved);
-    } else if (_sessions.isNotEmpty && hostId != null) {
-      selectedSessionId = _sessions.keys.first;
+    } else if (_activeChats.isNotEmpty && hostId != null) {
+      selectedSessionId = _activeChats.first.sessionId;
     }
 
     if (hostId != null) await _loadCachedStreams(hostId!);
@@ -836,7 +938,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
     }
     _deferredAutoSelectSessionId = null;
-    _pendingCreatedWorkspaceId = null;
+    _failSessionCreation('The connection changed before the chat was created.');
     _hostReadinessRecoveryInFlight = false;
 
     try {
@@ -1024,7 +1126,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _forceSnapshot.clear();
     _syncPending.clear();
     _deferredAutoSelectSessionId = null;
-    _pendingCreatedWorkspaceId = null;
+    _failSessionCreation('The host was forgotten before the chat was created.');
     phase = ConnectionPhase.unpaired;
     _notify();
   }
@@ -1054,26 +1156,200 @@ final class ConnectionCoordinator extends ChangeNotifier
     String? modelId,
     String? provider,
   }) async {
-    if (!isReady || selectedWorkspaceId == null) return;
+    if (_sessionCreation.isCreating) {
+      throw StateError('A chat is already being created.');
+    }
     final workspace = selectedWorkspace;
-    if (workspace == null) return;
+    if (!isReady || workspace == null) {
+      throw StateError(
+        'Connect and choose a workspace before creating a chat.',
+      );
+    }
     final commandId = _id();
-    _pendingCreatedWorkspaceId = workspace.workspaceId;
-    await _sendCommand(
-      type: 'session.create',
+    final completion = Completer<void>();
+    _sessionCreation = SessionCreationState.creating(
       commandId: commandId,
-      payload: <String, Object?>{
-        'workspaceId': selectedWorkspaceId,
-        'workspaceRelativePath': workspace.relativePath,
-        'policyMode': 'full',
-        'name': name != null && name.trim().isNotEmpty
-            ? name.trim()
-            : workspace.displayName,
-        'modelId': ?modelId,
-        'provider': ?provider,
-      },
-      requiresLease: false,
+      workspaceId: workspace.workspaceId,
     );
+    _sessionCreationCompleter = completion;
+    _creationSelectingSessionId = null;
+    errorMessage = null;
+    _notify();
+    try {
+      await _sendCommand(
+        type: 'session.create',
+        commandId: commandId,
+        payload: <String, Object?>{
+          'workspaceId': workspace.workspaceId,
+          'workspaceRelativePath': workspace.relativePath,
+          'policyMode': 'full',
+          'name': name != null && name.trim().isNotEmpty
+              ? name.trim()
+              : workspace.displayName,
+          'modelId': ?modelId,
+          'provider': ?provider,
+        },
+        requiresLease: false,
+      );
+    } on Object catch (error) {
+      _failSessionCreation(
+        _cleanError(error, 'Could not send the new chat request.'),
+        commandId: commandId,
+      );
+    }
+    if (_sessionCreation.commandId == commandId &&
+        _sessionCreation.isCreating) {
+      _sessionCreationTimer?.cancel();
+      _sessionCreationTimer = Timer(const Duration(seconds: 20), () {
+        _failSessionCreation(
+          'Timed out waiting for the new chat.',
+          commandId: commandId,
+        );
+      });
+    }
+    await completion.future;
+  }
+
+  void _clearSelectedChatProjection() {
+    selectedSessionId = null;
+    leaseId = null;
+    draft = '';
+    pendingCommandId = null;
+    pendingPayload = null;
+    pendingState = null;
+    selectedDeliveryMode = DeliveryMode.immediate;
+  }
+
+  bool _pruneInactiveSubscriptions() {
+    var next = _subscriptionSet;
+    for (final item in _subscriptionSet.items) {
+      if (!_isActiveChat(item.sessionId)) {
+        next = next.remove(item.sessionId);
+      }
+    }
+    if (identical(next, _subscriptionSet)) return false;
+    _subscriptionSet = next;
+    return true;
+  }
+
+  Future<void> _pruneSessionReferences(String sessionId) async {
+    if (_isActiveChat(sessionId)) return;
+    final removedSelection = selectedSessionId == sessionId;
+    final removedDeferred = _deferredAutoSelectSessionId == sessionId;
+    if (removedSelection) _clearSelectedChatProjection();
+    if (removedDeferred) _deferredAutoSelectSessionId = null;
+
+    final removedQueued = _historySyncQueue
+        .where((id) => id == sessionId)
+        .length;
+    _historySyncQueue.removeWhere((id) => id == sessionId);
+    final removedCurrent = _historySyncCurrentSessionId == sessionId;
+    if (removedCurrent) _historySyncCurrentSessionId = null;
+    final removedFromGate = removedQueued + (removedCurrent ? 1 : 0);
+    if (removedFromGate > 0) {
+      final reducedTotal = _historySyncTotal - removedFromGate;
+      _historySyncTotal = reducedTotal < _historySyncCompleted
+          ? _historySyncCompleted
+          : reducedTotal;
+    }
+    _historyRequests.removeWhere(
+      (_, request) => request.sessionId == sessionId,
+    );
+    _historySyncLocalRevisions.remove(sessionId);
+    _history.remove(sessionId);
+    _transcriptEventsCache.remove(sessionId);
+    _streams.remove('session:$sessionId');
+    _syncPending.remove('session:$sessionId');
+    _forceSnapshot.remove('session:$sessionId');
+    _controllers.drop(sessionId);
+
+    final subscriptionChanged = _subscriptionSet.contains(sessionId);
+    _subscriptionSet = _subscriptionSet.remove(sessionId);
+    if (subscriptionChanged) await _persistSubscriptionSet();
+
+    final activeChats = _activeChats;
+    final replacement = activeChats.isEmpty ? null : activeChats.first;
+    if (!_historyGateComplete) {
+      if ((removedSelection || removedDeferred) && replacement != null) {
+        _deferredAutoSelectSessionId = replacement.sessionId;
+      }
+      _notify();
+      if (removedCurrent || _historySyncQueue.isEmpty) {
+        await _syncNextHistorySession();
+      }
+      return;
+    }
+    if ((removedSelection || removedDeferred) && replacement != null) {
+      await selectPrimarySession(replacement.sessionId);
+      return;
+    }
+    if (_activeChats.isEmpty) {
+      _clearSelectedChatProjection();
+      _deferredAutoSelectSessionId = null;
+      _historySyncCurrentSessionId = null;
+      _historySyncQueue.clear();
+      _historySyncTotal = 0;
+      _historySyncCompleted = 0;
+      _historyGateComplete = true;
+    }
+    _notify();
+    if (subscriptionChanged && _socket != null && connectionId != null) {
+      await _pushSubscriptions();
+    }
+  }
+
+  void _failSessionCreation(String message, {String? commandId}) {
+    final creation = _sessionCreation;
+    if (!creation.isCreating ||
+        (commandId != null && creation.commandId != commandId)) {
+      return;
+    }
+    _sessionCreationTimer?.cancel();
+    _sessionCreationTimer = null;
+    _creationSelectingSessionId = null;
+    _sessionCreation = SessionCreationState.failed(
+      commandId: creation.commandId!,
+      workspaceId: creation.workspaceId!,
+      error: message,
+    );
+    final completer = _sessionCreationCompleter;
+    _sessionCreationCompleter = null;
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(StateError(message));
+    }
+    _notify();
+  }
+
+  Future<void> _selectCreatedSession(String commandId, String sessionId) async {
+    final creation = _sessionCreation;
+    if (!creation.isCreating || creation.commandId != commandId) return;
+    try {
+      await selectPrimarySession(sessionId);
+      if (!_sessionCreation.isCreating ||
+          _sessionCreation.commandId != commandId) {
+        return;
+      }
+      if (selectedSessionId != sessionId || !_isActiveChat(sessionId)) {
+        throw StateError('The new chat could not be selected.');
+      }
+      _sessionCreationTimer?.cancel();
+      _sessionCreationTimer = null;
+      _sessionCreation = SessionCreationState.created(
+        commandId: commandId,
+        workspaceId: creation.workspaceId!,
+        sessionId: sessionId,
+      );
+      _creationSelectingSessionId = null;
+      final completer = _sessionCreationCompleter;
+      _sessionCreationCompleter = null;
+      if (completer != null && !completer.isCompleted) completer.complete();
+      _notify();
+    } on Object catch (error) {
+      _failSessionCreation(
+        _cleanError(error, 'The new chat could not be selected.'),
+        commandId: commandId,
+      );
+    }
   }
 
   SessionTreeProjection get sessionTree => _sessionTree;
@@ -1349,7 +1625,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   Future<void> selectSession(String sessionId) async {
-    if (!_historyGateComplete) return;
+    if (!_historyGateComplete || !_isActiveChat(sessionId)) return;
     if (selectedSessionId == sessionId && isReady) return;
     selectedSessionId = sessionId;
     leaseId = null;
@@ -2056,7 +2332,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       // Initial connection is deliberately host-only. Session streams can
       // contain very large imported replays; history is fetched through the
       // bounded pager before a chat becomes selectable.
-      _deferredAutoSelectSessionId ??= selectedSessionId;
+      final selected = selectedSessionId;
+      if (selected != null && _isActiveChat(selected)) {
+        _deferredAutoSelectSessionId ??= selected;
+      }
       selectedSessionId = null;
       leaseId = null;
     }
@@ -2079,6 +2358,24 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> _subscribe() async {
     if (_socket == null || connectionId == null || hostId == null) return;
+    var repaired = _pruneInactiveSubscriptions();
+    final selected = selectedSessionId;
+    if (selected != null && !_isActiveChat(selected)) {
+      _clearSelectedChatProjection();
+    } else if (_historyGateComplete &&
+        selected != null &&
+        !_subscriptionSet.isFull(selected)) {
+      _subscriptionSet = _subscriptionSet.setFull(
+        sessionId: selected,
+        cursor: _cursorForSession(selected),
+      );
+      repaired = true;
+    }
+    final deferred = _deferredAutoSelectSessionId;
+    if (deferred != null && !_isActiveChat(deferred)) {
+      _deferredAutoSelectSessionId = null;
+    }
+    if (repaired) await _persistSubscriptionSet();
     final desired = <({String streamId, String detail})>[
       (streamId: 'host:$hostId', detail: 'full'),
       if (_historyGateComplete)
@@ -2200,6 +2497,7 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> _syncComplete(Map<String, Object?> payload) async {
     final streamId = payload['streamId'] as String;
+    if (!_syncPending.contains(streamId)) return;
     final current = StreamCursor.parse(payload['currentCursor'] as String);
     final state = _streams[streamId] ?? StreamViewState.initial(streamId);
     if (state.lastContiguousCursor.compareTo(current) < 0) {
@@ -2212,9 +2510,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       final deferredSessionId = _deferredAutoSelectSessionId;
       if (_historyGateComplete &&
           deferredSessionId != null &&
+          _isActiveChat(deferredSessionId) &&
           selectedSessionId != deferredSessionId) {
         _deferredAutoSelectSessionId = null;
-        await selectSession(deferredSessionId);
+        await selectPrimarySession(deferredSessionId);
         return;
       }
       _hostReadinessRecoveryInFlight = false;
@@ -2325,64 +2624,65 @@ final class ConnectionCoordinator extends ChangeNotifier
             _database.upsertSessionTreeNode(hostId: currentHost, node: node),
           );
         }
-      }
-      if (id is String) {
-        final explicitlyCreated =
+        final creation = _sessionCreation;
+        if (!_historyGateComplete &&
+            phase == ConnectionPhase.ready &&
             payload['change'] == 'added' &&
-            payload['workspaceId'] == _pendingCreatedWorkspaceId;
-        if (explicitlyCreated) {
-          _pendingCreatedWorkspaceId = null;
+            _historySyncCurrentSessionId != id &&
+            !_historySyncQueue.contains(id)) {
+          _historySyncQueue.add(id);
+          _historySyncTotal += 1;
         }
-        if (explicitlyCreated || selectedSessionId == null) {
-          if (phase == ConnectionPhase.synchronizing) {
-            _deferredAutoSelectSessionId = id;
+        final matchesCreation =
+            creation.isCreating &&
+            payload['change'] == 'added' &&
+            payload['createdByCommandId'] == creation.commandId &&
+            _isActiveChat(id);
+        if (matchesCreation) {
+          if (_creationSelectingSessionId == null) {
+            _creationSelectingSessionId = id;
+            if (_historyGateComplete) {
+              unawaited(_selectCreatedSession(creation.commandId!, id));
+            } else {
+              _deferredAutoSelectSessionId = id;
+            }
+          }
+        } else if (!creation.isCreating &&
+            selectedSessionId == null &&
+            _isActiveChat(id)) {
+          if (phase == ConnectionPhase.synchronizing || !_historyGateComplete) {
+            _deferredAutoSelectSessionId ??= id;
           } else {
             unawaited(selectPrimarySession(id));
           }
+        } else if (!_isActiveChat(id)) {
+          unawaited(_pruneSessionReferences(id));
         }
       }
     } else if (type == 'session.removed') {
       final id = payload['sessionId'];
-      if (id is String) _locallyDeletedSessionIds.add(id);
-      if (id is String && payload['permanent'] == true) {
-        _sessions.remove(id);
-        _sessionTree.remove(id);
-      } else if (id is String) {
-        final existing = _sessionTree[id];
-        final node = SessionTreeNode.fromWire(<String, Object?>{
-          if (existing != null) ...existing.toWire(),
-          ...payload,
-          'sessionId': id,
-          'lifecycleState': payload['deletionState'] ?? 'soft_deleted',
-        });
-        _sessionTree.upsert(node);
-        final currentHost = hostId;
-        if (currentHost != null) {
-          unawaited(
-            _database.upsertSessionTreeNode(hostId: currentHost, node: node),
-          );
-        }
-      }
-      if (id is String && selectedSessionId == id) {
-        final replacements = _sessions.values
-            .where((session) {
-              if (session.sessionId == id) return false;
-              final lifecycle = _sessionTree[session.sessionId]?.lifecycle;
-              return lifecycle != SessionLifecycleState.softDeleted &&
-                  lifecycle != SessionLifecycleState.purged;
-            })
-            .toList(growable: false);
-        final replacement = replacements.isEmpty ? null : replacements.first;
-        if (replacement != null) {
-          unawaited(selectPrimarySession(replacement.sessionId));
+      if (id is String) {
+        _locallyDeletedSessionIds.add(id);
+        if (payload['permanent'] == true) {
+          _sessions.remove(id);
+          _sessionTree.remove(id);
         } else {
-          selectedSessionId = null;
-          leaseId = null;
-          draft = '';
-          pendingCommandId = null;
-          pendingPayload = null;
-          pendingState = null;
+          final existing = _sessionTree[id];
+          final node = SessionTreeNode.fromWire(<String, Object?>{
+            if (existing != null) ...existing.toWire(),
+            ...payload,
+            'sessionId': id,
+            'lifecycleState': payload['deletionState'] ?? 'soft_deleted',
+          });
+          _sessionTree.upsert(node);
+          final currentHost = hostId;
+          if (currentHost != null) {
+            unawaited(
+              _database.upsertSessionTreeNode(hostId: currentHost, node: node),
+            );
+          }
         }
+        unawaited(_pruneSessionReferences(id));
       }
     } else if (type == 'session.delete_failed') {
       final id = payload['sessionId'];
@@ -2405,7 +2705,23 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
     } else if (type == 'session.restored') {
       final id = payload['sessionId'];
-      if (id is String) _locallyDeletedSessionIds.remove(id);
+      if (id is String) {
+        _locallyDeletedSessionIds.remove(id);
+        final existing = _sessionTree[id];
+        final node = SessionTreeNode.fromWire(<String, Object?>{
+          if (existing != null) ...existing.toWire(),
+          ...payload,
+          'sessionId': id,
+          'lifecycleState': 'active',
+        });
+        _sessionTree.upsert(node);
+        final currentHost = hostId;
+        if (currentHost != null) {
+          unawaited(
+            _database.upsertSessionTreeNode(hostId: currentHost, node: node),
+          );
+        }
+      }
     } else if (type == 'workspace.trust_state') {
       _workspaceTrustStateEvent(payload);
     } else if (type == 'queue.snapshot' || type == 'turn.queued') {
@@ -2512,8 +2828,22 @@ final class ConnectionCoordinator extends ChangeNotifier
         markAttention(sessionId: id, state: state, unreadCount: count);
       }
     } else if (type == 'command.state') {
-      final prompt = _pendingForCommand(payload['commandId']);
       final state = payload['state'];
+      if (payload['commandId'] == _sessionCreation.commandId &&
+          state is String &&
+          const {
+            'failed',
+            'rejected',
+            'indeterminate',
+            'cancelled',
+          }.contains(state)) {
+        _failSessionCreation(
+          payload['message']?.toString() ??
+              'The bridge could not create the chat.',
+          commandId: _sessionCreation.commandId,
+        );
+      }
+      final prompt = _pendingForCommand(payload['commandId']);
       if (prompt != null && state is String) {
         unawaited(_acceptPromptState(prompt, state));
       }
@@ -2863,8 +3193,23 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> message,
     Map<String, Object?> payload,
   ) async {
-    final prompt = _pendingForCommand(message['commandId']);
     final state = payload['state'];
+    if (message['commandId'] == _sessionCreation.commandId &&
+        state is String &&
+        const {
+          'failed',
+          'rejected',
+          'indeterminate',
+          'cancelled',
+        }.contains(state)) {
+      _failSessionCreation(
+        payload['message']?.toString() ??
+            'The bridge could not create the chat.',
+        commandId: _sessionCreation.commandId,
+      );
+      return;
+    }
+    final prompt = _pendingForCommand(message['commandId']);
     if (prompt != null && state is String) {
       await _acceptPromptState(prompt, state);
     }
@@ -2979,6 +3324,16 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> payload,
   ) async {
     final code = payload['code']?.toString() ?? 'unknown';
+    final creationCommandId = message['commandId'];
+    if (_sessionCreation.isCreating &&
+        creationCommandId == _sessionCreation.commandId) {
+      _failSessionCreation(
+        payload['message']?.toString() ??
+            'The bridge could not create the chat.',
+        commandId: creationCommandId as String,
+      );
+      return;
+    }
     final requestId = message['requestId'];
     final reconciledCommandId = requestId is String
         ? _pendingCurrentRequestCommand.remove(requestId)
@@ -3157,8 +3512,13 @@ final class ConnectionCoordinator extends ChangeNotifier
   Future<void> _reconcilePending() async {
     if (!isReady) return;
     // Deliberately read-only. Reconnect never calls retryPending and therefore
-    // cannot duplicate a prompt whose completion is uncertain.
-    for (final prompt in _pendingPromptsBySession.values.toList()) {
+    // cannot duplicate a prompt whose completion is uncertain. Commands tied
+    // to Trash entries stay durable but are not queried against a removed
+    // stream.
+    for (final prompt
+        in _pendingPromptsBySession.values
+            .where((prompt) => _isActiveChat(prompt.sessionId))
+            .toList()) {
       final requestId = await _sendControl('command.current', <String, Object?>{
         'commandId': prompt.commandId,
       });
@@ -3673,6 +4033,7 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   void _socketEnded(Object? error, int epoch) {
     if (epoch != _connectionEpoch || _disposed) return;
+    _failSessionCreation('The connection closed before the chat was created.');
     ++_connectionEpoch;
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
@@ -3728,6 +4089,7 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   void _protocolFailure(Object error, int epoch) {
     if (epoch != _connectionEpoch) return;
+    _failSessionCreation('The bridge response could not be read.');
     phase = ConnectionPhase.incompatible;
     errorMessage = 'Protocol error: $error';
     _notify();
@@ -3802,6 +4164,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   void dispose() {
     _disposed = true;
     WidgetsBinding.instance.removeObserver(this);
+    _failSessionCreation('Chat creation was cancelled.');
+    _sessionCreationTimer?.cancel();
     ++_connectionEpoch;
     _cancelReconnect();
     _ackTimer?.cancel();
@@ -3973,6 +4337,9 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (sessionId.isEmpty) {
       throw ArgumentError.value(sessionId, 'sessionId', 'must not be empty');
     }
+    if (_historyGateComplete && !_isActiveChat(sessionId)) {
+      throw StateError('Cannot select a chat that is not active.');
+    }
     if (_subscriptionSet.isFull(sessionId)) {
       await selectSession(sessionId);
       return;
@@ -3982,7 +4349,9 @@ final class ConnectionCoordinator extends ChangeNotifier
       sessionId: sessionId,
       cursor: _cursorForSession(sessionId),
     );
-    if (previousFull != null && previousFull != sessionId) {
+    if (previousFull != null &&
+        previousFull != sessionId &&
+        _isActiveChat(previousFull)) {
       if (next.summaries.length <
           SessionSubscriptionSet.maxSummarySubscriptions) {
         next = next.addSummary(
@@ -3999,6 +4368,9 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// Adds `sessionId` as a summary subscription. Throws when the cap
   /// would be exceeded.
   Future<void> addSummarySubscription(String sessionId) async {
+    if (_historyGateComplete && !_isActiveChat(sessionId)) {
+      throw StateError('Cannot subscribe to a chat that is not active.');
+    }
     if (_subscriptionSet.isFull(sessionId)) return;
     if (_subscriptionSet.contains(sessionId)) return;
     _subscriptionSet = _subscriptionSet.addSummary(

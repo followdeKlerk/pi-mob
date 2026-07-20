@@ -86,6 +86,167 @@ void main() {
   );
 
   test(
+    'deleted and purged summaries complete a cold history gate at zero',
+    () async {
+      const deletedId = '10101010-1010-4010-8010-101010101010';
+      const purgedId = '20202020-2020-4020-8020-202020202020';
+      await coordinator.initialize(autoConnect: false);
+      await coordinator.connect('https://fixture.test');
+      final socket = transport.sockets.single;
+      socket.server(helloAccepted());
+      await eventually(
+        () =>
+            socket.sent.any((message) => message['type'] == 'subscription.set'),
+      );
+      socket.server(
+        response('subscription.accepted', {
+          'streams': [
+            {'streamId': 'host:$hostId', 'mode': 'replay'},
+          ],
+        }),
+      );
+      socket.server(
+        event(
+          type: 'session.summary',
+          streamId: 'host:$hostId',
+          cursor: '1',
+          eventId: '30303030-3030-4030-8030-303030303030',
+          payload: {
+            'sessionId': deletedId,
+            'workspaceId': workspaceId,
+            'name': 'In trash',
+            'runtimeState': 'idle',
+            'lifecycleState': 'soft_deleted',
+          },
+        ),
+      );
+      socket.server(
+        event(
+          type: 'session.summary',
+          streamId: 'host:$hostId',
+          cursor: '2',
+          eventId: '40404040-4040-4040-8040-404040404040',
+          payload: {
+            'sessionId': purgedId,
+            'workspaceId': workspaceId,
+            'name': 'Purged',
+            'runtimeState': 'idle',
+            'lifecycleState': 'purged',
+          },
+        ),
+      );
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'host:$hostId',
+          'currentCursor': '2',
+          'mode': 'replay',
+        }, requestId: null),
+      );
+
+      await eventually(
+        () => coordinator.historyGateComplete && coordinator.isReady,
+      );
+      expect(coordinator.sessions, isEmpty);
+      expect(coordinator.historySyncTotal, 0);
+      expect(coordinator.historySyncCompleted, 0);
+      expect(coordinator.selectedSessionId, isNull);
+      expect(coordinator.subscriptionSet.isEmpty, isTrue);
+      expect(
+        socket.sent.where(
+          (message) => message['type'] == 'session.history.page',
+        ),
+        isEmpty,
+      );
+      for (final subscription in socket.sent.where(
+        (message) => message['type'] == 'subscription.set',
+      )) {
+        expect(streamIds(subscription), ['host:$hostId']);
+      }
+    },
+  );
+
+  test('session creation selects only the matching command fresh id', () async {
+    const unrelatedId = '50505050-5050-4050-8050-505050505050';
+    const createdId = '60606060-6060-4060-8060-606060606060';
+    await makeReady(coordinator, transport);
+    coordinator.debugSeedWorkspaces(const [
+      <String, Object?>{
+        'workspaceId': workspaceId,
+        'displayName': 'Fixture workspace',
+        'rootLabel': '/fixture',
+        'relativePath': '.',
+        'availability': 'available',
+        'trustState': 'approved',
+        'fingerprint': 'fixture-fingerprint',
+        'policyVersion': '1',
+        'manifest': <Object?>[],
+      },
+    ]);
+    coordinator.debugSelectWorkspace(workspaceId);
+    final socket = transport.sockets.single;
+    var completed = false;
+    final creation = coordinator.createSession().then((_) => completed = true);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'session.create'),
+    );
+    final create = socket.sent.lastWhere(
+      (message) => message['type'] == 'session.create',
+    );
+    final commandId = create['commandId'] as String;
+    expect(coordinator.sessionCreation.commandId, commandId);
+    expect(coordinator.sessionCreation.isCreating, isTrue);
+
+    socket.server(
+      event(
+        type: 'session.summary',
+        streamId: 'host:$hostId',
+        cursor: '2',
+        eventId: '70707070-7070-4070-8070-707070707070',
+        payload: {
+          'change': 'added',
+          'createdByCommandId': 'different-command',
+          'sessionId': unrelatedId,
+          'workspaceId': workspaceId,
+          'name': 'Someone else\'s chat',
+          'runtimeState': 'idle',
+        },
+      ),
+    );
+    await eventually(
+      () => coordinator.sessions.any(
+        (session) => session.sessionId == unrelatedId,
+      ),
+    );
+    expect(coordinator.selectedSessionId, sessionId);
+    expect(coordinator.sessionCreation.isCreating, isTrue);
+    expect(completed, isFalse);
+
+    socket.server(
+      event(
+        type: 'session.summary',
+        streamId: 'host:$hostId',
+        cursor: '3',
+        eventId: '80808080-8080-4080-8080-808080808080',
+        payload: {
+          'change': 'added',
+          'createdByCommandId': commandId,
+          'sessionId': createdId,
+          'workspaceId': workspaceId,
+          'name': 'Created chat',
+          'runtimeState': 'idle',
+        },
+      ),
+    );
+    await creation;
+
+    expect(completed, isTrue);
+    expect(coordinator.selectedSessionId, createdId);
+    expect(coordinator.sessionCreation.phase, SessionCreationPhase.created);
+    expect(coordinator.sessionCreation.sessionId, createdId);
+    expect(coordinator.subscriptionSet.full?.sessionId, createdId);
+  });
+
+  test(
     'first session announced during initial sync defers selection and controller acquire',
     () async {
       await coordinator.initialize(autoConnect: false);

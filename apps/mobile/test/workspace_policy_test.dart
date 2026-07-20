@@ -426,7 +426,13 @@ void main() {
       );
       _seedWorkspaces(coordinator);
 
-      await coordinator.createSession();
+      coordinator.createSession().ignore();
+      await eventually(
+        () => transport.sockets.last.sent.any(
+          (message) => message['type'] == 'session.create',
+        ),
+        tester: tester,
+      );
 
       final create = transport.sockets.last.sent.lastWhere(
         (message) => message['type'] == 'session.create',

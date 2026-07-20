@@ -6,7 +6,6 @@ import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
 import '../../domain/session_controls.dart';
 import '../../domain/session_directory.dart';
-import '../../domain/session_tree.dart';
 import '../../notifications/notification_controller.dart';
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
@@ -168,16 +167,23 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
   }
 
   Future<void> _newChat() async {
+    if (widget.coordinator.sessionCreation.isCreating) return;
     final workspace = await _chooseFolder();
     if (workspace == null) return;
     await widget.coordinator.selectWorkspaceEntry(workspace);
     if (widget.coordinator.requiresTrustApproval) return;
     final agent = await _chooseAgent();
     if (agent == null || agent.provider == null) return;
-    await widget.coordinator.createSession(
-      modelId: agent.id,
-      provider: agent.provider,
-    );
+    try {
+      await widget.coordinator.createSession(
+        modelId: agent.id,
+        provider: agent.provider,
+      );
+    } on Object {
+      // The coordinator exposes a concise, typed failure directly below the
+      // New chat affordance. Keep the drawer open so the user can retry.
+      return;
+    }
     if (mounted) Navigator.of(context).pop();
   }
 
@@ -218,6 +224,7 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
   @override
   Widget build(BuildContext context) {
     final coordinator = widget.coordinator;
+    final creation = coordinator.sessionCreation;
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final semantic = context.piSemanticColors;
@@ -244,26 +251,21 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     final transcriptSyncing =
         selectedSessionId != null &&
         coordinator.isHistorySyncing(selectedSessionId);
-    final sessions =
-        coordinator.sessions.where((session) {
-          final lifecycle =
-              coordinator.sessionTree[session.sessionId]?.lifecycle;
-          return lifecycle != SessionLifecycleState.softDeleted &&
-              lifecycle != SessionLifecycleState.purged;
-        }).toList()..sort((a, b) {
-          int rank(String id) => switch (coordinator.attentionFor(id)) {
-            SessionAttentionState.needsAttention => 0,
-            SessionAttentionState.unread => 1,
-            SessionAttentionState.background => 2,
-            SessionAttentionState.none => 3,
-          };
-          final attention = rank(a.sessionId).compareTo(rank(b.sessionId));
-          if (attention != 0) return attention;
-          return (b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
-              .compareTo(
-                a.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0),
-              );
-        });
+    final sessions = coordinator.sessions.toList()
+      ..sort((a, b) {
+        int rank(String id) => switch (coordinator.attentionFor(id)) {
+          SessionAttentionState.needsAttention => 0,
+          SessionAttentionState.unread => 1,
+          SessionAttentionState.background => 2,
+          SessionAttentionState.none => 3,
+        };
+        final attention = rank(a.sessionId).compareTo(rank(b.sessionId));
+        if (attention != 0) return attention;
+        return (b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .compareTo(
+              a.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0),
+            );
+      });
 
     return Drawer(
       key: const Key('chat-session-drawer'),
@@ -345,11 +347,57 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
               padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md),
               child: FilledButton.icon(
                 key: const Key('new-chat-button'),
-                onPressed: coordinator.isReady ? _newChat : null,
+                onPressed: coordinator.isReady && !creation.isCreating
+                    ? _newChat
+                    : null,
                 icon: const Icon(Icons.edit_square, size: 19),
                 label: const Text('New chat'),
               ),
             ),
+            if (creation.isCreating)
+              const Padding(
+                padding: EdgeInsets.fromLTRB(
+                  PiSpacing.md,
+                  PiSpacing.sm,
+                  PiSpacing.md,
+                  0,
+                ),
+                child: Row(
+                  key: Key('creating-chat-indicator'),
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: MotionSpinner(
+                        strokeWidth: 2,
+                        dimension: 14,
+                        label: 'Creating chat',
+                      ),
+                    ),
+                    SizedBox(width: PiSpacing.sm),
+                    Text('Creating chat…'),
+                  ],
+                ),
+              )
+            else if (creation.phase == SessionCreationPhase.failed)
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  PiSpacing.md,
+                  PiSpacing.sm,
+                  PiSpacing.md,
+                  0,
+                ),
+                child: Text(
+                  creation.error ?? 'Could not create chat.',
+                  key: const Key('creating-chat-error'),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: colors.error,
+                  ),
+                ),
+              ),
             const SizedBox(height: PiSpacing.sm),
             if (transcriptSyncing)
               Padding(
