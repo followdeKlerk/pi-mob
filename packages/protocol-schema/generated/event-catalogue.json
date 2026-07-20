@@ -1,0 +1,252 @@
+[
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "host.state"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "host.degraded"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "host.draining"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "host.capacity"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "host.backup_state"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "host.compatibility"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "session.summary"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "session.removed"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "workspace.summary"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "workspace.trust_state"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "notification.capability"
+  },
+  {
+    "class": "event",
+    "stream": "host-or-session",
+    "type": "command.state"
+  },
+  {
+    "class": "event",
+    "stream": "host-or-session",
+    "type": "error.event"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "session.state"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "session.metadata"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "session.policy"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "session.tree"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "controller.state"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.accepted"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.queued"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.started"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.waiting_for_input"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.retrying"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.compacting"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.settled"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.aborted"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.failed"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "turn.indeterminate"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "assistant.started"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "assistant.delta"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "assistant.completed"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "reasoning.started"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "reasoning.delta"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "reasoning.completed"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "tool.started"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "tool.output"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "tool.completed"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "tool.failed"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "tool.cancelled"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "queue.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "model.state"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "context.state"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "retry.state"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "compaction.state"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "extension.dialog"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "extension.notify"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "extension.status"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "extension.widget"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "extension.title"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "extension.editor_prefill"
+  }
+]

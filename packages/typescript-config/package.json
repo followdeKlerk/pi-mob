@@ -1,0 +1,14 @@
+{
+  "name": "@pi-mob/typescript-config",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "files": [
+    "tsconfig.base.json",
+    "tsconfig.strict.json"
+  ],
+  "exports": {
+    "./base": "./tsconfig.base.json",
+    "./strict": "./tsconfig.strict.json"
+  }
+}

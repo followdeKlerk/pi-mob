@@ -3,11 +3,11 @@
 ## meta
 
 ```text
-updated_utc: 2026-07-12
+updated_utc: 2026-07-14
 root: .
-managed_by: manual specification refresh; regenerate with /check after M1 scaffold
+managed_by: regenerate with /check after each scaffold milestone
 vcs: git
-branch: m0-contract-freeze
+branch: m1-m2-scaffold
 cache_scope: project-orientation
 ```
 
@@ -16,8 +16,8 @@ cache_scope: project-orientation
 ```text
 name: pi-mob
 purpose: private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale
-status: M1 activation ready
-shape: docs-only
+status: M0–M14 done; M15 activation ready
+shape: monorepo with executable protocol, durable multi-session/tree/queue Pi adapter, private attachment/export transport, and Flutter mobile control client
 mobile: Flutter 3.44.4 / Dart 3.12.2
 bridge: Bun 1.3.14 / TypeScript / SQLite WAL
 host_floor: macOS 13.0+
@@ -26,17 +26,15 @@ agent: @earendil-works/pi-coding-agent 0.80.6 via pi --mode rpc subprocess
 protocol: 1.0, host/session streams, decimal-string cursors
 ```
 
-No application scaffold, manifests, executable code, CI, or tests exist yet.
-
 ## active work
 
 Source: [`WORKING.md`](WORKING.md)
 
 ```text
-checkpoint: M1 — Monorepo scaffold and CI foundations
-objective: create the monorepo scaffold and root validation command
-next_checkpoint: M2 — Protocol schemas and shared fixtures
-blockers: none requiring a product decision
+checkpoint: M15 — Notifications and background experience
+objective: add privacy-preserving best-effort push and authoritative foreground reconciliation
+next_checkpoint: M16 — Accessibility, performance, privacy, and operations hardening
+blockers: final proof requires push credentials, signing, permission interaction, and physical devices
 ```
 
 M0 evidence retained:
@@ -46,7 +44,7 @@ M0 evidence retained:
 - sanitized real-Pi session/resource fixture inventory,
 - Flutter/Bun x64 artifact evidence.
 
-M1 still freezes Xcode/iOS and Android build pins and adds documentation/schema consistency checks.
+M1 shipped the scaffold (`M1-SUMMARY.md`). M2 shipped executable cross-language protocol contracts (`M2-SUMMARY.md`). M3 shipped the exact-Pi adapter (`M3-SUMMARY.md`). M4 shipped durable SQLite commands/events/leases and replay (`M4-SUMMARY.md`). M5 shipped the one-session client (`M5-SUMMARY.md`). M6 shipped supervised failure recovery (`M6-SUMMARY.md`). M7 shipped the portable installed host lifecycle (`M7-SUMMARY.md`). M8 shipped canonical workspace trust and host-enforced Read-only policy (`M8-SUMMARY.md`). M9 shipped the production transcript, tools, history paging, and composer (`M9-SUMMARY.md`).
 
 ## read first
 
@@ -64,8 +62,11 @@ M1 still freezes Xcode/iOS and Android build pins and adds documentation/schema 
 12. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md)
 13. [`docs/DECISIONS.md`](docs/DECISIONS.md)
 14. [`BACKLOG.md`](BACKLOG.md)
-15. [`WORKING.md`](WORKING.md)
-16. [`PLANNING.md`](PLANNING.md) — historical research only
+15. [`M2-SUMMARY.md`](M2-SUMMARY.md)
+16. [`M3-SUMMARY.md`](M3-SUMMARY.md)
+17. [`M4-SUMMARY.md`](M4-SUMMARY.md)
+18. [`WORKING.md`](WORKING.md)
+19. [`PLANNING.md`](PLANNING.md) — historical research only
 
 Normative documents under `docs/`, `BACKLOG.md`, and current `WORKING.md` override contradictory historical text in `PLANNING.md`.
 
@@ -170,26 +171,30 @@ running at crash -> indeterminate; never automatic rerun
 
 ## commands
 
-No commands exist yet. M1 must define at least:
+Root validation pipeline (`bun run all`, defined by M1):
 
 ```text
 setup
 format
 lint/analyze
 typecheck
-unit test
-protocol fixture check
-all checks
-bridge dev/build
-mobile dev/build
+fixtures:check
+schema:generate
+schema:check
+docs:check
+security:check
+deps:check
+test
+build
 clean
+all
 ```
 
 ## target entrypoints after M1
 
 ```text
 apps/mobile/lib/main.dart
-packages/bridge/src/main.ts
+packages/bridge/src/smoke.ts
 packages/pi-extension/src/index.ts
 packages/protocol-schema/src/index.ts
 packages/protocol-fixtures/
@@ -238,13 +243,12 @@ Detailed tasks, demos, dependencies, and exit criteria: [`BACKLOG.md`](BACKLOG.m
 
 ## known issues / intentionally incomplete
 
-- Docs-only repository; no executable validation yet.
-- Exact Flutter platform archive checksum not recorded yet.
-- Exact Xcode/iOS SDK and Android build toolchain not frozen until scaffold builds.
-- Real Pi compatibility manifest and sanitized session fixtures not yet committed.
+- M9 physical-device frame traces and complete screen-reader journeys remain part of the broader M16 release hardening gate; deterministic 1,000-turn, 200% text, reduced-motion, and semantics baselines pass.
+- Native mobile release signing/toolchain hardening remains scheduled for M16; M7 pins and verifies the x64 host release.
+- No real Xcode/Android release build in CI yet; M1 validates the iOS/Android deployment floors and runs `flutter analyze` plus the Dart fixture parity test.
 - Linux/Windows/Termux/public store/multi-user/sandbox/Obsidian are post-MVP.
 - `PLANNING.md` contains obsolete research statements and must not be treated as normative.
 
 ## next action
 
-Close remaining M0 evidence, then scaffold M1. Do not begin polished UI or push work before shared protocol fixtures and the real Pi adapter are proven.
+Activate M15: implement durable device registration, APNs/FCM adapters, status-only policy, coalescing, deep-link reconciliation, and platform background surfaces. Final proof requires signed physical-device testing.

@@ -627,6 +627,7 @@ error.event
 session.state
 session.metadata
 session.policy
+session.tree
 controller.state
 turn.accepted
 turn.queued

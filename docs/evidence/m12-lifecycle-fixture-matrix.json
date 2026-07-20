@@ -1,0 +1,23 @@
+{
+  "milestone": "M12",
+  "generatedAt": "2026-07-14",
+  "result": "pass",
+  "scenarios": [
+    {"id":"name-and-fallback","result":"pass","evidence":"packages/bridge/test/m12-tree-store.test.ts"},
+    {"id":"tree-lineage-pagination","result":"pass","evidence":"packages/bridge/test/m12-tree-store.test.ts"},
+    {"id":"eligible-fork","result":"pass","evidence":"packages/bridge/test/m12-session-lifecycle.test.ts"},
+    {"id":"fork-correctness","result":"pass","evidence":"packages/bridge/test/m12-session-lifecycle.test.ts"},
+    {"id":"clone-correctness","result":"pass","evidence":"packages/bridge/test/m12-session-lifecycle.test.ts"},
+    {"id":"fork-extension-cancel","result":"pass","originalUnchanged":true,"childCreated":false},
+    {"id":"clone-extension-cancel","result":"pass","originalUnchanged":true,"childCreated":false},
+    {"id":"snapshot-before-success","result":"pass","evidence":"packages/bridge/test/m12-session-lifecycle.test.ts"},
+    {"id":"active-delete-abort-stop","result":"pass","evidence":"packages/bridge/test/m12-session-lifecycle.test.ts"},
+    {"id":"seven-day-soft-delete-restore","result":"pass","retentionDays":7,"evidence":"packages/bridge/test/m12-tree-store.test.ts"},
+    {"id":"delete-failed-visible-repairable","result":"pass","repair":"repeat session.delete after correcting failure"},
+    {"id":"irreversible-purge","result":"pass","tombstoneRetained":true,"idReusable":false},
+    {"id":"mobile-draft-preservation","result":"pass","evidence":"apps/mobile/test/connection_coordinator_test.dart"},
+    {"id":"mobile-accessibility-200-percent","result":"pass","evidence":"apps/mobile/test/session_tree/session_tree_widgets_test.dart"}
+  ],
+  "fullGate":"bun run all",
+  "fullGateResult":"pass"
+}

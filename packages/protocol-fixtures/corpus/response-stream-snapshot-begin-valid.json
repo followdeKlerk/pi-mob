@@ -1,0 +1,20 @@
+{
+  "name": "response-stream-snapshot-begin-valid",
+  "kind": "response",
+  "valid": true,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "snapshotId": "66666666-6666-4666-8666-666666666666",
+      "streamId": "session:66666666-6666-4666-8666-666666666666",
+      "baselineCursor": "1"
+    },
+    "requestId": "22222222-2222-4222-8222-222222222222",
+    "type": "stream.snapshot.begin"
+  }
+}

@@ -1,0 +1,36 @@
+{
+  "name": "@pi-mob/bridge",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config.ts",
+    "./logger": "./src/logger.ts",
+    "./smoke": "./src/smoke.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "m3:contract": "bun run cmd/m3-contract.ts",
+    "daemon": "bun run src/daemon.ts",
+    "build:smoke": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile ./dist/bridge-smoke ./src/smoke.ts"
+  },
+  "dependencies": {
+    "@fastify/busboy": "3.2.0",
+    "@pi-mob/protocol-schema": "workspace:*",
+    "jpeg-js": "0.4.4",
+    "pngjs": "7.0.0",
+    "qrcode": "1.5.4"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-coding-agent": "0.80.6",
+    "@pi-mob/typescript-config": "workspace:*",
+    "@types/jpeg-js": "0.3.7",
+    "@types/pngjs": "6.0.5",
+    "@types/qrcode": "1.5.6",
+    "jsqr": "1.4.0"
+  }
+}

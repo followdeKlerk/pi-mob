@@ -32,13 +32,16 @@
   },
   "catalogue": "pi-0.80.6.catalogue.json",
   "fixtures": "fixtures/pi-0.80.6/rpc-session-contract.json",
+  "m3ContractReport": "fixtures/pi-0.80.6/m3-real-contract-report.json",
   "verification": {
     "commands": [
       "pi --version",
       "shasum -a 256 $(command -v pi)",
       "npm view @earendil-works/pi-coding-agent@0.80.6 version dist.integrity dist.tarball gitHead --json",
       "pi --mode rpc --session-dir <fixture-root>/sessions --no-extensions --extension <fixture-root>/extensions/contract-fixture.ts",
-      "SessionManager.list(<fixture-cwd>, <fixture-session-dir>)"
+      "SessionManager.list(<fixture-cwd>, <fixture-session-dir>)",
+      "bun run --cwd packages/bridge m3:contract",
+      "bun test packages/bridge/test/pi-real-contract.test.ts"
     ],
     "sanitization": "All fixture paths use <fixture-root>; values are synthetic; no provider request is made."
   }

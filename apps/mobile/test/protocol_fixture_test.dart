@@ -1,0 +1,238 @@
+import 'dart:convert';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:pi_mob/protocol_fixture.dart';
+import 'test_asset_loader.dart';
+
+void main() {
+  test('shared corpus fixture labels match Dart validation', () async {
+    final manifestRaw = await TestAssetLoader.loadString(
+      'packages/protocol-fixtures/corpus/fixtures-manifest.json',
+    );
+    final manifest = List<Map<String, Object?>>.from(
+      jsonDecode(manifestRaw) as List,
+    );
+    expect(manifest.length, greaterThan(100));
+    for (final entry in manifest) {
+      final raw = await TestAssetLoader.loadString(
+        'packages/protocol-fixtures/corpus/${entry['file']}',
+      );
+      final fixture = Map<String, Object?>.from(jsonDecode(raw) as Map);
+      final message = Map<String, Object?>.from(fixture['message'] as Map);
+      if (fixture['valid'] == true) {
+        final decoded = validateProtocolFixture(
+          entry['kind'] as String,
+          message,
+        );
+        expect(decoded, isNotNull, reason: entry['file'] as String?);
+        if (decoded is ProtocolEnvelope) {
+          expect(
+            jsonDecode(jsonEncode(decoded.toJson())),
+            message,
+            reason: 'round-trip ${entry['file']}',
+          );
+        }
+      } else {
+        expect(
+          () => validateProtocolFixture(entry['kind'] as String, message),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: entry['file'] as String?,
+        );
+      }
+    }
+  });
+
+  test('controller lease renew responses are recognized', () {
+    final decoded = validateProtocolFixture('response', <String, Object?>{
+      'protocol': const {'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'requestId': '22222222-2222-4222-8222-222222222222',
+      'type': 'controller.renew.result',
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': const {
+        'leaseId': '33333333-3333-4333-8333-333333333333',
+        'expiresAt': 1784089300000,
+      },
+    });
+    expect(decoded, isA<ProtocolEnvelope>());
+  });
+
+  test('legacy partial session summaries remain replayable', () {
+    final decoded = validateProtocolFixture('event', <String, Object?>{
+      'protocol': const {'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'eventId': '22222222-2222-4222-8222-222222222222',
+      'streamId': 'host:33333333-3333-4333-8333-333333333333',
+      'cursor': '49',
+      'type': 'session.summary',
+      'sentAt': '2026-07-15T04:08:45.772Z',
+      'payload': const {
+        'sessionId': '44444444-4444-4444-8444-444444444444',
+        'runtimeState': 'starting',
+      },
+    });
+    expect(decoded, isA<ProtocolEnvelope>());
+  });
+
+  test('decimal cursors and shared semantic hashes match TypeScript', () async {
+    expect(
+      DecimalCursor.parse(
+        '9007199254740992',
+      ).compareTo(DecimalCursor.parse('9007199254740991')),
+      1,
+    );
+    expect(
+      () => DecimalCursor.parse('01'),
+      throwsA(isA<ProtocolValidationException>()),
+    );
+
+    final raw = await TestAssetLoader.loadString(
+      'packages/protocol-fixtures/corpus/semantic-hashes.json',
+    );
+    final cases = List<Map<String, Object?>>.from(jsonDecode(raw) as List);
+    for (final hashCase in cases) {
+      final values =
+          (hashCase['messages'] ?? hashCase['semanticCommands']) as List;
+      expect(values.length, greaterThan(1));
+      for (final value in values) {
+        final json = Map<String, Object?>.from(value as Map);
+        final command = ProtocolCommand(
+          type: json['type'] as String,
+          payload: Map<String, Object?>.from(json['payload'] as Map),
+          commandId:
+              (json['commandId'] as String?) ??
+              '33333333-3333-4333-8333-333333333333',
+        );
+        expect(canonicalSemanticCommand(command), hashCase['canonical']);
+        expect(semanticCommandSha256(command), hashCase['sha256']);
+        expect(() => command.payload['new'] = true, throwsUnsupportedError);
+        final nested = command.payload['a'];
+        if (nested is List<Object?>) {
+          expect(() => nested.add(false), throwsUnsupportedError);
+        }
+      }
+    }
+  });
+
+  test('tool output boundary metadata remains exact and bounded', () async {
+    for (final expected in <String, Map<String, Object?>>{
+      'tool-output-event-boundary.json': <String, Object?>{
+        'retainedBytes': 262144,
+        'totalBytes': 262144,
+        'isTruncated': false,
+      },
+      'tool-output-retained-boundary.json': <String, Object?>{
+        'retainedBytes': 5242880,
+        'totalBytes': 6291456,
+        'isTruncated': true,
+      },
+    }.entries) {
+      final raw = await TestAssetLoader.loadString(
+        'packages/protocol-fixtures/corpus/${expected.key}',
+      );
+      final fixture = Map<String, Object?>.from(jsonDecode(raw) as Map);
+      final message = Map<String, Object?>.from(fixture['message'] as Map);
+      final payload = Map<String, Object?>.from(message['payload'] as Map);
+      expect(
+        payload,
+        containsPair('retainedBytes', expected.value['retainedBytes']),
+      );
+      expect(payload, containsPair('totalBytes', expected.value['totalBytes']));
+      expect(
+        payload,
+        containsPair('isTruncated', expected.value['isTruncated']),
+      );
+      expect(validateProtocolFixture('event', message), isA<ProtocolEvent>());
+    }
+  });
+
+  test(
+    'shared ordered scenario matrix applies transitions and reaches outcomes',
+    () async {
+      final raw = await TestAssetLoader.loadString(
+        'packages/protocol-fixtures/corpus/scenarios.json',
+      );
+      final scenarios = List<Map<String, Object?>>.from(
+        jsonDecode(raw) as List,
+      );
+      expect(scenarios.length, 11);
+      for (final scenario in scenarios) {
+        final steps = List<Map<String, Object?>>.from(
+          (scenario['steps'] as List).map(
+            (step) => Map<String, Object?>.from(step as Map),
+          ),
+        );
+        expect(
+          steps.length,
+          greaterThan(1),
+          reason: scenario['name'] as String?,
+        );
+        final machine = ProtocolScenarioMachine();
+        for (final step in steps) {
+          final fixtureRaw = await TestAssetLoader.loadString(
+            'packages/protocol-fixtures/corpus/${step['fixture']}',
+          );
+          final fixture = Map<String, Object?>.from(
+            jsonDecode(fixtureRaw) as Map,
+          );
+          final message = Map<String, Object?>.from(fixture['message'] as Map);
+          if (fixture['valid'] == true) {
+            expect(
+              validateProtocolFixture(fixture['kind'] as String, message),
+              isNotNull,
+            );
+          } else {
+            expect(
+              () => validateProtocolFixture(fixture['kind'] as String, message),
+              throwsA(isA<ProtocolValidationException>()),
+            );
+          }
+          expect(
+            machine.apply(step['action'] as String, fixture),
+            step['expect'],
+          );
+        }
+        expect(machine.phase, scenario['outcome']);
+      }
+    },
+  );
+
+  test('scenario transitions reject out-of-order behavior', () {
+    expect(
+      () => ProtocolScenarioMachine().apply('snapshot.end'),
+      throwsStateError,
+    );
+  });
+
+  test('error correlation and canonical stream identities match TypeBox', () {
+    final base = <String, Object?>{
+      'protocol': <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'requestId': '22222222-2222-4222-8222-222222222222',
+      'commandId': '33333333-3333-4333-8333-333333333333',
+      'sentAt': '2026-07-12T00:00:00.000Z',
+    };
+    final error = <String, Object?>{
+      ...base,
+      'type': 'error',
+      'payload': <String, Object?>{
+        'code': 'invalid_state',
+        'message': 'invalid',
+        'retryable': false,
+        'details': <String, Object?>{},
+      },
+    };
+    expect(ProtocolEnvelope.fromJson(error), isA<ProtocolError>());
+    final invalidStream = <String, Object?>{
+      ...base,
+      'eventId': '44444444-4444-4444-8444-444444444444',
+      'type': 'turn.started',
+      'streamId': 'session:not-a-uuid',
+      'cursor': '1',
+      'payload': <String, Object?>{},
+    };
+    expect(
+      () => ProtocolEnvelope.fromJson(invalidStream),
+      throwsA(isA<ProtocolValidationException>()),
+    );
+  });
+}

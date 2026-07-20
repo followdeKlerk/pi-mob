@@ -1,0 +1,13 @@
+{
+  "name": "pairing-valid",
+  "kind": "pairing",
+  "valid": true,
+  "message": {
+    "kind": "pi-mob-host",
+    "version": 1,
+    "hostId": "66666666-6666-4666-8666-666666666666",
+    "displayName": "fixture host",
+    "endpoint": "https://fixture-host.example",
+    "protocolMajor": 1
+  }
+}

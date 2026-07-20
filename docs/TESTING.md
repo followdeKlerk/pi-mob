@@ -15,6 +15,20 @@ Status: normative MVP release requirements.
 - Preserve privacy in fixtures, logs, screenshots, and CI artifacts.
 - No release gate depends solely on a simulator when platform lifecycle/push behaviour is involved.
 
+### Proportional testing and test cap
+
+Testing effort is risk-based, not line-count- or coverage-target-based.
+
+- **Trivial code needs no dedicated test** when it is declarative or mechanically obvious, has no branching or state transition, and failure is already caught by compilation, static analysis, schema validation, or an existing higher-level test. Examples include constants, simple field forwarding, generated boilerplate, and passive manifest wiring.
+- **Non-trivial code requires focused tests** when it contains branching, parsing, normalization, state, concurrency, persistence, protocol behavior, security/privacy policy, recovery, platform integration, or external side effects.
+- **Complex or high-impact code must test invariants and failure paths**, not merely the happy path. This includes command identity, leases, replay/snapshots, crash recovery, filesystem/process boundaries, migrations, and read-only enforcement.
+- Add the smallest test set that proves the behavior. Prefer one table/property/integration test over many near-duplicate examples.
+- Do not add tests solely to increase coverage percentages, mirror implementation details, test language/framework behavior, or re-prove an invariant already covered at a more appropriate layer.
+- When an existing test already detects the realistic regression, extend it rather than creating another test file.
+- Generated command/event fixture matrices remain appropriate because they prove contract exhaustiveness; ordinary trivial code does not inherit that requirement.
+
+The detailed required matrices below apply where their named risk or checkpoint feature exists. They are not a mandate to test unrelated trivial glue.
+
 ## 2. Static and repository checks
 
 Every applicable pull request/checkpoint runs:
@@ -394,7 +408,7 @@ Run representative real devices where behaviour requires hardware/platform servi
 - backup exclusion,
 - TalkBack/font scale/reduce animations.
 
-Simulator/emulator may exercise UI, but real APNs/FCM/lock/network/foreground-service release evidence is required.
+Simulator/emulator may exercise UI, but real-device evidence is required for each activated release platform. The current Android scope requires real FCM/lock/network/foreground-service evidence. Apple APNs/Live Activity device evidence is deferred until Apple products return to the activated product scope.
 
 ## 13. Accessibility gates
 
@@ -545,11 +559,25 @@ Critical cumulative gates:
 
 ### M15 background
 
-- real APNs/FCM/Live Activity/Android foreground behaviour,
+- real Android FCM and foreground-service behaviour,
 - status-only payload,
-- stale reconciliation.
+- stale reconciliation,
+- deterministic APNs adapter coverage; real Apple APNs/Live Activity activation deferred by product scope.
 
-### M17 personal MVP
+### M16 product UX
+
+- light/dark theme and semantic-status contrast tests,
+- Sessions/Activity/Host destination and platform-back widget tests,
+- 360×755 layouts at 100%, 150%, and 200% text scale,
+- transcript final-answer/reasoning/tool hierarchy and selection semantics,
+- reduced-motion token behavior,
+- Android screenshots and primary-flow observations with sanitized content.
+
+### M17 hardening
+
+- accessibility, performance, privacy, operations, soak, and recovery evidence.
+
+### M18 personal MVP
 
 - all product success criteria,
 - all P0/P1 MVP tasks Done or explicitly Deferred,

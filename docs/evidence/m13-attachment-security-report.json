@@ -1,0 +1,23 @@
+{
+  "milestone": "M13",
+  "generatedAt": "2026-07-14",
+  "result": "pass",
+  "limits": {"maxFilesPerPrompt":4,"maxFileBytes":10485760,"maxPromptBytes":26214400,"orphanTtlHours":24},
+  "scenarios": {
+    "pickerSanitizeResizeMetadataStrip": {"result":"pass","evidence":"apps/mobile/test/attachments_domain_m13_test.dart"},
+    "streamingMultipartUpload": {"result":"pass","evidence":"packages/bridge/src/core/binary-http.ts"},
+    "sameDigestRetryNoDuplicate": {"result":"pass","evidence":"packages/bridge/test/m13-admission-cleanup.test.ts"},
+    "digestConflict": {"result":"pass","evidence":"packages/bridge/test/m13-attachments.test.ts"},
+    "malformedMagicDecodeDimensionDecompression": {"result":"pass","evidence":"packages/bridge/test/m13-attachments.test.ts"},
+    "rejectBeforeAcceptance": {"result":"pass","evidence":"packages/bridge/test/m13-admission-cleanup.test.ts"},
+    "queueRetentionAndExpiryCleanup": {"result":"pass","evidence":"packages/bridge/test/m13-attachments.test.ts"},
+    "piDispatchBoundaryMapping": {"result":"pass","evidence":"packages/bridge/src/pi/one-session-adapter.ts"},
+    "opaqueDurableHtmlExport": {"result":"pass","evidence":"packages/bridge/test/m13-export.test.ts"},
+    "pendingFailedExportDeniedAndRestart": {"result":"pass","evidence":"packages/bridge/test/m13-admission-cleanup.test.ts"},
+    "mobileProgressExplicitSharePrivacy": {"result":"pass","evidence":"apps/mobile/test/attachments/"},
+    "nativeShareDemo": {"result":"pass","platform":"Android 16 API 36 emulator","observed":"system Bluetooth share destination chooser opened for local HTML export"},
+    "noPublicUrlOrPathLeak": {"result":"pass","evidence":["packages/bridge/test/m13-export.test.ts","packages/bridge/test/m13-attachments.test.ts"]}
+  },
+  "fullGate":"bun run all",
+  "fullGateResult":"pass"
+}

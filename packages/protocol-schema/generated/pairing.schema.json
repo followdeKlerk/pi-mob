@@ -1,0 +1,40 @@
+{
+  "$id": "pi-mob/protocol/pairing",
+  "additionalProperties": true,
+  "properties": {
+    "displayName": {
+      "minLength": 1,
+      "type": "string"
+    },
+    "endpoint": {
+      "pattern": "^https://",
+      "type": "string"
+    },
+    "hostId": {
+      "$id": "pi-mob/protocol/uuid",
+      "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+      "type": "string"
+    },
+    "kind": {
+      "const": "pi-mob-host",
+      "type": "string"
+    },
+    "protocolMajor": {
+      "const": 1,
+      "type": "number"
+    },
+    "version": {
+      "const": 1,
+      "type": "number"
+    }
+  },
+  "required": [
+    "kind",
+    "version",
+    "hostId",
+    "displayName",
+    "endpoint",
+    "protocolMajor"
+  ],
+  "type": "object"
+}

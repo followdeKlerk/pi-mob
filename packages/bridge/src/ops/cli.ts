@@ -1,0 +1,1081 @@
+/**
+ * M7 injectable operations CLI.
+ *
+ * The CLI is the only entry point through which the bridge install,
+ * lifecycle, serve, pairing, doctor, update, rollback, and uninstall
+ * operations are driven from the outside. It is intentionally:
+ *
+ *   - **Flag-driven only.** Every command line is parsed into an explicit
+ *     map of flags. There is no interactive shell, no REPL, no TTY
+ *     detection; the same argv always produces the same dispatch.
+ *   - **Dependency-injected.** `process.argv`, `process.env`, `launchctl`,
+ *     the real filesystem, the real Tailscale Serve CLI, and `console.*`
+ *     are never called from this module. Every dependency is supplied via
+ *     {@link CliDeps} so the test suite runs hermetically.
+ *   - **Destructive-action gated.** `update`, `rollback`, and `uninstall`
+ *     require both an explicit `--confirm` flag and an explicit mode flag.
+ *     The CLI refuses to dispatch without either of them.
+ *   - **Pi-session-preserving.** The `uninstall` flow never removes the
+ *     Pi session directory by default. The caller must opt in via
+ *     `--remove-pi-session-dir=true`; even `uninstall --mode=full` keeps
+ *     Pi sessions intact.
+ *
+ * The CLI is split into three layers:
+ *
+ *   - {@link parseArgs}: pure argv → {@link ParsedCommand} parser.
+ *   - `<command>Handler` functions: pure dispatch with structured
+ *     `<command>Result` returns (tested directly).
+ *   - {@link runCli}: the user-facing entry point that wires the parser,
+ *     the dispatchers, and the stdout/stderr sinks from {@link CliDeps}.
+ */
+
+import { validateBridgeEndpoint } from "./endpoint-guard";
+import { buildPairingPayload, encodePairingPayload, renderPairingTerminal, type PairingPayload } from "./pairing";
+import {
+  buildEnvironment,
+  DEFAULT_ENV_ALLOWLIST,
+  type BuildEnvironmentOptions,
+} from "./install-environment";
+import {
+  buildInstallPaths,
+  DEFAULT_LAUNCH_AGENT_LABEL,
+  ensureInstallPaths,
+  FILE_MODE,
+  type InstallPaths,
+} from "./install-paths";
+import {
+  defaultInstallConfig,
+  readInstallConfig,
+  writeInstallConfig,
+  type BridgeInstallConfig,
+} from "./install-config";
+import {
+  renderPlist,
+  type LaunchAgentSpec,
+} from "./launch-agent";
+import {
+  applyServeRoute,
+  BRIDGE_ROUTE_OWNER,
+  type ServeDriver,
+  type ServeRouteAccept,
+} from "./tailscale-serve";
+import {
+  type FileSystemPort,
+  type ClockPort,
+} from "./ports";
+import {
+  parseManifest,
+  type ReleaseManifest,
+} from "./release-manifest";
+import {
+  executeUpdate,
+  planUpdate,
+  type MigrationClass,
+} from "./update";
+import {
+  executeRollback,
+  planRollback,
+} from "./rollback";
+import {
+  executeUninstall,
+  type UninstallMode,
+  type UninstallPaths,
+} from "./uninstall";
+import { runDoctor, type PiProbe, type PushProbe } from "./doctor";
+
+// ---------------------------------------------------------------------------
+// Public type surface
+// ---------------------------------------------------------------------------
+
+/** All M7 commands the CLI understands. */
+export type CliCommand =
+  | "install"
+  | "serve"
+  | "pair"
+  | "doctor"
+  | "report"
+  | "update"
+  | "rollback"
+  | "uninstall";
+
+/** Canonical ordered list of supported commands. */
+export const CLI_COMMANDS: readonly CliCommand[] = [
+  "install",
+  "serve",
+  "pair",
+  "doctor",
+  "report",
+  "update",
+  "rollback",
+  "uninstall",
+];
+
+/** Help text for the top-level CLI. */
+export const CLI_HELP = [
+  "pi-mob bridge ops CLI",
+  "",
+  "Usage: pi-mob-ops <command> [flags]",
+  "",
+  "Commands:",
+  "  install     install paths, versioned config, LaunchAgent, env file",
+  "  serve       apply the owned Tailscale Serve route for the install",
+  "  pair        emit canonical pairing payload + optional terminal QR",
+  "  doctor      run every probe and emit a redacted report",
+  "  report      alias of doctor that prints only the typed JSON report",
+  "  update      transactional update with explicit mode + confirmation",
+  "  rollback    transactional rollback with explicit mode + confirmation",
+  "  uninstall   explicit uninstall with explicit mode + confirmation",
+  "",
+  "Every flag is explicit; no interactive shell, no defaults that may",
+  "trigger destructive actions. Pass `--help` after a command for help.",
+].join("\n");
+
+/**
+ * Injected dependencies. None of these default to `process.*` or to a real
+ * filesystem: the production caller (the bun entry script) supplies them.
+ * Tests substitute in-memory implementations for every port.
+ */
+export interface LifecycleDriver {
+  installAndVerify(paths: InstallPaths, port: number): void | Promise<void>;
+  preflight(): void | Promise<void>;
+  verifyTarget(manifest: ReleaseManifest): void | Promise<void>;
+  backup(paths: InstallPaths, manifest: ReleaseManifest): string | Promise<string>;
+  stop(): void | Promise<void>;
+  swap(paths: InstallPaths, manifest: ReleaseManifest): void | Promise<void>;
+  migrate(migrationClass: MigrationClass): void | Promise<void>;
+  start(): void | Promise<void>;
+  verifyRunning(): void | Promise<void>;
+  verifyBackup(backupId: string): void | Promise<void>;
+  restore(paths: InstallPaths, backupId: string): void | Promise<void>;
+  generationReset(): void | Promise<void>;
+  stopAndRemoveService(): void | Promise<void>;
+  removeOwnedServe(): void | Promise<void>;
+}
+
+export interface CliDeps {
+  readonly fs: FileSystemPort;
+  readonly clock: ClockPort;
+  readonly serveDriver: ServeDriver;
+  /** Required for destructive lifecycle commands; absence fails closed. */
+  readonly lifecycle?: LifecycleDriver;
+  readonly databaseIntegrity?: (path: string) => { ok: boolean; detail?: string };
+  readonly processProbe?: () => { loaded: boolean; listenerReady: boolean };
+  /** Optional Pi integration; if absent, the doctor Pi probe reports warn. */
+  readonly piProbe?: PiProbe;
+  /** Optional push integration; if absent, the doctor push probe reports warn. */
+  readonly pushProbe?: PushProbe;
+  /** stdout sink; receives complete lines (the CLI appends a trailing `\n`). */
+  readonly stdout: (chunk: string) => void;
+  /** stderr sink; receives complete lines (the CLI appends a trailing `\n`). */
+  readonly stderr: (chunk: string) => void;
+  /** Environment accessor; defaults to an empty map when omitted. */
+  readonly env?: () => Readonly<Record<string, string | undefined>>;
+  /** argv (without `node` and without the script path). */
+  readonly argv: readonly string[];
+  /**
+   * Optional exit sink; if omitted the CLI does not terminate the process.
+   * Production wires this to `process.exit`; tests leave it undefined so
+   * the test runner stays alive.
+   */
+  readonly exit?: (code: number) => void;
+  /**
+   * Whether `--yes` may substitute for `--confirm` on destructive commands.
+   * Production defaults to `true` so a `pipe`-friendly wrapper can use it;
+   * tests typically pass `false` so the explicit `--confirm` is required.
+   */
+  readonly acceptYes?: boolean;
+}
+
+/** What {@link runCli} returns. Useful for assertions in tests. */
+export interface CliRunResult {
+  readonly command: CliCommand | null;
+  readonly exitCode: number;
+  readonly stdout: string;
+  readonly stderr: string;
+  readonly parsed: ParsedCommand | null;
+  readonly data: unknown;
+}
+
+// ---------------------------------------------------------------------------
+// Result shapes — returned by every handler; serialisable.
+// ---------------------------------------------------------------------------
+
+export interface InstallResult {
+  readonly paths: InstallPaths;
+  readonly config: BridgeInstallConfig;
+  readonly envPath: string | null;
+  readonly envPathWritten: boolean;
+  readonly plistPath: string;
+  readonly timestamp: string;
+}
+
+export interface ServeResult {
+  readonly tcpPort: number;
+  readonly changed: boolean;
+  readonly ownedRoutePresent: boolean;
+  readonly preservedRouteCount: number;
+  readonly fingerprint: string;
+  readonly timestamp: string;
+}
+
+export interface PairResult {
+  readonly payload: PairingPayload;
+  readonly canonicalJson: string;
+  readonly terminal: string | null;
+  readonly timestamp: string;
+}
+
+export type { DoctorReport } from "./doctor";
+
+export interface CliUpdateResult {
+  readonly planId: string;
+  readonly ok: boolean;
+  readonly completed: readonly string[];
+  readonly backupId: string | null;
+  readonly rolledBack: boolean;
+  readonly error: { readonly stage: string; readonly message: string } | null;
+  readonly timestamp: string;
+}
+
+export interface CliRollbackResult {
+  readonly planId: string;
+  readonly ok: boolean;
+  readonly completed: readonly string[];
+  readonly generationResetInvoked: boolean;
+  readonly error: { readonly stage: string; readonly message: string } | null;
+  readonly timestamp: string;
+}
+
+export interface CliUninstallResult {
+  readonly mode: UninstallMode;
+  readonly removed: readonly string[];
+  readonly preserved: readonly string[];
+  readonly piSessionDir: string;
+  readonly piSessionDirRemoved: boolean;
+  readonly timestamp: string;
+}
+
+// ---------------------------------------------------------------------------
+// Argument parser
+// ---------------------------------------------------------------------------
+
+export interface ParsedCommand {
+  readonly command: CliCommand;
+  /**
+   * Per-flag value. Most flags hold a `string` or `true` (boolean); flags
+   * listed in {@link LIST_FLAG_KEYS} hold a `readonly string[]` accumulated
+   * in argv order. Tests assert on the exact runtime shape via the typed
+   * accessors below.
+   */
+  readonly flags: ReadonlyMap<string, string | boolean | readonly string[]>;
+  readonly positional: readonly string[];
+}
+
+/**
+ * Flags the parser is allowed to repeat. Repeated occurrences are appended
+ * to a `string[]` in argv order so callers can collect `PATH` directories,
+ * `accept` rules, and `env` overrides without inventing colon-separated
+ * encodings. Anything not in this set keeps the original overwrite
+ * semantics — repeating `--port` overwrites, never accumulates.
+ */
+const LIST_FLAG_KEYS: ReadonlySet<string> = new Set([
+  "path-dir",
+  "accept",
+  "env",
+]);
+
+/** Thrown when argv cannot be parsed into a valid command. */
+export class CliArgsError extends Error {
+  override readonly name = "CliArgsError";
+  constructor(readonly code: string, message: string) {
+    super(message);
+  }
+}
+
+const BOOLEAN_TRUE = new Set(["true", "1", "yes", "on"]);
+const BOOLEAN_FALSE = new Set(["false", "0", "no", "off"]);
+
+/**
+ * Parses an argv vector into a {@link ParsedCommand}. The first token must
+ * be a known command; flags are `--key=value` or `--key value` or `--flag`
+ * (boolean). The parser never consults `process.env` or `process.argv`.
+ */
+export function parseArgs(argv: readonly string[]): ParsedCommand {
+  if (argv.length === 0) {
+    throw new CliArgsError("argv_empty", "argv is empty; pass at least a command");
+  }
+  const command = argv[0]!;
+  if (!isCliCommand(command)) {
+    throw new CliArgsError(
+      "unknown_command",
+      `unknown command ${JSON.stringify(command)}; expected one of ${CLI_COMMANDS.join(", ")}`,
+    );
+  }
+  const flags = new Map<string, string | boolean>();
+  const positional: string[] = [];
+  let i = 1;
+  while (i < argv.length) {
+    const token = argv[i]!;
+    if (token === "--") {
+      // Rest-of-argv passthrough (rare; useful for testing).
+      for (let j = i + 1; j < argv.length; j += 1) positional.push(argv[j]!);
+      break;
+    }
+    if (token.startsWith("--")) {
+      const eq = token.indexOf("=");
+      if (eq > 0) {
+        const key = token.slice(2, eq);
+        const value = token.slice(eq + 1);
+        if (LIST_FLAG_KEYS.has(key)) {
+          appendListFlag(flags, key, value);
+        } else {
+          flags.set(key, value);
+        }
+        i += 1;
+        continue;
+      }
+      const key = token.slice(2);
+      // Boolean flag if no value follows, or the next token is another flag.
+      const next = argv[i + 1];
+      if (next === undefined || next.startsWith("--")) {
+        flags.set(key, true);
+        i += 1;
+        continue;
+      }
+      if (LIST_FLAG_KEYS.has(key)) {
+        appendListFlag(flags, key, next);
+      } else {
+        flags.set(key, next);
+      }
+      i += 2;
+      continue;
+    }
+    positional.push(token);
+    i += 1;
+  }
+  return { command, flags, positional };
+}
+
+function isCliCommand(value: string): value is CliCommand {
+  return (CLI_COMMANDS as readonly string[]).includes(value);
+}
+
+// ---------------------------------------------------------------------------
+// Flag helpers — typed accessors used by every handler.
+// ---------------------------------------------------------------------------
+
+function getFlagString(args: ParsedCommand, key: string): string | undefined {
+  const value = args.flags.get(key);
+  return typeof value === "string" ? value : undefined;
+}
+
+function getFlagStringRequired(args: ParsedCommand, key: string): string {
+  const value = getFlagString(args, key);
+  if (value === undefined || value.length === 0) {
+    throw new CliArgsError("flag_missing", `missing required --${key}`);
+  }
+  return value;
+}
+
+function getFlagIntegerRequired(args: ParsedCommand, key: string): number {
+  const raw = getFlagStringRequired(args, key);
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isInteger(n) || n < 0 || n > 65535) {
+    throw new CliArgsError("flag_invalid", `--${key} must be an integer in 0..65535 (got ${JSON.stringify(raw)})`);
+  }
+  return n;
+}
+
+function getFlagBoolean(args: ParsedCommand, key: string, fallback: boolean): boolean {
+  const value = args.flags.get(key);
+  if (value === undefined) return fallback;
+  if (typeof value === "boolean") return value;
+  if (typeof value !== "string") {
+    throw new CliArgsError(
+      "flag_invalid",
+      `--${key} must not be repeated`,
+    );
+  }
+  const lower = value.toLowerCase();
+  if (BOOLEAN_TRUE.has(lower)) return true;
+  if (BOOLEAN_FALSE.has(lower)) return false;
+  throw new CliArgsError(
+    "flag_invalid",
+    `--${key} must be true/false/1/0/yes/no/on/off (got ${JSON.stringify(value)})`,
+  );
+}
+
+function getFlagList(args: ParsedCommand, key: string): readonly string[] {
+  const value = args.flags.get(key);
+  if (value === undefined || typeof value === "boolean") return [];
+  if (typeof value === "string") return [value];
+  return value;
+}
+
+function appendListFlag(
+  flags: Map<string, string | boolean | readonly string[]>,
+  key: string,
+  value: string,
+): void {
+  const existing = flags.get(key);
+  if (Array.isArray(existing)) {
+    flags.set(key, [...existing, value]);
+    return;
+  }
+  flags.set(key, [value]);
+}
+
+function requireConfirm(args: ParsedCommand, deps: CliDeps): void {
+  const confirm = args.flags.get("confirm") === true;
+  const yes = args.flags.get("yes") === true;
+  if (confirm) return;
+  if (yes && (deps.acceptYes ?? true)) return;
+  throw new CliArgsError(
+    "confirmation_required",
+    "destructive commands require --confirm (or --yes when enabled)",
+  );
+}
+
+function requireAbsolute(label: string, value: string): string {
+  if (!value.startsWith("/")) {
+    throw new CliArgsError("flag_invalid", `--${label} must be an absolute path (got ${JSON.stringify(value)})`);
+  }
+  if (value.includes("..")) {
+    throw new CliArgsError("flag_invalid", `--${label} must not contain '..' (got ${JSON.stringify(value)})`);
+  }
+  if (value.includes("\0")) {
+    throw new CliArgsError("flag_invalid", `--${label} must not contain NUL (got ${JSON.stringify(value)})`);
+  }
+  return value;
+}
+
+// ---------------------------------------------------------------------------
+// Shared install-path loader
+// ---------------------------------------------------------------------------
+
+/** Loads or builds the install paths from `--install-root`. */
+function loadInstallPaths(args: ParsedCommand): InstallPaths {
+  const installRoot = requireAbsolute("install-root", getFlagStringRequired(args, "install-root"));
+  const labelFlag = getFlagString(args, "launch-agent-label");
+  const launchAgentsRoot = getFlagString(args, "launch-agents-root");
+  return buildInstallPaths({
+    installRoot,
+    ...(labelFlag !== undefined ? { launchAgentLabel: labelFlag } : {}),
+    ...(launchAgentsRoot !== undefined ? { launchAgentsRoot: requireAbsolute("launch-agents-root", launchAgentsRoot) } : {}),
+  });
+}
+
+// ---------------------------------------------------------------------------
+// install
+// ---------------------------------------------------------------------------
+
+export interface InstallArgs extends ParsedCommand {
+  readonly command: "install";
+}
+
+/** Builds the install payload and writes everything to disk atomically. */
+export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise<InstallResult> {
+  assertCommand(args, "install");
+
+  // Phase 1 — validate every flag and build the in-memory payload before
+  // any filesystem write happens. A validation failure here leaves the
+  // install root untouched so the user can fix and retry.
+  const installRoot = requireAbsolute("install-root", getFlagStringRequired(args, "install-root"));
+  const piExecutable = requireAbsolute("pi-executable", getFlagStringRequired(args, "pi-executable"));
+  const bridgeExecutable = requireAbsolute("bridge-executable", getFlagStringRequired(args, "bridge-executable"));
+  const workspaceRoot = requireAbsolute("workspace", getFlagStringRequired(args, "workspace"));
+  const piSessionDir = requireAbsolute("pi-session-dir", getFlagStringRequired(args, "pi-session-dir"));
+  const extensionPath = requireAbsolute("extension", getFlagStringRequired(args, "extension"));
+  const bridgeVersion = getFlagStringRequired(args, "bridge-version");
+  const protocolVersion = getFlagStringRequired(args, "protocol-version");
+  const port = getFlagIntegerRequired(args, "port");
+  const hostname = getFlagStringRequired(args, "hostname");
+  const environmentRaw = getFlagStringRequired(args, "environment");
+  if (environmentRaw !== "dev" && environmentRaw !== "release") {
+    throw new CliArgsError("flag_invalid", `--environment must be 'dev' or 'release' (got ${JSON.stringify(environmentRaw)})`);
+  }
+  const tailscaleServe = getFlagBoolean(args, "tailscale-serve", true);
+  const launchAgentLabel = getFlagString(args, "launch-agent-label") ?? DEFAULT_LAUNCH_AGENT_LABEL;
+  const launchAgentsRoot = requireAbsolute("launch-agents-root", getFlagStringRequired(args, "launch-agents-root"));
+  const envFileEnabled = getFlagBoolean(args, "env-file", true);
+  const pathDirsRaw = getFlagList(args, "path-dir");
+  if (pathDirsRaw.length === 0) {
+    throw new CliArgsError("flag_missing", "--path-dir must be passed at least once");
+  }
+  const pathDirs = pathDirsRaw.map((dir) => requireAbsolute("path-dir", dir));
+  const extrasList = getFlagList(args, "env");
+  const extras: Record<string, string> = {};
+  for (const entry of extrasList) {
+    const eq = entry.indexOf("=");
+    if (eq <= 0) {
+      throw new CliArgsError("flag_invalid", `--env must be KEY=VALUE (got ${JSON.stringify(entry)})`);
+    }
+    const key = entry.slice(0, eq);
+    if (key !== key.toUpperCase()) {
+      throw new CliArgsError("flag_invalid", `--env key must be uppercase (got ${JSON.stringify(key)})`);
+    }
+    extras[key] = entry.slice(eq + 1);
+  }
+
+  const paths = buildInstallPaths({ installRoot, launchAgentLabel, launchAgentsRoot });
+
+  // defaultInstallConfig validates port + hostname + absolute paths.
+  const config = defaultInstallConfig({
+    paths,
+    piExecutable,
+    bridgeExecutable,
+    bridgeVersion,
+    protocolVersion,
+    port,
+    hostname,
+    environment: environmentRaw,
+    tailscaleServe,
+  });
+
+  // Build the env in memory so forbidden keys + control characters fail
+  // before any file write.
+  const envBuildOptions: BuildEnvironmentOptions = {
+    pathDirs,
+    allowlist: DEFAULT_ENV_ALLOWLIST,
+    extras,
+    ...(getFlagString(args, "home") !== undefined ? { home: getFlagString(args, "home")! } : {}),
+    ...(getFlagString(args, "tmpdir") !== undefined ? { tmpdir: getFlagString(args, "tmpdir")! } : {}),
+    ...(getFlagString(args, "lang") !== undefined ? { lang: getFlagString(args, "lang")! } : {}),
+    ...(getFlagString(args, "tz") !== undefined ? { tz: getFlagString(args, "tz")! } : {}),
+    source: deps.env?.() ?? {},
+  };
+  const built = buildEnvironment(envBuildOptions);
+
+  // Validate the LaunchAgent spec by rendering it. renderPlist throws on
+  // any spec violation (no-shell, absolute paths, Background process type).
+  const plistSpec: LaunchAgentSpec = {
+    label: paths.launchAgentLabel,
+    program: bridgeExecutable,
+    programArguments: [
+      bridgeExecutable,
+      "--config", paths.configFile,
+      "--workspace", workspaceRoot,
+      "--session-dir", piSessionDir,
+      "--extension", extensionPath,
+    ],
+    workingDirectory: workspaceRoot,
+    environment: { ...built.env, PI_MOB_PAIRING_FILE: `${paths.secretsRoot}/pairing.json` },
+    stdoutPath: `${paths.logRoot}/bridge.out`,
+    stderrPath: `${paths.logRoot}/bridge.err`,
+  };
+  const plistXml = renderPlist(plistSpec);
+
+  if (!deps.lifecycle) throw new CliArgsError("lifecycle_unavailable", "install requires the macOS lifecycle driver");
+
+  // Phase 2 — perform the filesystem writes. Each writer validates again
+  // (writeInstallConfig / renderPlist) and re-checks permissions.
+  ensureInstallPaths(paths, deps.fs);
+  writeInstallConfig(paths.configFile, config, deps.fs);
+  if (envFileEnabled) {
+    const lines = [
+      "# owner-only env file generated by the bridge install flow",
+      "# every key below is allow-listed; do not append arbitrary keys",
+      ...Object.keys(built.env).sort().map((key) => `${key}=${built.env[key]}`),
+    ];
+    deps.fs.writeFile(paths.envFile, `${lines.join("\n")}\n`, FILE_MODE);
+    deps.fs.chmod(paths.envFile, FILE_MODE);
+  }
+  deps.fs.writeFile(paths.plistPath, plistXml, FILE_MODE);
+  deps.fs.chmod(paths.plistPath, FILE_MODE);
+  await deps.lifecycle.installAndVerify(paths, port);
+
+  return {
+    paths,
+    config,
+    envPath: envFileEnabled ? paths.envFile : null,
+    envPathWritten: envFileEnabled,
+    plistPath: paths.plistPath,
+    timestamp: deps.clock.iso(),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// serve
+// ---------------------------------------------------------------------------
+
+export interface ServeArgs extends ParsedCommand {
+  readonly command: "serve";
+}
+
+/** Applies the owned Tailscale Serve route via the injected driver. */
+export async function handleServe(args: ParsedCommand, deps: CliDeps): Promise<ServeResult> {
+  assertCommand(args, "serve");
+  // Reading the on-disk config is optional; if it is absent the CLI still
+  // applies the requested route — useful for first-time bootstrap flows
+  // where the doctor report has not yet been written.
+  const paths = loadInstallPaths(args);
+  if (deps.fs.exists(paths.configFile)) {
+    readInstallConfig(paths.configFile, deps.fs);
+  }
+  const tcpPort = getFlagIntegerRequired(args, "tcp-port");
+  if (tcpPort === 0 || tcpPort > 65535) {
+    throw new CliArgsError("flag_invalid", `--tcp-port must be 1..65535 (got ${tcpPort})`);
+  }
+  const webAddress = getFlagString(args, "web-address");
+  const acceptRaw = getFlagList(args, "accept");
+  const accept: ServeRouteAccept[] = acceptRaw.map((entry) => parseAccept(entry));
+
+  const result = await applyServeRoute({
+    driver: deps.serveDriver,
+    tcpPort,
+    ...(webAddress !== undefined ? { webAddress } : {}),
+    accept,
+    ownerId: BRIDGE_ROUTE_OWNER,
+  });
+
+  // Persist the served-port fingerprint onto the state root so a future
+  // doctor run can compare without invoking the driver.
+  deps.fs.mkdir(paths.stateRoot, { recursive: true, mode: 0o700 });
+  deps.fs.writeFile(
+    `${paths.stateRoot}/serve-fingerprint.txt`,
+    JSON.stringify({
+      tcpPort,
+      ownerId: BRIDGE_ROUTE_OWNER,
+      ownedRoutePresent: result.ownedRoute !== null,
+      routeFingerprint: JSON.stringify(result.ownedRoute ?? null),
+      timestamp: deps.clock.iso(),
+    }),
+    FILE_MODE,
+  );
+  deps.fs.chmod(`${paths.stateRoot}/serve-fingerprint.txt`, FILE_MODE);
+
+  return {
+    tcpPort,
+    changed: result.changed,
+    ownedRoutePresent: result.ownedRoute !== null,
+    preservedRouteCount: result.preservedRoutes.length,
+    fingerprint: summariseRoutes(result.routes, BRIDGE_ROUTE_OWNER),
+    timestamp: deps.clock.iso(),
+  };
+}
+
+function parseAccept(entry: string): ServeRouteAccept {
+  const colon = entry.indexOf(":");
+  if (colon <= 0) {
+    throw new CliArgsError("flag_invalid", `--accept must be NAME:FROM (got ${JSON.stringify(entry)})`);
+  }
+  const name = entry.slice(0, colon);
+  const from = entry.slice(colon + 1);
+  if (name.length === 0 || from.length === 0) {
+    throw new CliArgsError("flag_invalid", `--accept NAME and FROM must be non-empty (got ${JSON.stringify(entry)})`);
+  }
+  return { name, from };
+}
+
+function summariseRoutes(routes: readonly unknown[], ownerId: string): string {
+  return JSON.stringify({ ownerId, count: routes.length });
+}
+
+// ---------------------------------------------------------------------------
+// pair
+// ---------------------------------------------------------------------------
+
+export interface PairArgs extends ParsedCommand {
+  readonly command: "pair";
+}
+
+/**
+ * Builds the canonical pairing payload and optionally renders the terminal
+ * QR-style grid. The handler is pure: it does not consult `console` and
+ * never spawns a UI subprocess.
+ */
+export function handlePair(args: ParsedCommand, deps: CliDeps): PairResult {
+  assertCommand(args, "pair");
+  const hostId = getFlagStringRequired(args, "host-id");
+  const displayName = getFlagStringRequired(args, "display-name");
+  const endpoint = getFlagStringRequired(args, "endpoint");
+  // Validate the endpoint up-front so a tampered or malformed value fails
+  // the CLI before any payload is emitted.
+  validateBridgeEndpoint(endpoint);
+
+  const payload = buildPairingPayload({ hostId, displayName, endpoint });
+  const canonicalJson = encodePairingPayload({ hostId, displayName, endpoint });
+
+  const wantTerminal = args.flags.get("terminal") === true;
+  const modules = parseIntegerOr(args, "modules", 21);
+  const quietZone = parseIntegerOr(args, "quiet-zone", 2);
+  const invert = args.flags.get("invert") === true;
+  const terminal = wantTerminal
+    ? renderPairingTerminal(payload, { modules, quietZone, invert })
+    : null;
+  const output = getFlagString(args, "output");
+  if (output !== undefined) {
+    const outputPath = requireAbsolute("output", output);
+    deps.fs.writeFile(outputPath, `${JSON.stringify({ payload, terminal: terminal ?? renderPairingTerminal(payload) })}\n`, FILE_MODE);
+    deps.fs.chmod(outputPath, FILE_MODE);
+  }
+
+  return { payload, canonicalJson, terminal, timestamp: deps.clock.iso() };
+}
+
+/** Parses an integer flag with a fallback default. */
+function parseIntegerOr(args: ParsedCommand, key: string, fallback: number): number {
+  const raw = args.flags.get(key);
+  if (raw === undefined) return fallback;
+  if (typeof raw === "boolean") {
+    throw new CliArgsError("flag_invalid", `--${key} must be an integer (got boolean)`);
+  }
+  if (typeof raw !== "string") {
+    throw new CliArgsError(
+      "flag_invalid",
+      `--${key} must not be repeated`,
+    );
+  }
+  const n = Number.parseInt(raw, 10);
+  if (!Number.isInteger(n)) {
+    throw new CliArgsError("flag_invalid", `--${key} must be an integer (got ${JSON.stringify(raw)})`);
+  }
+  return n;
+}
+
+// ---------------------------------------------------------------------------
+// doctor
+// ---------------------------------------------------------------------------
+
+export interface DoctorArgs extends ParsedCommand {
+  readonly command: "doctor";
+}
+
+/** Runs every probe and returns the typed report. */
+export async function handleDoctor(args: ParsedCommand, deps: CliDeps): Promise<import("./doctor").DoctorReport> {
+  assertCommand(args, "doctor");
+  const paths = loadInstallPaths(args);
+  const config = readInstallConfig(paths.configFile, deps.fs);
+  const ports: import("./doctor").DoctorPorts = {
+    fs: deps.fs,
+    clock: deps.clock,
+    serveDriver: deps.serveDriver,
+    ...(deps.databaseIntegrity ? { databaseIntegrity: deps.databaseIntegrity } : {}),
+    ...(deps.processProbe ? { processProbe: deps.processProbe } : {}),
+    ...(deps.piProbe !== undefined ? { piProbe: deps.piProbe } : {}),
+    ...(deps.pushProbe !== undefined ? { pushProbe: deps.pushProbe } : {}),
+  };
+  return runDoctor({ config, paths, ports });
+}
+
+// ---------------------------------------------------------------------------
+// report — strict JSON output of the doctor report.
+// ---------------------------------------------------------------------------
+
+export interface ReportArgs extends ParsedCommand {
+  readonly command: "report";
+}
+
+/** Runs `doctor` and returns the JSON string for strict consumers. */
+export async function handleReport(args: ParsedCommand, deps: CliDeps): Promise<{
+  readonly report: import("./doctor").DoctorReport;
+  readonly json: string;
+}> {
+  const report = await handleDoctor(args, deps);
+  return { report, json: JSON.stringify(report) };
+}
+
+// ---------------------------------------------------------------------------
+// update
+// ---------------------------------------------------------------------------
+
+export interface UpdateArgs extends ParsedCommand {
+  readonly command: "update";
+}
+
+const MIGRATION_CLASSES: readonly MigrationClass[] = [
+  "binary_only",
+  "reversible_migration",
+  "restore_required",
+];
+
+/** Plans and executes an update transactionally. */
+export async function handleUpdate(args: ParsedCommand, deps: CliDeps): Promise<CliUpdateResult> {
+  assertCommand(args, "update");
+  requireConfirm(args, deps);
+  const paths = loadInstallPaths(args);
+  const currentConfig = readInstallConfig(paths.configFile, deps.fs);
+  const manifestPath = requireAbsolute("manifest-path", getFlagStringRequired(args, "manifest-path"));
+  const migrationRaw = getFlagStringRequired(args, "migration-class");
+  if (!MIGRATION_CLASSES.includes(migrationRaw as MigrationClass)) {
+    throw new CliArgsError(
+      "flag_invalid",
+      `--migration-class must be one of ${MIGRATION_CLASSES.join("|")} (got ${JSON.stringify(migrationRaw)})`,
+    );
+  }
+  const migrationClass = migrationRaw as MigrationClass;
+  if (!deps.fs.exists(manifestPath)) {
+    throw new CliArgsError("flag_invalid", `manifest not found: ${manifestPath}`);
+  }
+  const manifestBuffer = deps.fs.readFile(manifestPath);
+  const manifest = parseManifest(manifestBuffer.toString("utf8")) as ReleaseManifest;
+  const plan = planUpdate({
+    currentVersion: currentConfig.bridgeVersion,
+    targetManifest: manifest,
+    targetRoot: paths.installRoot,
+    migrationClass,
+  });
+
+  if (!deps.lifecycle) throw new CliArgsError("lifecycle_unavailable", "update requires a production lifecycle driver");
+  const hooks = makeUpdateHooks(paths, manifest, migrationClass, deps.lifecycle);
+  const rollback = makeUpdateRollbackHooks(paths, deps.lifecycle, migrationClass);
+
+  const result = await executeUpdate({ plan, ports: { fs: deps.fs, clock: deps.clock }, hooks, rollback });
+  return {
+    planId: result.planId,
+    ok: result.ok,
+    completed: result.completed,
+    backupId: result.backupId,
+    rolledBack: result.rolledBack,
+    error: result.error,
+    timestamp: result.timestamp,
+  };
+}
+
+function makeUpdateHooks(
+  paths: InstallPaths,
+  manifest: ReleaseManifest,
+  migrationClass: MigrationClass,
+  lifecycle: LifecycleDriver,
+): import("./update").UpdateHooks {
+  let backupId: string | null = null;
+  return {
+    preflight: () => lifecycle.preflight(),
+    verifyTarget: () => lifecycle.verifyTarget(manifest),
+    backup: async () => { await lifecycle.stop(); backupId = await lifecycle.backup(paths, manifest); return backupId; },
+    migrate: () => lifecycle.migrate(migrationClass),
+    generationReset: () => lifecycle.generationReset(),
+    swap: () => lifecycle.swap(paths, manifest),
+    postVerify: async () => { await lifecycle.start(); await lifecycle.verifyRunning(); },
+    finalize: () => undefined,
+  };
+}
+
+function makeUpdateRollbackHooks(
+  paths: InstallPaths,
+  lifecycle: LifecycleDriver,
+  migrationClass: MigrationClass,
+): import("./update").UpdateRollbackHooks {
+  return {
+    restore: async () => {
+      await lifecycle.stop();
+      await lifecycle.restore(paths, "latest");
+      if (migrationClass !== "restore_required") {
+        await lifecycle.start();
+        await lifecycle.verifyRunning();
+      }
+    },
+    generationReset: async () => {
+      await lifecycle.generationReset();
+      await lifecycle.start();
+      await lifecycle.verifyRunning();
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// rollback
+// ---------------------------------------------------------------------------
+
+export interface RollbackArgs extends ParsedCommand {
+  readonly command: "rollback";
+}
+
+/** Plans and executes a rollback transactionally. */
+export async function handleRollback(args: ParsedCommand, deps: CliDeps): Promise<CliRollbackResult> {
+  assertCommand(args, "rollback");
+  requireConfirm(args, deps);
+  const paths = loadInstallPaths(args);
+  const currentConfig = readInstallConfig(paths.configFile, deps.fs);
+  const backupId = getFlagStringRequired(args, "backup-id");
+  const migrationRaw = getFlagStringRequired(args, "migration-class");
+  if (!MIGRATION_CLASSES.includes(migrationRaw as MigrationClass)) {
+    throw new CliArgsError(
+      "flag_invalid",
+      `--migration-class must be one of ${MIGRATION_CLASSES.join("|")} (got ${JSON.stringify(migrationRaw)})`,
+    );
+  }
+  const migrationClass = migrationRaw as MigrationClass;
+  const plan = planRollback({
+    currentVersion: currentConfig.bridgeVersion,
+    backupId,
+    migrationClass,
+  });
+
+  if (!deps.lifecycle) throw new CliArgsError("lifecycle_unavailable", "rollback requires a production lifecycle driver");
+  const result = await executeRollback({
+    plan,
+    ports: { clock: deps.clock },
+    hooks: {
+      preflight: () => deps.lifecycle!.preflight(),
+      verifyBackup: () => deps.lifecycle!.verifyBackup(backupId),
+      generationReset: async () => { await deps.lifecycle!.stop(); await deps.lifecycle!.generationReset(); },
+      swap: async () => {
+        await deps.lifecycle!.stop();
+        await deps.lifecycle!.restore(paths, backupId);
+      },
+      verifyTarget: async () => { await deps.lifecycle!.start(); await deps.lifecycle!.verifyRunning(); },
+      finalize: () => undefined,
+    },
+  });
+  return {
+    planId: result.planId,
+    ok: result.ok,
+    completed: result.completed,
+    generationResetInvoked: result.generationResetInvoked,
+    error: result.error,
+    timestamp: result.timestamp,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// uninstall
+// ---------------------------------------------------------------------------
+
+export interface UninstallArgs extends ParsedCommand {
+  readonly command: "uninstall";
+}
+
+const UNINSTALL_MODES: readonly UninstallMode[] = [
+  "retain_data",
+  "remove_state",
+  "full",
+];
+
+/**
+ * Plans and executes an uninstall. The Pi session directory is **always**
+ * preserved unless `--remove-pi-session-dir=true` is explicitly passed;
+ * even `--mode=full` keeps Pi sessions intact by default.
+ */
+export async function handleUninstall(args: ParsedCommand, deps: CliDeps): Promise<CliUninstallResult> {
+  assertCommand(args, "uninstall");
+  requireConfirm(args, deps);
+  const paths = loadInstallPaths(args);
+  const piSessionDir = requireAbsolute("pi-session-dir", getFlagStringRequired(args, "pi-session-dir"));
+  const modeRaw = getFlagStringRequired(args, "mode");
+  if (!UNINSTALL_MODES.includes(modeRaw as UninstallMode)) {
+    throw new CliArgsError(
+      "flag_invalid",
+      `--mode must be one of ${UNINSTALL_MODES.join("|")} (got ${JSON.stringify(modeRaw)})`,
+    );
+  }
+  const mode = modeRaw as UninstallMode;
+  // Pi sessions retained by default — opt-in only.
+  const removePiSessionDir = getFlagBoolean(args, "remove-pi-session-dir", false);
+
+  if (!deps.lifecycle) throw new CliArgsError("lifecycle_unavailable", "uninstall requires a production lifecycle driver");
+  await deps.lifecycle.stopAndRemoveService();
+  await deps.lifecycle.removeOwnedServe();
+  const uninstallPaths: UninstallPaths = { ...paths, piSessionDir };
+  const result = executeUninstall({
+    mode,
+    paths: uninstallPaths,
+    fs: deps.fs,
+    clock: deps.clock,
+    removePiSessionDir,
+  });
+  return {
+    mode: result.mode,
+    removed: result.removed,
+    preserved: result.preserved,
+    piSessionDir: result.plan.piSessionDir,
+    piSessionDirRemoved: result.piSessionDirRemoved,
+    timestamp: result.timestamp,
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Dispatch / runCli
+// ---------------------------------------------------------------------------
+
+function assertCommand(args: ParsedCommand, expected: CliCommand): void {
+  if (args.command !== expected) {
+    throw new CliArgsError("command_mismatch", `expected command '${expected}' but got '${args.command}'`);
+  }
+}
+
+/**
+ * Dispatches a parsed command to the matching handler. The dispatcher is
+ * pure with respect to the filesystem; it only types the result and returns
+ * it. `runCli` is responsible for emitting the result to stdout/stderr.
+ */
+export async function dispatch(args: ParsedCommand, deps: CliDeps): Promise<unknown> {
+  switch (args.command) {
+    case "install": return await handleInstall(args, deps);
+    case "serve": return await handleServe(args, deps);
+    case "pair": return handlePair(args, deps);
+    case "doctor": return await handleDoctor(args, deps);
+    case "report": return await handleReport(args, deps);
+    case "update": return await handleUpdate(args, deps);
+    case "rollback": return await handleRollback(args, deps);
+    case "uninstall": return await handleUninstall(args, deps);
+  }
+}
+
+/** Stable, schema-versioned envelope around every handler result. */
+function envelope(command: CliCommand, data: unknown, timestamp: string): string {
+  const payload = { schemaVersion: 1, command, timestamp, data };
+  return JSON.stringify(payload);
+}
+
+/**
+ * Top-level entry point. Parses argv, dispatches, prints the typed result
+ * to stdout (JSON envelope) and any diagnostic to stderr, then optionally
+ * invokes `deps.exit(code)` on error. The function never throws; failures
+ * are surfaced through the exit code and stderr sink.
+ */
+export async function runCli(deps: CliDeps): Promise<CliRunResult> {
+  const stdoutChunks: string[] = [];
+  const stderrChunks: string[] = [];
+  const captureStdout = (chunk: string): void => {
+    stdoutChunks.push(chunk);
+    deps.stdout(chunk);
+  };
+  const captureStderr = (chunk: string): void => {
+    stderrChunks.push(chunk);
+    deps.stderr(chunk);
+  };
+
+  let parsed: ParsedCommand | null = null;
+  try {
+    parsed = parseArgs(deps.argv);
+  } catch (error) {
+    captureStderr(`${(error as Error).message}\n`);
+    captureStderr(`\n${CLI_HELP}\n`);
+    deps.exit?.(2);
+    return {
+      command: null,
+      exitCode: 2,
+      stdout: stdoutChunks.join(""),
+      stderr: stderrChunks.join(""),
+      parsed: null,
+      data: null,
+    };
+  }
+
+  let exitCode = 0;
+  let data: unknown = null;
+  try {
+    data = await dispatch(parsed, deps);
+    captureStdout(`${envelope(parsed.command, data, deps.clock.iso())}\n`);
+  } catch (error) {
+    exitCode = 1;
+    const err = error as Error;
+    captureStderr(`${parsed.command}: ${err.name || "Error"}: ${err.message}\n`);
+    data = {
+      error: { name: err.name, message: err.message, code: (err as { code?: unknown }).code ?? null },
+    };
+    captureStdout(`${envelope(parsed.command, data, deps.clock.iso())}\n`);
+  }
+
+  if (exitCode !== 0) deps.exit?.(exitCode);
+
+  return {
+    command: parsed.command,
+    exitCode,
+    stdout: stdoutChunks.join(""),
+    stderr: stderrChunks.join(""),
+    parsed,
+    data,
+  };
+}

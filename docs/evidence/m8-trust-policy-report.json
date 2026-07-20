@@ -1,0 +1,39 @@
+{
+  "schemaVersion": 1,
+  "checkpoint": "M8",
+  "date": "2026-07-13",
+  "pathPolicy": {
+    "realpathCanonicalization": true,
+    "stableOpaqueIds": true,
+    "traversalRejected": true,
+    "symlinkEscapeRejected": true,
+    "mobileAbsolutePathsExposed": false,
+    "boundedCancelableSearch": true
+  },
+  "trust": {
+    "piVersion": "0.80.6",
+    "recursiveResourceHashing": true,
+    "resourceSymlinksRejected": true,
+    "approvalDurable": true,
+    "changedFingerprintInvalidates": true,
+    "automaticFirstUseApproval": false,
+    "spawnGateRechecksImmediatelyBeforeSpawn": true
+  },
+  "policy": {
+    "modes": ["full", "read_only"],
+    "turnSnapshotDurable": true,
+    "snapshotPublishedBeforeDispatch": true,
+    "unknownToolsDefaultDeniedInReadOnly": true,
+    "mutatingShellAndPackageToolsDenied": true,
+    "realPinnedPiWriteBlockedBeforeExecution": true,
+    "fullModeFixtureWriteAllowed": true,
+    "osSandboxClaim": false
+  },
+  "evidence": [
+    "packages/bridge/test/m8-bridge-policy.test.ts",
+    "packages/bridge/test/m8-real-readonly.test.ts",
+    "packages/pi-extension/test/policy.test.ts",
+    "packages/pi-extension/test/extension.test.ts",
+    "apps/mobile/test/workspace_policy_test.dart"
+  ]
+}

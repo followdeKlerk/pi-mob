@@ -1,0 +1,8 @@
+{
+  "extends": "@pi-mob/typescript-config/strict",
+  "compilerOptions": {
+    "types": ["bun", "node", "bun-types/test", "bun-types/test-globals"]
+  },
+  "include": ["src/**/*", "test/**/*"],
+  "exclude": ["node_modules", "dist", "build"]
+}

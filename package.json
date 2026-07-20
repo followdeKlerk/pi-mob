@@ -1,0 +1,38 @@
+{
+  "name": "pi-mob",
+  "version": "0.0.0",
+  "private": true,
+  "description": "pi-mob monorepo: Flutter mobile control surface + Bun/TypeScript bridge for Pi coding-agent sessions over Tailscale.",
+  "type": "module",
+  "workspaces": [
+    "packages/*"
+  ],
+  "scripts": {
+    "setup": "bun run scripts/setup.ts",
+    "format": "bun run scripts/format.ts",
+    "lint": "bun run scripts/lint.ts",
+    "typecheck": "bun run scripts/typecheck.ts",
+    "test": "bun run scripts/test.ts",
+    "schema:generate": "bun run scripts/schema-generate.ts",
+    "schema:check": "bun run scripts/schema-check.ts",
+    "fixtures:check": "bun run scripts/fixtures-check.ts",
+    "docs:check": "bun run scripts/docs-check.ts",
+    "security:check": "bun run scripts/security-check.ts",
+    "token:lint": "bun run scripts/token-lint.ts",
+    "deps:check": "bun run scripts/deps-check.ts",
+    "build": "bun run scripts/build.ts",
+    "clean": "bun run scripts/clean.ts",
+    "all": "bun run scripts/all.ts"
+  },
+  "devDependencies": {
+    "@types/bun": "1.3.14",
+    "@types/node": "26.1.1",
+    "bun-types": "1.3.14",
+    "typescript": "5.9.3"
+  },
+  "engines": {
+    "bun": "1.3.14",
+    "node": ">=20.0.0"
+  },
+  "packageManager": "bun@1.3.14"
+}

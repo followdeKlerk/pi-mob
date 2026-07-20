@@ -1,99 +1,51 @@
 # Working
 
-Status: M1 activation ready
+Status: M0–M15 done; M16 implementation complete locally; real-Android TalkBack checkpoint evidence blocked by device availability
 
 ## Current checkpoint
 
-**M1 — Monorepo scaffold and CI foundations**
+**M16 — Mobile product UX, visual system, and workflow integration (active)**
 
-The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Product, architecture, protocol, data, runtime, UX, security, testing, release, toolchain, and decision documents are now normative.
+The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
-Activate the M1 monorepo scaffold and CI foundation work. M0 evidence is frozen in `docs/compatibility/`.
+Complete the new mobile product experience without changing bridge authority or durable command semantics. All locally verifiable M16 implementation now includes light/dark token themes, semantic status colors, compact status grammar, discoverable commands and skills, shared reduced-motion primitives, visible focus treatment, a Sessions/Activity/Host product shell, progressive host diagnostics, and a calmer transcript hierarchy.
 
-## M0 completed in the second audit
+M16 builds the mobile product's original non-derivative identity on three proven grammars:
 
-- Product contract and success criteria.
-- System authority and component boundaries.
-- One host WebSocket with host/session streams.
-- Decimal-string replay cursors.
-- Atomic snapshot and post-baseline replay.
-- Controller lease concurrency model.
-- Durable command identity and indeterminate crash rules.
-- Bridge-owned follow-up queue and no offline auto-send.
-- Full host/mobile data model, retention, backup, migration, deletion, and repair.
-- Complete mobile screen/state/accessibility specification.
-- Security/privacy threat model preserving Tailscale-only authentication.
-- Release/install/update/rollback/private-distribution specification.
-- Decision ledger.
-- M0–M17 checkpointed backlog.
-- Current upstream Pi repository/package/version identification.
-- Flutter `3.44.4` and Bun `1.3.14` selection.
-- macOS bridge floor corrected to `13.0+`.
-- Compiled Bun release configured to disable automatic `.env` and `bunfig.toml` loading.
+- **Linear-grade information density** — compact session/list rows, restrained chrome, focused content surfaces, calm typography hierarchy.
+- **GitHub-grade agent UX** — unambiguous primary action, secondary actions in overflow, transparent state, status pills, discoverable command/skill surface.
+- **Claude-grade readability** — legible transcript typography, generous line height, clear user/assistant/reasoning/tool hierarchy, focused final-answer surface.
 
-## M0 evidence retained
+M16 is anchored by a normative design-token system and navigation contract documented in [`docs/UX.md`](docs/UX.md) and [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md), so M17 hardening and M18 signed release ship on one coherent visual foundation. Apple physical-device evidence is deferred by product scope; M16 physical evidence is Android-only.
 
-- `docs/compatibility/pi-0.80.6.manifest.json`
-- `docs/compatibility/pi-0.80.6.catalogue.json`
-- `docs/compatibility/fixtures/pi-0.80.6/rpc-session-contract.json`
-- `docs/compatibility/toolchain-evidence-2026-07-12.json`
+## Completed foundation
 
-The real-Pi fixture found two adapter requirements: validate a stored session path before `switch_session` (a missing path may be created) and implement deletion through a separately tested adapter path (there is no `delete_session` RPC command).
+- **M0–M9:** protocol, durable bridge, private host, trust policy, production transcript/tools/composer.
+- **M10–M12:** Pi controls, multiplexed sessions/controller leases, and durable session lineage/lifecycle.
+- **M13:** bounded private image attachments, opaque HTML export, and explicit native sharing.
+- **M14:** durable bounded follow-up queues, exact Pi extension-response mapping, and reconnect-safe accessible interaction UI.
+- **M15:** status-only APNs/FCM adapters, production Android FCM activation, permission/channel and foreground service, real background delivery, failure isolation, and foreground reconciliation. Apple APNs and Live Activity activation remains deferred by product scope. See [`M15-SUMMARY.md`](M15-SUMMARY.md) and [`docs/evidence/m15-android-lifecycle-report.json`](docs/evidence/m15-android-lifecycle-report.json).
+
+## Latest M16 slice
+
+- **M16-02/03 (density and agent UX):** `StatusPill` / `SessionStatePill` unify runtime state in the app bar and saved-chat rows; the app bar now exposes observer/controller role, search, and an explicit Commands and skills sheet backed by the existing command model.
+- **M16-06b (full token migration):** `scripts/token-lint.ts` now scans 71 Dart files across nine mobile trees. Existing ad-hoc spacing, radius, and color literals in transcript widgets, controls, sessions, session tree, attachments, interaction, workspaces, and pairing use the shared Pi token/theme layer.
+- **M16-07 (motion grammar):** `PiCurve` and shared `MotionSpinner`, `MotionProgressBar`, and `MotionCrossfade` primitives apply semantic transitions and collapse continuous motion under `MediaQuery.disableAnimations`.
+- **M16-08 (local accessibility implementation):** new primitives expose stable semantics; `FocusRing` provides a visible 2dp focus indicator; widget coverage proves light/dark rendering, focus behavior, reduced-motion fallbacks, and 100/150/200% text-scale baselines.
+- **Validation:** `bun run all` passes (including formatting, analysis, typechecks, security/docs/schema/fixture checks, 71-file token lint, 347 Flutter tests, release build) and a separate `cd apps/mobile && flutter test` passes all 347 tests.
 
 ## Immediate next actions
 
-### 1. Activate M1
-
-Create:
-
-```text
-apps/mobile
-packages/bridge
-packages/pi-extension
-packages/protocol-schema
-packages/protocol-fixtures
-scripts
-```
-
-### 2. Make one root validation command
-
-It must run:
-
-```text
-format
-lint/analyze
-typecheck
-unit placeholders
-shared fixture validation
-Markdown/spec checks
-secret/dependency checks
-```
-
-### 3. Prove cross-language fixture loading
-
-Before implementing bridge business logic or transcript UI:
-
-- TypeScript validates one generated protocol fixture.
-- Dart decodes the same fixture into its immutable model.
-- CI proves both agree.
+1. Connect the target Android phone and run the complete M16 checkpoint journey with TalkBack enabled, 200% text scale, and reduced motion.
+2. Retain the required Android screenshots, frame captures, TalkBack transcript, and reduced-motion captures; update M16-08 and exit criteria only after that evidence exists.
+3. Keep Firebase credentials local; Apple activation remains deferred.
 
 ## Do not start yet
 
-Until M1/M2 exit:
-
-- polished transcript UI,
-- push notifications,
-- session tree UI,
-- attachment UI,
-- Live Activities,
-- general plugin experimentation.
-
-The next engineering risk is schema/build drift, not visual design.
+M17 hardening and M18 signed release remain blocked until M16 exits.
 
 ## Blockers
 
-None requiring a new product decision.
-
-The only remaining M0 work is evidence collection and executable contract verification. If a real Pi/toolchain test contradicts a normative assumption, record the contradiction and update the relevant decision before coding around it.
+The real-Android M16 checkpoint is blocked by device availability. On 2026-07-20, `adb devices -l` returned no devices and `flutter devices` listed only macOS and Chrome. Therefore the required TalkBack primary-journey walkthrough and Android evidence bundle cannot be truthfully completed or claimed in this pane. No M17 work has started.

@@ -1,0 +1,57 @@
+{
+  "milestone": "M11",
+  "generatedAt": "2026-07-14",
+  "result": "pass",
+  "scenarios": {
+    "oneSocketHostSummaries": {
+      "result": "pass",
+      "evidence": "packages/bridge/test/m11-multi-session.test.ts"
+    },
+    "threeIndependentSessions": {
+      "result": "pass",
+      "capacity": 3,
+      "evidence": "packages/bridge/test/m11-multi-session-adapter.test.ts"
+    },
+    "boundedSubscriptions": {
+      "result": "pass",
+      "fullDetailMaximum": 1,
+      "summaryMaximum": 5,
+      "evidence": [
+        "packages/bridge/test/m11-multi-session.test.ts",
+        "apps/mobile/test/session_subscriptions_test.dart"
+      ]
+    },
+    "controllerUniqueness": {
+      "result": "pass",
+      "stressAttempts": 20,
+      "clients": 5,
+      "scopes": 4,
+      "evidence": "packages/bridge/test/m11-multi-session.test.ts"
+    },
+    "capacityAndEviction": {
+      "result": "pass",
+      "evidence": [
+        "packages/bridge/test/m6-process-supervisor.test.ts",
+        "packages/bridge/test/m11-multi-session-adapter.test.ts"
+      ]
+    },
+    "idleStopAndLazyRestore": {
+      "result": "pass",
+      "evidence": "packages/bridge/test/m11-multi-session-adapter.test.ts"
+    },
+    "crossSessionIsolation": {
+      "result": "pass",
+      "evidence": "packages/bridge/test/m11-multi-session-adapter.test.ts"
+    },
+    "mobileObserverTakeoverDraftsAndBadges": {
+      "result": "pass",
+      "evidence": [
+        "apps/mobile/test/coordinator_multi_session_test.dart",
+        "apps/mobile/test/sessions/sessions_test.dart",
+        "apps/mobile/test/app_database_m11_test.dart"
+      ]
+    }
+  },
+  "fullGate": "bun run all",
+  "fullGateResult": "pass"
+}

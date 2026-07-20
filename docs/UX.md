@@ -91,6 +91,10 @@ The user confirms before the host is saved.
 
 ## 4. Host dashboard
 
+The mobile primary navigation does not expose a Host tab. This diagnostic
+surface and its underlying logic remain implemented for recovery and future
+settings work, but the normal product shell is a single Chat screen.
+
 Displays:
 
 - host name and connection state,
@@ -106,7 +110,7 @@ Primary actions:
 
 - New session.
 - Open session list.
-- Choose workspace.
+- Choose indexed home folder.
 - Diagnostics.
 
 Host dashboard is driven by the replayable host stream.
@@ -115,9 +119,9 @@ Host dashboard is driven by the replayable host stream.
 
 Sections:
 
-1. Recent workspaces.
-2. Search configured roots.
-3. Unavailable recents.
+1. Indexed folders beneath the configured home root.
+2. Folder-name filter.
+3. Unavailable session folders.
 
 Each row shows:
 
@@ -130,9 +134,9 @@ Each row shows:
 
 Search:
 
-- starts after two characters or explicit submit,
+- filters the immediately visible bounded folder index,
 - is cancellable,
-- streams results incrementally,
+- refreshes results from the host,
 - never exposes paths outside configured roots,
 - does not search file contents.
 
@@ -144,17 +148,26 @@ Before starting Pi with changed or unknown trust-bearing resources, show:
 - root-relative filenames,
 - added/removed/changed status,
 - explanation that approval is not a sandbox,
-- Full mode and Read-only mode choices.
+- the fixed Full-policy behavior.
 
 Actions:
 
-- Trust and continue in Full mode.
-- Trust and continue Read-only.
+- Trust and continue.
 - Cancel.
+
+The normal mobile surface does not expose a policy toggle. Sessions created
+from the app always request Full policy; lower-level policy compatibility
+remains a protocol/host concern.
 
 No default countdown or auto-approval.
 
 ## 6. Session list
+
+On mobile, saved sessions live in a leading hamburger drawer on the Chat
+screen. Rows read like saved conversations: the session title is primary,
+folder and runtime state are secondary, and the already-known host name is
+not repeated. Each row provides rename and confirmation-protected delete
+actions. The drawer also provides New chat and folder selection.
 
 Default sort:
 
@@ -201,6 +214,10 @@ Runtime state labels use plain language:
 
 ## 7. Transcript screen
 
+Selecting a saved session automatically requests and merges every available
+history page. The transcript never asks the user to manually load older
+messages.
+
 ### Header
 
 Shows:
@@ -210,15 +227,18 @@ Shows:
 - runtime state,
 - controller/observer state,
 - model and thinking level,
-- read-only status,
 - queue count.
 
 Header actions:
 
 - session switcher,
 - model/thinking sheet,
-- details/menu,
-- abort while active.
+- details/menu.
+
+The composer is one compact row: an expanding message field and a fixed
+circular primary action. That action is Send while idle, disabled when sending
+is unavailable, and Abort while the agent is generating. No separate abort
+button or disabled-status sentence is shown.
 
 ### Turn composition
 
@@ -231,11 +251,15 @@ Each assistant turn is composed of:
 
 Reasoning:
 
-- expanded while actively streaming unless the user collapsed it,
-- collapsed after completion by default,
-- labelled as model-provided reasoning,
+- presented as a compact `Thinking…` indicator while active,
+- collapsed by default in every phase and expandable on demand,
+- described as provider-supplied thinking rather than complete/private chain-of-thought,
 - copyable when visible,
 - hidden gracefully when the provider does not emit it.
+
+This follows the progressive-disclosure pattern documented for Claude mobile
+(an expandable Thinking section) and the low-chrome in-flight status used by
+Codex, while retaining Pi's useful tool transparency.
 
 Final answer:
 
@@ -521,3 +545,23 @@ Avoid generic `Something went wrong` when a stable bridge error code exists.
 - Paginate older history.
 - Profile on a 60 Hz baseline and high-refresh device.
 - High refresh is a best-effort enhancement; no UX depends on 120 Hz.
+
+## 21. M16 product shell and visual identity
+
+Pi Mob uses an original, non-derivative visual system. External products are references for interaction grammar only:
+
+- Linear informs calm information density, precise hierarchy, compact status treatment, and restrained chrome.
+- GitHub Mobile agent surfaces inform session-first navigation, visible execution state, and contextual actions.
+- Claude informs transcript readability, secondary reasoning treatment, and focused final answers.
+
+No third-party logo, trademarked glyph, copied illustration, proprietary asset, or cloned palette enters the product.
+
+The paired Android shell has three stable destinations:
+
+1. **Sessions** — workspace choice, session creation/selection, trust, policy, and session state.
+2. **Activity** — the selected session transcript and keyboard-safe composer.
+3. **Host** — endpoint, connection diagnostics, protocol/version details, and privacy explanation.
+
+Technical connection detail must never dominate Sessions or Activity. The app bar is contextual, the bottom navigation remains thumb-reachable, and Android Back follows platform expectations. Transient choices use sheets/dialogs; durable state remains in the coordinator and database.
+
+The visual system is token-led through Flutter themes/extensions: neutral surfaces, one indigo primary family, a restrained cyan accent, semantic status roles, 4/8-based spacing, consistent radii, and reduced-motion-aware timing. New UI must support light and dark themes, icon-plus-text status redundancy, 360 dp narrow widths, and 200% text reflow.

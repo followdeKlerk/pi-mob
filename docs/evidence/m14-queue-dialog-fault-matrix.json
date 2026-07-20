@@ -1,0 +1,18 @@
+{
+  "milestone": "M14",
+  "generatedAt": "2026-07-14",
+  "result": "pass",
+  "scenarios": {
+    "queueFifoAndCapacityTen": {"result":"pass","evidence":"packages/bridge/test/m14-queue-dialogs.test.ts"},
+    "queueRestartRecovery": {"result":"pass","evidence":"packages/bridge/test/m14-queue-dialogs.test.ts"},
+    "removedItemNeverDispatches": {"result":"pass","evidence":"packages/bridge/test/m14-queue-dialogs.test.ts"},
+    "settleTriggeredDispatch": {"result":"pass","evidence":"packages/bridge/test/m14-queue-dialogs.test.ts"},
+    "dialogReconnectReplay": {"result":"pass","evidence":"packages/bridge/test/m14-queue-dialogs.test.ts"},
+    "dialogDuplicateResponseRejected": {"result":"pass","evidence":"packages/bridge/test/m14-queue-dialogs.test.ts"},
+    "dialogExpiryNoInventedDefault": {"result":"pass","evidence":"packages/bridge/test/m14-queue-dialogs.test.ts"},
+    "mobileQueueAndDialogAccessibility": {"result":"pass","evidence":"apps/mobile/test/interaction_m14_test.dart"},
+    "expiredInputLocalOnly": {"result":"pass","evidence":"apps/mobile/lib/src/connection/connection_coordinator.dart"}
+  },
+  "fullGate": "bun run all",
+  "fullGateResult": "pass"
+}
