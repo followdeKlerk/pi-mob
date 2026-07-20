@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'pairing_flow.dart';
 
 /// Manual endpoint entry view.
@@ -54,7 +56,7 @@ class _ManualEndpointViewState extends State<ManualEndpointView> {
       container: true,
       label: 'Manual endpoint entry',
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(PiSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [

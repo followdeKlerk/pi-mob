@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'control_view_data.dart';
 
 /// Discoverable, categorized, searchable command list for skills, prompt
@@ -97,7 +99,7 @@ class _SupportedCommandListState extends State<SupportedCommandList> {
                 ? 'No matching commands. Total available: $total.'
                 : 'Showing $shown of $total commands.',
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4),
+              padding: const EdgeInsets.symmetric(horizontal: PiSpacing.xs),
               child: Text(
                 shown == 0
                     ? 'No commands match. $total available in total.'
@@ -123,8 +125,8 @@ class _SupportedCommandListState extends State<SupportedCommandList> {
                         if (grouped[category] case final items?) ...[
                           Padding(
                             padding: const EdgeInsets.symmetric(
-                              horizontal: 4,
-                              vertical: 4,
+                              horizontal: PiSpacing.xs,
+                              vertical: PiSpacing.xs,
                             ),
                             child: Row(
                               children: [

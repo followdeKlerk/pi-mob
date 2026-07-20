@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../ui/theme/pi_tokens.dart';
 import '../domain/interaction_state.dart';
 
 class FollowUpQueuePanel extends StatelessWidget {
@@ -20,7 +22,7 @@ class FollowUpQueuePanel extends StatelessWidget {
       child: Card(
         key: const Key('follow-up-queue'),
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(PiSpacing.sm),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -108,7 +110,7 @@ class _ExtensionDialogPanelState extends State<ExtensionDialogPanel> {
       child: Card(
         key: Key('extension-dialog-${widget.dialog.dialogId}'),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(PiSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [

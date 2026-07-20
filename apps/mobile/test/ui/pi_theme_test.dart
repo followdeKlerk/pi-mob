@@ -75,7 +75,9 @@ void main() {
   group('pi tokens', () {
     test('spacing values are positive, ordered, and finite', () {
       expect(PiSpacing.xs, greaterThan(0));
-      expect(PiSpacing.values, hasLength(6));
+      expect(PiSpacing.values, hasLength(7));
+      expect(PiSpacing.values.first, equals(PiSpacing.none));
+      expect(PiSpacing.values.first, equals(0));
       for (var i = 1; i < PiSpacing.values.length; i++) {
         expect(
           PiSpacing.values[i],

@@ -2,6 +2,8 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+
+import '../ui/theme/pi_tokens.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 /// Callback that delivers a single decoded QR raw value to the view's owner.
@@ -143,7 +145,7 @@ class _UnsupportedCameraPanel extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(PiSpacing.lg),
       child: Center(
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,

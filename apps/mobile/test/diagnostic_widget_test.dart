@@ -165,7 +165,7 @@ void main() {
     // The saved-chat drawer shows the broken session runtime state.
     await tester.tap(find.byKey(const Key('open-chat-drawer')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Repeated crashes'), findsOneWidget);
+    expect(find.textContaining('Repeated crashes'), findsWidgets);
     await tester.tap(find.byKey(const Key('close-chat-drawer')));
     await tester.pumpAndSettle();
 

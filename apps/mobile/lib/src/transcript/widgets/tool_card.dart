@@ -70,7 +70,7 @@ class _ToolCardState extends State<ToolCard> {
 
   /// Horizontal inset (logical pixels) shared across the transcript so the
   /// prose edges align.
-  static const double _contentInset = 16;
+  static const double _contentInset = PiSpacing.lg;
 
   @override
   Widget build(BuildContext context) {
@@ -159,12 +159,21 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _expandedBody() {
     return Padding(
-      padding: const EdgeInsets.fromLTRB(_contentInset, 0, _contentInset, 12),
+      padding: const EdgeInsets.fromLTRB(
+        _contentInset,
+        PiSpacing.none,
+        _contentInset,
+        PiSpacing.md,
+      ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Divider(height: 12, thickness: 1, color: _colors.outlineVariant),
+          Divider(
+            height: PiSpacing.md,
+            thickness: 1,
+            color: _colors.outlineVariant,
+          ),
           _argsSection(),
           const SizedBox(height: 8),
           _resultSection(),
@@ -224,12 +233,9 @@ class _ToolCardState extends State<ToolCard> {
     children: [
       Text(
         title,
-        style: _text.labelMedium?.copyWith(
-          color: _colors.onSurfaceVariant,
-          letterSpacing: 0.4,
-        ),
+        style: _text.labelMedium?.copyWith(color: _colors.onSurfaceVariant),
       ),
-      const SizedBox(height: 6),
+      const SizedBox(height: PiSpacing.xs),
       body,
     ],
   );
@@ -298,7 +304,7 @@ class _ToolCardState extends State<ToolCard> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _kv([MapEntry('path', args.path)]),
-            const SizedBox(height: 6),
+            const SizedBox(height: PiSpacing.xs),
             Text(
               'oldText',
               style: _text.labelSmall?.copyWith(
@@ -306,7 +312,7 @@ class _ToolCardState extends State<ToolCard> {
               ),
             ),
             _codeBlock(args.oldText),
-            const SizedBox(height: 6),
+            const SizedBox(height: PiSpacing.xs),
             Text(
               'newText',
               style: _text.labelSmall?.copyWith(
@@ -323,7 +329,7 @@ class _ToolCardState extends State<ToolCard> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _kv([MapEntry('path', args.path)]),
-            const SizedBox(height: 6),
+            const SizedBox(height: PiSpacing.xs),
             Text(
               'content (${args.content.length} chars)',
               style: _text.labelSmall?.copyWith(
@@ -375,7 +381,7 @@ class _ToolCardState extends State<ToolCard> {
               MapEntry('bytes', r.byteCount),
               if (r.totalLines != null) MapEntry('totalLines', r.totalLines!),
             ]),
-            const SizedBox(height: 6),
+            const SizedBox(height: PiSpacing.xs),
             _codeBlock(r.content),
           ],
         );
@@ -386,7 +392,7 @@ class _ToolCardState extends State<ToolCard> {
           mainAxisSize: MainAxisSize.min,
           children: [
             _kv([MapEntry('exitCode', r.exitCode)]),
-            const SizedBox(height: 6),
+            const SizedBox(height: PiSpacing.xs),
             Text(
               'stdout',
               style: _text.labelSmall?.copyWith(
@@ -394,7 +400,7 @@ class _ToolCardState extends State<ToolCard> {
               ),
             ),
             _codeBlock(r.stdout),
-            const SizedBox(height: 6),
+            const SizedBox(height: PiSpacing.xs),
             Text(
               'stderr',
               style: _text.labelSmall?.copyWith(
@@ -505,7 +511,9 @@ class _ToolCardState extends State<ToolCard> {
       children: [
         for (final entry in entries)
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 1),
+            padding: const EdgeInsets.symmetric(
+              vertical: PiSpacing.xs,
+            ), // PiSpacing.xs keeps arg rows calm and dense
             child: RichText(
               text: TextSpan(
                 style: _text.bodySmall,
@@ -546,10 +554,10 @@ class _ToolCardState extends State<ToolCard> {
     final visible = clipped ? text.substring(0, previewCharacters) : text;
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.all(8),
+      padding: const EdgeInsets.all(PiSpacing.sm),
       decoration: BoxDecoration(
         color: _colors.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(PiRadius.sm),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -565,7 +573,7 @@ class _ToolCardState extends State<ToolCard> {
           ),
           if (clipped)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: PiSpacing.xs),
               child: Text(
                 'Preview capped at $previewCharacters characters; '
                 '${text.length - previewCharacters} more are not rendered.',
@@ -581,10 +589,10 @@ class _ToolCardState extends State<ToolCard> {
   }
 
   Widget _notice(String message) => Container(
-    padding: const EdgeInsets.all(8),
+    padding: const EdgeInsets.all(PiSpacing.sm),
     decoration: BoxDecoration(
       color: _colors.errorContainer,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(PiRadius.sm),
     ),
     child: Text(
       message,
@@ -594,11 +602,14 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _truncationBanner(ToolOutputTruncation t) => Container(
     key: const Key('tool-truncation-banner'),
-    margin: const EdgeInsets.symmetric(horizontal: _contentInset, vertical: 4),
-    padding: const EdgeInsets.all(8),
+    margin: const EdgeInsets.symmetric(
+      horizontal: _contentInset,
+      vertical: PiSpacing.xs,
+    ),
+    padding: const EdgeInsets.all(PiSpacing.sm),
     decoration: BoxDecoration(
       color: _colors.tertiaryContainer,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(PiRadius.sm),
     ),
     child: Row(
       children: [
@@ -619,11 +630,14 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _errorBanner(String? message) => Container(
     key: const Key('tool-error-banner'),
-    margin: const EdgeInsets.symmetric(horizontal: _contentInset, vertical: 4),
-    padding: const EdgeInsets.all(8),
+    margin: const EdgeInsets.symmetric(
+      horizontal: _contentInset,
+      vertical: PiSpacing.xs,
+    ),
+    padding: const EdgeInsets.all(PiSpacing.sm),
     decoration: BoxDecoration(
       color: _colors.errorContainer,
-      borderRadius: BorderRadius.circular(6),
+      borderRadius: BorderRadius.circular(PiRadius.sm),
     ),
     child: Row(
       children: [

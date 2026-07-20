@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'html_export_view_data.dart';
 import 'share_callback.dart';
 
@@ -37,7 +39,7 @@ class HtmlExportShareSheet extends StatelessWidget {
           Container(
             key: const Key('html-export-share-privacy-warning'),
             color: theme.colorScheme.tertiaryContainer,
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(PiSpacing.md),
             child: Row(
               children: [
                 Icon(

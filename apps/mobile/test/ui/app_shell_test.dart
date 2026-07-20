@@ -54,7 +54,14 @@ void main() {
       ),
       findsOneWidget,
     );
+    // M16-02: the saved-chat row shows a status pill.
+    expect(
+      find.byKey(const Key('chat-pill-22222222-2222-4222-8222-222222222222')),
+      findsOneWidget,
+    );
   });
+
+  _m16Affordances();
 
   testWidgets('empty Chat opens the same saved-chat drawer', (tester) async {
     final fixture = await _fixture();
@@ -130,4 +137,74 @@ final class _OfflineTransport implements BridgeTransport {
 
 final class _Offline implements Exception {
   const _Offline();
+}
+
+void _m16Affordances() {
+  TestWidgetsFlutterBinding.ensureInitialized();
+
+  testWidgets(
+    'app bar shows a SessionStatePill for the selected chat runtime',
+    (tester) async {
+      final fixture = await _fixture(withSession: true);
+      addTearDown(fixture.dispose);
+
+      await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
+      await tester.pump();
+
+      expect(find.byKey(const Key('app-bar-state-pill')), findsOneWidget);
+      expect(find.byKey(const Key('app-bar-role')), findsOneWidget);
+    },
+  );
+
+  testWidgets('app bar exposes a discoverable commands affordance', (
+    tester,
+  ) async {
+    final fixture = await _fixture(withSession: true);
+    addTearDown(fixture.dispose);
+
+    await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
+    await tester.pump();
+
+    expect(find.byKey(const Key('open-commands')), findsOneWidget);
+  });
+
+  testWidgets(
+    'tapping the commands affordance opens a bottom sheet with the palette',
+    (tester) async {
+      final fixture = await _fixture(withSession: true);
+      addTearDown(fixture.dispose);
+
+      await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
+      await tester.pump();
+
+      await tester.tap(find.byKey(const Key('open-commands')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('command-search')), findsOneWidget);
+      expect(find.text('Show available skills'), findsOneWidget);
+      expect(find.text('Connection status'), findsOneWidget);
+    },
+  );
+
+  testWidgets('commands sheet renders at 200% text scale without overflow', (
+    tester,
+  ) async {
+    await tester.binding.setSurfaceSize(const Size(360, 800));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    final fixture = await _fixture(withSession: true);
+    addTearDown(fixture.dispose);
+
+    await tester.pumpWidget(
+      MediaQuery(
+        data: const MediaQueryData(textScaler: TextScaler.linear(2.0)),
+        child: PiMobApp(coordinator: fixture.coordinator),
+      ),
+    );
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('open-commands')));
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('command-search')), findsOneWidget);
+  });
 }

@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+
+import '../../ui/theme/pi_tokens.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
@@ -351,7 +353,7 @@ class _TurnView extends StatelessWidget {
         liveRegion: assistant.isTerminal,
         label: 'Assistant turn ${assistant.status.name}',
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 6),
+          padding: const EdgeInsets.symmetric(vertical: PiSpacing.sm),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
@@ -391,9 +393,9 @@ class _TurnView extends StatelessWidget {
               Padding(
                 padding: const EdgeInsets.fromLTRB(
                   _contentInset,
-                  6,
+                  PiSpacing.sm,
                   _contentInset,
-                  4,
+                  PiSpacing.xs,
                 ),
                 child: Align(
                   alignment: Alignment.centerRight,
@@ -401,7 +403,6 @@ class _TurnView extends StatelessWidget {
                     assistant.status.name,
                     style: text.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
-                      letterSpacing: 0.4,
                     ),
                   ),
                 ),
@@ -417,10 +418,10 @@ class _TurnView extends StatelessWidget {
       return Padding(
         padding: const EdgeInsets.symmetric(
           horizontal: _contentInset,
-          vertical: 6,
+          vertical: PiSpacing.sm,
         ),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(PiRadius.md),
           onLongPress: () => _showUserActions(context, message),
           child: ListTile(
             leading: const Icon(Icons.person_outline),
@@ -434,7 +435,7 @@ class _TurnView extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(
         horizontal: _contentInset,
-        vertical: 6,
+        vertical: PiSpacing.sm,
       ),
       child: ListTile(
         leading: const Icon(Icons.info_outline),

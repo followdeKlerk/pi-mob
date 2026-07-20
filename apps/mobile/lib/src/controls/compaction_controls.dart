@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'control_view_data.dart';
 import 'unsupported_control_state.dart';
 
@@ -42,7 +44,12 @@ class CompactionControls extends StatelessWidget {
       child: Card(
         key: const Key('compaction-controls'),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          padding: const EdgeInsets.fromLTRB(
+            PiSpacing.sm,
+            PiSpacing.sm,
+            PiSpacing.sm,
+            PiSpacing.md,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -69,7 +76,7 @@ class CompactionControls extends StatelessWidget {
               if (data.summary case final summary?) ...[
                 const Divider(),
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: PiSpacing.sm),
                   child: Text(
                     summary,
                     key: const Key('compaction-summary'),

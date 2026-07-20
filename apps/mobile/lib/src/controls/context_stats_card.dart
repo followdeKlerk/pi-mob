@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+import '../ui/shell/motion_primitives.dart';
+
 import 'control_view_data.dart';
 
 /// Advisory context/token/cost values. Missing values are shown as unknown,
@@ -36,7 +39,7 @@ class ContextStatsCard extends StatelessWidget {
       child: Card(
         key: const Key('context-stats-card'),
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(PiSpacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -56,11 +59,11 @@ class ContextStatsCard extends StatelessWidget {
               ),
               if (fraction != null) ...[
                 const SizedBox(height: 12),
-                LinearProgressIndicator(
+                MotionProgressBar(
                   key: const Key('context-usage'),
                   value: fraction,
-                  semanticsLabel:
-                      'Context usage ${(fraction * 100).round()} percent',
+                  label: '${(fraction * 100).round()}%',
+                  minHeight: 4,
                 ),
               ],
               const SizedBox(height: 12),

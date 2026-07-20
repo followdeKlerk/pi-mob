@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'attachment_view_data.dart';
 
 /// Full-size preview surface for an attachment.
@@ -50,7 +52,7 @@ class AttachmentPreview extends StatelessWidget {
                       ),
                       if (dimensions != null)
                         Padding(
-                          padding: const EdgeInsets.only(top: 8),
+                          padding: const EdgeInsets.only(top: PiSpacing.sm),
                           child: Text(
                             dimensions.toString(),
                             style: theme.textTheme.bodyMedium,

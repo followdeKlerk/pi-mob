@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'attachment_callbacks.dart';
 import 'attachment_view_data.dart';
 
@@ -77,7 +79,10 @@ class AttachmentChip extends StatelessWidget {
                 ? null
                 : () => callbacks.onPreviewTap!(data.id),
             child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+              padding: const EdgeInsets.symmetric(
+                horizontal: PiSpacing.md,
+                vertical: PiSpacing.sm,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,

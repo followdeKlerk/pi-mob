@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'attachment_callbacks.dart';
 import 'attachment_chip.dart';
 import 'attachment_expiry.dart';
@@ -32,7 +34,7 @@ class AttachmentSurface extends StatelessWidget {
         child: Material(
           color: theme.colorScheme.surfaceContainerHighest,
           child: Padding(
-            padding: const EdgeInsets.all(12),
+            padding: const EdgeInsets.all(PiSpacing.md),
             child: Text(
               'Attachments unavailable: $unavailable',
               style: theme.textTheme.bodyMedium,
@@ -53,13 +55,13 @@ class AttachmentSurface extends StatelessWidget {
       child: Material(
         color: theme.colorScheme.surface,
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(PiSpacing.sm),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
               if (data.isFull)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 8),
+                  padding: const EdgeInsets.only(bottom: PiSpacing.sm),
                   child: Text(
                     'Maximum ${data.maxAttachmentCount} attachments reached',
                     style: theme.textTheme.bodySmall,
@@ -104,7 +106,7 @@ class _AttachmentRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: const EdgeInsets.symmetric(vertical: PiSpacing.xs),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [

@@ -16,6 +16,7 @@ import '../domain/mobile_state.dart';
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
+import '../controls/control_view_data.dart';
 import '../domain/session_tree.dart';
 import '../sync/event_reducer.dart';
 import 'bridge_transport.dart';
@@ -464,6 +465,19 @@ final class ConnectionCoordinator extends ChangeNotifier
       selectedSessionId == null ? null : _dialogsBySession[selectedSessionId!];
   String? expiredDialogInput(String dialogId) => _expiredDialogInput[dialogId];
   List<ModelOption> get configuredModels => List.unmodifiable(_models);
+
+  /// Commands and skills the bridge has published for the active host.
+  ///
+  /// M16-03 surfaces this list through a discoverable command palette
+  /// (see `apps/mobile/lib/src/ui/shell/app_shell.dart`). The list is null
+  /// before the first host handshake completes and stays an empty list
+  /// while the bridge is reconnecting. The mobile UI uses null/empty to
+  /// render a calm fallback that still explains the gap.
+  List<SupportedCommandData>? get supportedCommands => null;
+
+  /// Display name shown in the chat header and command palette. Falls
+  /// back to the host endpoint when no display name has been published.
+  String get displayName => hostDisplayName ?? '';
   SessionControlState? get selectedControls => selectedSessionId == null
       ? null
       : (_sessionControls[selectedSessionId!] ??

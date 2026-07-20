@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+import '../ui/shell/motion_primitives.dart';
+
 import 'session_tree_view_data.dart';
 
 /// Accessible lifecycle/details surface for rename, recoverable delete,
@@ -103,9 +106,9 @@ class SessionLifecyclePanel extends StatelessWidget {
                   label: 'Active turn will be aborted before deletion.',
                   child: Material(
                     color: Theme.of(context).colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(PiRadius.md),
                     child: const Padding(
-                      padding: EdgeInsets.all(8),
+                      padding: EdgeInsets.all(PiSpacing.sm),
                       child: Text(
                         'Step 1: abort the active turn. '
                         'Step 2: move the settled session to Trash. '
@@ -229,7 +232,7 @@ class SessionLifecyclePanel extends StatelessWidget {
       child: Card(
         key: const Key('session-lifecycle-panel'),
         child: SingleChildScrollView(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(PiSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
@@ -288,9 +291,9 @@ class SessionLifecyclePanel extends StatelessWidget {
                   child: Material(
                     key: const Key('session-delete-failed'),
                     color: Theme.of(context).colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(PiRadius.md),
                     child: Padding(
-                      padding: const EdgeInsets.all(10),
+                      padding: const EdgeInsets.all(PiSpacing.sm),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
@@ -429,16 +432,20 @@ class _LifecyclePhase extends StatelessWidget {
       child: Material(
         key: const Key('session-lifecycle-progress'),
         color: Theme.of(context).colorScheme.secondaryContainer,
-        borderRadius: BorderRadius.circular(8),
+        borderRadius: BorderRadius.circular(PiRadius.md),
         child: Padding(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(PiSpacing.sm),
           child: Row(
             children: [
               const SizedBox.square(
                 dimension: 20,
-                child: CircularProgressIndicator(strokeWidth: 2),
+                child: MotionSpinner(
+                  strokeWidth: 2,
+                  dimension: 20,
+                  label: 'Lifecycle operation in progress',
+                ),
               ),
-              const SizedBox(width: 10),
+              const SizedBox(width: PiSpacing.sm),
               Expanded(child: Text(text)),
             ],
           ),
@@ -456,7 +463,7 @@ class _Fact extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.only(bottom: 4),
+    padding: const EdgeInsets.only(bottom: PiSpacing.xs),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -485,9 +492,9 @@ class _LifecycleNotice extends StatelessWidget {
     child: Material(
       key: key,
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(8),
+      borderRadius: BorderRadius.circular(PiRadius.md),
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(PiSpacing.sm),
         child: Row(
           children: [
             Icon(icon),

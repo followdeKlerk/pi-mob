@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'session_view_data.dart';
 
 /// Observer banner. Always exposes a "Take control" action that requires an
@@ -61,10 +63,10 @@ class ObserverBanner extends StatelessWidget {
           '${ObserverBannerText.detail(reason, data.controllerClientName)}',
       child: Container(
         key: const Key('observer-banner'),
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(PiSpacing.md),
         decoration: BoxDecoration(
           color: colors.tertiaryContainer,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(PiRadius.md),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+import '../ui/shell/motion_primitives.dart';
+
 import 'attachment_callbacks.dart';
 import 'attachment_view_data.dart';
 
@@ -50,12 +53,12 @@ class AttachmentUploadProgress extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         key: ValueKey('attachment-upload-${data.id}'),
         children: [
-          LinearProgressIndicator(
+          MotionProgressBar(
             key: ValueKey('attachment-progress-bar-${data.id}'),
             value: indeterminate ? null : _ratio,
             minHeight: 6,
-            backgroundColor: theme.colorScheme.surfaceContainerHighest,
-            color: isFailed ? theme.colorScheme.error : null,
+            errorTint: isFailed ? theme.colorScheme.error : null,
+            label: indeterminate ? null : '${(_ratio * 100).round()}%',
           ),
           const SizedBox(height: 4),
           Row(
@@ -76,7 +79,7 @@ class AttachmentUploadProgress extends StatelessWidget {
           ),
           if (isRetryable)
             Padding(
-              padding: const EdgeInsets.only(top: 4),
+              padding: const EdgeInsets.only(top: PiSpacing.xs),
               child: Row(
                 children: [
                   if (callbacks.onRetry != null)

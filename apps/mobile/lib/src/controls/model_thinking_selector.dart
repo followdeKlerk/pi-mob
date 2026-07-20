@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'control_view_data.dart';
 import 'unsupported_control_state.dart';
 
@@ -29,7 +31,7 @@ class ModelThinkingSelector extends StatelessWidget {
       label: 'Model and thinking controls',
       child: Card(
         child: Padding(
-          padding: const EdgeInsets.all(16),
+          padding: const EdgeInsets.all(PiSpacing.lg),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -43,9 +45,9 @@ class ModelThinkingSelector extends StatelessWidget {
                   child: Material(
                     key: const Key('unavailable-restored-model'),
                     color: Theme.of(context).colorScheme.errorContainer,
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(PiRadius.md),
                     child: Padding(
-                      padding: const EdgeInsets.all(12),
+                      padding: const EdgeInsets.all(PiSpacing.md),
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [

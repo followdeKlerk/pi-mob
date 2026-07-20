@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'session_badges.dart';
 import 'session_capacity_notice.dart';
 import 'session_view_data.dart';
@@ -107,7 +109,7 @@ class _SessionListViewState extends State<SessionListView> {
           _Header(data: data, callbacks: widget.callbacks),
           const SizedBox(height: 8),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: PiSpacing.xs),
             child: TextField(
               key: const Key('session-search'),
               controller: _searchController,
@@ -137,7 +139,7 @@ class _SessionListViewState extends State<SessionListView> {
               onDismiss: () => setState(() => _showCapacityNotice = false),
             ),
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 4),
+            padding: const EdgeInsets.symmetric(horizontal: PiSpacing.xs),
             child: Row(
               children: [
                 Expanded(
@@ -362,7 +364,7 @@ class _Pagination extends StatelessWidget {
     final start = page.items.isEmpty ? 0 : page.pageIndex * page.pageSize + 1;
     final end = page.pageIndex * page.pageSize + page.items.length;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 8),
+      padding: const EdgeInsets.symmetric(vertical: PiSpacing.sm),
       child: Row(
         children: [
           IconButton(

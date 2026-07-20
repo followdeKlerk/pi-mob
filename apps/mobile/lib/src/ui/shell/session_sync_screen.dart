@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
 import '../theme/pi_theme.dart';
+import 'motion_primitives.dart';
 
 /// Sessions-first synchronization gate. Chats are local-first after this
 /// screen completes, so opening one never starts a transcript download.
@@ -60,11 +61,10 @@ class SessionSyncScreen extends StatelessWidget {
                 ),
                 const SizedBox(height: PiSpacing.md),
                 if (!ready && error == null) ...[
-                  LinearProgressIndicator(
+                  MotionProgressBar(
                     key: const Key('all-chat-sync-progress'),
                     value: total == 0 ? null : coordinator.historySyncProgress,
                     minHeight: 4,
-                    borderRadius: BorderRadius.circular(PiRadius.pill),
                   ),
                   const SizedBox(height: PiSpacing.sm),
                   Text(
@@ -134,8 +134,10 @@ class SessionSyncScreen extends StatelessWidget {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(
+                                child: MotionSpinner(
                                   strokeWidth: 2,
+                                  dimension: 20,
+                                  label: 'Syncing chat history',
                                 ),
                               )
                             : Icon(

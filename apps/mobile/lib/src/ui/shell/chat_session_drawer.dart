@@ -10,6 +10,8 @@ import '../../domain/session_tree.dart';
 import '../../notifications/notification_controller.dart';
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
+import 'motion_primitives.dart';
+import 'status_pill.dart';
 
 enum _ChatAction { rename, delete }
 
@@ -374,7 +376,11 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                       const SizedBox(
                         width: 14,
                         height: 14,
-                        child: CircularProgressIndicator(strokeWidth: 2),
+                        child: MotionSpinner(
+                          strokeWidth: 2,
+                          dimension: 14,
+                          label: 'Syncing chat history',
+                        ),
                       ),
                       const SizedBox(width: PiSpacing.sm),
                       Expanded(
@@ -420,19 +426,34 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(PiRadius.md),
                             ),
-                            leading: const Icon(
+                            leading: Icon(
                               Icons.chat_bubble_outline,
                               size: 20,
+                              color: colors.onSurfaceVariant,
                             ),
                             title: Text(
                               _title(session),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: Text(
-                              _context(session),
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: PiSpacing.xs),
+                              child: Wrap(
+                                spacing: PiSpacing.xs,
+                                runSpacing: PiSpacing.xs,
+                                crossAxisAlignment: WrapCrossAlignment.center,
+                                children: [
+                                  Text(
+                                    _context(session),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                  SessionStatePill(
+                                    key: Key('chat-pill-${session.sessionId}'),
+                                    runtimeState: session.runtimeState,
+                                  ),
+                                ],
+                              ),
                             ),
                             trailing: IconButton(
                               key: Key('chat-actions-${session.sessionId}'),

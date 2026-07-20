@@ -24,6 +24,8 @@ library;
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 
+import '../../../ui/theme/pi_tokens.dart';
+
 /// Block-level AST nodes.
 sealed class SafeMarkdownBlock {
   const SafeMarkdownBlock();
@@ -364,7 +366,7 @@ List<Widget> buildSafeMarkdownWidgets(
   TextStyle? baseStyle,
   TextStyle? codeStyle,
   TextStyle? linkStyle,
-  Color? blockBackground,
+  required Color blockBackground,
   SafeMarkdownLinkTap? onLinkTap,
 }) {
   InlineSpan buildInline(SafeMarkdownInline inline) {
@@ -437,7 +439,7 @@ List<Widget> buildSafeMarkdownWidgets(
         (block) => _renderBlock(
           block,
           baseStyle: baseStyle,
-          blockBackground: blockBackground ?? const Color(0x11000000),
+          blockBackground: blockBackground,
           buildInline: buildInline,
         ),
       )
@@ -527,7 +529,7 @@ Widget _renderBlock(
   switch (block) {
     case SafeMarkdownParagraph(:final children):
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: PiSpacing.xs),
         child: Text.rich(
           TextSpan(
             style: baseStyle,
@@ -537,19 +539,19 @@ Widget _renderBlock(
       );
     case SafeMarkdownCodeBlock(:final code, :final language):
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 6),
+        padding: const EdgeInsets.symmetric(vertical: PiSpacing.xs),
         child: Container(
-          padding: const EdgeInsets.all(8),
+          padding: const EdgeInsets.all(PiSpacing.sm),
           decoration: BoxDecoration(
             color: blockBackground,
-            borderRadius: BorderRadius.circular(6),
+            borderRadius: BorderRadius.circular(PiRadius.sm),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               if (language != null)
                 Padding(
-                  padding: const EdgeInsets.only(bottom: 4),
+                  padding: const EdgeInsets.only(bottom: PiSpacing.xs),
                   child: Text(
                     language,
                     style: const TextStyle(
@@ -565,13 +567,16 @@ Widget _renderBlock(
       );
     case SafeMarkdownBulletList(:final items):
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: PiSpacing.xs),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (final item in items)
               Padding(
-                padding: const EdgeInsets.only(left: 8, bottom: 2),
+                padding: const EdgeInsets.only(
+                  left: PiSpacing.sm,
+                  bottom: PiSpacing.xs,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
@@ -594,13 +599,16 @@ Widget _renderBlock(
       );
     case SafeMarkdownOrderedList(:final items):
       return Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
+        padding: const EdgeInsets.symmetric(vertical: PiSpacing.xs),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             for (var idx = 0; idx < items.length; idx++)
               Padding(
-                padding: const EdgeInsets.only(left: 8, bottom: 2),
+                padding: const EdgeInsets.only(
+                  left: PiSpacing.sm,
+                  bottom: PiSpacing.xs,
+                ),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

@@ -1,6 +1,8 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+
+import '../ui/theme/pi_tokens.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import 'camera_pairing_scanner_view.dart';
@@ -251,7 +253,7 @@ class _ManualPaneState extends State<_ManualPane> {
   Widget build(BuildContext context) {
     final flow = PairingFlowScope.of(context);
     return ListView(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(PiSpacing.lg),
       children: [
         Card(
           key: const Key('manual-endpoint-card'),
@@ -260,7 +262,7 @@ class _ManualPaneState extends State<_ManualPane> {
         const SizedBox(height: 16),
         Card(
           child: Padding(
-            padding: const EdgeInsets.all(16),
+            padding: const EdgeInsets.all(PiSpacing.lg),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -412,14 +414,14 @@ class _RejectionPanel extends StatelessWidget {
         reason?.technicalReason ??
         'Pairing input was rejected';
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(PiSpacing.lg),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Card(
             color: theme.colorScheme.errorContainer,
             child: Padding(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.all(PiSpacing.lg),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [

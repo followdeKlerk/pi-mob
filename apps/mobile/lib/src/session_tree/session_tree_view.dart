@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+import '../ui/shell/motion_primitives.dart';
+
 import 'session_tree_view_data.dart';
 
 /// Accessible, lazily rendered session tree. Child pages are requested only
@@ -145,7 +148,7 @@ class SessionTreeView extends StatelessWidget {
           child: Semantics(
             liveRegion: true,
             label: 'Loading session tree',
-            child: CircularProgressIndicator(),
+            child: const MotionSpinner(label: 'Loading session tree'),
           ),
         );
       case SessionTreeSurfaceState.failed:
@@ -173,7 +176,12 @@ class SessionTreeView extends StatelessWidget {
         }
         return ListView.builder(
           key: const Key('session-tree-list'),
-          padding: const EdgeInsets.fromLTRB(8, 4, 8, 24),
+          padding: const EdgeInsets.fromLTRB(
+            PiSpacing.sm,
+            PiSpacing.xs,
+            PiSpacing.sm,
+            PiSpacing.xl,
+          ),
           itemCount: data.roots.length,
           itemBuilder: (context, index) => _TreeNode(
             node: data.roots[index],
@@ -194,7 +202,12 @@ class _TreeHeader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(12, 8, 8, 4),
+    padding: const EdgeInsets.fromLTRB(
+      PiSpacing.md,
+      PiSpacing.sm,
+      PiSpacing.sm,
+      PiSpacing.xs,
+    ),
     child: Row(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
@@ -300,7 +313,7 @@ class _TreeNodeState extends State<_TreeNode> {
         : '';
 
     return Padding(
-      padding: EdgeInsets.only(left: node.depth * 16.0),
+      padding: EdgeInsets.only(left: node.depth * PiSpacing.lg),
       child: Semantics(
         container: true,
         label: '$kindLabel$current$branch$forkable$expanded. ${node.preview}',
@@ -311,17 +324,17 @@ class _TreeNodeState extends State<_TreeNode> {
               color: node.isCurrentLeaf
                   ? Theme.of(context).colorScheme.primaryContainer
                   : Colors.transparent,
-              borderRadius: BorderRadius.circular(8),
+              borderRadius: BorderRadius.circular(PiRadius.md),
               child: InkWell(
                 key: Key('tree-node-${node.entryId}'),
-                borderRadius: BorderRadius.circular(8),
+                borderRadius: BorderRadius.circular(PiRadius.md),
                 onTap: widget.callbacks.onNodeSelected == null
                     ? null
                     : () => widget.callbacks.onNodeSelected?.call(node),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: 4,
-                    vertical: 6,
+                    horizontal: PiSpacing.xs,
+                    vertical: PiSpacing.xs,
                   ),
                   child: Row(
                     crossAxisAlignment: CrossAxisAlignment.center,
@@ -422,7 +435,7 @@ class _ChildPageState extends StatelessWidget {
     if (node.childrenState == SessionTreeChildrenState.loading) {
       return Padding(
         key: Key('tree-children-loading-${node.entryId}'),
-        padding: const EdgeInsets.all(12),
+        padding: const EdgeInsets.all(PiSpacing.md),
         child: Semantics(
           liveRegion: true,
           label: 'Loading child entries',
@@ -432,7 +445,10 @@ class _ChildPageState extends StatelessWidget {
     }
     if (node.childrenState == SessionTreeChildrenState.failed) {
       return Padding(
-        padding: const EdgeInsets.only(left: 48, bottom: 8),
+        padding: const EdgeInsets.only(
+          left: PiSpacing.xxl + PiSpacing.lg,
+          bottom: PiSpacing.sm,
+        ),
         child: Semantics(
           liveRegion: true,
           label: 'Child entries failed to load. ${node.childrenError ?? ''}',
@@ -454,7 +470,10 @@ class _ChildPageState extends StatelessWidget {
     }
     if (node.hasMoreChildren) {
       return Padding(
-        padding: const EdgeInsets.only(left: 48, bottom: 8),
+        padding: const EdgeInsets.only(
+          left: PiSpacing.xxl + PiSpacing.lg,
+          bottom: PiSpacing.sm,
+        ),
         child: Align(
           alignment: Alignment.centerLeft,
           child: TextButton.icon(
@@ -509,7 +528,10 @@ class _BranchOperationStatus extends StatelessWidget {
         key: const Key('session-branch-operation-status'),
         color: Theme.of(context).colorScheme.secondaryContainer,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: PiSpacing.md,
+            vertical: PiSpacing.sm,
+          ),
           child: Row(
             children: [
               Icon(icon),
@@ -550,7 +572,7 @@ class _TreeNotice extends StatelessWidget {
       key: key,
       color: Theme.of(context).colorScheme.surfaceContainerHighest,
       child: Padding(
-        padding: const EdgeInsets.all(8),
+        padding: const EdgeInsets.all(PiSpacing.sm),
         child: Row(
           children: [
             Icon(icon),
@@ -582,7 +604,7 @@ class _TreeFailure extends StatelessWidget {
       liveRegion: true,
       label: '$title. $message',
       child: Padding(
-        padding: const EdgeInsets.all(24),
+        padding: const EdgeInsets.all(PiSpacing.xl),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [

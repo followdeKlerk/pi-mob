@@ -154,6 +154,53 @@ describe("token-lint allowlist", () => {
   });
 });
 
+describe("token-lint tree scope", () => {
+  test("scans every required mobile widget subtree", async () => {
+    const { readFileSync } = await import("node:fs");
+    const source = readFileSync(
+      new URL("../token-lint.ts", import.meta.url),
+      "utf8",
+    );
+    const expected = [
+      "apps/mobile/lib/src/ui",
+      "apps/mobile/lib/src/transcript/widgets",
+      "apps/mobile/lib/src/controls",
+      "apps/mobile/lib/src/sessions",
+      "apps/mobile/lib/src/session_tree",
+      "apps/mobile/lib/src/attachments",
+      "apps/mobile/lib/src/interaction",
+      "apps/mobile/lib/src/workspaces",
+      "apps/mobile/lib/src/pairing",
+    ];
+    for (const tree of expected) {
+      expect(source).toContain(tree);
+    }
+    expect(source).toMatch(/const TREES:\s*readonly string\[\]/);
+  });
+
+  test("scans at least 30 Dart files across the expanded scope", async () => {
+    const root = new URL("../..", import.meta.url).pathname;
+    const proc = Bun.spawn(["bun", "run", "scripts/token-lint.ts"], {
+      cwd: root,
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [stdout] = await Promise.all([
+      new Response(proc.stdout).text(),
+    ]);
+    const exit = await proc.exited;
+    expect(exit).toBe(0);
+    const match = stdout.match(/scanned (\d+) Dart file/);
+    expect(match).not.toBeNull();
+    const count = Number(match![1]);
+    // The M16-06a baseline was 18 files. The M16-06b expansion at minimum
+    // triples that count to cover transcript, controls, sessions, session_tree,
+    // attachments, interaction, workspaces, and pairing.
+    expect(count).toBeGreaterThanOrEqual(30);
+    expect(stdout).toContain("across 9 tree(s)");
+  });
+});
+
 describe("token-lint script integration", () => {
   test("scans the real ui tree and exits 0 after the legacy migration", async () => {
     const root = new URL("../..", import.meta.url).pathname;

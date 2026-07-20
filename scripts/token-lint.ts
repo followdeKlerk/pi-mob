@@ -40,7 +40,7 @@
  * fix.
  */
 
-import { readdirSync, readFileSync, statSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
@@ -99,7 +99,21 @@ const TOKEN_DECL_ALLOWLIST = new Set([
   "apps/mobile/lib/src/ui/theme/pi_tokens.dart",
 ]);
 
-const TREE = "apps/mobile/lib/src/ui";
+// M16-06b: the lint now scans every mobile widget subtree that renders
+// visible UI. Pure-domain / data / view-data files are intentionally
+// excluded because they do not paint. Adding a new subtree to this list
+// is the explicit migration contract for future M16/N checkpoints.
+const TREES: readonly string[] = [
+  "apps/mobile/lib/src/ui",
+  "apps/mobile/lib/src/transcript/widgets",
+  "apps/mobile/lib/src/controls",
+  "apps/mobile/lib/src/sessions",
+  "apps/mobile/lib/src/session_tree",
+  "apps/mobile/lib/src/attachments",
+  "apps/mobile/lib/src/interaction",
+  "apps/mobile/lib/src/workspaces",
+  "apps/mobile/lib/src/pairing",
+];
 
 function walk(dir: string): string[] {
   const out: string[] = [];
@@ -166,11 +180,20 @@ function lintFile(filePath: string): readonly Offense[] {
 }
 
 function main(): number {
-  const tree = join(ROOT, TREE);
-  const files = walk(tree);
+  const files: string[] = [];
+  for (const tree of TREES) {
+    const fullTree = join(ROOT, tree);
+    if (!existsSync(fullTree)) {
+      process.stderr.write(
+        `token-lint: tree ${tree} does not exist; refusing to pass silently\n`,
+      );
+      return 1;
+    }
+    files.push(...walk(fullTree));
+  }
   if (files.length === 0) {
     process.stderr.write(
-      `token-lint: no Dart files found under ${TREE}; refusing to pass silently\n`,
+      `token-lint: no Dart files found under ${TREES.join(", ")}; refusing to pass silently\n`,
     );
     return 1;
   }
@@ -181,7 +204,7 @@ function main(): number {
 
   if (offenses.length === 0) {
     process.stdout.write(
-      `token-lint ok: scanned ${files.length} Dart file(s) under ${TREE}\n`,
+      `token-lint ok: scanned ${files.length} Dart file(s) across ${TREES.length} tree(s)\n`,
     );
     return 0;
   }

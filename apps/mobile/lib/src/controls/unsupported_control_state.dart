@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 /// Explicit presentation for a capability the current host/session cannot
 /// provide. This is intentionally reusable instead of silently hiding a row.
 class UnsupportedControlState extends StatelessWidget {
@@ -19,7 +21,7 @@ class UnsupportedControlState extends StatelessWidget {
     child: Card(
       key: const Key('unsupported-control-state'),
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(PiSpacing.lg),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

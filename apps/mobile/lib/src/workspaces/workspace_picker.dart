@@ -2,6 +2,9 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+import '../ui/shell/motion_primitives.dart';
+
 import '../connection/connection_coordinator.dart';
 import '../domain/mobile_state.dart';
 
@@ -109,7 +112,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
     final search = coordinator.workspaceSearch;
     return SafeArea(
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(PiSpacing.lg),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -234,30 +237,32 @@ class _SearchResults extends StatelessWidget {
   Widget build(BuildContext context) {
     final search = coordinator.workspaceSearch;
     if (search.isActive) {
-      return const Padding(
+      return Padding(
         key: Key('workspace-searching-indicator'),
-        padding: EdgeInsets.symmetric(vertical: 24),
-        child: Center(child: CircularProgressIndicator()),
+        padding: const EdgeInsets.symmetric(vertical: PiSpacing.xl),
+        child: const Center(
+          child: MotionSpinner(label: 'Searching workspaces'),
+        ),
       );
     }
     if (search.phase == WorkspaceSearchPhase.error) {
       return Padding(
         key: const Key('workspace-search-error'),
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(PiSpacing.lg),
         child: Text(search.error ?? 'Search failed'),
       );
     }
     if (search.phase == WorkspaceSearchPhase.cancelled) {
       return const Padding(
         key: Key('workspace-search-cancelled'),
-        padding: EdgeInsets.symmetric(vertical: 24),
+        padding: EdgeInsets.symmetric(vertical: PiSpacing.xl),
         child: Center(child: Text('Search cancelled. Results discarded.')),
       );
     }
     if (search.hits.isEmpty) {
       return const Padding(
         key: Key('workspace-search-empty'),
-        padding: EdgeInsets.symmetric(vertical: 24),
+        padding: EdgeInsets.symmetric(vertical: PiSpacing.xl),
         child: Center(child: Text('No matching indexed folders.')),
       );
     }
@@ -408,10 +413,10 @@ class _TrustReviewDialog extends StatelessWidget {
             const SizedBox(height: 12),
             Container(
               key: const Key('trust-review-guardrail-note'),
-              padding: const EdgeInsets.all(8),
+              padding: const EdgeInsets.all(PiSpacing.sm),
               decoration: BoxDecoration(
                 color: colors.errorContainer,
-                borderRadius: BorderRadius.circular(6),
+                borderRadius: BorderRadius.circular(PiRadius.sm),
               ),
               child: Text(
                 'This is a product guardrail enforced through Pi tool hooks. '

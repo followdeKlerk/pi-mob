@@ -20,6 +20,11 @@ import 'package:flutter/widgets.dart';
 class PiSpacing {
   const PiSpacing._();
 
+  /// 0 logical pixels — explicit "no gap" sentinel that keeps multi-axis
+  /// tokenized padding readable (for example `EdgeInsets.fromLTRB(
+  /// PiSpacing.md, PiSpacing.none, PiSpacing.md, PiSpacing.md)`).
+  static const double none = 0;
+
   /// 4 logical pixels — minimum gap, used for chip padding and tight rows.
   static const double xs = 4;
 
@@ -40,7 +45,7 @@ class PiSpacing {
 
   /// All spacing values in declaration order. Useful for tests and for any
   /// code that wants to enumerate the scale (e.g. dev tooling).
-  static const List<double> values = <double>[xs, sm, md, lg, xl, xxl];
+  static const List<double> values = <double>[none, xs, sm, md, lg, xl, xxl];
 }
 
 /// Corner radius scale.
@@ -81,6 +86,39 @@ class PiDuration {
 
   /// 400 ms — entry/exit transitions for sheets and full-screen routes.
   static const Duration long = Duration(milliseconds: 400);
+}
+
+/// Curve tokens for Pi Mob animations.
+///
+/// Curves are tokenized alongside [PiDuration] so motion calls in widget
+/// code can share a single set of named timings without re-declaring
+/// Material's [Curves] constants. Use [PiMotion.resolve] / [resolveFor]
+/// to swap the active curve for [Curves.linear] when reduced motion is
+/// on, which collapses continuous animation to a single instant update.
+class PiCurve {
+  const PiCurve._();
+
+  /// Standard acceleration curve for entry animations.
+  static const Curve emphasized = Curves.easeInOutCubicEmphasized;
+
+  /// Gentle deceleration curve for exits.
+  static const Curve decelerate = Curves.easeOutCubic;
+
+  /// Acceleration curve used when content moves toward its final position.
+  static const Curve accelerate = Curves.easeInCubic;
+
+  /// Returns [curve] when animations are allowed, otherwise
+  /// [Curves.linear] so transitions still resolve instantly without any
+  /// visible easing.
+  static Curve resolve(BuildContext context, Curve curve) {
+    final reduced = MediaQuery.maybeOf(context)?.disableAnimations ?? false;
+    return resolveFor(curve, reducedMotion: reduced);
+  }
+
+  /// Pure variant of [resolve] for tests and non-widget callers.
+  static Curve resolveFor(Curve curve, {required bool reducedMotion}) {
+    return reducedMotion ? Curves.linear : curve;
+  }
 }
 
 /// Resolves an animation duration while honoring the platform's

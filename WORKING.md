@@ -1,6 +1,6 @@
 # Working
 
-Status: M0–M15 done; M16 active with theme, transcript, product-shell foundation, and token-only lint shipped
+Status: M0–M15 done; M16 implementation complete locally; real-Android TalkBack checkpoint evidence blocked by device availability
 
 ## Current checkpoint
 
@@ -10,7 +10,7 @@ The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative doc
 
 ## Current objective
 
-Complete the new mobile product experience without changing bridge authority or durable command semantics. The first M16 slice now includes light/dark token themes, semantic status colors, a Sessions/Activity/Host product shell, progressive host diagnostics, and a calmer transcript hierarchy.
+Complete the new mobile product experience without changing bridge authority or durable command semantics. All locally verifiable M16 implementation now includes light/dark token themes, semantic status colors, compact status grammar, discoverable commands and skills, shared reduced-motion primitives, visible focus treatment, a Sessions/Activity/Host product shell, progressive host diagnostics, and a calmer transcript hierarchy.
 
 M16 builds the mobile product's original non-derivative identity on three proven grammars:
 
@@ -30,16 +30,17 @@ M16 is anchored by a normative design-token system and navigation contract docum
 
 ## Latest M16 slice
 
-- **M16-06a (token-only lint):** `scripts/token-lint.ts` scans `apps/mobile/lib/src/ui/**` for ad-hoc padding / corner radius / letterSpacing / hex-color literals, with a per-line `// pi-mob:token-legacy-allow` escape hatch and an allowlist for the three token-declaration files. Wired into `bun run all` and `bun run token:lint`. The daily-ui subtree is token-pure as of this checkpoint.
-- **Backlog:** `BACKLOG.md` M16-06 split into 06a (lint shipped) and 06b (broader migration pending).
-- **Migration follow-up:** migrate transcript widgets, controls, sessions, session tree, attachments, and interaction widgets to PiSpacing/PiRadius tokens, then expand the lint's scope to those subtrees.
+- **M16-02/03 (density and agent UX):** `StatusPill` / `SessionStatePill` unify runtime state in the app bar and saved-chat rows; the app bar now exposes observer/controller role, search, and an explicit Commands and skills sheet backed by the existing command model.
+- **M16-06b (full token migration):** `scripts/token-lint.ts` now scans 71 Dart files across nine mobile trees. Existing ad-hoc spacing, radius, and color literals in transcript widgets, controls, sessions, session tree, attachments, interaction, workspaces, and pairing use the shared Pi token/theme layer.
+- **M16-07 (motion grammar):** `PiCurve` and shared `MotionSpinner`, `MotionProgressBar`, and `MotionCrossfade` primitives apply semantic transitions and collapse continuous motion under `MediaQuery.disableAnimations`.
+- **M16-08 (local accessibility implementation):** new primitives expose stable semantics; `FocusRing` provides a visible 2dp focus indicator; widget coverage proves light/dark rendering, focus behavior, reduced-motion fallbacks, and 100/150/200% text-scale baselines.
+- **Validation:** `bun run all` passes (including formatting, analysis, typechecks, security/docs/schema/fixture checks, 71-file token lint, 347 Flutter tests, release build) and a separate `cd apps/mobile && flutter test` passes all 347 tests.
 
 ## Immediate next actions
 
-1. Extend the token-only lint to the remaining mobile subtrees (transcript widgets, controls, sessions, session tree, attachments, interaction) and migrate the existing ad-hoc constants to tokens. See BACKLOG.md M16-06b.
-2. Continue migrating session/workspace/control surfaces away from generic nested cards; add per-row status pills and progress surfaces (M16-02/03).
-3. Validate the new shell and theme on the target Android phone from the Taildrop build once M16-02/03 land a row-density change.
-4. Keep Firebase credentials local; Apple activation remains deferred.
+1. Connect the target Android phone and run the complete M16 checkpoint journey with TalkBack enabled, 200% text scale, and reduced motion.
+2. Retain the required Android screenshots, frame captures, TalkBack transcript, and reduced-motion captures; update M16-08 and exit criteria only after that evidence exists.
+3. Keep Firebase credentials local; Apple activation remains deferred.
 
 ## Do not start yet
 
@@ -47,4 +48,4 @@ M17 hardening and M18 signed release remain blocked until M16 exits.
 
 ## Blockers
 
-None. Remaining M16 work is planned product work, not an external blocker.
+The real-Android M16 checkpoint is blocked by device availability. On 2026-07-20, `adb devices -l` returned no devices and `flutter devices` listed only macOS and Chrome. Therefore the required TalkBack primary-journey walkthrough and Android evidence bundle cannot be truthfully completed or claimed in this pane. No M17 work has started.

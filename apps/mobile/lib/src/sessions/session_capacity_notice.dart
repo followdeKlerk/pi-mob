@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'session_view_data.dart';
 
 /// Capacity/no-victim messaging. M11 caps the number of active sessions at
@@ -42,11 +44,11 @@ class SessionCapacityNotice extends StatelessWidget {
           'active sessions.',
       child: Container(
         key: const Key('session-capacity-notice'),
-        margin: const EdgeInsets.symmetric(vertical: 8),
-        padding: const EdgeInsets.all(12),
+        margin: const EdgeInsets.symmetric(vertical: PiSpacing.sm),
+        padding: const EdgeInsets.all(PiSpacing.md),
         decoration: BoxDecoration(
           color: colors.errorContainer,
-          borderRadius: BorderRadius.circular(8),
+          borderRadius: BorderRadius.circular(PiRadius.md),
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,

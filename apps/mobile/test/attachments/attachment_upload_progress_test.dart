@@ -38,8 +38,12 @@ void main() {
     );
     expect(find.text('Uploading'), findsOneWidget);
     expect(find.textContaining('KB'), findsOneWidget);
+    final progress = tester.widget<AttachmentUploadProgress>(
+      find.byType(AttachmentUploadProgress),
+    );
+    expect(progress.data.progressFraction, 0.5);
     final bar = tester.widget<LinearProgressIndicator>(
-      find.byKey(const ValueKey('attachment-progress-bar-up1')),
+      find.byType(LinearProgressIndicator),
     );
     expect(bar.value, 0.5);
   });
@@ -104,8 +108,12 @@ void main() {
         ),
       ),
     );
-    final bar = tester.widget<LinearProgressIndicator>(
+    expect(
       find.byKey(const ValueKey('attachment-progress-bar-up2')),
+      findsOneWidget,
+    );
+    final bar = tester.widget<LinearProgressIndicator>(
+      find.byType(LinearProgressIndicator),
     );
     expect(bar.value, isNull);
   });

@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'session_view_data.dart';
 
 /// Fast, dense session switcher. Renders at most
@@ -27,13 +29,16 @@ class SessionSwitcher extends StatelessWidget {
       child: Card(
         key: const Key('session-switcher'),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+          padding: const EdgeInsets.symmetric(
+            horizontal: PiSpacing.xs,
+            vertical: PiSpacing.sm,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: PiSpacing.sm),
                 child: Row(
                   children: [
                     Icon(Icons.swap_horiz, color: theme.colorScheme.primary),
@@ -55,7 +60,7 @@ class SessionSwitcher extends StatelessWidget {
                 ),
               if (overflow > 0)
                 Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  padding: const EdgeInsets.symmetric(horizontal: PiSpacing.sm),
                   child: TextButton.icon(
                     key: const Key('session-switcher-overflow'),
                     onPressed: callbacks.onOpenFullList,

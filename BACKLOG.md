@@ -681,15 +681,15 @@ The full visual system, motion grammar, and navigation contract live in [`docs/U
 ## Tasks
 
 - [x] **M16-01 P0 M** Define and commit the first design-token system (light/dark themes, semantic status colors, spacing, radius, and reduced-motion-aware timing) and publish its rules in `docs/IMPLEMENTATION_DEFAULTS.md`. High-contrast activation remains in M17 hardening.
-- [ ] **M16-02 P0 L** Implement Linear-style information-density grammar across host dashboard, session list, workspace picker, queue, and settings (compact rows, restrained chrome, calm typography hierarchy).
-- [ ] **M16-03 P0 M** Implement GitHub-style agent UX primitives (unambiguous primary action, secondary actions in overflow, status pills, progress surfaces, command/skill discoverability, transparent activity, no hidden mutating affordances).
+- [x] **M16-02 P0 L** Implement Linear-style information-density grammar across host dashboard, session list, workspace picker, queue, and settings (compact rows, restrained chrome, calm typography hierarchy). `StatusPill` / `SessionStatePill` provide one compact state grammar in the app bar and saved-chat rows, while the existing tokenized workspace, queue, and settings surfaces retain restrained row density.
+- [x] **M16-03 P0 M** Implement GitHub-style agent UX primitives (unambiguous primary action, secondary actions in overflow, status pills, progress surfaces, command/skill discoverability, transparent activity, no hidden mutating affordances). The app bar exposes the controller role, runtime state, search, and an explicit Commands and skills sheet; progress surfaces use shared motion-aware primitives.
 - [x] **M16-04 P0 M** Implement Claude-style transcript readability (legible type, generous line height, clear user/assistant/reasoning/tool hierarchy, focused final-answer surface, safe selection/copy/link behaviour).
 - [x] **M16-05 P0 L** Document and implement the paired Sessions/Activity/Host destination contract, keep transient choices in sheets/dialogs, preserve deep-link reconciliation, and cover destination switching plus narrow layouts with widget tests.
-- [ ] **M16-06 P0 M** Migrate every existing screen to the token system; remove ad-hoc spacing, colour, radius, and elevation values; add a token-only lint that fails CI on non-token visual constants.
+- [x] **M16-06 P0 M** Migrate every existing screen to the token system; remove ad-hoc spacing, colour, radius, and elevation values; add a token-only lint that fails CI on non-token visual constants.
   - [x] M16-06a: token-only lint shipped (`scripts/token-lint.ts` + `scripts/test/token-lint.test.ts`) and wired into `bun run all`; the lint scans `apps/mobile/lib/src/ui/**` and exits non-zero on any non-token padding/radius/letter-spacing/hex-color literal. The daily-ui subtree is token-pure as of this checkpoint.
-  - [ ] M16-06b: extend the lint to the remaining mobile subtrees (transcript widgets, controls, sessions, session tree, attachments, interaction) and migrate the existing ad-hoc constants to PiSpacing/PiRadius tokens.
-- [ ] **M16-07 P0 M** Define and apply the motion grammar (tokenized duration/curve tokens, reduced-motion baseline, semantic transitions only); remove decorative animation; prove reduced-motion removes every pulse/typewriter/spinner where a status pill suffices.
-- [ ] **M16-08 P0 M** Add accessibility semantics (label, role, state, focus order, visible focus ring) for every new visual primitive; prove light/dark + 100/150/200% text-scale baselines and TalkBack primary journeys on a real Android phone.
+  - [x] M16-06b: the lint now scans 71 Dart files across UI, transcript widgets, controls, sessions, session tree, attachments, interaction, workspaces, and pairing; migrated visual constants use `PiSpacing` / `PiRadius` / semantic theme colors.
+- [x] **M16-07 P0 M** Define and apply the motion grammar (tokenized duration/curve tokens, reduced-motion baseline, semantic transitions only); remove decorative animation; prove reduced-motion removes every pulse/typewriter/spinner where a status pill suffices. `PiCurve`, `MotionSpinner`, `MotionProgressBar`, and `MotionCrossfade` collapse continuous motion under `MediaQuery.disableAnimations`, with widget coverage for normal and reduced-motion modes.
+- [ ] **M16-08 P0 M** Add accessibility semantics (label, role, state, focus order, visible focus ring) for every new visual primitive; prove light/dark + 100/150/200% text-scale baselines and TalkBack primary journeys on a real Android phone. Locally verifiable implementation is complete: shared primitives expose semantics, `FocusRing` provides a visible indicator, and widget tests cover focus, light/dark, reduced motion, and 100/150/200% text scale. **Evidence blocker:** on 2026-07-20 `adb devices -l` returned no devices and `flutter devices` listed only macOS and Chrome, so the required real-Android TalkBack walkthrough, screenshots, frame captures, and transcripts remain unverified and are not claimed.
 
 ## Checkpoint demo
 
@@ -705,6 +705,8 @@ On a real Android phone, walk onboarding → host dashboard → workspace picker
 - [ ] No third-party chat UI framework and no third-party visual asset library is introduced.
 - [ ] No visual element is derivative of an external product trademark or identity.
 - [ ] Android-only physical-device evidence (screenshots, frame captures, TalkBack transcripts) is retained; Apple physical-device evidence remains deferred.
+
+**Current honest boundary (2026-07-20):** all locally verifiable M16 implementation and automated validation pass (`bun run all`, including 347 Flutter tests, plus a separate `flutter test` run). M16 remains active solely because the acceptance contract requires a real Android phone with TalkBack, 200% text scale, and reduced motion for the checkpoint demo and retained evidence bundle; no Android device is currently connected.
 
 **Evidence:** Android visual-system evidence bundle (screenshots, frame captures, TalkBack transcripts, reduced-motion captures) and the token/navigation contract entries in [`docs/UX.md`](docs/UX.md) and [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md).
 

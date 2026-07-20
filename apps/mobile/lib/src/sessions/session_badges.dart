@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'session_view_data.dart';
 
 /// Small reusable badge for a session. Combines attention / stopped / deleted
@@ -75,12 +77,14 @@ class _Pill extends StatelessWidget {
       child: Container(
         key: keyValue,
         padding: EdgeInsets.symmetric(
-          horizontal: dense ? 6 : 8,
-          vertical: dense ? 2 : 4,
+          horizontal: dense ? PiSpacing.xs : PiSpacing.sm,
+          vertical: dense ? PiSpacing.xs : PiSpacing.xs,
         ),
         decoration: BoxDecoration(
           color: background,
-          borderRadius: BorderRadius.circular(dense ? 4 : 12),
+          borderRadius: BorderRadius.circular(
+            dense ? PiRadius.sm : PiRadius.md,
+          ),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,

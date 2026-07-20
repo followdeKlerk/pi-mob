@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'control_view_data.dart';
 import 'unsupported_control_state.dart';
 
@@ -53,7 +55,12 @@ class RetryControls extends StatelessWidget {
       child: Card(
         key: const Key('retry-controls'),
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(8, 8, 8, 12),
+          padding: const EdgeInsets.fromLTRB(
+            PiSpacing.sm,
+            PiSpacing.sm,
+            PiSpacing.sm,
+            PiSpacing.md,
+          ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -67,7 +74,7 @@ class RetryControls extends StatelessWidget {
                     : callbacks.onAutoRetryChanged,
               ),
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 8),
+                padding: const EdgeInsets.symmetric(horizontal: PiSpacing.sm),
                 child: Row(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [

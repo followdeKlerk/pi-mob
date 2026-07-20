@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import '../../connection/connection_coordinator.dart';
 import '../../transcript/widgets/transcript_view.dart';
 import '../theme/pi_theme.dart';
+import 'motion_primitives.dart';
 
 /// Transcript surface as composed on the Activity destination. Keeps the
 /// stream-keyed `TranscriptEventView` that the existing M10–M15 flows and
@@ -54,7 +55,11 @@ class TranscriptPanel extends StatelessWidget {
                 const SizedBox(
                   width: 16,
                   height: 16,
-                  child: CircularProgressIndicator(strokeWidth: 2),
+                  child: MotionSpinner(
+                    strokeWidth: 2,
+                    dimension: 16,
+                    label: 'Loading transcript',
+                  ),
                 ),
                 const SizedBox(width: PiSpacing.sm),
                 Expanded(

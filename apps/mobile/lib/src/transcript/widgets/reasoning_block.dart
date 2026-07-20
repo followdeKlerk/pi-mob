@@ -9,6 +9,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../../ui/theme/pi_theme.dart';
+import '../../ui/shell/motion_primitives.dart';
 import 'view_data/reasoning_view_data.dart';
 
 class ReasoningBlock extends StatefulWidget {
@@ -83,12 +84,11 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
                   child: Row(
                     children: [
                       if (active) ...[
-                        SizedBox.square(
+                        MotionSpinner(
+                          strokeWidth: 1.8,
                           dimension: 14,
-                          child: CircularProgressIndicator(
-                            strokeWidth: 1.8,
-                            color: colors.primary,
-                          ),
+                          color: colors.primary,
+                          label: 'Reasoning in progress',
                         ),
                         const SizedBox(width: PiSpacing.sm),
                       ] else ...[
@@ -135,7 +135,7 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
     return Padding(
       padding: const EdgeInsets.fromLTRB(
         PiSpacing.md,
-        0,
+        PiSpacing.none,
         PiSpacing.md,
         PiSpacing.md,
       ),

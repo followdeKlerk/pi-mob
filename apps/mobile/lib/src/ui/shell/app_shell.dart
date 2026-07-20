@@ -2,7 +2,11 @@ import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../notifications/notification_controller.dart';
+import '../../controls/control_view_data.dart';
+import '../../controls/supported_command_list.dart';
 import 'activity_destination.dart';
+import '../theme/pi_tokens.dart';
+import 'status_pill.dart';
 import 'chat_session_drawer.dart';
 import 'session_sync_screen.dart';
 import 'transcript_search_sheet.dart';
@@ -66,6 +70,97 @@ class _AppShellState extends State<AppShell> {
 
   void _openChats() => _scaffoldKey.currentState?.openDrawer();
 
+  /// Surfaces the M16 command palette.
+  ///
+  /// The bridge still owns the actual command catalogue, so the sheet
+  /// consumes whatever the [ConnectionCoordinator] exposes through
+  /// [ConnectionCoordinator.supportedCommands] once that field lands. Until
+  /// then the sheet renders a curated baseline of common skills / templates
+  /// so the discoverable affordance is visible end-to-end and can be wired
+  /// to the bridge without a UX rework.
+  Future<void> _openCommands(BuildContext context) async {
+    final commands =
+        widget.coordinator.supportedCommands ??
+        const <SupportedCommandData>[
+          SupportedCommandData(
+            id: 'skill:help',
+            title: 'Show available skills',
+            category: SupportedCommandCategory.skill,
+            description: 'Lists every skill the bridge currently exposes.',
+            invocation: '/skills',
+          ),
+          SupportedCommandData(
+            id: 'skill:status',
+            title: 'Connection status',
+            category: SupportedCommandCategory.skill,
+            description: 'Inspects the active host, lease, and stream state.',
+            invocation: '/status',
+          ),
+          SupportedCommandData(
+            id: 'template:compact',
+            title: 'Compact this transcript',
+            category: SupportedCommandCategory.template,
+            description:
+                'Summarises the current transcript into a final answer.',
+            invocation: '/compact',
+          ),
+          SupportedCommandData(
+            id: 'template:retry',
+            title: 'Retry last turn',
+            category: SupportedCommandCategory.template,
+            description:
+                'Resubmits the most recent user prompt with the same model.',
+            invocation: '/retry',
+          ),
+          SupportedCommandData(
+            id: 'extension:approve',
+            title: 'Approve pending extension',
+            category: SupportedCommandCategory.extension,
+            description:
+                'Confirms the most recent extension dialog if one is open.',
+          ),
+          SupportedCommandData(
+            id: 'extension:cancel',
+            title: 'Cancel pending extension',
+            category: SupportedCommandCategory.extension,
+            description:
+                'Rejects the most recent extension dialog if one is open.',
+          ),
+        ];
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: PiSpacing.lg,
+              vertical: PiSpacing.sm,
+            ),
+            child: SizedBox(
+              height: MediaQuery.of(sheetContext).size.height * 0.7,
+              child: SupportedCommandList(
+                commands: commands,
+                onInvoke: (cmd) {
+                  Navigator.of(sheetContext).pop();
+                  ScaffoldMessenger.of(sheetContext).showSnackBar(
+                    SnackBar(
+                      content: Text(
+                        '${cmd.title} queued for ${widget.coordinator.displayName}.',
+                      ),
+                      behavior: SnackBarBehavior.floating,
+                    ),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final historyAvailable =
@@ -111,10 +206,24 @@ class _AppShellState extends State<AppShell> {
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(fontWeight: FontWeight.w600),
                   ),
-                  Text(
-                    '${widget.coordinator.selectedRuntimeState ?? 'idle'} · '
-                    '${widget.coordinator.leaseId == null ? 'observer' : 'controller'}',
-                    style: Theme.of(context).textTheme.labelSmall,
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 4,
+                    crossAxisAlignment: WrapCrossAlignment.center,
+                    children: [
+                      SessionStatePill(
+                        key: const Key('app-bar-state-pill'),
+                        runtimeState:
+                            widget.coordinator.selectedRuntimeState ?? 'idle',
+                      ),
+                      Text(
+                        widget.coordinator.leaseId == null
+                            ? 'Observer'
+                            : 'Controller',
+                        key: const Key('app-bar-role'),
+                        style: Theme.of(context).textTheme.labelSmall,
+                      ),
+                    ],
                   ),
                 ],
               )
@@ -125,7 +234,13 @@ class _AppShellState extends State<AppShell> {
               ),
         centerTitle: false,
         actions: [
-          if (chatOpen)
+          if (chatOpen) ...[
+            IconButton(
+              key: const Key('open-commands'),
+              tooltip: 'Commands and skills',
+              onPressed: () => _openCommands(context),
+              icon: const Icon(Icons.bolt_rounded),
+            ),
             IconButton(
               key: const Key('open-transcript-search'),
               tooltip: 'Search this chat',
@@ -133,6 +248,7 @@ class _AppShellState extends State<AppShell> {
                   showTranscriptSearch(context, widget.coordinator),
               icon: const Icon(Icons.search_rounded),
             ),
+          ],
         ],
         surfaceTintColor: Colors.transparent,
         scrolledUnderElevation: 0,

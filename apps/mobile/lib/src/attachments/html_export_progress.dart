@@ -1,5 +1,8 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+import '../ui/shell/motion_primitives.dart';
+
 import 'html_export_view_data.dart';
 
 /// HTML export progress + completion surface.
@@ -56,7 +59,7 @@ class HtmlExportProgressCard extends StatelessWidget {
       child: Card(
         key: const Key('html-export-progress'),
         child: Padding(
-          padding: const EdgeInsets.all(12),
+          padding: const EdgeInsets.all(PiSpacing.md),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: [
@@ -86,17 +89,18 @@ class HtmlExportProgressCard extends StatelessWidget {
                 ],
               ),
               const SizedBox(height: 8),
-              LinearProgressIndicator(
+              MotionProgressBar(
                 key: const Key('html-export-progress-bar'),
                 value: _indeterminate ? null : _ratio,
                 minHeight: 6,
-                color: isFailed ? theme.colorScheme.error : null,
+                errorTint: isFailed ? theme.colorScheme.error : null,
+                label: _indeterminate ? null : '${(_ratio * 100).round()}%',
               ),
               const SizedBox(height: 8),
               Text(_status, style: theme.textTheme.bodySmall),
               if (data.exportId != null)
                 Padding(
-                  padding: const EdgeInsets.only(top: 4),
+                  padding: const EdgeInsets.only(top: PiSpacing.xs),
                   child: Text(
                     'Export ID ${data.exportId}${data.expiresAt == null ? '' : ' expires ${data.expiresAt!.toIso8601String()}'}',
                     style: theme.textTheme.bodySmall,

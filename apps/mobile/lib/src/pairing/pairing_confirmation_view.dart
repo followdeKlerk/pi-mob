@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import '../ui/theme/pi_tokens.dart';
+
 import 'pairing_payload.dart';
 
 /// Pairing confirmation view.
@@ -41,7 +43,7 @@ class PairingConfirmationView extends StatelessWidget {
       container: true,
       label: 'Pairing confirmation',
       child: Padding(
-        padding: const EdgeInsets.all(16),
+        padding: const EdgeInsets.all(PiSpacing.lg),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -133,10 +135,13 @@ class _ConfirmField extends StatelessWidget {
       container: true,
       label: '$label: $value',
       child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(
+          horizontal: PiSpacing.md,
+          vertical: PiSpacing.sm,
+        ),
         decoration: BoxDecoration(
           color: colors.surfaceContainerHighest,
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(PiRadius.md),
         ),
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
