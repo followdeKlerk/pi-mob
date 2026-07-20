@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:drift/native.dart';
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
@@ -10,6 +11,9 @@ import 'package:pi_mob/src/domain/attachments.dart';
 import 'package:pi_mob/src/domain/mobile_state.dart';
 import 'package:pi_mob/src/domain/prompt_send_lifecycle.dart';
 import 'package:pi_mob/src/domain/session_tree.dart';
+import 'package:pi_mob/src/interaction/interaction_panel.dart';
+import 'package:pi_mob/src/ui/shell/composer.dart';
+import 'package:pi_mob/src/ui/shell/transcript_panel.dart';
 
 const hostId = '11111111-1111-4111-8111-111111111111';
 const sessionId = '22222222-2222-4222-8222-222222222222';
@@ -1302,6 +1306,86 @@ void main() {
     expect(first?.pendingCommandId, isNull);
     expect(second?.draftText, 'Session B draft');
     expect(coordinator.draft, 'Session B draft');
+  });
+
+  testWidgets('running turn UI stays minimal while abort and Ask User remain', (
+    tester,
+  ) async {
+    await tester.runAsync(() async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'turn.started',
+          streamId: 'session:$sessionId',
+          cursor: '2',
+          eventId: '19191919-1919-4191-8191-191919191919',
+          payload: {
+            'sessionId': sessionId,
+            'commandId': 'previous-cmd',
+            'deliveryMode': 'immediate',
+          },
+        ),
+      );
+      socket.server(
+        event(
+          type: 'extension.dialog',
+          streamId: 'session:$sessionId',
+          cursor: '3',
+          eventId: '18181818-1818-4181-8181-181818181818',
+          payload: {
+            'sessionId': sessionId,
+            'dialogId': '17171717-1717-4171-8171-171717171717',
+            'method': 'select',
+            'title': 'Choose an action',
+            'options': ['Approve', 'Decline'],
+            'expiresAt': '2026-07-21T00:00:00.000Z',
+          },
+        ),
+      );
+      await eventually(
+        () => coordinator.canAbort && coordinator.selectedDialog != null,
+      );
+    });
+    final draftController = TextEditingController();
+    addTearDown(draftController.dispose);
+    await tester.binding.setSurfaceSize(const Size(800, 1200));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: Column(
+            children: [
+              SizedBox(
+                height: 320,
+                child: TranscriptPanel(coordinator: coordinator),
+              ),
+              Composer(
+                coordinator: coordinator,
+                draftController: draftController,
+                onOpenDialog: () {},
+              ),
+              ExtensionDialogPanel(
+                dialog: coordinator.selectedDialog!,
+                now: () => DateTime.utc(2026, 7, 20),
+                onRespond: ({value, confirmed, cancelled = false}) {},
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+
+    expect(find.byKey(const Key('active-turn-status')), findsNothing);
+    expect(find.byKey(const Key('delivery-mode-selector')), findsNothing);
+    expect(find.text('Pi is responding'), findsNothing);
+    expect(find.byKey(const Key('send-button')), findsOneWidget);
+    expect(find.byIcon(Icons.stop), findsOneWidget);
+    expect(find.byKey(const Key('open-extension-dialog')), findsOneWidget);
+    expect(find.byKey(const Key('extension-option-Approve')), findsOneWidget);
+    expect(find.byKey(const Key('extension-option-Decline')), findsOneWidget);
   });
 
   test('running session accepts steer prompt over the wire', () async {

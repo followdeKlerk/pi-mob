@@ -3,7 +3,6 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
-import '../../domain/mobile_state.dart';
 import '../../domain/prompt_send_lifecycle.dart';
 import '../../interaction/interaction_panel.dart';
 import '../theme/pi_theme.dart';
@@ -273,48 +272,15 @@ class Composer extends StatelessWidget {
               ),
               const SizedBox(height: PiSpacing.sm),
             ],
-            if (coordinator.promptSendStatus.phase != PromptSendPhase.ready &&
-                coordinator.promptSendStatus.phase !=
-                    PromptSendPhase.indeterminate) ...[
+            if (const {
+              PromptSendPhase.acquiringControl,
+              PromptSendPhase.submitting,
+              PromptSendPhase.failed,
+            }.contains(coordinator.promptSendStatus.phase)) ...[
               _PromptSendFeedback(
                 status: coordinator.promptSendStatus,
                 onAction: (failure) =>
                     _handlePromptFailureAction(context, failure),
-              ),
-              const SizedBox(height: PiSpacing.sm),
-            ],
-            if (coordinator.selectedRuntimeState == 'running') ...[
-              Text(
-                'Choose how to deliver while Pi is working',
-                style: Theme.of(context).textTheme.labelLarge,
-              ),
-              const SizedBox(height: PiSpacing.sm),
-              SegmentedButton<DeliveryMode>(
-                key: const Key('delivery-mode-selector'),
-                segments: const [
-                  ButtonSegment(
-                    value: DeliveryMode.steer,
-                    label: Text('Steer'),
-                  ),
-                  ButtonSegment(
-                    value: DeliveryMode.followUp,
-                    label: Text('Follow up'),
-                  ),
-                ],
-                emptySelectionAllowed: true,
-                selected:
-                    coordinator.selectedDeliveryMode == DeliveryMode.immediate
-                    ? const <DeliveryMode>{}
-                    : <DeliveryMode>{coordinator.selectedDeliveryMode},
-                onSelectionChanged: (selection) {
-                  unawaited(
-                    coordinator.setSelectedDeliveryMode(
-                      selection.isEmpty
-                          ? DeliveryMode.immediate
-                          : selection.first,
-                    ),
-                  );
-                },
               ),
               const SizedBox(height: PiSpacing.sm),
             ],
@@ -491,7 +457,7 @@ String _promptSemanticLabel(PromptSendStatus status) => switch (status.phase) {
   PromptSendPhase.acquiringControl => 'Getting control of this chat',
   PromptSendPhase.submitting => 'Sending message',
   PromptSendPhase.accepted => 'Message accepted',
-  PromptSendPhase.running => 'Pi is responding',
+  PromptSendPhase.running => 'Message is running',
   PromptSendPhase.failed =>
     'Message failed: ${status.failure?.message ?? 'Unknown failure'}',
   PromptSendPhase.indeterminate => 'Message completion is unknown',

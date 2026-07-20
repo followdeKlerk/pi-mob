@@ -453,6 +453,11 @@
         "payload": {
           "additionalProperties": true,
           "properties": {
+            "createdByCommandId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
             "queueCount": {
               "minimum": 0,
               "type": "integer"
