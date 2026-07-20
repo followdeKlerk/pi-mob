@@ -122,7 +122,10 @@ class _Bullet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Padding(
-            padding: const EdgeInsets.only(top: 6, right: PiSpacing.sm),
+            padding: const EdgeInsets.only(
+              top: PiSpacing.sm,
+              right: PiSpacing.sm,
+            ),
             child: Container(
               width: 6,
               height: 6,

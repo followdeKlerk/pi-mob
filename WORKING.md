@@ -1,6 +1,6 @@
 # Working
 
-Status: M0–M15 done; M16 active with theme, transcript, and product-shell foundation implemented
+Status: M0–M15 done; M16 active with theme, transcript, product-shell foundation, and token-only lint shipped
 
 ## Current checkpoint
 
@@ -26,13 +26,20 @@ M16 is anchored by a normative design-token system and navigation contract docum
 - **M10–M12:** Pi controls, multiplexed sessions/controller leases, and durable session lineage/lifecycle.
 - **M13:** bounded private image attachments, opaque HTML export, and explicit native sharing.
 - **M14:** durable bounded follow-up queues, exact Pi extension-response mapping, and reconnect-safe accessible interaction UI.
-- **M15:** status-only APNs/FCM adapters, production Android FCM activation, permission/channel and foreground service, real background delivery, failure isolation, and foreground reconciliation. See [`M15-SUMMARY.md`](M15-SUMMARY.md) and [`docs/evidence/m15-android-lifecycle-report.json`](docs/evidence/m15-android-lifecycle-report.json).
+- **M15:** status-only APNs/FCM adapters, production Android FCM activation, permission/channel and foreground service, real background delivery, failure isolation, and foreground reconciliation. Apple APNs and Live Activity activation remains deferred by product scope. See [`M15-SUMMARY.md`](M15-SUMMARY.md) and [`docs/evidence/m15-android-lifecycle-report.json`](docs/evidence/m15-android-lifecycle-report.json).
+
+## Latest M16 slice
+
+- **M16-06a (token-only lint):** `scripts/token-lint.ts` scans `apps/mobile/lib/src/ui/**` for ad-hoc padding / corner radius / letterSpacing / hex-color literals, with a per-line `// pi-mob:token-legacy-allow` escape hatch and an allowlist for the three token-declaration files. Wired into `bun run all` and `bun run token:lint`. The daily-ui subtree is token-pure as of this checkpoint.
+- **Backlog:** `BACKLOG.md` M16-06 split into 06a (lint shipped) and 06b (broader migration pending).
+- **Migration follow-up:** migrate transcript widgets, controls, sessions, session tree, attachments, and interaction widgets to PiSpacing/PiRadius tokens, then expand the lint's scope to those subtrees.
 
 ## Immediate next actions
 
-1. Validate the new shell and theme on the target Android phone from the Taildrop build.
-2. Continue migrating session/workspace/control surfaces away from generic nested cards and complete TalkBack evidence.
-3. Keep Firebase credentials local; Apple activation remains deferred.
+1. Extend the token-only lint to the remaining mobile subtrees (transcript widgets, controls, sessions, session tree, attachments, interaction) and migrate the existing ad-hoc constants to tokens. See BACKLOG.md M16-06b.
+2. Continue migrating session/workspace/control surfaces away from generic nested cards; add per-row status pills and progress surfaces (M16-02/03).
+3. Validate the new shell and theme on the target Android phone from the Taildrop build once M16-02/03 land a row-density change.
+4. Keep Firebase credentials local; Apple activation remains deferred.
 
 ## Do not start yet
 

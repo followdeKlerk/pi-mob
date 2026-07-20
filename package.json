@@ -18,6 +18,7 @@
     "fixtures:check": "bun run scripts/fixtures-check.ts",
     "docs:check": "bun run scripts/docs-check.ts",
     "security:check": "bun run scripts/security-check.ts",
+    "token:lint": "bun run scripts/token-lint.ts",
     "deps:check": "bun run scripts/deps-check.ts",
     "build": "bun run scripts/build.ts",
     "clean": "bun run scripts/clean.ts",

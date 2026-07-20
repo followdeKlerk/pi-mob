@@ -46,6 +46,16 @@ function main(): number {
     const code = run(`bun test (${dir})`, ["bun", "test"], dir);
     if (code !== 0) return code;
   }
+  const scriptsTestDir = join(ROOT, "scripts", "test");
+  if (
+    existsSync(scriptsTestDir) &&
+    readdirSync(scriptsTestDir).some((f) =>
+      f.endsWith(".test.ts") || f.endsWith(".spec.ts"),
+    )
+  ) {
+    const code = run("bun test (scripts/test)", ["bun", "test"], scriptsTestDir);
+    if (code !== 0) return code;
+  }
   if (FLUTTER && existsSync(FLUTTER)) {
     const mobile = run("flutter test (apps/mobile)", [FLUTTER, "test"], `${ROOT}/apps/mobile`);
     if (mobile !== 0) return mobile;

@@ -22,6 +22,7 @@ const SEQUENCE: Array<{ label: string; cmd: readonly string[]; optional: boolean
   { label: "schema:check", cmd: ["bun", "run", "scripts/schema-check.ts"], optional: false },
   { label: "docs:check", cmd: ["bun", "run", "scripts/docs-check.ts"], optional: false },
   { label: "security:check", cmd: ["bun", "run", "scripts/security-check.ts"], optional: false },
+  { label: "token:lint", cmd: ["bun", "run", "scripts/token-lint.ts"], optional: false },
   { label: "deps:check", cmd: ["bun", "run", "scripts/deps-check.ts"], optional: false },
   { label: "test", cmd: ["bun", "run", "scripts/test.ts"], optional: false },
   { label: "build", cmd: ["bun", "run", "scripts/build.ts"], optional: false },
