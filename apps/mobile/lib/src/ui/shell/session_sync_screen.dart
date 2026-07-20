@@ -1,12 +1,11 @@
 import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
-import '../../domain/mobile_state.dart';
 import '../theme/pi_theme.dart';
 import 'motion_primitives.dart';
 
-/// Sessions-first synchronization gate. Chats are local-first after this
-/// screen completes, so opening one never starts a transcript download.
+/// Compact synchronization gate. Session names, identifiers, and actions stay
+/// hidden until every durable chat history is ready for local-first browsing.
 class SessionSyncScreen extends StatelessWidget {
   const SessionSyncScreen({required this.coordinator, super.key});
 
@@ -16,168 +15,123 @@ class SessionSyncScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
-    final sessions = coordinator.sessions.toList()
-      ..sort(
-        (a, b) => (b.lastActivityAt ?? DateTime(0)).compareTo(
-          a.lastActivityAt ?? DateTime(0),
-        ),
-      );
     final ready = coordinator.historyGateComplete;
     final error = coordinator.historyGateError;
     final total = coordinator.historySyncTotal;
     final completed = coordinator.historySyncCompleted;
 
     return SafeArea(
-      child: Column(
-        key: const Key('session-sync-screen'),
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(
-              PiSpacing.lg,
-              PiSpacing.lg,
-              PiSpacing.lg,
-              PiSpacing.md,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  ready ? 'Chats are ready' : 'Syncing chats',
-                  style: theme.textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-                const SizedBox(height: PiSpacing.xs),
-                Text(
-                  ready
-                      ? 'Transcripts are stored on this device. Choose a chat.'
-                      : error != null
-                      ? 'Sync paused. Your existing local data is safe.'
-                      : 'Keeping transcripts available before opening chat${total == 1 ? '' : 's'}.',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    color: colors.onSurfaceVariant,
-                  ),
-                ),
-                const SizedBox(height: PiSpacing.md),
-                if (!ready && error == null) ...[
-                  MotionProgressBar(
-                    key: const Key('all-chat-sync-progress'),
-                    value: total == 0 ? null : coordinator.historySyncProgress,
-                    minHeight: 4,
-                  ),
-                  const SizedBox(height: PiSpacing.sm),
-                  Text(
-                    total == 0
-                        ? 'Preparing session index…'
-                        : '$completed of $total chats synced',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: colors.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-                if (error != null) ...[
-                  Container(
-                    padding: const EdgeInsets.all(PiSpacing.md),
-                    decoration: BoxDecoration(
-                      color: colors.errorContainer,
-                      borderRadius: BorderRadius.circular(PiRadius.md),
-                    ),
-                    child: Row(
-                      children: [
-                        const Icon(Icons.sync_problem, size: 20),
-                        const SizedBox(width: PiSpacing.sm),
-                        const Expanded(
-                          child: Text('Could not finish syncing chats'),
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(PiSpacing.lg),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 520),
+            child: Card(
+              key: const Key('session-sync-screen'),
+              child: Padding(
+                padding: const EdgeInsets.all(PiSpacing.xl),
+                child: Semantics(
+                  container: true,
+                  liveRegion: true,
+                  label: error != null
+                      ? 'Chat synchronization failed'
+                      : ready
+                      ? 'Chats are ready'
+                      : total == 0
+                      ? 'Syncing chats'
+                      : 'Syncing chats, $completed of $total complete',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        error != null
+                            ? Icons.sync_problem
+                            : ready
+                            ? Icons.check_circle_outline
+                            : Icons.sync,
+                        size: 36,
+                        color: error != null ? colors.error : colors.primary,
+                      ),
+                      const SizedBox(height: PiSpacing.md),
+                      Text(
+                        ready ? 'Chats are ready' : 'Syncing chats',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
                         ),
-                        TextButton(
-                          key: const Key('retry-all-chat-sync'),
-                          onPressed: coordinator.isReady
-                              ? coordinator.retryHistoryGate
-                              : null,
-                          child: const Text('Retry'),
+                      ),
+                      const SizedBox(height: PiSpacing.xs),
+                      Text(
+                        error != null
+                            ? 'Sync paused. Your existing local data is safe.'
+                            : ready
+                            ? 'Your local chat history is ready.'
+                            : 'Preparing your chat history so opening a chat '
+                                  'is immediate and works through reconnects.',
+                        textAlign: TextAlign.center,
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          color: colors.onSurfaceVariant,
+                        ),
+                      ),
+                      const SizedBox(height: PiSpacing.lg),
+                      if (!ready && error == null) ...[
+                        MotionProgressBar(
+                          key: const Key('all-chat-sync-progress'),
+                          value: total == 0
+                              ? null
+                              : coordinator.historySyncProgress,
+                          minHeight: 4,
+                        ),
+                        const SizedBox(height: PiSpacing.sm),
+                        Text(
+                          total == 0
+                              ? 'Preparing chats…'
+                              : '$completed of $total chats synced',
+                          key: const Key('chat-sync-progress-label'),
+                          textAlign: TextAlign.center,
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            color: colors.onSurfaceVariant,
+                          ),
                         ),
                       ],
-                    ),
+                      if (error != null)
+                        Container(
+                          key: const Key('chat-sync-error'),
+                          padding: const EdgeInsets.all(PiSpacing.md),
+                          decoration: BoxDecoration(
+                            color: colors.errorContainer,
+                            borderRadius: BorderRadius.circular(PiRadius.md),
+                          ),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Text(
+                                'Could not finish syncing chats',
+                                style: theme.textTheme.titleSmall?.copyWith(
+                                  color: colors.onErrorContainer,
+                                ),
+                              ),
+                              const SizedBox(height: PiSpacing.sm),
+                              TextButton.icon(
+                                key: const Key('retry-all-chat-sync'),
+                                onPressed: coordinator.isReady
+                                    ? coordinator.retryHistoryGate
+                                    : null,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry'),
+                              ),
+                            ],
+                          ),
+                        ),
+                    ],
                   ),
-                ],
-              ],
+                ),
+              ),
             ),
           ),
-          const Divider(height: 1),
-          Expanded(
-            child: sessions.isEmpty
-                ? Center(
-                    child: Text(
-                      ready ? 'No saved chats yet' : 'Discovering chats…',
-                      style: theme.textTheme.bodyMedium?.copyWith(
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ),
-                  )
-                : ListView.builder(
-                    key: const Key('sync-session-list'),
-                    padding: const EdgeInsets.all(PiSpacing.sm),
-                    itemCount: sessions.length,
-                    itemBuilder: (context, index) {
-                      final session = sessions[index];
-                      final current =
-                          coordinator.historySyncCurrentSessionId ==
-                          session.sessionId;
-                      return ListTile(
-                        key: Key('sync-session-${session.sessionId}'),
-                        enabled: ready,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(PiRadius.md),
-                        ),
-                        leading: current
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: MotionSpinner(
-                                  strokeWidth: 2,
-                                  dimension: 20,
-                                  label: 'Syncing chat history',
-                                ),
-                              )
-                            : Icon(
-                                ready
-                                    ? Icons.check_circle_outline
-                                    : Icons.chat_bubble_outline,
-                                size: 20,
-                                color: ready
-                                    ? colors.primary
-                                    : colors.onSurfaceVariant,
-                              ),
-                        title: Text(
-                          _title(session),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: session.workspaceId == null
-                            ? null
-                            : Text(
-                                session.workspaceId!,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                              ),
-                        trailing: ready
-                            ? const Icon(Icons.chevron_right)
-                            : null,
-                        onTap: ready
-                            ? () => coordinator.takeControl(session.sessionId)
-                            : null,
-                      );
-                    },
-                  ),
-          ),
-        ],
+        ),
       ),
     );
-  }
-
-  String _title(SessionState session) {
-    final value = session.name.trim();
-    return value.isEmpty ? 'Untitled chat' : value;
   }
 }

@@ -8,6 +8,7 @@ import 'package:pi_mob/src/connection/connection_coordinator.dart';
 import 'package:pi_mob/src/data/app_database.dart';
 import 'package:pi_mob/src/domain/attachments.dart';
 import 'package:pi_mob/src/domain/mobile_state.dart';
+import 'package:pi_mob/src/domain/prompt_send_lifecycle.dart';
 import 'package:pi_mob/src/domain/session_tree.dart';
 
 const hostId = '11111111-1111-4111-8111-111111111111';
@@ -785,6 +786,361 @@ void main() {
     );
     await eventually(() => coordinator.pendingCommandId == null);
     expect(coordinator.draft, isEmpty);
+  });
+
+  test('older turn events cannot clobber a newer pending prompt', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+
+    await coordinator.updateDraft('First prompt');
+    await coordinator.submitPrompt();
+    final first = socket.sent.lastWhere(
+      (message) => message['type'] == 'prompt.submit',
+    );
+    final firstCommandId = first['commandId'] as String;
+    socket.server(
+      response('command.receipt', {
+        'state': 'accepted',
+        'duplicate': false,
+      }, commandId: firstCommandId),
+    );
+    await eventually(() => coordinator.pendingCommandId == null);
+    socket.server(
+      event(
+        type: 'turn.started',
+        streamId: 'session:$sessionId',
+        cursor: '2',
+        eventId: '45454545-4545-4545-8545-454545454545',
+        payload: {'sessionId': sessionId, 'commandId': firstCommandId},
+      ),
+    );
+    await eventually(() => coordinator.selectedRuntimeState == 'running');
+
+    await coordinator.updateDraft('Second prompt');
+    await coordinator.submitPrompt();
+    final second = socket.sent.lastWhere(
+      (message) => message['type'] == 'prompt.submit',
+    );
+    final secondCommandId = second['commandId'] as String;
+    expect(secondCommandId, isNot(firstCommandId));
+    expect(coordinator.pendingCommandId, secondCommandId);
+    expect(coordinator.promptSendStatus.phase, PromptSendPhase.submitting);
+
+    socket.server(
+      event(
+        type: 'turn.settled',
+        streamId: 'session:$sessionId',
+        cursor: '3',
+        eventId: '46464646-4646-4646-8646-464646464646',
+        payload: {'sessionId': sessionId, 'commandId': firstCommandId},
+      ),
+    );
+    socket.server(
+      event(
+        type: 'turn.indeterminate',
+        streamId: 'session:$sessionId',
+        cursor: '4',
+        eventId: '47474747-4747-4747-8747-474747474747',
+        payload: {'sessionId': sessionId, 'commandId': firstCommandId},
+      ),
+    );
+    await eventually(() => coordinator.selectedRuntimeState == 'indeterminate');
+
+    expect(coordinator.pendingCommandId, secondCommandId);
+    expect(coordinator.promptSendStatus.phase, PromptSendPhase.submitting);
+    final saved = await database.draft(hostId, sessionId);
+    expect(saved?.pendingCommandId, secondCommandId);
+    expect(saved?.draftText, 'Second prompt');
+  });
+
+  test(
+    'observer send waits for authoritative control and submits exactly once',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'controller.state',
+          streamId: 'session:$sessionId',
+          cursor: '2',
+          eventId: '31313131-3131-4131-8131-313131313131',
+          payload: {
+            'scope': 'session',
+            'sessionId': sessionId,
+            'mode': 'observer',
+            'leaseId': leaseId,
+          },
+        ),
+      );
+      await eventually(() => coordinator.leaseId == null);
+      await coordinator.updateDraft('Acquire then send');
+      final acquiresBefore = socket.sent
+          .where((message) => message['type'] == 'controller.acquire')
+          .length;
+
+      final submission = coordinator.submitPromptWithRecovery();
+      await eventually(
+        () =>
+            socket.sent
+                .where((message) => message['type'] == 'controller.acquire')
+                .length >
+            acquiresBefore,
+      );
+      expect(
+        coordinator.promptSendStatus.phase,
+        PromptSendPhase.acquiringControl,
+      );
+      expect(
+        socket.sent.where((message) => message['type'] == 'prompt.submit'),
+        isEmpty,
+      );
+      final storedWhileAcquiring = await database.draft(hostId, sessionId);
+      expect(storedWhileAcquiring?.pendingCommandId, isNotNull);
+      expect(storedWhileAcquiring?.draftText, 'Acquire then send');
+
+      const acquiredLease = '56565656-5656-4565-8565-565656565656';
+      socket.server(
+        event(
+          type: 'controller.state',
+          streamId: 'session:$sessionId',
+          cursor: '3',
+          eventId: '32323232-3232-4232-8232-323232323232',
+          payload: {
+            'scope': 'session',
+            'sessionId': sessionId,
+            'mode': 'controller',
+            'leaseId': acquiredLease,
+          },
+        ),
+      );
+      await submission;
+      final prompts = socket.sent
+          .where((message) => message['type'] == 'prompt.submit')
+          .toList();
+      expect(prompts, hasLength(1));
+      expect(prompts.single['leaseId'], acquiredLease);
+      expect(
+        prompts.single['payload'],
+        containsPair('message', 'Acquire then send'),
+      );
+
+      socket.server(
+        response('command.receipt', {
+          'state': 'accepted',
+          'duplicate': false,
+        }, commandId: prompts.single['commandId'] as String),
+      );
+      await eventually(() => coordinator.draft.isEmpty);
+      expect(coordinator.promptSendStatus.phase, PromptSendPhase.accepted);
+    },
+  );
+
+  test(
+    'controller conflict takes over once and resumes the frozen prompt',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'controller.state',
+          streamId: 'session:$sessionId',
+          cursor: '2',
+          eventId: '33333333-3333-4333-8333-333333333330',
+          payload: {
+            'scope': 'session',
+            'sessionId': sessionId,
+            'mode': 'observer',
+            'leaseId': leaseId,
+          },
+        ),
+      );
+      await eventually(() => coordinator.leaseId == null);
+      await coordinator.updateDraft('Take over safely');
+      final acquiresBefore = socket.sent
+          .where((message) => message['type'] == 'controller.acquire')
+          .length;
+      final submission = coordinator.submitPromptWithRecovery();
+      await eventually(
+        () =>
+            socket.sent
+                .where((message) => message['type'] == 'controller.acquire')
+                .length >
+            acquiresBefore,
+      );
+      final acquire = socket.sent.lastWhere(
+        (message) => message['type'] == 'controller.acquire',
+      );
+      socket.server(
+        response('error', {
+          'code': 'controller_conflict',
+          'message': 'Controlled elsewhere',
+          'retryable': true,
+          'details': <String, Object?>{},
+        }, commandId: acquire['commandId'] as String),
+      );
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'controller.takeover',
+        ),
+      );
+      expect(
+        socket.sent.where(
+          (message) => message['type'] == 'controller.takeover',
+        ),
+        hasLength(1),
+      );
+      const takeoverLease = '57575757-5757-4575-8575-575757575757';
+      socket.server(
+        event(
+          type: 'controller.state',
+          streamId: 'session:$sessionId',
+          cursor: '3',
+          eventId: '34343434-3434-4434-8434-343434343434',
+          payload: {
+            'scope': 'session',
+            'sessionId': sessionId,
+            'mode': 'controller',
+            'leaseId': takeoverLease,
+          },
+        ),
+      );
+      await submission;
+      final prompts = socket.sent
+          .where((message) => message['type'] == 'prompt.submit')
+          .toList();
+      expect(prompts, hasLength(1));
+      expect(prompts.single['leaseId'], takeoverLease);
+      final persisted = await database.draft(hostId, sessionId);
+      expect(persisted?.pendingCommandId, prompts.single['commandId']);
+      expect(persisted?.draftText, 'Take over safely');
+    },
+  );
+
+  test(
+    'acquisition connection failure is typed and preserves the draft',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'controller.state',
+          streamId: 'session:$sessionId',
+          cursor: '2',
+          eventId: '35353535-3535-4535-8535-353535353535',
+          payload: {
+            'scope': 'session',
+            'sessionId': sessionId,
+            'mode': 'observer',
+            'leaseId': leaseId,
+          },
+        ),
+      );
+      await eventually(() => coordinator.leaseId == null);
+      await coordinator.updateDraft('Keep after disconnect');
+      final submission = coordinator.submitPromptWithRecovery();
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'controller.acquire',
+        ),
+      );
+      await socket.close();
+      await submission;
+      expect(
+        socket.sent.where((message) => message['type'] == 'prompt.submit'),
+        isEmpty,
+      );
+      expect(coordinator.draft, 'Keep after disconnect');
+      expect(coordinator.promptSendStatus.phase, PromptSendPhase.failed);
+      expect(
+        coordinator.promptSendStatus.failure?.action,
+        PromptFailureAction.reconnect,
+      );
+    },
+  );
+
+  test(
+    'bridge rejection is visible and retains the exact pending command',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      await coordinator.updateDraft('Reject visibly');
+      await coordinator.submitPrompt();
+      final prompt = socket.sent.lastWhere(
+        (message) => message['type'] == 'prompt.submit',
+      );
+      socket.server(
+        response('error', {
+          'code': 'queue_full',
+          'message': 'Queue is full',
+          'retryable': true,
+          'details': <String, Object?>{},
+        }, commandId: prompt['commandId'] as String),
+      );
+      await eventually(
+        () => coordinator.promptSendStatus.phase == PromptSendPhase.failed,
+      );
+      expect(coordinator.draft, 'Reject visibly');
+      expect(coordinator.pendingCommandId, prompt['commandId']);
+      expect(coordinator.promptSendStatus.failure?.message, 'Queue is full');
+      expect(
+        coordinator.promptSendStatus.failure?.action,
+        PromptFailureAction.retry,
+      );
+    },
+  );
+
+  test('background receipt clears only its own session draft', () async {
+    const secondSessionId = '68686868-6868-4686-8686-686868686868';
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    await coordinator.updateDraft('Session A pending');
+    await coordinator.submitPrompt();
+    final prompt = socket.sent.lastWhere(
+      (message) => message['type'] == 'prompt.submit',
+    );
+
+    socket.server(
+      event(
+        type: 'session.summary',
+        streamId: 'host:$hostId',
+        cursor: '2',
+        eventId: '36363636-3636-4636-8636-363636363636',
+        payload: {
+          'sessionId': secondSessionId,
+          'workspaceId': workspaceId,
+          'name': 'Second session',
+          'runtimeState': 'idle',
+          'queueCount': 0,
+        },
+      ),
+    );
+    await eventually(
+      () => coordinator.sessions.any(
+        (session) => session.sessionId == secondSessionId,
+      ),
+    );
+    await coordinator.selectPrimarySession(secondSessionId);
+    expect(coordinator.selectedSessionId, secondSessionId);
+    await coordinator.updateDraft('Session B draft');
+
+    socket.server(
+      response('command.receipt', {
+        'state': 'accepted',
+        'duplicate': false,
+      }, commandId: prompt['commandId'] as String),
+    );
+    DraftEntry? first;
+    final deadline = DateTime.now().add(const Duration(seconds: 3));
+    do {
+      first = await database.draft(hostId, sessionId);
+      if (first?.pendingCommandId == null) break;
+      await Future<void>.delayed(const Duration(milliseconds: 5));
+    } while (DateTime.now().isBefore(deadline));
+    final second = await database.draft(hostId, secondSessionId);
+    expect(first?.draftText, isEmpty);
+    expect(first?.pendingCommandId, isNull);
+    expect(second?.draftText, 'Session B draft');
+    expect(coordinator.draft, 'Session B draft');
   });
 
   test('running session accepts steer prompt over the wire', () async {

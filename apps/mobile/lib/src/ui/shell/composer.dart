@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../domain/mobile_state.dart';
+import '../../domain/prompt_send_lifecycle.dart';
 import '../../interaction/interaction_panel.dart';
 import '../theme/pi_theme.dart';
 import 'model_picker_sheet.dart';
+import 'motion_primitives.dart';
+import 'trust_review.dart';
 
 /// Prompt composer with delivery-mode selector, follow-up queue, extension
 /// dialog opener, and the persistent draft `TextField`.
@@ -14,9 +17,9 @@ import 'model_picker_sheet.dart';
 /// The composer is intentionally a single fixed-height surface anchored at the
 /// bottom of the Activity destination. It owns its own `LiveRegion`
 /// semantics node so screen-readers announce state transitions, and exposes
-/// stable keys (`draft-field`, `send-button`, `retry-command`,
-/// `delivery-mode-selector`, `open-extension-dialog`, `pending-command`) used
-/// by downstream integrations.
+/// stable keys (`draft-field`, `send-button`, `prompt-send-action`,
+/// `delivery-mode-selector`, and `open-extension-dialog`) used by downstream
+/// integrations.
 class Composer extends StatelessWidget {
   const Composer({
     required this.coordinator,
@@ -144,6 +147,42 @@ class Composer extends StatelessWidget {
     await coordinator.updateDraft(value);
   }
 
+  Future<void> _reviewWorkspaceTrust(BuildContext context) async {
+    final workspace = coordinator.selectedWorkspace;
+    if (workspace == null) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => InlineTrustReview(
+        entry: workspace,
+        onApprove: () async {
+          await coordinator.approveWorkspaceTrust(workspace.workspaceId);
+          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
+        },
+      ),
+    );
+  }
+
+  Future<void> _handlePromptFailureAction(
+    BuildContext context,
+    PromptSendFailure failure,
+  ) async {
+    switch (failure.action) {
+      case PromptFailureAction.retry:
+      case PromptFailureAction.takeControl:
+        await coordinator.retryPending();
+        return;
+      case PromptFailureAction.reconnect:
+        await coordinator.reconnectForPrompt();
+        return;
+      case PromptFailureAction.approveWorkspace:
+        if (context.mounted) await _reviewWorkspaceTrust(context);
+        return;
+      case PromptFailureAction.discardUncertain:
+        if (context.mounted) await _discardIndeterminate(context);
+        return;
+    }
+  }
+
   Future<void> _discardIndeterminate(BuildContext context) async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -231,6 +270,16 @@ class Composer extends StatelessWidget {
                     ],
                   ),
                 ),
+              ),
+              const SizedBox(height: PiSpacing.sm),
+            ],
+            if (coordinator.promptSendStatus.phase != PromptSendPhase.ready &&
+                coordinator.promptSendStatus.phase !=
+                    PromptSendPhase.indeterminate) ...[
+              _PromptSendFeedback(
+                status: coordinator.promptSendStatus,
+                onAction: (failure) =>
+                    _handlePromptFailureAction(context, failure),
               ),
               const SizedBox(height: PiSpacing.sm),
             ],
@@ -427,32 +476,107 @@ class Composer extends StatelessWidget {
             ),
             Semantics(
               liveRegion: true,
-              label: coordinator.pendingCommandId == null
-                  ? 'Composer ready'
-                  : 'Prompt ${coordinator.pendingState ?? 'pending'}',
+              label: _promptSemanticLabel(coordinator.promptSendStatus),
               child: const SizedBox.shrink(),
             ),
-            if (coordinator.pendingCommandId != null) ...[
-              const SizedBox(height: PiSpacing.sm),
-              Text(
-                'Pending ${coordinator.pendingState ?? 'unknown'} · '
-                '${coordinator.pendingCommandId}',
-                key: const Key('pending-command'),
-                overflow: TextOverflow.ellipsis,
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+String _promptSemanticLabel(PromptSendStatus status) => switch (status.phase) {
+  PromptSendPhase.ready => 'Composer ready',
+  PromptSendPhase.acquiringControl => 'Getting control of this chat',
+  PromptSendPhase.submitting => 'Sending message',
+  PromptSendPhase.accepted => 'Message accepted',
+  PromptSendPhase.running => 'Pi is responding',
+  PromptSendPhase.failed =>
+    'Message failed: ${status.failure?.message ?? 'Unknown failure'}',
+  PromptSendPhase.indeterminate => 'Message completion is unknown',
+};
+
+class _PromptSendFeedback extends StatelessWidget {
+  const _PromptSendFeedback({required this.status, required this.onAction});
+
+  final PromptSendStatus status;
+  final Future<void> Function(PromptSendFailure failure) onAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final failure = status.failure;
+    final failed = status.phase == PromptSendPhase.failed;
+    final colors = Theme.of(context).colorScheme;
+    final title = switch (status.phase) {
+      PromptSendPhase.acquiringControl => 'Getting control of this chat…',
+      PromptSendPhase.submitting => 'Sending…',
+      PromptSendPhase.accepted => 'Message accepted',
+      PromptSendPhase.running => 'Pi is responding',
+      PromptSendPhase.failed => 'Message not sent',
+      _ => 'Message status',
+    };
+    return Semantics(
+      liveRegion: true,
+      container: true,
+      label: _promptSemanticLabel(status),
+      child: Container(
+        key: Key('prompt-send-${status.phase.name}'),
+        padding: const EdgeInsets.all(PiSpacing.sm),
+        decoration: BoxDecoration(
+          color: failed ? colors.errorContainer : colors.secondaryContainer,
+          borderRadius: BorderRadius.circular(PiRadius.sm),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            if (status.isBusy)
+              MotionSpinner(strokeWidth: 2, dimension: 18, label: title)
+            else
+              Icon(
+                failed ? Icons.error_outline : Icons.check_circle_outline,
+                size: 18,
+                color: failed
+                    ? colors.onErrorContainer
+                    : colors.onSecondaryContainer,
               ),
-              const SizedBox(height: PiSpacing.sm),
-              Align(
-                alignment: Alignment.centerRight,
-                child: OutlinedButton.icon(
-                  key: const Key('retry-command'),
-                  onPressed: coordinator.canRetry
-                      ? coordinator.retryPending
-                      : null,
-                  icon: const Icon(Icons.replay),
-                  label: const Text('Retry exact command'),
-                ),
+            const SizedBox(width: PiSpacing.sm),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                      color: failed
+                          ? colors.onErrorContainer
+                          : colors.onSecondaryContainer,
+                    ),
+                  ),
+                  if (failure != null)
+                    Text(
+                      failure.message,
+                      key: const Key('prompt-send-failure-message'),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: colors.onErrorContainer,
+                      ),
+                    ),
+                ],
               ),
-            ],
+            ),
+            if (failure != null)
+              TextButton(
+                key: const Key('prompt-send-action'),
+                onPressed: () => unawaited(onAction(failure)),
+                child: Text(switch (failure.action) {
+                  PromptFailureAction.retry => 'Retry',
+                  PromptFailureAction.takeControl => 'Take control',
+                  PromptFailureAction.reconnect => 'Reconnect',
+                  PromptFailureAction.approveWorkspace => 'Review workspace',
+                  PromptFailureAction.discardUncertain => 'Discard',
+                }),
+              ),
           ],
         ),
       ),

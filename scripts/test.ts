@@ -26,12 +26,17 @@ function hasTests(dir: string): boolean {
   );
 }
 
-function run(label: string, cmd: readonly string[], cwd?: string): number {
+function run(
+  label: string,
+  cmd: readonly string[],
+  cwd?: string,
+  timeoutMs = 60_000,
+): number {
   process.stdout.write(`==> ${label}\n`);
   const result = spawnSync(cmd[0]!, cmd.slice(1), {
     cwd: cwd ?? ROOT,
     stdio: "inherit",
-    timeout: 60_000,
+    timeout: timeoutMs,
   });
   if (result.signal === "SIGTERM") process.stderr.write(`==> ${label} unavailable: SDK command did not become runnable within 60 seconds\n`);
   return result.status ?? 1;
@@ -57,7 +62,15 @@ function main(): number {
     if (code !== 0) return code;
   }
   if (FLUTTER && existsSync(FLUTTER)) {
-    const mobile = run("flutter test (apps/mobile)", [FLUTTER, "test"], `${ROOT}/apps/mobile`);
+    // The full Flutter suite routinely approaches one minute before process
+    // finalization. A larger bound avoids SIGTERM racing flutter_tools cleanup
+    // while still preventing an indefinitely wedged CI job.
+    const mobile = run(
+      "flutter test (apps/mobile)",
+      [FLUTTER, "test"],
+      `${ROOT}/apps/mobile`,
+      5 * 60_000,
+    );
     if (mobile !== 0) return mobile;
   } else {
     process.stderr.write("flutter test unavailable: Flutter SDK is not installed\n");

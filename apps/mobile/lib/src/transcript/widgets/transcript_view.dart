@@ -348,10 +348,13 @@ class _TurnView extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     if (turn is AssistantTurn) {
       final assistant = turn as AssistantTurn;
+      final statusLabel = assistant.completedWithNoResponse
+          ? 'Completed with no response'
+          : assistant.status.name;
       return Semantics(
         container: true,
         liveRegion: assistant.isTerminal,
-        label: 'Assistant turn ${assistant.status.name}',
+        label: 'Assistant turn $statusLabel',
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: PiSpacing.sm),
           child: Column(
@@ -400,7 +403,10 @@ class _TurnView extends StatelessWidget {
                 child: Align(
                   alignment: Alignment.centerRight,
                   child: Text(
-                    assistant.status.name,
+                    statusLabel,
+                    key: assistant.completedWithNoResponse
+                        ? Key('assistant-no-response-${assistant.turnId}')
+                        : null,
                     style: text.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),

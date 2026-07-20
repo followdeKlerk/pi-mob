@@ -264,6 +264,11 @@ class AssistantTurn extends Turn {
   Iterable<ReasoningItem> get reasoningItems =>
       items.whereType<ReasoningItem>();
 
+  /// True when the host settled normally without emitting any assistant
+  /// reasoning, tool activity, or answer content.
+  bool get completedWithNoResponse =>
+      status == AssistantTurnStatus.completed && items.isEmpty;
+
   /// The first final-answer item, or `null` if none has been emitted.
   FinalAnswerItem? get finalAnswer {
     for (final item in items) {

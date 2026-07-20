@@ -278,6 +278,48 @@ void main() {
     expect(secondTools, isEmpty);
   });
 
+  test('settled turn with no assistant activity is explicit', () {
+    final events = <StreamEventState>[
+      event(1, 'turn.started', {
+        'turnId': 'empty-turn',
+        'commandId': 'empty-command',
+        'message': 'Are you there?',
+      }),
+      event(2, 'turn.settled', {'turnId': 'empty-turn'}),
+    ];
+
+    const reducer = TranscriptReducer();
+    var state = TranscriptReducerState.empty('session:s');
+    for (final item in events) {
+      state = reducer.apply(state: state, event: item);
+    }
+
+    final user = state.document.turns.whereType<UserTurn>().single;
+    final assistant = state.document.turns.whereType<AssistantTurn>().single;
+    expect(user.status, UserTurnStatus.settled);
+    expect(assistant.status, AssistantTurnStatus.completed);
+    expect(assistant.items, isEmpty);
+    expect(assistant.completedWithNoResponse, isTrue);
+    expect(state.document.lastSettledTurnId, 'turn:assistant:empty-turn');
+  });
+
+  test('completed assistant activity is not classified as no response', () {
+    const reducer = TranscriptReducer();
+    var state = TranscriptReducerState.empty('session:s');
+    for (final item in <StreamEventState>[
+      event(1, 'turn.started', {'turnId': 'answered', 'message': 'Reply'}),
+      event(2, 'assistant.started', {'contentBlockId': 'answer'}),
+      event(3, 'assistant.delta', {'contentBlockId': 'answer', 'text': 'Here'}),
+      event(4, 'assistant.completed', {'contentBlockId': 'answer'}),
+      event(5, 'turn.settled', {'turnId': 'answered'}),
+    ]) {
+      state = reducer.apply(state: state, event: item);
+    }
+    final assistant = state.document.turns.whereType<AssistantTurn>().single;
+    expect(assistant.items, isNotEmpty);
+    expect(assistant.completedWithNoResponse, isFalse);
+  });
+
   test('reused Pi content block ids remain isolated between turns', () {
     final events = <StreamEventState>[
       event(1, 'turn.started', {'turnId': 'turn-1', 'message': 'First'}),

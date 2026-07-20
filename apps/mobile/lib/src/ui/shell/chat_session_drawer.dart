@@ -181,13 +181,6 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     if (mounted) Navigator.of(context).pop();
   }
 
-  Future<void> _changeFolder() async {
-    final workspace = await _chooseFolder();
-    if (workspace != null) {
-      await widget.coordinator.selectWorkspaceEntry(workspace);
-    }
-  }
-
   Future<void> _selectSession(String sessionId) async {
     Navigator.of(context).pop();
     await widget.coordinator.takeControl(sessionId);
@@ -229,7 +222,7 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     final colors = theme.colorScheme;
     final semantic = context.piSemanticColors;
     final connectionLabel = switch (coordinator.phase) {
-      ConnectionPhase.ready => 'Connected',
+      ConnectionPhase.ready => 'Bridge connected',
       ConnectionPhase.probing ||
       ConnectionPhase.connecting ||
       ConnectionPhase.handshaking => 'Connecting',
@@ -471,21 +464,6 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                     ),
             ),
             const Divider(height: 1),
-            ListTile(
-              key: const Key('change-chat-folder'),
-              leading: const Icon(Icons.folder_outlined),
-              title: const Text('Choose folder'),
-              subtitle: Text(
-                coordinator.selectedWorkspace?.relativePath ??
-                    coordinator.selectedWorkspace?.displayName ??
-                    'No folder selected',
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-              onTap: coordinator.isReady
-                  ? () => unawaited(_changeFolder())
-                  : null,
-            ),
             if (widget.notifications case final notifications?)
               ListenableBuilder(
                 listenable: notifications,

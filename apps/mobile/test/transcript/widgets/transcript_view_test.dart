@@ -45,6 +45,20 @@ TranscriptDocument _document(List<Turn> turns) => TranscriptDocument(
   lastSettledTurnId: null,
 );
 
+StreamEventState _event(
+  int cursor,
+  String type,
+  Map<String, Object?> payload,
+) => StreamEventState(
+  hostId: 'host',
+  streamId: 'session:s',
+  cursor: StreamCursor.parse('$cursor'),
+  eventId: 'event-$cursor',
+  type: type,
+  payload: payload,
+  occurredAt: DateTime.utc(2026, 7, 20),
+);
+
 Widget _app(Widget child, {TextScaler textScaler = TextScaler.noScaling}) {
   return MaterialApp(
     home: Scaffold(
@@ -103,6 +117,57 @@ void main() {
     // The list's scroll controller is wired up so the FAB has a hook.
     final list = tester.widget<ListView>(listFinder);
     expect(list.controller, isNotNull);
+  });
+
+  testWidgets('settled event with no assistant output is explicit', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        TranscriptEventView(
+          streamId: 'session:s',
+          events: [
+            _event(1, 'turn.started', {
+              'turnId': 'empty-turn',
+              'commandId': 'empty-command',
+              'message': 'Are you there?',
+            }),
+            _event(2, 'turn.settled', {'turnId': 'empty-turn'}),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('Are you there?'), findsOneWidget);
+    expect(find.text('Completed with no response'), findsOneWidget);
+    expect(
+      find.byKey(const Key('assistant-no-response-empty-turn')),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('assistant content suppresses no-response fallback', (
+    tester,
+  ) async {
+    final doc = _document([
+      _assistantTurn(
+        turnId: 'answered',
+        assistantStepId: 'step',
+        items: [
+          FinalAnswerItem(
+            itemId: 'answer',
+            assistantStepId: 'step',
+            viewData: const FinalAnswerViewData(
+              answerId: 'answer',
+              markdown: 'Actual response',
+            ),
+          ),
+        ],
+      ),
+    ]);
+    await tester.pumpWidget(_app(TranscriptView(document: doc)));
+    expect(find.text('Actual response'), findsOneWidget);
+    expect(find.text('Completed with no response'), findsNothing);
   });
 
   testWidgets(

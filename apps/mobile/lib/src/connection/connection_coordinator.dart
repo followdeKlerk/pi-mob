@@ -13,6 +13,7 @@ import '../domain/attachments.dart';
 import '../domain/controller_lease.dart';
 import '../domain/interaction_state.dart';
 import '../domain/mobile_state.dart';
+import '../domain/prompt_send_lifecycle.dart';
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
@@ -49,6 +50,20 @@ class _HistoryRequest {
 
   final String sessionId;
   final int epoch;
+}
+
+class _PendingPrompt {
+  _PendingPrompt({
+    required this.sessionId,
+    required this.commandId,
+    required this.payload,
+    required this.state,
+  });
+
+  final String sessionId;
+  final String commandId;
+  final Map<String, Object?> payload;
+  String state;
 }
 
 class _TranscriptEventsCache {
@@ -152,6 +167,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   SessionSubscriptionSet _subscriptionSet = SessionSubscriptionSet.empty();
   final ControllerBook _controllers = ControllerBook();
   final Map<String, Completer<void>> _controllerWaiters = {};
+  final Map<String, _PendingPrompt> _pendingPromptsBySession = {};
+  final Map<String, String> _pendingCurrentRequestCommand = {};
+  final Map<String, PromptSendStatus> _promptSendBySession = {};
+  final Map<String, String> _lastPromptCommandBySession = {};
   bool _sendRecoveryInFlight = false;
   final Map<String, SessionAttentionState> _attention = {};
   final Map<String, String> _attentionWire = {};
@@ -213,6 +232,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   Map<String, Object?>? pendingPayload;
   String? pendingState;
   DeliveryMode selectedDeliveryMode = DeliveryMode.immediate;
+
+  PromptSendStatus get promptSendStatus {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return const PromptSendStatus.ready();
+    return _promptSendBySession[sessionId] ?? const PromptSendStatus.ready();
+  }
 
   bool get isReady => phase == ConnectionPhase.ready && _socket != null;
   bool get historyGateComplete => _historyGateComplete;
@@ -351,11 +376,17 @@ final class ConnectionCoordinator extends ChangeNotifier
     return null;
   }
 
-  bool get canRetry =>
-      isReady &&
-      leaseId != null &&
-      pendingCommandId != null &&
-      pendingPayload != null;
+  bool get canRetry {
+    final sessionId = selectedSessionId;
+    final prompt = sessionId == null
+        ? null
+        : _pendingPromptsBySession[sessionId];
+    return isReady &&
+        prompt != null &&
+        prompt.commandId == pendingCommandId &&
+        promptSendStatus.phase == PromptSendPhase.failed;
+  }
+
   bool get canAbort =>
       isReady &&
       selectedSessionId != null &&
@@ -743,21 +774,18 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
     }
     final drafts = await _database.allDrafts();
-    if (drafts.isNotEmpty) {
-      final saved = drafts.reduce(
+    final hostDrafts = hostId == null
+        ? const <DraftEntry>[]
+        : drafts.where((entry) => entry.hostId == hostId).toList();
+    for (final saved in hostDrafts) {
+      _restorePendingPrompt(saved);
+    }
+    if (hostDrafts.isNotEmpty) {
+      final saved = hostDrafts.reduce(
         (a, b) => a.updatedAt.isAfter(b.updatedAt) ? a : b,
       );
-      // Only adopt the draft's hostId if a host row still exists. Drafts are
-      // intentionally preserved across explicit forget-host so the user can
-      // re-pair without losing their typing, but orphaned drafts must not
-      // resurrect a forgotten host identity.
-      if (hostId != null) {
-        hostId ??= saved.hostId;
-      }
-      if (hostId != null) {
-        selectedSessionId = saved.sessionId;
-        _restoreDraft(saved);
-      }
+      selectedSessionId = saved.sessionId;
+      _restoreDraft(saved);
     } else if (_sessions.isNotEmpty && hostId != null) {
       selectedSessionId = _sessions.keys.first;
     }
@@ -792,6 +820,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     // History requests are connection-epoch bound. Never carry a loading
     // latch or an HMAC page token across reconnects/bridge restarts.
     _historyRequests.clear();
+    _pendingCurrentRequestCommand.clear();
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
       _historySyncQueue.clear();
@@ -980,6 +1009,10 @@ final class ConnectionCoordinator extends ChangeNotifier
     for (final sessionId in _controllers.sessions.toList()) {
       _controllers.drop(sessionId);
     }
+    _pendingPromptsBySession.clear();
+    _pendingCurrentRequestCommand.clear();
+    _promptSendBySession.clear();
+    _lastPromptCommandBySession.clear();
     _attention.clear();
     _attentionWire.clear();
     _unreadCount.clear();
@@ -1331,6 +1364,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       pendingCommandId = null;
       pendingPayload = null;
       pendingState = null;
+      _promptSendBySession.putIfAbsent(sessionId, PromptSendStatus.ready);
       // No saved draft for this host/session pair; clear any stale
       // in-memory attachment list so the next composer edit starts clean.
       _attachmentsBySession.remove(sessionId);
@@ -1339,6 +1373,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _persistDraft();
       }
     } else {
+      _restorePendingPrompt(saved);
       _restoreDraft(saved);
       final stored = await _database.localAttachmentsFor(
         hostId: hostId!,
@@ -1356,82 +1391,374 @@ final class ConnectionCoordinator extends ChangeNotifier
     await _persistDraft();
   }
 
-  /// User-facing send path. A missing lease is recoverable: foreground the
-  /// selected session, wait for the host's authoritative controller event,
-  /// then submit exactly once through the normal durability barrier.
-  Future<void> submitPromptWithRecovery() async {
-    if (!canAttemptSend) return;
-    final sessionId = selectedSessionId!;
+  /// User-facing send path. One explicit tap creates and persists one frozen
+  /// command intent before controller acquisition or any prompt wire write.
+  /// Recovery always resumes that same command id and semantic payload.
+  Future<PromptSendStatus> submitPromptWithRecovery() async {
+    if (!canAttemptSend) {
+      return _failPromptBeforeIntent(
+        composerDisabledReason ?? 'Sending is unavailable right now.',
+      );
+    }
+    final prompt = await _preparePromptIntent();
+    final sessionId = prompt.sessionId;
     _sendRecoveryInFlight = true;
     errorMessage = null;
     _notify();
     try {
-      if (leaseId == null) await _ensureControllerForMutation(sessionId);
+      if (leaseId == null) {
+        prompt.state = 'acquiring_control';
+        _setPromptStatus(
+          sessionId,
+          const PromptSendStatus(phase: PromptSendPhase.acquiringControl),
+        );
+        await _persistSelectedPrompt(prompt);
+        await _ensureControllerForMutation(sessionId);
+      }
       if (selectedSessionId != sessionId) {
-        throw StateError('The selected chat changed before Send completed');
+        throw StateError('The selected chat changed before Send completed.');
       }
-      if (!canSend) {
-        throw StateError(composerDisabledReason ?? 'Send is unavailable');
+      if (leaseId == null) {
+        throw StateError('Could not acquire control of this chat.');
       }
-      await submitPrompt();
+      await _sendPreparedPrompt(prompt);
     } on Object catch (error) {
-      errorMessage = error.toString();
+      await _markPromptFailure(
+        prompt,
+        code: isReady ? 'control_unavailable' : 'disconnected',
+        message: isReady
+            ? _cleanError(error, 'Could not acquire control of this chat.')
+            : 'The bridge disconnected before control was acquired.',
+        action: isReady
+            ? PromptFailureAction.takeControl
+            : PromptFailureAction.reconnect,
+      );
     } finally {
       _sendRecoveryInFlight = false;
       _notify();
     }
+    return _promptSendBySession[sessionId] ?? const PromptSendStatus.ready();
   }
 
-  Future<void> submitPrompt() async {
-    if (!canSend) return;
+  /// Controlled-session entry point retained for tests and non-composer
+  /// callers. Unlike the former implementation it never silently returns.
+  Future<PromptSendStatus> submitPrompt() async {
+    if (!canSend) {
+      return _failPromptBeforeIntent(
+        composerDisabledReason ?? 'Sending is unavailable right now.',
+      );
+    }
+    final prompt = await _preparePromptIntent();
+    await _sendPreparedPrompt(prompt);
+    return _promptSendBySession[prompt.sessionId] ??
+        const PromptSendStatus.ready();
+  }
+
+  Future<_PendingPrompt> _preparePromptIntent() async {
+    final sessionId = selectedSessionId!;
     final commandId = _id();
-    final payload = <String, Object?>{
-      'sessionId': selectedSessionId!,
+    final payload = Map<String, Object?>.unmodifiable(<String, Object?>{
+      'sessionId': sessionId,
       'deliveryMode': deliveryModeWire(_effectiveDeliveryMode),
       'message': draft,
       'attachmentIds': _activeReadyAttachmentIds(),
-    };
-
-    // Durability barrier: this exact semantic payload is committed before send.
-    pendingCommandId = commandId;
-    pendingPayload = Map<String, Object?>.unmodifiable(payload);
-    pendingState = 'created';
+    });
+    final prompt = _PendingPrompt(
+      sessionId: sessionId,
+      commandId: commandId,
+      payload: payload,
+      state: leaseId == null ? 'acquiring_control' : 'created',
+    );
+    _pendingPromptsBySession[sessionId] = prompt;
+    _lastPromptCommandBySession[sessionId] = commandId;
+    _projectSelectedPrompt(prompt);
+    _setPromptStatus(
+      sessionId,
+      PromptSendStatus(
+        phase: leaseId == null
+            ? PromptSendPhase.acquiringControl
+            : PromptSendPhase.submitting,
+      ),
+    );
+    // Durability barrier: command id and exact payload exist on disk before
+    // controller acquisition and before prompt.submit can reach the socket.
     await _persistDraft();
     _notify();
+    return prompt;
+  }
+
+  Future<void> _sendPreparedPrompt(_PendingPrompt prompt) async {
+    if (!_isCurrentPrompt(prompt)) return;
+    if (selectedSessionId != prompt.sessionId || leaseId == null || !isReady) {
+      await _markPromptFailure(
+        prompt,
+        code: !isReady ? 'disconnected' : 'controller_required',
+        message: !isReady
+            ? 'The bridge disconnected before the message was sent.'
+            : 'Could not acquire control of this chat.',
+        action: !isReady
+            ? PromptFailureAction.reconnect
+            : PromptFailureAction.takeControl,
+      );
+      return;
+    }
+    prompt.state = 'submitting';
+    _projectSelectedPrompt(prompt);
+    _setPromptStatus(
+      prompt.sessionId,
+      const PromptSendStatus(phase: PromptSendPhase.submitting),
+    );
+    await _persistSelectedPrompt(prompt);
     try {
       await _sendCommand(
         type: 'prompt.submit',
-        commandId: commandId,
-        payload: payload,
+        commandId: prompt.commandId,
+        payload: Map<String, Object?>.from(prompt.payload),
         requiresLease: true,
       );
-      if (pendingCommandId == commandId) {
-        pendingState = 'sent';
-        await _persistDraft();
+      if (_pendingPromptsBySession[prompt.sessionId]?.commandId ==
+          prompt.commandId) {
+        prompt.state = 'sent';
+        _projectSelectedPrompt(prompt);
+        await _persistSelectedPrompt(prompt);
         _notify();
       }
     } on Object catch (error) {
-      pendingState = 'send_error';
-      errorMessage = error.toString();
-      await _persistDraft();
+      // A response can accept this command while the socket write future is
+      // still unwinding. Never let that stale continuation overwrite a newer
+      // prompt for the same session.
+      if (!_isCurrentPrompt(prompt)) return;
+      // A socket write failure cannot prove whether the bridge durably saw the
+      // command. Preserve the frozen intent and never resend automatically.
+      prompt.state = 'indeterminate';
+      _projectSelectedPrompt(prompt);
+      _setPromptStatus(
+        prompt.sessionId,
+        PromptSendStatus(
+          phase: PromptSendPhase.indeterminate,
+          failure: PromptSendFailure(
+            code: 'completion_uncertain',
+            message:
+                'The connection changed while sending. Check status before '
+                'trying anything again.',
+            action: PromptFailureAction.discardUncertain,
+          ),
+        ),
+      );
+      await _persistSelectedPrompt(prompt);
+      errorMessage = _cleanError(error, 'Connection changed while sending.');
       _notify();
     }
   }
 
-  /// The only path that sends a persisted prompt after a failed/lost attempt.
-  /// It reuses both the command ID and byte-equivalent decoded payload.
-  Future<void> retryPending() async {
-    if (!canRetry) return;
-    pendingState = 'retrying';
-    await _persistDraft();
+  /// Explicit retry of the same persisted command id and byte-equivalent
+  /// payload. Reconnect itself only calls command.current and never invokes
+  /// this method.
+  Future<PromptSendStatus> retryPending() async {
+    final sessionId = selectedSessionId;
+    final prompt = sessionId == null
+        ? null
+        : _pendingPromptsBySession[sessionId];
+    if (prompt == null) {
+      return _failPromptBeforeIntent('There is no message available to retry.');
+    }
+    if (!isReady) {
+      await _markPromptFailure(
+        prompt,
+        code: 'disconnected',
+        message: 'Reconnect to the bridge before retrying.',
+        action: PromptFailureAction.reconnect,
+      );
+      return promptSendStatus;
+    }
+    _sendRecoveryInFlight = true;
+    try {
+      if (leaseId == null) {
+        prompt.state = 'acquiring_control';
+        _setPromptStatus(
+          sessionId!,
+          const PromptSendStatus(phase: PromptSendPhase.acquiringControl),
+        );
+        await _persistSelectedPrompt(prompt);
+        await _ensureControllerForMutation(sessionId);
+      }
+      await _sendPreparedPrompt(prompt);
+    } on Object catch (error) {
+      await _markPromptFailure(
+        prompt,
+        code: isReady ? 'control_unavailable' : 'disconnected',
+        message: isReady
+            ? _cleanError(error, 'Could not acquire control of this chat.')
+            : 'The bridge disconnected before control was acquired.',
+        action: isReady
+            ? PromptFailureAction.takeControl
+            : PromptFailureAction.reconnect,
+      );
+    } finally {
+      _sendRecoveryInFlight = false;
+      _notify();
+    }
+    return promptSendStatus;
+  }
+
+  Future<void> reconnectForPrompt() async {
+    final target = endpoint;
+    if (target == null) return;
+    await connect(target.toString(), force: true);
+  }
+
+  PromptSendStatus _failPromptBeforeIntent(String message) {
+    final sessionId = selectedSessionId;
+    final action = requiresTrustApproval
+        ? PromptFailureAction.approveWorkspace
+        : !isReady
+        ? PromptFailureAction.reconnect
+        : leaseId == null
+        ? PromptFailureAction.takeControl
+        : PromptFailureAction.retry;
+    final status = PromptSendStatus(
+      phase: PromptSendPhase.failed,
+      failure: PromptSendFailure(
+        code: 'send_unavailable',
+        message: message,
+        action: action,
+      ),
+    );
+    if (sessionId != null) _promptSendBySession[sessionId] = status;
     _notify();
-    await _sendCommand(
-      type: 'prompt.submit',
-      commandId: pendingCommandId!,
-      payload: Map<String, Object?>.from(pendingPayload!),
-      requiresLease: true,
+    return status;
+  }
+
+  void _setPromptStatus(String sessionId, PromptSendStatus status) {
+    _promptSendBySession[sessionId] = status;
+    _notify();
+  }
+
+  bool _isCurrentPrompt(_PendingPrompt prompt) =>
+      _pendingPromptsBySession[prompt.sessionId]?.commandId == prompt.commandId;
+
+  void _projectSelectedPrompt(_PendingPrompt prompt) {
+    if (selectedSessionId != prompt.sessionId || !_isCurrentPrompt(prompt)) {
+      return;
+    }
+    pendingCommandId = prompt.commandId;
+    pendingPayload = prompt.payload;
+    pendingState = prompt.state;
+  }
+
+  Future<void> _markPromptFailure(
+    _PendingPrompt prompt, {
+    required String code,
+    required String message,
+    required PromptFailureAction action,
+  }) async {
+    if (!_isCurrentPrompt(prompt)) return;
+    prompt.state = code;
+    _projectSelectedPrompt(prompt);
+    _setPromptStatus(
+      prompt.sessionId,
+      PromptSendStatus(
+        phase: code == 'indeterminate'
+            ? PromptSendPhase.indeterminate
+            : PromptSendPhase.failed,
+        failure: PromptSendFailure(
+          code: code,
+          message: message,
+          action: action,
+        ),
+      ),
+    );
+    await _persistSelectedPrompt(prompt);
+    _notify();
+  }
+
+  Future<void> _persistSelectedPrompt(_PendingPrompt prompt) async {
+    if (_disposed || !_isCurrentPrompt(prompt)) return;
+    if (selectedSessionId == prompt.sessionId) {
+      _projectSelectedPrompt(prompt);
+      await _persistDraft();
+      return;
+    }
+    final currentHost = hostId;
+    if (currentHost == null) return;
+    final saved = await _database.draft(currentHost, prompt.sessionId);
+    if (_disposed || !_isCurrentPrompt(prompt) || saved == null) return;
+    if (saved.pendingCommandId != null &&
+        saved.pendingCommandId != prompt.commandId) {
+      return;
+    }
+    await _database.saveDraft(
+      hostId: currentHost,
+      sessionId: prompt.sessionId,
+      text: saved.draftText,
+      pendingCommandId: prompt.commandId,
+      pendingPayloadJson: jsonEncode(prompt.payload),
+      pendingState: prompt.state,
+      selectedDeliveryMode:
+          deliveryModeFromWire(saved.selectedDeliveryMode) ??
+          DeliveryMode.immediate,
+      updatedAt: _now(),
+      localAttachmentRefsJson: _decodeAttachmentIds(
+        saved.localAttachmentRefsJson,
+      ),
     );
   }
+
+  static List<String> _decodeAttachmentIds(String encoded) {
+    try {
+      final decoded = jsonDecode(encoded);
+      return decoded is List
+          ? decoded.whereType<String>().toList(growable: false)
+          : const <String>[];
+    } on FormatException {
+      return const <String>[];
+    }
+  }
+
+  static String _cleanError(Object error, String fallback) {
+    final text = error.toString().replaceFirst(RegExp(r'^StateError:\s*'), '');
+    return text.trim().isEmpty ? fallback : text;
+  }
+
+  static PromptSendFailure _promptFailureFromBridge(
+    String code,
+    String? fallback,
+  ) => switch (code) {
+    'controller_conflict' => const PromptSendFailure(
+      code: 'controller_conflict',
+      message: 'Another controller still owns this chat.',
+      action: PromptFailureAction.takeControl,
+    ),
+    'controller_required' || 'stale_controller' => PromptSendFailure(
+      code: code,
+      message: 'Control of this chat was lost before the message was accepted.',
+      action: PromptFailureAction.takeControl,
+    ),
+    'workspace_trust_required' || 'workspace_not_allowed' => PromptSendFailure(
+      code: code,
+      message: 'Approve workspace trust before sending this message.',
+      action: PromptFailureAction.approveWorkspace,
+    ),
+    'host_not_ready' ||
+    'host_draining' ||
+    'session_not_found' => PromptSendFailure(
+      code: code,
+      message: 'The selected chat is not available for messages right now.',
+      action: PromptFailureAction.retry,
+    ),
+    'database_unavailable' || 'storage_full' => PromptSendFailure(
+      code: code,
+      message: 'The bridge could not durably accept this message.',
+      action: PromptFailureAction.reconnect,
+    ),
+    _ => PromptSendFailure(
+      code: code,
+      message: fallback?.trim().isNotEmpty == true
+          ? fallback!.trim()
+          : 'The bridge rejected this message.',
+      action: PromptFailureAction.retry,
+    ),
+  };
 
   /// Explicitly abandons local retry tracking for an uncertain prompt and
   /// restarts the Pi session without resending that prompt. The submitted
@@ -1443,6 +1770,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     final submittedText = pendingPayload?['message'];
     if (draft == submittedText || pendingState == 'indeterminate') draft = '';
+    final sessionId = selectedSessionId;
+    if (sessionId != null) {
+      _pendingPromptsBySession.remove(sessionId);
+      _promptSendBySession[sessionId] = const PromptSendStatus.ready();
+    }
     pendingCommandId = null;
     pendingPayload = null;
     pendingState = null;
@@ -1705,6 +2037,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       _locallyDeletedSessionIds.clear();
       _sessionControls.clear();
       _models.clear();
+      _pendingPromptsBySession.clear();
+      _pendingCurrentRequestCommand.clear();
+      _promptSendBySession.clear();
+      _lastPromptCommandBySession.clear();
       _history.clear();
       _historyRequests.clear();
       _historyGateComplete = false;
@@ -2109,6 +2445,37 @@ final class ConnectionCoordinator extends ChangeNotifier
           (payload['message'] ?? payload['text'] ?? payload['title'])
               ?.toString();
     } else if (type == 'session.state' || type.startsWith('turn.')) {
+      final eventSessionId = payload['sessionId'];
+      final eventCommandId = payload['commandId'];
+      if (eventSessionId is String) {
+        final pending = _pendingPromptsBySession[eventSessionId];
+        final expected =
+            pending?.commandId ?? _lastPromptCommandBySession[eventSessionId];
+        final eventMatchesPending =
+            pending == null ||
+            (eventCommandId is String && eventCommandId == pending.commandId);
+        if (type == 'turn.started' &&
+            eventMatchesPending &&
+            (expected == null ||
+                eventCommandId == null ||
+                eventCommandId == expected)) {
+          _promptSendBySession[eventSessionId] = const PromptSendStatus(
+            phase: PromptSendPhase.running,
+          );
+        } else if ((type == 'turn.settled' || type == 'turn.aborted') &&
+            pending == null) {
+          _promptSendBySession[eventSessionId] = const PromptSendStatus.ready();
+        } else if (type == 'turn.indeterminate' && eventMatchesPending) {
+          _promptSendBySession[eventSessionId] = const PromptSendStatus(
+            phase: PromptSendPhase.indeterminate,
+            failure: PromptSendFailure(
+              code: 'completion_uncertain',
+              message: 'Pi stopped before completion could be confirmed.',
+              action: PromptFailureAction.discardUncertain,
+            ),
+          );
+        }
+      }
       final runtimeState =
           type == 'turn.failed' &&
               (payload['errorCode'] == 'provider_interrupted' ||
@@ -2144,10 +2511,12 @@ final class ConnectionCoordinator extends ChangeNotifier
             : null;
         markAttention(sessionId: id, state: state, unreadCount: count);
       }
-    } else if (type == 'command.state' &&
-        payload['commandId'] == pendingCommandId) {
+    } else if (type == 'command.state') {
+      final prompt = _pendingForCommand(payload['commandId']);
       final state = payload['state'];
-      if (state is String) unawaited(_acceptPending(state));
+      if (prompt != null && state is String) {
+        unawaited(_acceptPromptState(prompt, state));
+      }
     }
   }
 
@@ -2494,32 +2863,115 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> message,
     Map<String, Object?> payload,
   ) async {
-    final commandId = message['commandId'];
+    final prompt = _pendingForCommand(message['commandId']);
     final state = payload['state'];
-    if (commandId == pendingCommandId && state is String) {
-      await _acceptPending(state);
+    if (prompt != null && state is String) {
+      await _acceptPromptState(prompt, state);
     }
   }
 
   Future<void> _commandCurrent(Map<String, Object?> payload) async {
-    if (payload['commandId'] == pendingCommandId &&
-        payload['state'] is String) {
-      await _acceptPending(payload['state'] as String);
+    final prompt = _pendingForCommand(payload['commandId']);
+    final state = payload['state'];
+    if (prompt != null && state is String) {
+      await _acceptPromptState(prompt, state);
     }
   }
 
-  Future<void> _acceptPending(String state) async {
-    pendingState = state;
-    if (!_acceptedOrLater.contains(state)) {
-      await _persistDraft();
+  _PendingPrompt? _pendingForCommand(Object? commandId) {
+    if (commandId is! String) return null;
+    for (final prompt in _pendingPromptsBySession.values) {
+      if (prompt.commandId == commandId) return prompt;
+    }
+    if (commandId == pendingCommandId &&
+        selectedSessionId != null &&
+        pendingPayload != null) {
+      final current = _pendingPromptsBySession[selectedSessionId!];
+      if (current != null && current.commandId != commandId) return null;
+      final restored = _PendingPrompt(
+        sessionId: selectedSessionId!,
+        commandId: commandId,
+        payload: Map<String, Object?>.unmodifiable(pendingPayload!),
+        state: pendingState ?? 'unknown',
+      );
+      _pendingPromptsBySession[restored.sessionId] = restored;
+      return restored;
+    }
+    return null;
+  }
+
+  Future<void> _acceptPromptState(_PendingPrompt prompt, String state) async {
+    prompt.state = state;
+    if (state == 'indeterminate') {
+      _projectSelectedPrompt(prompt);
+      _setPromptStatus(
+        prompt.sessionId,
+        const PromptSendStatus(
+          phase: PromptSendPhase.indeterminate,
+          failure: PromptSendFailure(
+            code: 'completion_uncertain',
+            message:
+                'The bridge cannot confirm whether this message completed.',
+            action: PromptFailureAction.discardUncertain,
+          ),
+        ),
+      );
+      await _persistSelectedPrompt(prompt);
       return;
     }
-    final submittedText = pendingPayload?['message'];
-    if (draft == submittedText) draft = '';
-    pendingCommandId = null;
-    pendingPayload = null;
-    pendingState = null;
-    await _persistDraft();
+    if (!_acceptedOrLater.contains(state)) {
+      _projectSelectedPrompt(prompt);
+      _setPromptStatus(
+        prompt.sessionId,
+        const PromptSendStatus(phase: PromptSendPhase.submitting),
+      );
+      await _persistSelectedPrompt(prompt);
+      return;
+    }
+
+    _pendingPromptsBySession.remove(prompt.sessionId);
+    _lastPromptCommandBySession[prompt.sessionId] = prompt.commandId;
+    _setPromptStatus(
+      prompt.sessionId,
+      PromptSendStatus(
+        phase: state == 'running'
+            ? PromptSendPhase.running
+            : PromptSendPhase.accepted,
+      ),
+    );
+    if (selectedSessionId == prompt.sessionId &&
+        pendingCommandId == prompt.commandId) {
+      final submittedText = prompt.payload['message'];
+      if (draft == submittedText) draft = '';
+      pendingCommandId = null;
+      pendingPayload = null;
+      pendingState = null;
+      await _persistDraft();
+    } else {
+      await _clearAcceptedBackgroundPrompt(prompt);
+    }
+  }
+
+  Future<void> _clearAcceptedBackgroundPrompt(_PendingPrompt prompt) async {
+    final currentHost = hostId;
+    if (currentHost == null) return;
+    final saved = await _database.draft(currentHost, prompt.sessionId);
+    if (saved == null || saved.pendingCommandId != prompt.commandId) return;
+    await _database.saveDraft(
+      hostId: currentHost,
+      sessionId: prompt.sessionId,
+      text: saved.draftText == prompt.payload['message'] ? '' : saved.draftText,
+      pendingCommandId: null,
+      pendingPayloadJson: null,
+      pendingState: null,
+      selectedDeliveryMode:
+          deliveryModeFromWire(saved.selectedDeliveryMode) ??
+          DeliveryMode.immediate,
+      updatedAt: _now(),
+      localAttachmentRefsJson: _decodeAttachmentIds(
+        saved.localAttachmentRefsJson,
+      ),
+    );
   }
 
   Future<void> _serverError(
@@ -2528,6 +2980,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   ) async {
     final code = payload['code']?.toString() ?? 'unknown';
     final requestId = message['requestId'];
+    final reconciledCommandId = requestId is String
+        ? _pendingCurrentRequestCommand.remove(requestId)
+        : null;
+    final prompt = _pendingForCommand(
+      message['commandId'] ?? reconciledCommandId,
+    );
     final historyRequest = requestId is String
         ? _historyRequests.remove(requestId)
         : null;
@@ -2612,29 +3070,53 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (code == 'controller_conflict' &&
         _sendRecoveryInFlight &&
         selectedSessionId != null) {
-      // A user-tapped Send is an explicit request to control this chat. Reclaim
-      // a lease left by an older app connection instead of timing out behind
-      // the ordinary acquire conflict.
-      errorMessage = null;
-      unawaited(takeoverController(selectedSessionId!));
+      // Send is the explicit user intent that permits one takeover attempt.
+      // The prompt itself is already frozen, so a successful authoritative
+      // controller event resumes exactly that command once.
+      final sessionId = selectedSessionId!;
+      final controller = _controllers.forSession(sessionId);
+      if (!controller.takeoverPending) {
+        errorMessage = null;
+        try {
+          await takeoverController(sessionId);
+        } on Object catch (error) {
+          final waiter = _controllerWaiters.remove(sessionId);
+          if (waiter != null && !waiter.isCompleted) {
+            waiter.completeError(error);
+          }
+        }
+        return;
+      }
+      final waiter = _controllerWaiters.remove(sessionId);
+      if (waiter != null && !waiter.isCompleted) {
+        waiter.completeError(
+          StateError('Another controller still owns this chat.'),
+        );
+      }
+    }
+    if (code == 'command_not_found' && prompt != null) {
+      // command.current authoritatively proves this frozen command was never
+      // accepted. Preserve the draft and expose an explicit retry; do not
+      // create a replacement command id.
+      await _markPromptFailure(
+        prompt,
+        code: code,
+        message: 'The bridge did not accept this message. You can retry it.',
+        action: PromptFailureAction.retry,
+      );
       return;
     }
-    if (code == 'command_not_found' && pendingCommandId != null) {
-      // The host authoritatively has no durable record for this command. It
-      // cannot execute later, so retaining its local pending marker only
-      // deadlocks the composer. Preserve the draft and let the next explicit
-      // Send create a fresh command id.
-      pendingCommandId = null;
-      pendingPayload = null;
-      pendingState = null;
-      errorMessage = null;
-      await _persistDraft();
-      _notify();
-      return;
-    }
-    if (message['commandId'] == pendingCommandId) {
-      pendingState = code;
-      await _persistDraft();
+    if (prompt != null) {
+      final failure = _promptFailureFromBridge(
+        code,
+        payload['message']?.toString(),
+      );
+      await _markPromptFailure(
+        prompt,
+        code: code,
+        message: failure.message,
+        action: failure.action,
+      );
     }
   }
 
@@ -2673,11 +3155,15 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   Future<void> _reconcilePending() async {
-    if (pendingCommandId == null || !isReady) return;
-    // Deliberately a read only. Never call retryPending from reconnect.
-    await _sendControl('command.current', <String, Object?>{
-      'commandId': pendingCommandId!,
-    });
+    if (!isReady) return;
+    // Deliberately read-only. Reconnect never calls retryPending and therefore
+    // cannot duplicate a prompt whose completion is uncertain.
+    for (final prompt in _pendingPromptsBySession.values.toList()) {
+      final requestId = await _sendControl('command.current', <String, Object?>{
+        'commandId': prompt.commandId,
+      });
+      _pendingCurrentRequestCommand[requestId] = prompt.commandId;
+    }
   }
 
   Future<String> _sendControl(String type, Map<String, Object?> payload) async {
@@ -2753,39 +3239,102 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   Future<void> _persistDraft() async {
-    if (hostId == null || selectedSessionId == null) return;
-    final attachments =
-        _attachmentsBySession[selectedSessionId] ?? const <AttachmentRef>[];
+    final currentHost = hostId;
+    final currentSession = selectedSessionId;
+    if (_disposed || currentHost == null || currentSession == null) return;
+    // Snapshot every field before the first await. A quick session switch must
+    // not combine one chat's draft or pending command with another chat's key.
+    final currentDraft = draft;
+    final currentCommandId = pendingCommandId;
+    final currentPayload = pendingPayload;
+    final currentState = pendingState;
+    final currentDeliveryMode = selectedDeliveryMode;
+    final attachments = List<AttachmentRef>.of(
+      _attachmentsBySession[currentSession] ?? const <AttachmentRef>[],
+    );
     // Persist the in-memory attachment list to its dedicated table. The
     // M13 column on `draft_entries` is a denormalised mirror used only to
     // surface the count in the composer; the table is the source of truth.
     await _database.removeLocalAttachmentsForSession(
-      hostId: hostId!,
-      sessionId: selectedSessionId!,
+      hostId: currentHost,
+      sessionId: currentSession,
     );
+    if (_disposed) return;
     for (var i = 0; i < attachments.length; i++) {
       await _database.upsertLocalAttachment(
-        hostId: hostId!,
-        sessionId: selectedSessionId!,
+        hostId: currentHost,
+        sessionId: currentSession,
         ref: attachments[i],
         orderIndex: i,
       );
+      if (_disposed) return;
     }
     await _database.saveDraft(
-      hostId: hostId!,
-      sessionId: selectedSessionId!,
-      text: draft,
-      pendingCommandId: pendingCommandId,
-      pendingPayloadJson: pendingPayload == null
+      hostId: currentHost,
+      sessionId: currentSession,
+      text: currentDraft,
+      pendingCommandId: currentCommandId,
+      pendingPayloadJson: currentPayload == null
           ? null
-          : jsonEncode(pendingPayload),
-      pendingState: pendingState,
-      selectedDeliveryMode: selectedDeliveryMode,
+          : jsonEncode(currentPayload),
+      pendingState: currentState,
+      selectedDeliveryMode: currentDeliveryMode,
       updatedAt: _now(),
       localAttachmentRefsJson: attachments
           .map((ref) => ref.id)
           .toList(growable: false),
     );
+  }
+
+  void _restorePendingPrompt(DraftEntry saved) {
+    final commandId = saved.pendingCommandId;
+    final encoded = saved.pendingPayloadJson;
+    if (commandId == null || encoded == null) return;
+    try {
+      final decoded = jsonDecode(encoded);
+      final prompt = _PendingPrompt(
+        sessionId: saved.sessionId,
+        commandId: commandId,
+        payload: Map<String, Object?>.unmodifiable(
+          Map<String, Object?>.from(decoded as Map),
+        ),
+        state: saved.pendingState ?? 'unknown',
+      );
+      _pendingPromptsBySession[saved.sessionId] = prompt;
+      _lastPromptCommandBySession[saved.sessionId] = commandId;
+      _promptSendBySession[saved.sessionId] = _statusForRestoredPrompt(prompt);
+    } on Object {
+      // A malformed local payload cannot be resent. Keep the draft text, but
+      // do not hydrate an unsafe command intent.
+    }
+  }
+
+  static PromptSendStatus _statusForRestoredPrompt(_PendingPrompt prompt) {
+    return switch (prompt.state) {
+      'indeterminate' ||
+      'sent' ||
+      'submitting' ||
+      'retrying' => const PromptSendStatus(
+        phase: PromptSendPhase.indeterminate,
+        failure: PromptSendFailure(
+          code: 'completion_uncertain',
+          message: 'Checking whether the bridge accepted this message.',
+          action: PromptFailureAction.discardUncertain,
+        ),
+      ),
+      'acquiring_control' => const PromptSendStatus(
+        phase: PromptSendPhase.failed,
+        failure: PromptSendFailure(
+          code: 'control_unavailable',
+          message: 'Control was not acquired before the app stopped.',
+          action: PromptFailureAction.takeControl,
+        ),
+      ),
+      _ => PromptSendStatus(
+        phase: PromptSendPhase.failed,
+        failure: _promptFailureFromBridge(prompt.state, null),
+      ),
+    };
   }
 
   void _restoreDraft(DraftEntry saved) {
@@ -3136,6 +3685,34 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
     }
     _controllerWaiters.clear();
+    for (final prompt in _pendingPromptsBySession.values) {
+      if (prompt.state == 'submitting' ||
+          prompt.state == 'sent' ||
+          prompt.state == 'retrying') {
+        prompt.state = 'indeterminate';
+        _promptSendBySession[prompt.sessionId] = const PromptSendStatus(
+          phase: PromptSendPhase.indeterminate,
+          failure: PromptSendFailure(
+            code: 'completion_uncertain',
+            message:
+                'The connection changed before delivery could be confirmed.',
+            action: PromptFailureAction.discardUncertain,
+          ),
+        );
+      } else if (prompt.state == 'acquiring_control' ||
+          prompt.state == 'created') {
+        prompt.state = 'disconnected';
+        _promptSendBySession[prompt.sessionId] = const PromptSendStatus(
+          phase: PromptSendPhase.failed,
+          failure: PromptSendFailure(
+            code: 'disconnected',
+            message: 'The bridge disconnected before the message was sent.',
+            action: PromptFailureAction.reconnect,
+          ),
+        );
+      }
+      unawaited(_persistSelectedPrompt(prompt));
+    }
     _ackTimer?.cancel();
     _leaseTimer?.cancel();
     unawaited(_closeSocket());
@@ -3193,10 +3770,29 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   String _id() => _uuid.v4().toLowerCase();
 
+  /// Test seam for exercising progress rendering without a bridge fixture.
+  @visibleForTesting
+  void debugSetHistorySyncState({
+    required int completed,
+    required int total,
+    bool complete = false,
+    String? error,
+  }) {
+    _historySyncCompleted = completed;
+    _historySyncTotal = total;
+    _historyGateComplete = complete;
+    _historyGateError = error;
+    _notify();
+  }
+
+  /// Coalesce mutation bursts into one listener notification while ensuring
+  /// network-only updates do not wait for an unrelated frame or pointer event.
+  /// A microtask runs after the active build/callback stack, and listener
+  /// setState calls schedule the frame that paints the new state.
   void _notify() {
     if (_disposed || _notifyScheduled) return;
     _notifyScheduled = true;
-    WidgetsBinding.instance.addPostFrameCallback((_) {
+    scheduleMicrotask(() {
       _notifyScheduled = false;
       if (!_disposed) notifyListeners();
     });
@@ -3356,12 +3952,18 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (controller.mode == ControllerMode.primary) return;
     controller.beginTakeover();
     _notify();
-    await _sendCommand(
-      type: 'controller.takeover',
-      commandId: _id(),
-      payload: <String, Object?>{'sessionId': sessionId},
-      requiresLease: false,
-    );
+    try {
+      await _sendCommand(
+        type: 'controller.takeover',
+        commandId: _id(),
+        payload: <String, Object?>{'sessionId': sessionId},
+        requiresLease: false,
+      );
+    } on Object {
+      controller.markObserver(observerLeaseId: controller.leaseId);
+      _notify();
+      rethrow;
+    }
   }
 
   /// Replaces the foreground session. The previous full subscription,

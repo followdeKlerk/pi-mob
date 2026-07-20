@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:convert';
+
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -47,7 +50,8 @@ void main() {
     expect(find.text('Saved chat'), findsWidgets);
     expect(find.textContaining('Fixture host'), findsNothing);
     expect(find.byKey(const Key('new-chat-button')), findsOneWidget);
-    expect(find.byKey(const Key('change-chat-folder')), findsOneWidget);
+    expect(find.byKey(const Key('change-chat-folder')), findsNothing);
+    expect(find.text('Choose folder'), findsNothing);
     expect(
       find.byKey(
         const Key('chat-actions-22222222-2222-4222-8222-222222222222'),
@@ -62,6 +66,28 @@ void main() {
   });
 
   _m16Affordances();
+
+  testWidgets('New chat still begins with required workspace selection', (
+    tester,
+  ) async {
+    final fixture = await _readyFixture();
+    try {
+      await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
+      await tester.pump();
+      await tester.tap(find.byKey(const Key('activity-empty-go-sessions')));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byKey(const Key('new-chat-button')));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('workspace-picker-title')), findsOneWidget);
+      expect(find.byKey(const Key('new-chat-agent-picker')), findsNothing);
+      expect(find.byKey(const Key('change-chat-folder')), findsNothing);
+    } finally {
+      fixture.coordinator.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+      await fixture.database.close();
+    }
+  });
 
   testWidgets('empty Chat opens the same saved-chat drawer', (tester) async {
     final fixture = await _fixture();
@@ -121,6 +147,128 @@ final class _Fixture {
     coordinator.dispose();
     await database.close();
   }
+}
+
+Future<_Fixture> _readyFixture() async {
+  final database = AppDatabase.withExecutor(NativeDatabase.memory());
+  const hostId = '11111111-1111-4111-8111-111111111111';
+  await database.upsertHost(
+    HostEntriesCompanion.insert(
+      hostId: hostId,
+      endpoint: 'https://fixture.test',
+      displayName: 'Fixture host',
+      generation: '1',
+      connectionState: 'offline',
+      capabilitiesJson: '[]',
+    ),
+  );
+  final transport = _ReadyTransport();
+  final coordinator = ConnectionCoordinator(
+    transport: transport,
+    database: database,
+  );
+  await coordinator.initialize(autoConnect: false);
+  await coordinator.connect('https://fixture.test');
+  final socket = transport.socket!;
+  socket.server(
+    _response('hello.accepted', {
+      'connectionId': '44444444-4444-4444-8444-444444444444',
+      'hostId': hostId,
+      'hostGeneration': '1',
+      'hostDisplayName': 'Fixture host',
+      'bridgeVersion': 'test',
+      'piVersion': '0.80.6',
+      'serverTime': '2026-07-20T00:00:00.000Z',
+      'capabilities': ['streams.v1', 'commands.v1', 'controller_leases.v1'],
+      'limits': {
+        'maxJsonBytes': 1048576,
+        'maxAttachmentBytes': 10485760,
+        'maxAttachmentsPerPrompt': 4,
+        'maxPromptAttachmentBytes': 26214400,
+        'maxQueuedFollowUps': 10,
+        'maxSessionPageSize': 100,
+        'maxBackgroundSessionSubscriptions': 5,
+      },
+    }),
+  );
+  await _eventually(
+    () => socket.sent.any((message) => message['type'] == 'subscription.set'),
+  );
+  socket.server(
+    _response('subscription.accepted', {
+      'streams': [
+        {'streamId': 'host:$hostId', 'mode': 'current'},
+      ],
+    }),
+  );
+  socket.server(
+    _response('stream.sync.complete', {
+      'streamId': 'host:$hostId',
+      'currentCursor': '0',
+      'mode': 'current',
+    }, requestId: null),
+  );
+  await _eventually(
+    () => coordinator.isReady && coordinator.historyGateComplete,
+  );
+  return _Fixture(database, coordinator);
+}
+
+Future<void> _eventually(bool Function() condition) async {
+  for (var attempt = 0; attempt < 1000; attempt++) {
+    if (condition()) return;
+    await Future<void>.microtask(() {});
+  }
+  throw TestFailure('Condition was not met');
+}
+
+Map<String, Object?> _response(
+  String type,
+  Map<String, Object?> payload, {
+  String? requestId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+}) => <String, Object?>{
+  'protocol': const {'major': 1, 'minor': 0},
+  'messageId': 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb',
+  'requestId': ?requestId,
+  'type': type,
+  'sentAt': '2026-07-20T00:00:00.000Z',
+  'payload': payload,
+};
+
+final class _ReadyTransport implements BridgeTransport {
+  _ReadySocket? socket;
+
+  @override
+  Future<EndpointProbe> probe(Uri endpoint) async => const EndpointProbe(
+    statusCode: 200,
+    ready: true,
+    body: {'status': 'ready'},
+  );
+
+  @override
+  Future<BridgeSocket> connect(Uri endpoint) async {
+    return socket = _ReadySocket();
+  }
+}
+
+final class _ReadySocket implements BridgeSocket {
+  final StreamController<String> _messages = StreamController<String>();
+  final List<Map<String, Object?>> sent = [];
+
+  @override
+  Stream<String> get messages => _messages.stream;
+
+  @override
+  Future<void> send(Map<String, Object?> message) async {
+    sent.add(Map<String, Object?>.from(message));
+  }
+
+  void server(Map<String, Object?> message) {
+    _messages.add(jsonEncode(message));
+  }
+
+  @override
+  Future<void> close([int? code, String? reason]) => _messages.close();
 }
 
 final class _OfflineTransport implements BridgeTransport {

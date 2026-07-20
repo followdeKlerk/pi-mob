@@ -167,7 +167,8 @@ On mobile, saved sessions live in a leading hamburger drawer on the Chat
 screen. Rows read like saved conversations: the session title is primary,
 folder and runtime state are secondary, and the already-known host name is
 not repeated. Each row provides rename and confirmation-protected delete
-actions. The drawer also provides New chat and folder selection.
+actions. The drawer also provides New chat, whose first required step is
+folder selection before trust review, agent selection, and session creation.
 
 Default sort:
 
