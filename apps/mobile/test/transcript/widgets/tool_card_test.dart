@@ -143,7 +143,7 @@ void main() {
     });
   }
 
-  testWidgets('truncation banner surfaces retained, total, and digest values', (
+  testWidgets('truncation details stay collapsed inside the tool card', (
     tester,
   ) async {
     const truncation = ToolOutputTruncation(
@@ -164,7 +164,17 @@ void main() {
         ),
       ),
     );
+
     expect(find.byKey(const Key('tool-truncation-banner')), findsOneWidget);
+    expect(find.text('Output truncated'), findsOneWidget);
+    expect(find.byKey(const Key('tool-truncation-details')), findsNothing);
+    expect(find.textContaining('5.0 KB'), findsNothing);
+    expect(find.textContaining('SHA-256 abc123'), findsNothing);
+
+    await tester.tap(find.text('read'));
+    await tester.pump();
+
+    expect(find.byKey(const Key('tool-truncation-details')), findsOneWidget);
     expect(find.textContaining('5.0 KB'), findsOneWidget);
     expect(find.textContaining('20.0 KB'), findsOneWidget);
     expect(find.textContaining('retained'), findsOneWidget);

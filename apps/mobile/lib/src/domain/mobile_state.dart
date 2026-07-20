@@ -167,22 +167,6 @@ DeliveryMode? deliveryModeFromWire(Object? value) {
   }
 }
 
-final class ToolOutputNotice {
-  const ToolOutputNotice({
-    required this.toolCallId,
-    required this.retainedBytes,
-    required this.totalBytes,
-    required this.isTruncated,
-    this.digest,
-  });
-
-  final String toolCallId;
-  final int retainedBytes;
-  final int totalBytes;
-  final bool isTruncated;
-  final String? digest;
-}
-
 String sessionStateLabel(String state) => switch (state) {
   'crashed' => 'Pi stopped unexpectedly',
   'crash_loop' => 'Repeated crashes',

@@ -11,9 +11,9 @@
 ///   * A compact header with the canonical tool label, a status icon, and
 ///     a redundant status text label (icon and text are both visible so the
 ///     affordance never depends on colour alone).
-///   * An optional truncation banner when the host dropped bytes.
-///   * An expandable region for the arguments, the raw result, and
-///     tool-specific highlights.
+///   * An optional compact truncation badge when the host dropped bytes.
+///   * An expandable region for truncation details, arguments, the raw result,
+///     and tool-specific highlights.
 ///
 /// Widgets are immutable from the outside: the only state we keep is
 /// `expanded`, which the user toggles by tapping the header.
@@ -55,13 +55,10 @@ class ToolCard extends StatefulWidget {
 }
 
 class _ToolCardState extends State<ToolCard> {
+  // Every tool starts collapsed so execution details never compete with the
+  // surrounding assistant conversation. Once the user expands a card, normal
+  // data refreshes preserve that explicit choice.
   bool _expanded = false;
-
-  @override
-  void initState() {
-    super.initState();
-    _expanded = widget.data.toolName == 'Agent';
-  }
 
   ToolCallViewData get _data => widget.data;
   TranscriptToolStatus get _status => _data.status;
@@ -174,6 +171,10 @@ class _ToolCardState extends State<ToolCard> {
             thickness: 1,
             color: _colors.outlineVariant,
           ),
+          if (_data.truncation case final truncation?) ...[
+            _truncationDetails(truncation),
+            const SizedBox(height: PiSpacing.sm),
+          ],
           _argsSection(),
           const SizedBox(height: 8),
           _resultSection(),
@@ -617,14 +618,31 @@ class _ToolCardState extends State<ToolCard> {
         const SizedBox(width: 8),
         Expanded(
           child: Text(
-            'Truncated: ${t.summaryLabel}'
-            '${t.digest == null ? '' : ' · SHA-256 ${t.digest}'}',
+            'Output truncated',
             style: _text.bodySmall?.copyWith(
               color: _colors.onTertiaryContainer,
+              fontWeight: FontWeight.w600,
             ),
           ),
         ),
       ],
+    ),
+  );
+
+  Widget _truncationDetails(ToolOutputTruncation truncation) => _section(
+    'Truncation details',
+    Container(
+      key: const Key('tool-truncation-details'),
+      padding: const EdgeInsets.all(PiSpacing.sm),
+      decoration: BoxDecoration(
+        color: _colors.tertiaryContainer,
+        borderRadius: BorderRadius.circular(PiRadius.sm),
+      ),
+      child: Text(
+        '${truncation.summaryLabel}'
+        '${truncation.digest == null ? '' : '\nSHA-256 ${truncation.digest}'}',
+        style: _text.bodySmall?.copyWith(color: _colors.onTertiaryContainer),
+      ),
     ),
   );
 

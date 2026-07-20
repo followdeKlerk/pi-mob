@@ -147,9 +147,39 @@ void main() {
       hostId: hostId,
       streamId: 'session:$sessionId',
       cursor: '1',
+      type: 'turn.started',
+      payloadJson:
+          '{"sessionId":"$sessionId","turnId":"turn-1","message":"Inspect output"}',
+      occurredAt: DateTime.utc(2026, 7, 13),
+    );
+    await database.insertEvent(
+      eventId: '66666666-6666-4666-8666-666666666666',
+      hostId: hostId,
+      streamId: 'session:$sessionId',
+      cursor: '2',
+      type: 'tool.started',
+      payloadJson:
+          '{"sessionId":"$sessionId","turnId":"turn-1","toolCallId":"55555555-5555-4555-8555-555555555555","toolName":"read","arguments":{"path":"large.log"}}',
+      occurredAt: DateTime.utc(2026, 7, 13),
+    );
+    await database.insertEvent(
+      eventId: '77777777-7777-4777-8777-777777777777',
+      hostId: hostId,
+      streamId: 'session:$sessionId',
+      cursor: '3',
       type: 'tool.output',
       payloadJson:
-          '{"sessionId":"$sessionId","toolCallId":"55555555-5555-4555-8555-555555555555","retainedBytes":5242880,"totalBytes":6291456,"isTruncated":true,"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+          '{"sessionId":"$sessionId","turnId":"turn-1","toolCallId":"55555555-5555-4555-8555-555555555555","output":"retained output","retainedBytes":5242880,"totalBytes":6291456,"isTruncated":true,"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
+      occurredAt: DateTime.utc(2026, 7, 13),
+    );
+    await database.insertEvent(
+      eventId: '88888888-8888-4888-8888-888888888888',
+      hostId: hostId,
+      streamId: 'session:$sessionId',
+      cursor: '4',
+      type: 'tool.completed',
+      payloadJson:
+          '{"sessionId":"$sessionId","turnId":"turn-1","toolCallId":"55555555-5555-4555-8555-555555555555","toolName":"read","result":{"content":"retained output","byteCount":5242880},"retainedBytes":5242880,"totalBytes":6291456,"isTruncated":true,"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
       occurredAt: DateTime.utc(2026, 7, 13),
     );
     final coordinator = ConnectionCoordinator(
@@ -169,19 +199,29 @@ void main() {
     await tester.tap(find.byKey(const Key('close-chat-drawer')));
     await tester.pumpAndSettle();
 
-    // Chat hosts the indeterminate warning, transcript truncation chip, and
-    // persistent composer.
+    // Chat hosts the indeterminate warning and one collapsed truncation badge
+    // inside the originating tool card, never a standalone timeline notice.
     expect(find.byKey(const Key('indeterminate-warning')), findsOneWidget);
     expect(
       find.textContaining('will not run again automatically'),
       findsOneWidget,
     );
-    expect(find.text('Tool output truncated'), findsOneWidget);
+    expect(find.text('Tool output truncated'), findsNothing);
+    expect(find.text('Output truncated'), findsOneWidget);
     expect(
-      find.textContaining('5242880 of 6291456 bytes retained'),
-      findsOneWidget,
+      find.byKey(const Key('tool-output-55555555-5555-4555-8555-555555555555')),
+      findsNothing,
     );
+    expect(find.byKey(const Key('tool-truncation-details')), findsNothing);
+    expect(find.textContaining('SHA-256 cccc'), findsNothing);
+
+    await tester.tap(find.text('read'));
+    await tester.pump();
+    expect(find.byKey(const Key('tool-truncation-details')), findsOneWidget);
+    expect(find.textContaining('5.0 MB'), findsOneWidget);
+    expect(find.textContaining('6.0 MB'), findsOneWidget);
     expect(find.textContaining('SHA-256 cccc'), findsOneWidget);
+    expect(find.text('retained output'), findsOneWidget);
 
     coordinator.dispose();
     await database.close();

@@ -5,9 +5,10 @@ import '../../transcript/widgets/transcript_view.dart';
 import '../theme/pi_theme.dart';
 import 'motion_primitives.dart';
 
-/// Transcript surface as composed on the Activity destination. Keeps the
-/// stream-keyed `TranscriptEventView` that the existing M10–M15 flows and
-/// tests already use, plus the durable `tool.output` truncation chips.
+/// Transcript surface as composed on the Activity destination. The
+/// stream-keyed `TranscriptEventView` is the sole presentation path for
+/// conversational and tool activity, including truncation metadata attached
+/// to its originating tool card.
 class TranscriptPanel extends StatelessWidget {
   const TranscriptPanel({required this.coordinator, super.key});
 
@@ -34,9 +35,6 @@ class TranscriptPanel extends StatelessWidget {
       'compacting',
       'finishing',
     }.contains(runtime);
-    final truncated = coordinator.toolOutputNotices.where(
-      (item) => item.isTruncated,
-    );
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -79,17 +77,6 @@ class TranscriptPanel extends StatelessWidget {
               ],
             ),
           ),
-        if (truncated.isNotEmpty)
-          for (final notice in truncated)
-            ListTile(
-              key: Key('tool-output-${notice.toolCallId}'),
-              leading: const Icon(Icons.content_cut),
-              title: const Text('Tool output truncated'),
-              subtitle: Text(
-                '${notice.retainedBytes} of ${notice.totalBytes} bytes retained'
-                '${notice.digest == null ? '' : '\nSHA-256 ${notice.digest}'}',
-              ),
-            ),
         Expanded(
           child: TranscriptEventView(
             key: ValueKey(streamId),

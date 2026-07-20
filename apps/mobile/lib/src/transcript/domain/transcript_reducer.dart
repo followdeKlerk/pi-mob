@@ -685,11 +685,15 @@ class TranscriptReducer {
   ) {
     final parsed = _parser.parseToolStarted(event.payload);
     final builders = Map<String, _ToolBuilder>.of(state.toolBuilders);
+    final pending = builders[parsed.toolCallId];
     builders[parsed.toolCallId] = _ToolBuilder(
       assistantStepId: parsed.assistantStepId,
       toolName: parsed.toolName,
       status: TranscriptToolStatus.running,
       arguments: Map<String, Object?>.of(parsed.arguments),
+      outputBuffer: pending?.outputBuffer ?? '',
+      result: pending?.result,
+      truncation: pending?.truncation,
       startedAt: parsed.startedAt ?? event.occurredAt,
     );
     final viewData = builders[parsed.toolCallId]!.toViewData();
@@ -720,6 +724,9 @@ class TranscriptReducer {
     final parsed = _parser.parseToolOutput(event.payload);
     final builders = Map<String, _ToolBuilder>.of(state.toolBuilders);
     final existing = builders[parsed.toolCallId];
+    final pendingOnly =
+        existing == null ||
+        (existing.startedAt == null && existing.finishedAt == null);
     final step = parsed.assistantStepId.isNotEmpty
         ? parsed.assistantStepId
         : (existing?.assistantStepId ?? '');
@@ -731,7 +738,7 @@ class TranscriptReducer {
         assistantStepId: step,
         toolName: toolName,
         status: TranscriptToolStatus.running,
-        outputBuffer: parsed.outputDelta ?? '',
+        outputBuffer: _capString(parsed.outputDelta ?? '', _kToolOutputByteCap),
         result: parsed.result,
         truncation: parsed.truncation,
       );
@@ -750,6 +757,12 @@ class TranscriptReducer {
         finishedAt: existing.finishedAt,
       );
     }
+    final nextState = state._withBuilders(toolBuilders: builders);
+    // A metadata-only output can arrive from a retained history boundary
+    // before its `tool.started` event. Keep it pending by call ID rather than
+    // manufacturing an anonymous timeline card. The start/terminal event will
+    // attach the accumulated output and truncation to the real tool card.
+    if (pendingOnly) return nextState;
     final viewData = builders[parsed.toolCallId]!.toViewData();
     final fixedView = ToolCallViewData(
       toolCallId: parsed.toolCallId,
@@ -762,7 +775,6 @@ class TranscriptReducer {
       startedAt: viewData.startedAt,
       finishedAt: viewData.finishedAt,
     );
-    final nextState = state._withBuilders(toolBuilders: builders);
     return _upsertToolItem(
       nextState,
       assistantStepId: step,
@@ -1063,6 +1075,36 @@ class TranscriptReducer {
     required String itemId,
     required ToolCallViewData viewData,
   }) {
+    final item = ToolItem(
+      itemId: itemId,
+      assistantStepId: assistantStepId,
+      viewData: viewData,
+    );
+    // Live normalized tool events can omit assistantStepId. Once a call has
+    // been placed, update that stable item in its owning turn rather than
+    // resolving an empty step to whichever turn happens to be newest.
+    for (final candidate in state.document.turns.reversed) {
+      if (candidate is! AssistantTurn) continue;
+      final existingIndex = candidate.items.indexWhere(
+        (existing) => existing is ToolItem && existing.itemId == itemId,
+      );
+      if (existingIndex < 0) continue;
+      final existingTool = candidate.items[existingIndex] as ToolItem;
+      final replacement = assistantStepId.isEmpty
+          ? ToolItem(
+              itemId: itemId,
+              assistantStepId: existingTool.assistantStepId,
+              viewData: viewData,
+            )
+          : item;
+      return state.copyWith(
+        document: state.document.replaceTurn(
+          candidate.copyWith(
+            items: _replaceOrAppendItem(candidate.items, replacement),
+          ),
+        ),
+      );
+    }
     final turnId = _resolveTurnForStep(state, assistantStepId);
     if (turnId == null) {
       return _recordDiagnostic(
@@ -1082,11 +1124,6 @@ class TranscriptReducer {
         detail: 'Tool item arrived before its assistant turn',
       );
     }
-    final item = ToolItem(
-      itemId: itemId,
-      assistantStepId: assistantStepId,
-      viewData: viewData,
-    );
     return state.copyWith(
       document: state.document.replaceTurn(
         turn.copyWith(items: _replaceOrAppendItem(turn.items, item)),

@@ -138,7 +138,6 @@ final class ConnectionCoordinator extends ChangeNotifier
   Completer<void>? _pairingCompleter;
   final List<WorkspaceEntry> _workspaces = [];
   final List<String> _rawEvents = [];
-  final List<ToolOutputNotice> _toolOutputNotices = [];
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
   String? _deferredAutoSelectSessionId;
@@ -483,8 +482,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       : (_sessionControls[selectedSessionId!] ??
             SessionControlState.empty(selectedSessionId!));
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
-  List<ToolOutputNotice> get toolOutputNotices =>
-      List.unmodifiable(_toolOutputNotices);
   Map<String, StreamViewState> get streams => Map.unmodifiable(_streams);
 
   SessionHistoryState historyFor(String sessionId) =>
@@ -991,7 +988,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     _workspaceSearchEpoch += 1;
     _workspaceTrustRequiredFor = null;
     _rawEvents.clear();
-    _toolOutputNotices.clear();
     _forceSnapshot.clear();
     _syncPending.clear();
     _deferredAutoSelectSessionId = null;
@@ -1716,7 +1712,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       _historySyncQueue.clear();
       _historySyncLocalRevisions.clear();
       _rawEvents.clear();
-      _toolOutputNotices.clear();
       _forceSnapshot.add('host:$newHostId');
     } else {
       await _loadCachedStreams(newHostId);
@@ -1957,26 +1952,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     } else if (type == 'host.draining') {
       phase = ConnectionPhase.hostDraining;
       errorMessage = 'Host is draining';
-    } else if (type == 'tool.output' ||
-        type == 'tool.completed' ||
-        type == 'tool.failed') {
-      final retained = payload['retainedBytes'];
-      final total = payload['totalBytes'];
-      final truncated = payload['isTruncated'];
-      if (retained is int && total is int && truncated is bool) {
-        _toolOutputNotices.removeWhere(
-          (notice) => notice.toolCallId == payload['toolCallId'],
-        );
-        _toolOutputNotices.add(
-          ToolOutputNotice(
-            toolCallId: payload['toolCallId']?.toString() ?? 'unknown',
-            retainedBytes: retained,
-            totalBytes: total,
-            isTruncated: truncated,
-            digest: payload['digest'] as String?,
-          ),
-        );
-      }
     } else if (type == 'model.state' ||
         type == 'context.state' ||
         type == 'retry.state' ||

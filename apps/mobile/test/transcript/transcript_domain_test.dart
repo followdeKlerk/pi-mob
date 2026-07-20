@@ -96,6 +96,188 @@ void main() {
     },
   );
 
+  test(
+    'repeated truncation metadata aggregates on one originating tool item',
+    () {
+      final events = <StreamEventState>[
+        event(1, 'turn.started', {
+          'turnId': 'turn-1',
+          'message': 'Read the large file',
+        }),
+        event(2, 'tool.started', {
+          'toolCallId': 'read-1',
+          'toolName': 'read',
+          'arguments': {'path': 'large.log'},
+        }),
+        event(3, 'tool.output', {
+          'toolCallId': 'read-1',
+          'output': 'first chunk',
+          'retainedBytes': 100,
+          'totalBytes': 200,
+          'isTruncated': true,
+          'digest': 'first',
+        }),
+        event(4, 'tool.output', {
+          'toolCallId': 'read-1',
+          'output': 'second chunk',
+          'retainedBytes': 150,
+          'totalBytes': 300,
+          'isTruncated': true,
+          'digest': 'latest',
+        }),
+        event(5, 'tool.completed', {
+          'toolCallId': 'read-1',
+          'toolName': 'read',
+          'result': {'content': 'retained output', 'byteCount': 150},
+        }),
+      ];
+
+      const reducer = TranscriptReducer();
+      var state = TranscriptReducerState.empty('session:s');
+      for (final item in events) {
+        state = reducer.apply(state: state, event: item);
+      }
+
+      final turn = state.document.turns.whereType<AssistantTurn>().single;
+      final tools = turn.items.whereType<ToolItem>().toList();
+      expect(tools, hasLength(1));
+      expect(tools.single.itemId, 'read-1');
+      expect(tools.single.viewData.status, TranscriptToolStatus.completed);
+      expect(tools.single.viewData.truncation?.retainedBytes, 150);
+      expect(tools.single.viewData.truncation?.totalBytes, 300);
+      expect(tools.single.viewData.truncation?.digest, 'latest');
+      expect(tools.single.viewData.result?['content'], 'retained output');
+    },
+  );
+
+  test('interleaved truncations remain associated by tool call id', () {
+    final events = <StreamEventState>[
+      event(1, 'turn.started', {'message': 'Run both'}),
+      event(2, 'tool.started', {
+        'toolCallId': 'read-1',
+        'toolName': 'read',
+        'arguments': {'path': 'a'},
+      }),
+      event(3, 'tool.started', {
+        'toolCallId': 'bash-1',
+        'toolName': 'bash',
+        'arguments': {'command': 'echo b'},
+      }),
+      event(4, 'tool.output', {
+        'toolCallId': 'read-1',
+        'retainedBytes': 10,
+        'totalBytes': 20,
+        'isTruncated': true,
+        'digest': 'read-digest',
+      }),
+      event(5, 'tool.output', {
+        'toolCallId': 'bash-1',
+        'retainedBytes': 30,
+        'totalBytes': 40,
+        'isTruncated': true,
+        'digest': 'bash-digest',
+      }),
+    ];
+
+    const reducer = TranscriptReducer();
+    var state = TranscriptReducerState.empty('session:s');
+    for (final item in events) {
+      state = reducer.apply(state: state, event: item);
+    }
+
+    final tools = state.document.turns
+        .whereType<AssistantTurn>()
+        .single
+        .items
+        .whereType<ToolItem>()
+        .toList();
+    expect(tools, hasLength(2));
+    final byId = {for (final tool in tools) tool.itemId: tool.viewData};
+    expect(byId['read-1']?.truncation?.totalBytes, 20);
+    expect(byId['read-1']?.truncation?.digest, 'read-digest');
+    expect(byId['bash-1']?.truncation?.totalBytes, 40);
+    expect(byId['bash-1']?.truncation?.digest, 'bash-digest');
+  });
+
+  test('metadata-only output waits for its originating tool start', () {
+    const reducer = TranscriptReducer();
+    var state = TranscriptReducerState.empty('session:s');
+    state = reducer.apply(
+      state: state,
+      event: event(1, 'turn.started', {
+        'turnId': 'turn-1',
+        'message': 'Inspect output',
+      }),
+    );
+    state = reducer.apply(
+      state: state,
+      event: event(2, 'tool.output', {
+        'toolCallId': 'read-1',
+        'retainedBytes': 100,
+        'totalBytes': 200,
+        'isTruncated': true,
+      }),
+    );
+
+    var turn = state.document.turns.whereType<AssistantTurn>().single;
+    expect(turn.items.whereType<ToolItem>(), isEmpty);
+    expect(state.document.diagnostics, isEmpty);
+
+    state = reducer.apply(
+      state: state,
+      event: event(3, 'tool.started', {
+        'toolCallId': 'read-1',
+        'toolName': 'read',
+        'arguments': {'path': 'large.log'},
+      }),
+    );
+
+    turn = state.document.turns.whereType<AssistantTurn>().single;
+    final tool = turn.items.whereType<ToolItem>().single;
+    expect(tool.itemId, 'read-1');
+    expect(tool.viewData.truncation?.retainedBytes, 100);
+    expect(tool.viewData.truncation?.totalBytes, 200);
+  });
+
+  test('late tool metadata updates its original turn', () {
+    final events = <StreamEventState>[
+      event(1, 'turn.started', {'turnId': 'turn-1', 'message': 'First'}),
+      event(2, 'tool.started', {
+        'toolCallId': 'read-1',
+        'toolName': 'read',
+        'arguments': {'path': 'large.log'},
+      }),
+      event(3, 'turn.settled', {'turnId': 'turn-1'}),
+      event(4, 'turn.started', {'turnId': 'turn-2', 'message': 'Second'}),
+      event(5, 'tool.output', {
+        'toolCallId': 'read-1',
+        'retainedBytes': 100,
+        'totalBytes': 200,
+        'isTruncated': true,
+      }),
+      event(6, 'tool.completed', {
+        'toolCallId': 'read-1',
+        'toolName': 'read',
+        'result': {'content': 'late result', 'byteCount': 100},
+      }),
+    ];
+
+    const reducer = TranscriptReducer();
+    var state = TranscriptReducerState.empty('session:s');
+    for (final item in events) {
+      state = reducer.apply(state: state, event: item);
+    }
+
+    final turns = state.document.turns.whereType<AssistantTurn>().toList();
+    final firstTools = turns[0].items.whereType<ToolItem>().toList();
+    final secondTools = turns[1].items.whereType<ToolItem>().toList();
+    expect(firstTools, hasLength(1));
+    expect(firstTools.single.itemId, 'read-1');
+    expect(firstTools.single.viewData.truncation?.totalBytes, 200);
+    expect(firstTools.single.viewData.status, TranscriptToolStatus.completed);
+    expect(secondTools, isEmpty);
+  });
+
   test('reused Pi content block ids remain isolated between turns', () {
     final events = <StreamEventState>[
       event(1, 'turn.started', {'turnId': 'turn-1', 'message': 'First'}),

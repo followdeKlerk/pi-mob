@@ -720,11 +720,18 @@ void main() {
           },
         ),
       );
-      await eventually(() => coordinator.toolOutputNotices.isNotEmpty);
+      await eventually(
+        () => coordinator
+            .transcriptEvents(sessionId)
+            .any((item) => item.type == 'tool.output'),
+      );
       expect(coordinator.sessions.single.runtimeState, 'indeterminate');
       expect(coordinator.pendingState, 'indeterminate');
       expect(coordinator.draft, 'Do not repeat');
-      expect(coordinator.toolOutputNotices.single.totalBytes, 6291456);
+      final truncationEvent = coordinator
+          .transcriptEvents(sessionId)
+          .singleWhere((item) => item.type == 'tool.output');
+      expect(truncationEvent.payload['totalBytes'], 6291456);
       expect(coordinator.canRetrySession, isTrue);
       await coordinator.retrySession();
       expect(

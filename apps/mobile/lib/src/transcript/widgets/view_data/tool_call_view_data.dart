@@ -47,9 +47,9 @@ class BuiltInToolName {
   static bool isBuiltIn(String name) => all.contains(name);
 }
 
-/// Truncation notice attached to a tool result when the host has dropped
-/// part of the output. The mobile widget surfaces the notice prominently so
-/// the user knows the answer is partial and can request the full payload.
+/// Truncation metadata attached to a tool result when the host has dropped
+/// part of the output. The mobile widget keeps byte counts and the optional
+/// digest collapsed inside the originating tool card until requested.
 class ToolOutputTruncation {
   const ToolOutputTruncation({
     required this.retainedBytes,
@@ -151,8 +151,8 @@ class ToolCallViewData {
   /// [status] is [TranscriptToolStatus.error] or [TranscriptToolStatus.policyDenied].
   final String? errorMessage;
 
-  /// Optional truncation notice. When present, the card renders a warning
-  /// badge and a "View full output" affordance.
+  /// Optional truncation metadata. When present, the card renders a compact
+  /// badge and reveals retained/original byte counts only when expanded.
   final ToolOutputTruncation? truncation;
 
   /// When the call started. Optional so older journals without timestamps
