@@ -159,7 +159,7 @@ void main() {
         ),
       ),
     );
-    expect(find.bySemanticsLabel('Thinking complete'), findsOneWidget);
+    expect(find.bySemanticsLabel(RegExp(r'Thinking complete')), findsOneWidget);
     handle.dispose();
   });
 }

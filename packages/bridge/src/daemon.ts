@@ -547,7 +547,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       ? state.piSessionPath
       : null;
     if (cwd === options.workspace && !externalSessionPath) return rpc;
-    const client = new SupervisedRpcClient({ 
+    const client = new SupervisedRpcClient({
       processId: sessionId,
       beforeSpawn: () => {
         const trust = bootstrap.handler.resolveTrust(

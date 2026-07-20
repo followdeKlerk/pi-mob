@@ -49,7 +49,8 @@ class _ModelPickerBodyState extends State<_ModelPickerBody> {
     final coordinator = widget.coordinator;
     final controls = coordinator.selectedControls;
     final runtime = coordinator.selectedRuntimeState;
-    final mutable = runtime == null || runtime == 'idle' || runtime == 'stopped';
+    final mutable =
+        runtime == null || runtime == 'idle' || runtime == 'stopped';
     final models = coordinator.configuredModels
         .where((model) => model.available)
         .map(
@@ -81,9 +82,9 @@ class _ModelPickerBodyState extends State<_ModelPickerBody> {
           children: [
             Text(
               'Model',
-              style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+              style: Theme.of(
+                context,
+              ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: PiSpacing.sm),
             Text(

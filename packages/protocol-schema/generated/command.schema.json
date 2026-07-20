@@ -647,6 +647,10 @@
         "payload": {
           "additionalProperties": true,
           "properties": {
+            "modelId": {
+              "minLength": 1,
+              "type": "string"
+            },
             "modelIntent": {
               "type": "string"
             },
@@ -664,6 +668,10 @@
                   "type": "string"
                 }
               ]
+            },
+            "provider": {
+              "minLength": 1,
+              "type": "string"
             },
             "workspaceId": {
               "$id": "pi-mob/protocol/uuid",
@@ -1974,6 +1982,10 @@
           "additionalProperties": true,
           "properties": {
             "modelId": {
+              "minLength": 1,
+              "type": "string"
+            },
+            "provider": {
               "minLength": 1,
               "type": "string"
             },

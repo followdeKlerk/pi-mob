@@ -105,7 +105,7 @@ void main() {
         ),
       ),
     );
-    expect(find.text('Unknown tool: mystery'), findsOneWidget);
+    expect(find.text('mystery'), findsOneWidget);
   });
 
   for (final status in TranscriptToolStatus.values) {

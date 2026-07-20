@@ -134,6 +134,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   int _historySyncCompleted = 0;
   bool _historyGateComplete = false;
   String? _historyGateError;
+  Completer<void>? _pairingCompleter;
   final List<WorkspaceEntry> _workspaces = [];
   final List<String> _rawEvents = [];
   final List<ToolOutputNotice> _toolOutputNotices = [];
@@ -483,8 +484,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   int historyEventCount(String sessionId) => historyFor(sessionId).items.length;
 
   List<StreamEventState> transcriptEvents(String sessionId) {
-    final history =
-        _history[sessionId]?.items ?? const <StreamEventState>[];
+    final history = _history[sessionId]?.items ?? const <StreamEventState>[];
     final live =
         _streams['session:$sessionId']?.events ?? const <StreamEventState>[];
     final cached = _transcriptEventsCache[sessionId];
@@ -500,26 +500,22 @@ final class ConnectionCoordinator extends ChangeNotifier
     for (final event in live) {
       byId[event.eventId] = event;
     }
-    final result =
-        byId.values
-            .where((event) {
-              final family = event.type.split('.').first;
-              if (!const <String>{
-                'turn',
-                'assistant',
-                'reasoning',
-                'tool',
-              }.contains(family)) {
-                return false;
-              }
-              // Reasoning and tool lifecycle records are part of the durable
-              // conversation. Keep imported and locally-created activity so
-              // session switches, reconnects, and app restarts reconstruct
-              // the same transcript instead of silently dropping work.
-              return true;
-            })
-            .toList()
-          ..sort((a, b) => a.cursor.compareTo(b.cursor));
+    final result = byId.values.where((event) {
+      final family = event.type.split('.').first;
+      if (!const <String>{
+        'turn',
+        'assistant',
+        'reasoning',
+        'tool',
+      }.contains(family)) {
+        return false;
+      }
+      // Reasoning and tool lifecycle records are part of the durable
+      // conversation. Keep imported and locally-created activity so
+      // session switches, reconnects, and app restarts reconstruct
+      // the same transcript instead of silently dropping work.
+      return true;
+    }).toList()..sort((a, b) => a.cursor.compareTo(b.cursor));
     final immutable = List<StreamEventState>.unmodifiable(result);
     _transcriptEventsCache[sessionId] = _TranscriptEventsCache(
       history: history,
@@ -547,13 +543,12 @@ final class ConnectionCoordinator extends ChangeNotifier
     _historySyncQueue
       ..clear()
       ..addAll(
-        _sessions.keys.where(
-          (id) => !_locallyDeletedSessionIds.contains(id),
-        ),
+        _sessions.keys.where((id) => !_locallyDeletedSessionIds.contains(id)),
       );
     _historySyncTotal = _historySyncQueue.length;
     _historySyncCompleted = 0;
     _historySyncLocalRevisions.clear();
+    _deferredAutoSelectSessionId ??= selectedSessionId;
     selectedSessionId = null;
     _notify();
     await _syncNextHistorySession();
@@ -566,6 +561,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       _historyGateComplete = true;
       _historyGateError = null;
       _notify();
+      final deferredSessionId = _deferredAutoSelectSessionId;
+      _deferredAutoSelectSessionId = null;
+      if (deferredSessionId != null && selectedSessionId != deferredSessionId) {
+        await selectSession(deferredSessionId);
+      }
       return;
     }
     final sessionId = _historySyncQueue.removeAt(0);
@@ -646,15 +646,12 @@ final class ConnectionCoordinator extends ChangeNotifier
         break;
       }
     }
-    return _sendSessionControl(
-      'model.set',
-      <String, Object?>{
-        'modelId': modelId,
-        if (selected?.provider != null) 'provider': selected!.provider,
-      },
-      idleOnly: true,
-    );
+    return _sendSessionControl('model.set', <String, Object?>{
+      'modelId': modelId,
+      if (selected?.provider != null) 'provider': selected!.provider,
+    }, idleOnly: true);
   }
+
   Future<void> setThinking(String level) => _sendSessionControl(
     'thinking.set',
     <String, Object?>{'level': level},
@@ -878,6 +875,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     await connect(endpointText);
     if (hostId != null) return;
     final completer = Completer<void>();
+    _pairingCompleter = completer;
     late VoidCallback listener;
     listener = () {
       if (hostId != null && !completer.isCompleted) {
@@ -906,6 +904,9 @@ final class ConnectionCoordinator extends ChangeNotifier
         ),
       );
     } finally {
+      if (identical(_pairingCompleter, completer)) {
+        _pairingCompleter = null;
+      }
       removeListener(listener);
     }
   }
@@ -1064,7 +1065,9 @@ final class ConnectionCoordinator extends ChangeNotifier
   Future<String> downloadLatestExport() async {
     final origin = endpoint;
     final exportId = latestExportId;
-    if (origin == null || exportId == null || latestExportState != 'completed') {
+    if (origin == null ||
+        exportId == null ||
+        latestExportState != 'completed') {
       throw StateError('No completed export is available');
     }
     return PrivateBinaryTransport().downloadExport(
@@ -1072,6 +1075,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       exportId: exportId,
     );
   }
+
   Future<void> deleteSession(String sessionId) async {
     // Hide immediately, but keep the current selection intact until the wire
     // send succeeds so a transport failure can roll back without losing its
@@ -1627,7 +1631,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       case 'session.history.page.result':
         await _sessionHistoryPageResult(message, payload);
       case 'workspace.trust_state':
-        await _workspaceTrustStateEvent(payload);
+        _workspaceTrustStateEvent(payload);
       case 'command.current.result':
         await _commandCurrent(payload);
       case 'command.receipt':
@@ -1666,6 +1670,9 @@ final class ConnectionCoordinator extends ChangeNotifier
     hostId = newHostId;
     connectionId = newConnectionId;
     hostGeneration = newGeneration;
+    if (_pairingCompleter case final pairing? when !pairing.isCompleted) {
+      pairing.complete();
+    }
     hostDisplayName = payload['hostDisplayName'] as String?;
     bridgeVersion = payload['bridgeVersion'] as String?;
     piVersion = payload['piVersion'] as String?;
@@ -1704,6 +1711,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       // Initial connection is deliberately host-only. Session streams can
       // contain very large imported replays; history is fetched through the
       // bounded pager before a chat becomes selectable.
+      _deferredAutoSelectSessionId ??= selectedSessionId;
       selectedSessionId = null;
       leaseId = null;
     }
@@ -1857,10 +1865,10 @@ final class ConnectionCoordinator extends ChangeNotifier
     _syncPending.remove(streamId);
     if (_syncPending.isEmpty) {
       final deferredSessionId = _deferredAutoSelectSessionId;
-      _deferredAutoSelectSessionId = null;
       if (_historyGateComplete &&
           deferredSessionId != null &&
           selectedSessionId != deferredSessionId) {
+        _deferredAutoSelectSessionId = null;
         await selectSession(deferredSessionId);
         return;
       }
@@ -2074,7 +2082,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       final id = payload['sessionId'];
       if (id is String) _locallyDeletedSessionIds.remove(id);
     } else if (type == 'workspace.trust_state') {
-      unawaited(_workspaceTrustStateEvent(payload));
+      _workspaceTrustStateEvent(payload);
     } else if (type == 'queue.snapshot' || type == 'turn.queued') {
       final id = payload['sessionId'];
       final items = payload['items'];
@@ -2279,11 +2287,11 @@ final class ConnectionCoordinator extends ChangeNotifier
         ? payload['nextPageToken'] as String
         : null;
     final localRevision = _historySyncLocalRevisions[request.sessionId];
-    final alreadyFresh = localRevision != null &&
+    final alreadyFresh =
+        localRevision != null &&
         localRevision == responseRevision &&
         existing.items.isNotEmpty;
-    final reachedDurablePrefix = localRevision != null &&
-        overlapsDurableCache;
+    final reachedDurablePrefix = localRevision != null && overlapsDurableCache;
     final nextPageToken = alreadyFresh || reachedDurablePrefix
         ? null
         : rawNextPageToken;
@@ -2405,7 +2413,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _notify();
   }
 
-  Future<void> _workspaceTrustStateEvent(Map<String, Object?> payload) async {
+  void _workspaceTrustStateEvent(Map<String, Object?> payload) {
     final id = payload['workspaceId'] as String?;
     final state = _parseTrustState(payload['trustState'] as String?);
     final fingerprint = payload['fingerprint'] as String?;
@@ -2665,8 +2673,7 @@ final class ConnectionCoordinator extends ChangeNotifier
           _sendControl('controller.renew', <String, Object?>{
             'leaseId': currentLease,
           }).catchError((Object error, StackTrace stack) {
-            if (renewalEpoch == _connectionEpoch &&
-                currentLease == leaseId) {
+            if (renewalEpoch == _connectionEpoch && currentLease == leaseId) {
               _socketEnded(error, renewalEpoch);
             }
             return '';
@@ -3037,6 +3044,9 @@ final class ConnectionCoordinator extends ChangeNotifier
           'context.state',
           'retry.state',
           'compaction.state',
+          'tool.output',
+          'tool.completed',
+          'tool.failed',
         }.contains(event.type)) {
           _handleEventPayload(event.type, payload);
         }

@@ -118,9 +118,8 @@ class FinalAnswerView extends StatelessWidget {
                       key: ValueKey('copy-answer-${data.answerId}'),
                       tooltip: 'Copy answer',
                       visualDensity: VisualDensity.compact,
-                      onPressed: () => Clipboard.setData(
-                        ClipboardData(text: data.markdown),
-                      ),
+                      onPressed: () =>
+                          Clipboard.setData(ClipboardData(text: data.markdown)),
                       icon: const Icon(Icons.copy_outlined, size: 18),
                     ),
                     IconButton(

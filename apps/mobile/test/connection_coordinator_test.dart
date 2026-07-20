@@ -141,6 +141,26 @@ void main() {
         }, requestId: null),
       );
       await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'session.history.page',
+        ),
+      );
+      final historyRequest = socket.sent.lastWhere(
+        (message) => message['type'] == 'session.history.page',
+      );
+      socket.server(
+        response(
+          'session.history.page.result',
+          {
+            'sessionId': sessionId,
+            'snapshotRevision': '0',
+            'nextPageToken': null,
+            'items': <Object?>[],
+          },
+          requestId: historyRequest['requestId'] as String,
+        ),
+      );
+      await eventually(
         () =>
             socket.sent
                 .where((message) => message['type'] == 'subscription.set')
@@ -527,9 +547,9 @@ void main() {
       expect(stored.draftText, 'Implement exactly once');
 
       // A fresh foreground connection must perform a read-only reconciliation.
-      await coordinator.connect('https://fixture.test');
+      await coordinator.connect('https://fixture.test', force: true);
       final second = transport.sockets.last;
-      socketHandshake(
+      await socketHandshake(
         second,
         includeSession: true,
         hostCursor: '1',
@@ -585,12 +605,13 @@ void main() {
 
       await coordinator.connect('https://fixture.test');
       final socket = transport.sockets.single;
-      socketHandshake(
+      await socketHandshake(
         socket,
         includeSession: true,
         hostCursor: '1',
         sessionCursor: '1',
       );
+      await eventually(() => coordinator.isReady);
       await eventually(
         () =>
             socket.sent.any((message) => message['type'] == 'command.current'),
@@ -617,7 +638,7 @@ void main() {
       await coordinator.updateDraft('Keep across restore');
       await coordinator.submitPrompt();
 
-      await coordinator.connect('https://fixture.test');
+      await coordinator.connect('https://fixture.test', force: true);
       final socket = transport.sockets.last;
       socket.server(helloAccepted(generation: '2'));
       await eventually(
@@ -818,7 +839,7 @@ void main() {
     expect(stored!.selectedDeliveryMode, 'follow_up');
   });
 
-  test('running session blocks default immediate composer', () async {
+  test('running session defaults the primary action to follow-up', () async {
     await makeReady(coordinator, transport);
     final socket = transport.sockets.single;
     socket.server(
@@ -837,21 +858,18 @@ void main() {
     await eventually(() => coordinator.selectedRuntimeState == 'running');
     await coordinator.updateDraft('Cannot fire immediately');
     expect(coordinator.selectedDeliveryMode, DeliveryMode.immediate);
-    expect(coordinator.canSend, isFalse);
-    expect(
-      coordinator.composerDisabledReason,
-      contains('Steer or Queue follow-up'),
-    );
+    expect(coordinator.canSend, isTrue);
+    expect(coordinator.composerDisabledReason, isNull);
 
     final sentBefore = socket.sent
         .where((message) => message['type'] == 'prompt.submit')
         .length;
     await coordinator.submitPrompt();
-    expect(
-      socket.sent.where((message) => message['type'] == 'prompt.submit').length,
-      sentBefore,
-    );
-    expect(coordinator.pendingCommandId, isNull);
+    final sent = socket.sent
+        .where((message) => message['type'] == 'prompt.submit')
+        .toList();
+    expect(sent, hasLength(sentBefore + 1));
+    expect(sent.last['payload'], containsPair('deliveryMode', 'follow_up'));
   });
 
   test(
@@ -970,105 +988,115 @@ void main() {
     },
   );
 
-  test('history keeps reasoning and tools while merging stable pages', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
+  test(
+    'history keeps reasoning and tools while merging stable pages',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
 
-    await coordinator.loadOlderHistory(sessionId, pageSize: 2);
-    final firstRequest = socket.sent.lastWhere(
-      (message) => message['type'] == 'session.history.page',
-    );
-    expect(firstRequest['payload'], containsPair('pageToken', null));
-    socket.server(
-      response(
-        'session.history.page.result',
-        {
-          'snapshotRevision': '4',
-          'nextPageToken': 'opaque-next',
-          'items': [
-            {
-              'eventId': 'history-reasoning',
-              'streamId': 'session:$sessionId',
-              'cursor': '1',
-              'type': 'reasoning.delta',
-              'payload': {'historical': true, 'text': 'considering'},
-              'createdAt': 0,
-            },
-            {
-              'eventId': 'history-tool',
-              'streamId': 'session:$sessionId',
-              'cursor': '2',
-              'type': 'tool.started',
-              'payload': {'historical': true, 'toolName': 'read'},
-              'createdAt': 0,
-            },
-            {
-              'eventId': 'history-3',
-              'streamId': 'session:$sessionId',
-              'cursor': '3',
-              'type': 'assistant.delta',
-              'payload': {'contentBlockId': 'a', 'text': 'three'},
-              'createdAt': 1,
-            },
-            {
-              'eventId': 'history-4',
-              'streamId': 'session:$sessionId',
-              'cursor': '4',
-              'type': 'assistant.completed',
-              'payload': {'contentBlockId': 'a'},
-              'createdAt': 2,
-            },
-          ],
-        },
-        requestId: firstRequest['requestId'] as String,
-      ),
-    );
-    await eventually(() => coordinator.transcriptEvents(sessionId).length == 4);
-    expect(coordinator.historyFor(sessionId).snapshotRevision, '4');
-    expect(coordinator.hasOlderHistory(sessionId), isTrue);
+      await coordinator.loadOlderHistory(sessionId, pageSize: 2);
+      final firstRequest = socket.sent.lastWhere(
+        (message) => message['type'] == 'session.history.page',
+      );
+      expect(firstRequest['payload'], containsPair('pageToken', null));
+      socket.server(
+        response(
+          'session.history.page.result',
+          {
+            'snapshotRevision': '4',
+            'nextPageToken': 'opaque-next',
+            'items': [
+              {
+                'eventId': 'history-reasoning',
+                'streamId': 'session:$sessionId',
+                'cursor': '1',
+                'type': 'reasoning.delta',
+                'payload': {'historical': true, 'text': 'considering'},
+                'createdAt': 0,
+              },
+              {
+                'eventId': 'history-tool',
+                'streamId': 'session:$sessionId',
+                'cursor': '2',
+                'type': 'tool.started',
+                'payload': {'historical': true, 'toolName': 'read'},
+                'createdAt': 0,
+              },
+              {
+                'eventId': 'history-3',
+                'streamId': 'session:$sessionId',
+                'cursor': '3',
+                'type': 'assistant.delta',
+                'payload': {'contentBlockId': 'a', 'text': 'three'},
+                'createdAt': 1,
+              },
+              {
+                'eventId': 'history-4',
+                'streamId': 'session:$sessionId',
+                'cursor': '4',
+                'type': 'assistant.completed',
+                'payload': {'contentBlockId': 'a'},
+                'createdAt': 2,
+              },
+            ],
+          },
+          requestId: firstRequest['requestId'] as String,
+        ),
+      );
+      await eventually(
+        () => coordinator.transcriptEvents(sessionId).length == 4,
+      );
+      expect(coordinator.historyFor(sessionId).snapshotRevision, '4');
+      expect(coordinator.hasOlderHistory(sessionId), isTrue);
 
-    await coordinator.loadOlderHistory(sessionId, pageSize: 2);
-    final secondRequest = socket.sent.lastWhere(
-      (message) => message['type'] == 'session.history.page',
-    );
-    expect(secondRequest['payload'], containsPair('pageToken', 'opaque-next'));
-    socket.server(
-      response(
-        'session.history.page.result',
-        {
-          'snapshotRevision': '5',
-          'items': [
-            {
-              'eventId': 'history-2',
-              'streamId': 'session:$sessionId',
-              'cursor': '2',
-              'type': 'assistant.started',
-              'payload': {'contentBlockId': 'a'},
-              'createdAt': 0,
-            },
-            {
-              'eventId': 'history-3',
-              'streamId': 'session:$sessionId',
-              'cursor': '3',
-              'type': 'assistant.delta',
-              'payload': {'contentBlockId': 'a', 'text': 'three'},
-              'createdAt': 1,
-            },
-          ],
-        },
-        requestId: secondRequest['requestId'] as String,
-      ),
-    );
-    await eventually(() => coordinator.transcriptEvents(sessionId).length == 5);
-    expect(
-      coordinator
-          .transcriptEvents(sessionId)
-          .map((event) => event.cursor.value),
-      ['1', '2', '2', '3', '4'],
-    );
-    expect(coordinator.historyFor(sessionId).snapshotRevision, '5');
-    expect(coordinator.hasOlderHistory(sessionId), isFalse);
-  });
+      await coordinator.loadOlderHistory(sessionId, pageSize: 2);
+      final secondRequest = socket.sent.lastWhere(
+        (message) => message['type'] == 'session.history.page',
+      );
+      expect(
+        secondRequest['payload'],
+        containsPair('pageToken', 'opaque-next'),
+      );
+      socket.server(
+        response(
+          'session.history.page.result',
+          {
+            'snapshotRevision': '5',
+            'items': [
+              {
+                'eventId': 'history-2',
+                'streamId': 'session:$sessionId',
+                'cursor': '2',
+                'type': 'assistant.started',
+                'payload': {'contentBlockId': 'a'},
+                'createdAt': 0,
+              },
+              {
+                'eventId': 'history-3',
+                'streamId': 'session:$sessionId',
+                'cursor': '3',
+                'type': 'assistant.delta',
+                'payload': {'contentBlockId': 'a', 'text': 'three'},
+                'createdAt': 1,
+              },
+            ],
+          },
+          requestId: secondRequest['requestId'] as String,
+        ),
+      );
+      await eventually(
+        () => coordinator.transcriptEvents(sessionId).length == 5,
+      );
+      expect(
+        coordinator
+            .transcriptEvents(sessionId)
+            .map((event) => event.cursor.value),
+        ['1', '2', '2', '3', '4'],
+      );
+      expect(coordinator.historyFor(sessionId).snapshotRevision, '5');
+      expect(coordinator.hasOlderHistory(sessionId), isFalse);
+    },
+  );
 
   test('idle session blocks steer and follow-up delivery modes', () async {
     await makeReady(coordinator, transport);
@@ -1162,13 +1190,41 @@ void main() {
       await coordinator.renameSession(sessionId, 'Renamed');
       await coordinator.forkSession(sessionId, 'entry-1');
       await coordinator.cloneSession(sessionId);
+      final subscriptionsBeforeDelete = socket.sent
+          .where((message) => message['type'] == 'subscription.set')
+          .length;
       await coordinator.deleteSession(sessionId);
-      expect(coordinator.draft, 'keep this draft');
+      expect(coordinator.draft, isEmpty);
+      expect(
+        (await database.draft(hostId, sessionId))?.draftText,
+        'keep this draft',
+      );
+      await eventually(
+        () =>
+            socket.sent
+                .where((message) => message['type'] == 'subscription.set')
+                .length >
+            subscriptionsBeforeDelete,
+      );
+      socket.server(
+        response('subscription.accepted', {
+          'streams': [
+            {'streamId': 'host:$hostId', 'mode': 'current'},
+          ],
+        }),
+      );
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'host:$hostId',
+          'currentCursor': '1',
+          'mode': 'current',
+        }, requestId: null),
+      );
+      await eventually(() => coordinator.isReady);
       expect(
         () => coordinator.purgeSession(sessionId, confirmed: false),
         throwsStateError,
       );
-      await coordinator.purgeSession(sessionId, confirmed: true);
       final sentTypes = socket.sent.map((message) => message['type']).toList();
       expect(
         sentTypes,
@@ -1177,7 +1233,6 @@ void main() {
           'session.fork',
           'session.clone',
           'session.delete',
-          'session.purge',
         ]),
       );
       final fork = socket.sent.lastWhere(
@@ -1344,22 +1399,28 @@ Future<void> makeReady(
   await eventually(() => coordinator.leaseId == leaseId);
 }
 
-void socketHandshake(
+Future<void> socketHandshake(
   FakeBridgeSocket socket, {
   required bool includeSession,
   required String hostCursor,
   required String sessionCursor,
 }) {
   socket.server(helloAccepted());
-  unawaited(() async {
+  return () async {
     await eventually(
       () => socket.sent.any((message) => message['type'] == 'subscription.set'),
     );
+    final initialSubscription = socket.sent.lastWhere(
+      (message) => message['type'] == 'subscription.set',
+    );
+    final initialIncludesSession = streamIds(
+      initialSubscription,
+    ).contains('session:$sessionId');
     socket.server(
       response('subscription.accepted', {
         'streams': [
           {'streamId': 'host:$hostId', 'mode': 'current'},
-          if (includeSession)
+          if (initialIncludesSession)
             {'streamId': 'session:$sessionId', 'mode': 'current'},
         ],
       }),
@@ -1371,7 +1432,67 @@ void socketHandshake(
         'mode': 'current',
       }, requestId: null),
     );
+    if (initialIncludesSession) {
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'session:$sessionId',
+          'currentCursor': sessionCursor,
+          'mode': 'current',
+        }, requestId: null),
+      );
+      return;
+    }
     if (includeSession) {
+      await eventually(
+        () =>
+            socket.sent.any(
+              (message) => message['type'] == 'session.history.page',
+            ) ||
+            socket.sent
+                    .where((message) => message['type'] == 'subscription.set')
+                    .length >=
+                2,
+      );
+      final historyRequests = socket.sent.where(
+        (message) => message['type'] == 'session.history.page',
+      );
+      if (historyRequests.isNotEmpty) {
+        final request = historyRequests.last;
+        socket.server(
+          response(
+            'session.history.page.result',
+            {
+              'sessionId': sessionId,
+              'snapshotRevision': sessionCursor,
+              'nextPageToken': null,
+              'items': <Object?>[],
+            },
+            requestId: request['requestId'] as String,
+          ),
+        );
+      }
+      await eventually(
+        () =>
+            socket.sent
+                .where((message) => message['type'] == 'subscription.set')
+                .length >=
+            2,
+      );
+      socket.server(
+        response('subscription.accepted', {
+          'streams': [
+            {'streamId': 'host:$hostId', 'mode': 'current'},
+            {'streamId': 'session:$sessionId', 'mode': 'current'},
+          ],
+        }),
+      );
+      socket.server(
+        response('stream.sync.complete', {
+          'streamId': 'host:$hostId',
+          'currentCursor': hostCursor,
+          'mode': 'current',
+        }, requestId: null),
+      );
       socket.server(
         response('stream.sync.complete', {
           'streamId': 'session:$sessionId',
@@ -1380,7 +1501,7 @@ void socketHandshake(
         }, requestId: null),
       );
     }
-  }());
+  }();
 }
 
 List<String> streamIds(Map<String, Object?> subscription) =>

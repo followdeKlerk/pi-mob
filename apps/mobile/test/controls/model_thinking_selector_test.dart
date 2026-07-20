@@ -43,7 +43,9 @@ void main() {
     expect(find.byKey(const Key('unavailable-restored-model')), findsOneWidget);
     expect(find.textContaining('Old Sonnet'), findsOneWidget);
     // An available model is still listed and selectable.
-    expect(find.text('Sonnet'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('model-selector-dropdown')));
+    await tester.pumpAndSettle();
+    expect(find.text('Anthropic · Sonnet'), findsOneWidget);
   });
 
   testWidgets('model select + thinking select fire callbacks', (tester) async {
@@ -77,8 +79,10 @@ void main() {
         ),
       ),
     );
-    await tester.tap(find.byKey(ValueKey('model-m2')));
-    await tester.pump();
+    await tester.tap(find.byKey(const Key('model-selector-dropdown')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Anthropic · Opus').last);
+    await tester.pumpAndSettle();
     expect(modelId, 'm2');
     // Thinking dropdown re-renders for the selected model.
     expect(find.byKey(const Key('thinking-selector')), findsOneWidget);

@@ -58,16 +58,13 @@ class TranscriptPanel extends StatelessWidget {
                 ),
                 const SizedBox(width: PiSpacing.sm),
                 Expanded(
-                  child: Text(
-                    switch (runtime) {
-                      'waiting_for_input' => 'Pi is waiting for your input',
-                      'retrying' => 'Pi is retrying',
-                      'compacting' => 'Pi is compacting context',
-                      'finishing' => 'Pi is finishing the turn',
-                      _ => 'Pi is working',
-                    },
-                    style: Theme.of(context).textTheme.labelMedium,
-                  ),
+                  child: Text(switch (runtime) {
+                    'waiting_for_input' => 'Pi is waiting for your input',
+                    'retrying' => 'Pi is retrying',
+                    'compacting' => 'Pi is compacting context',
+                    'finishing' => 'Pi is finishing the turn',
+                    _ => 'Pi is working',
+                  }, style: Theme.of(context).textTheme.labelMedium),
                 ),
                 if (coordinator.canAbort)
                   TextButton(

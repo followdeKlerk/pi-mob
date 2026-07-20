@@ -27,7 +27,9 @@ class _TranscriptSearchSheetState extends State<TranscriptSearchSheet> {
   String query = '';
 
   String? _text(StreamEventState event) {
-    if (event.type == 'turn.started') return event.payload['message'] as String?;
+    if (event.type == 'turn.started') {
+      return event.payload['message'] as String?;
+    }
     if (event.type == 'assistant.delta') {
       return (event.payload['text'] ?? event.payload['delta']) as String?;
     }
@@ -43,10 +45,12 @@ class _TranscriptSearchSheetState extends State<TranscriptSearchSheet> {
         : widget.coordinator
               .transcriptEvents(sessionId)
               .map((event) => (event: event, text: _text(event)))
-              .where((item) =>
-                  item.text != null &&
-                  q.isNotEmpty &&
-                  item.text!.toLowerCase().contains(q))
+              .where(
+                (item) =>
+                    item.text != null &&
+                    q.isNotEmpty &&
+                    item.text!.toLowerCase().contains(q),
+              )
               .map((item) => (event: item.event, text: item.text!))
               .toList(growable: false);
     return SafeArea(

@@ -26,28 +26,29 @@ const Color _piAccent = Color(0xFF7D6757);
 
 /// Constructs the light Material 3 theme for Pi Mob.
 ThemeData piLightTheme() {
-  final colorScheme = ColorScheme.fromSeed(
-    seedColor: _piSeed,
-    secondary: _piAccent,
-    brightness: Brightness.light,
-  ).copyWith(
-    primary: const Color(0xFFC96442),
-    onPrimary: const Color(0xFFFAF9F5),
-    primaryContainer: const Color(0xFFFCE4D8),
-    onPrimaryContainer: const Color(0xFF3A1D10),
-    secondary: const Color(0xFF7D6757),
-    onSecondary: const Color(0xFFFAF9F5),
-    secondaryContainer: const Color(0xFFEFE0D2),
-    onSecondaryContainer: const Color(0xFF2A1F17),
-    tertiary: const Color(0xFF6F7F4F),
-    surface: const Color(0xFFFAF9F5),
-    onSurface: const Color(0xFF141413),
-    onSurfaceVariant: const Color(0xFF5E5D59),
-    outline: const Color(0xFF87867F),
-    outlineVariant: const Color(0xFFE8E6DC),
-    error: const Color(0xFFB53333),
-    errorContainer: const Color(0xFFFADDD7),
-  );
+  final colorScheme =
+      ColorScheme.fromSeed(
+        seedColor: _piSeed,
+        secondary: _piAccent,
+        brightness: Brightness.light,
+      ).copyWith(
+        primary: const Color(0xFFC96442),
+        onPrimary: const Color(0xFFFAF9F5),
+        primaryContainer: const Color(0xFFFCE4D8),
+        onPrimaryContainer: const Color(0xFF3A1D10),
+        secondary: const Color(0xFF7D6757),
+        onSecondary: const Color(0xFFFAF9F5),
+        secondaryContainer: const Color(0xFFEFE0D2),
+        onSecondaryContainer: const Color(0xFF2A1F17),
+        tertiary: const Color(0xFF6F7F4F),
+        surface: const Color(0xFFFAF9F5),
+        onSurface: const Color(0xFF141413),
+        onSurfaceVariant: const Color(0xFF5E5D59),
+        outline: const Color(0xFF87867F),
+        outlineVariant: const Color(0xFFE8E6DC),
+        error: const Color(0xFFB53333),
+        errorContainer: const Color(0xFFFADDD7),
+      );
   return _buildTheme(
     colorScheme: colorScheme,
     semantic: PiSemanticColors.light,
@@ -56,28 +57,29 @@ ThemeData piLightTheme() {
 
 /// Constructs the dark Material 3 theme for Pi Mob.
 ThemeData piDarkTheme() {
-  final colorScheme = ColorScheme.fromSeed(
-    seedColor: _piSeed,
-    secondary: _piAccent,
-    brightness: Brightness.dark,
-  ).copyWith(
-    primary: const Color(0xFFD97757),
-    onPrimary: const Color(0xFF2A1208),
-    primaryContainer: const Color(0xFF7A3D23),
-    onPrimaryContainer: const Color(0xFFFCE4D8),
-    secondary: const Color(0xFFCFC0B1),
-    onSecondary: const Color(0xFF3A2F25),
-    secondaryContainer: const Color(0xFF5E4D40),
-    onSecondaryContainer: const Color(0xFFEFE0D2),
-    tertiary: const Color(0xFFBCC99A),
-    surface: const Color(0xFF1F1E1B),
-    onSurface: const Color(0xFFEAE6DA),
-    onSurfaceVariant: const Color(0xFFB0AEA5),
-    outline: const Color(0xFF73726C),
-    outlineVariant: const Color(0xFF3D3D3A),
-    error: const Color(0xFFE8836F),
-    errorContainer: const Color(0xFF7A2018),
-  );
+  final colorScheme =
+      ColorScheme.fromSeed(
+        seedColor: _piSeed,
+        secondary: _piAccent,
+        brightness: Brightness.dark,
+      ).copyWith(
+        primary: const Color(0xFFD97757),
+        onPrimary: const Color(0xFF2A1208),
+        primaryContainer: const Color(0xFF7A3D23),
+        onPrimaryContainer: const Color(0xFFFCE4D8),
+        secondary: const Color(0xFFCFC0B1),
+        onSecondary: const Color(0xFF3A2F25),
+        secondaryContainer: const Color(0xFF5E4D40),
+        onSecondaryContainer: const Color(0xFFEFE0D2),
+        tertiary: const Color(0xFFBCC99A),
+        surface: const Color(0xFF1F1E1B),
+        onSurface: const Color(0xFFEAE6DA),
+        onSurfaceVariant: const Color(0xFFB0AEA5),
+        outline: const Color(0xFF73726C),
+        outlineVariant: const Color(0xFF3D3D3A),
+        error: const Color(0xFFE8836F),
+        errorContainer: const Color(0xFF7A2018),
+      );
   return _buildTheme(colorScheme: colorScheme, semantic: PiSemanticColors.dark);
 }
 

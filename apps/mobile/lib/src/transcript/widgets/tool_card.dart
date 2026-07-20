@@ -639,15 +639,13 @@ class _ToolCardState extends State<ToolCard> {
     ),
   );
 
-  static String _toolLabel(
-    String toolName,
-    Map<String, Object?> arguments,
-  ) {
+  static String _toolLabel(String toolName, Map<String, Object?> arguments) {
     if (BuiltInToolName.isBuiltIn(toolName)) return toolName;
     return switch (toolName) {
-      'Agent' => arguments['description'] is String
-          ? 'Agent · ${arguments['description']}'
-          : 'Agent',
+      'Agent' =>
+        arguments['description'] is String
+            ? 'Agent · ${arguments['description']}'
+            : 'Agent',
       'get_subagent_result' => 'Agent result',
       'steer_subagent' => 'Steer agent',
       'web_search' => 'Web search',

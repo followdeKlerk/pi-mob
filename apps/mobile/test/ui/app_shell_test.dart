@@ -19,7 +19,7 @@ void main() {
     await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
     await tester.pump();
 
-    expect(find.text('Chat'), findsOneWidget);
+    expect(find.text('Saved chat'), findsOneWidget);
     expect(find.byKey(const Key('open-chat-drawer')), findsOneWidget);
     expect(find.byKey(const Key('open-transcript-search')), findsOneWidget);
     expect(find.byKey(const Key('open-chat-controls')), findsNothing);
@@ -44,7 +44,7 @@ void main() {
 
     expect(find.byKey(const Key('chat-session-drawer')), findsOneWidget);
     expect(find.byKey(const Key('saved-chat-list')), findsOneWidget);
-    expect(find.text('Saved chat'), findsOneWidget);
+    expect(find.text('Saved chat'), findsWidgets);
     expect(find.textContaining('Fixture host'), findsNothing);
     expect(find.byKey(const Key('new-chat-button')), findsOneWidget);
     expect(find.byKey(const Key('change-chat-folder')), findsOneWidget);

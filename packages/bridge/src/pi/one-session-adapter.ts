@@ -953,6 +953,9 @@ export class OneSessionPiAdapter {
     const sessionId = String(command.payload.sessionId ?? "");
     const modelId = String(command.payload.modelId ?? "");
     const state = this.store.sessionState(sessionId) ?? {};
+    if (state.runtimeState !== "idle" && state.runtimeState !== "stopped") {
+      throw new Error("model.set requires an idle session");
+    }
     const candidates = [
       ...(Array.isArray(state.availableModels) ? state.availableModels : []),
       ...this.hostModels,

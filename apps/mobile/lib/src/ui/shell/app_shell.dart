@@ -68,8 +68,10 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final chatOpen = widget.coordinator.historyGateComplete &&
-        widget.coordinator.selectedSessionId != null;
+    final historyAvailable =
+        widget.coordinator.historyGateComplete || !widget.coordinator.isReady;
+    final chatOpen =
+        historyAvailable && widget.coordinator.selectedSessionId != null;
     final selectedId = widget.coordinator.selectedSessionId;
     final selected = selectedId == null
         ? null
@@ -78,11 +80,13 @@ class _AppShellState extends State<AppShell> {
               .firstOrNull;
     return Scaffold(
       key: _scaffoldKey,
-      drawer: chatOpen ? ChatSessionDrawer(
-        coordinator: widget.coordinator,
-        notifications: widget.notifications,
-        onForgetHost: widget.onForgetHost,
-      ) : null,
+      drawer: historyAvailable
+          ? ChatSessionDrawer(
+              coordinator: widget.coordinator,
+              notifications: widget.notifications,
+              onForgetHost: widget.onForgetHost,
+            )
+          : null,
       appBar: AppBar(
         automaticallyImplyLeading: false,
         leadingWidth: 52,
@@ -125,10 +129,8 @@ class _AppShellState extends State<AppShell> {
             IconButton(
               key: const Key('open-transcript-search'),
               tooltip: 'Search this chat',
-              onPressed: () => showTranscriptSearch(
-                context,
-                widget.coordinator,
-              ),
+              onPressed: () =>
+                  showTranscriptSearch(context, widget.coordinator),
               icon: const Icon(Icons.search_rounded),
             ),
         ],
@@ -137,7 +139,7 @@ class _AppShellState extends State<AppShell> {
       ),
       body: SafeArea(
         top: false,
-        child: chatOpen
+        child: historyAvailable
             ? ActivityDestination(
                 coordinator: widget.coordinator,
                 draftController: widget.draftController,

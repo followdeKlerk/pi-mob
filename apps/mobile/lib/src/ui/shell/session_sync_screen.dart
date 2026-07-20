@@ -16,9 +16,11 @@ class SessionSyncScreen extends StatelessWidget {
     final theme = Theme.of(context);
     final colors = theme.colorScheme;
     final sessions = coordinator.sessions.toList()
-      ..sort((a, b) => (b.lastActivityAt ?? DateTime(0)).compareTo(
-            a.lastActivityAt ?? DateTime(0),
-          ));
+      ..sort(
+        (a, b) => (b.lastActivityAt ?? DateTime(0)).compareTo(
+          a.lastActivityAt ?? DateTime(0),
+        ),
+      );
     final ready = coordinator.historyGateComplete;
     final error = coordinator.historyGateError;
     final total = coordinator.historySyncTotal;
@@ -50,8 +52,8 @@ class SessionSyncScreen extends StatelessWidget {
                   ready
                       ? 'Transcripts are stored on this device. Choose a chat.'
                       : error != null
-                          ? 'Sync paused. Your existing local data is safe.'
-                          : 'Keeping transcripts available before opening chat${total == 1 ? '' : 's'}.' ,
+                      ? 'Sync paused. Your existing local data is safe.'
+                      : 'Keeping transcripts available before opening chat${total == 1 ? '' : 's'}.',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     color: colors.onSurfaceVariant,
                   ),
@@ -85,7 +87,9 @@ class SessionSyncScreen extends StatelessWidget {
                       children: [
                         const Icon(Icons.sync_problem, size: 20),
                         const SizedBox(width: PiSpacing.sm),
-                        const Expanded(child: Text('Could not finish syncing chats')),
+                        const Expanded(
+                          child: Text('Could not finish syncing chats'),
+                        ),
                         TextButton(
                           key: const Key('retry-all-chat-sync'),
                           onPressed: coordinator.isReady
@@ -117,7 +121,8 @@ class SessionSyncScreen extends StatelessWidget {
                     itemCount: sessions.length,
                     itemBuilder: (context, index) {
                       final session = sessions[index];
-                      final current = coordinator.historySyncCurrentSessionId ==
+                      final current =
+                          coordinator.historySyncCurrentSessionId ==
                           session.sessionId;
                       return ListTile(
                         key: Key('sync-session-${session.sessionId}'),
@@ -129,12 +134,18 @@ class SessionSyncScreen extends StatelessWidget {
                             ? const SizedBox(
                                 width: 20,
                                 height: 20,
-                                child: CircularProgressIndicator(strokeWidth: 2),
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                ),
                               )
                             : Icon(
-                                ready ? Icons.check_circle_outline : Icons.chat_bubble_outline,
+                                ready
+                                    ? Icons.check_circle_outline
+                                    : Icons.chat_bubble_outline,
                                 size: 20,
-                                color: ready ? colors.primary : colors.onSurfaceVariant,
+                                color: ready
+                                    ? colors.primary
+                                    : colors.onSurfaceVariant,
                               ),
                         title: Text(
                           _title(session),
@@ -148,7 +159,9 @@ class SessionSyncScreen extends StatelessWidget {
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                               ),
-                        trailing: ready ? const Icon(Icons.chevron_right) : null,
+                        trailing: ready
+                            ? const Icon(Icons.chevron_right)
+                            : null,
                         onTap: ready
                             ? () => coordinator.takeControl(session.sessionId)
                             : null,

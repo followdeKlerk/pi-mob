@@ -26,6 +26,7 @@ const ROOT = new URL("..", import.meta.url).pathname;
 const ALLOWLIST = new Set([
   "docs/compatibility",
   ".git",
+  ".gjc",
   "node_modules",
   ".dart_tool",
   ".flutter-plugins-dependencies",

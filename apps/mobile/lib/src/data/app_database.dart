@@ -311,11 +311,7 @@ class AppDatabase extends _$AppDatabase {
         .toList(growable: false);
     if (values.isEmpty) return;
     await batch((batch) {
-      batch.insertAll(
-        cachedEvents,
-        values,
-        mode: InsertMode.insertOrIgnore,
-      );
+      batch.insertAll(cachedEvents, values, mode: InsertMode.insertOrIgnore);
     });
   }
 
@@ -499,7 +495,12 @@ class AppDatabase extends _$AppDatabase {
       'VALUES (?, ?, ?, ?) ON CONFLICT(host_id, session_id) DO UPDATE SET '
       'snapshot_revision = excluded.snapshot_revision, '
       'completed_at = excluded.completed_at',
-      [hostId, sessionId, snapshotRevision, DateTime.now().toUtc().millisecondsSinceEpoch],
+      [
+        hostId,
+        sessionId,
+        snapshotRevision,
+        DateTime.now().toUtc().millisecondsSinceEpoch,
+      ],
     );
   }
 

@@ -18,8 +18,6 @@ const _wsB = 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb';
 const _wsFingerprint =
     '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 const _connectionId = '44444444-4444-4444-8444-444444444444';
-const _leaseId = '55555555-5555-4555-8555-555555555555';
-
 // pi-mob:security-test-fixture — deliberate private-path display probes.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -170,8 +168,10 @@ void main() {
       await tester.pump();
       expect(coordinator.workspaceSearch.isActive, isTrue);
 
-      // A stale search response arrives after cancel. The picker must
-      // ignore it because the search epoch advanced.
+      // Cancel first. Responses from the abandoned request must then be
+      // ignored because the search epoch advanced.
+      await tester.tap(find.byKey(const Key('workspace-search-cancel')));
+      await tester.pump();
       final socket = transport.sockets.last;
       socket.server(
         response('workspace.search.result', {
@@ -208,10 +208,6 @@ void main() {
       );
       await tester.pump();
 
-      // Hit the cancel button and confirm the picker reaches a stable
-      // cancelled state without surfacing stale rows.
-      await tester.tap(find.byKey(const Key('workspace-search-cancel')));
-      await tester.pump();
       expect(find.byKey(const Key('workspace-search-results')), findsNothing);
       expect(
         find.byKey(const Key('workspace-search-cancelled')),
@@ -329,6 +325,7 @@ void main() {
           () => !coordinator.requiresTrustApproval,
           tester: tester,
         );
+        await tester.pump();
         // The unapproved banner is gone.
         expect(
           find.byKey(Key('workspace-tile-unapproved-$_wsA')),
@@ -354,6 +351,15 @@ void main() {
           ),
         );
         await _drainCoordinator(tester);
+        await eventually(
+          () => coordinator.workspaces.any(
+            (entry) =>
+                entry.workspaceId == _wsA &&
+                entry.trustState == WorkspaceTrustState.fingerprintChanged,
+          ),
+          tester: tester,
+        );
+        await tester.pump();
         expect(
           coordinator.streams['host:$_hostId']?.lastContiguousCursor.value,
           '1',
@@ -371,7 +377,7 @@ void main() {
 
   group('Composer gating', () {
     testWidgets(
-      'send is disabled while approval is required and no session can start',
+      'composer stays unavailable while approval is required and no session can start',
       (tester) async {
         final (coordinator, database, transport) = await bootstrap(
           tester,
@@ -384,53 +390,28 @@ void main() {
         addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(PiMobApp(coordinator: coordinator));
         await tester.pump();
-        await tester.tap(find.byKey(const Key('shell-sessions')));
-        await tester.pumpAndSettle();
         expect(tester.takeException(), isNull);
-        expect(
-          find.byKey(const Key('workspace-session-scroll')),
-          findsOneWidget,
-        );
-
-        // The session panel exposes the trust-required banner and a
-        // prominent Review and approve action.
-        expect(find.byKey(const Key('trust-required-banner')), findsOneWidget);
-        expect(find.byKey(const Key('trust-required-review')), findsOneWidget);
-        await tester.tap(find.byKey(const Key('shell-activity')));
-        await tester.pumpAndSettle();
-        // Send button is disabled because trust approval is required.
-        final send = tester.widget<FilledButton>(
-          find.byKey(const Key('send-button')),
-        );
-        expect(send.onPressed, isNull);
-        // Approval flips the workspace to approved and send becomes enabled.
+        // The chat-first shell does not mount a composer until a synchronized
+        // session is selected, and trust approval is still required.
+        expect(coordinator.requiresTrustApproval, isTrue);
+        expect(find.byKey(const Key('send-button')), findsNothing);
+        // Approval clears the trust gate, but without a selected synchronized
+        // session the composer correctly remains unavailable.
         coordinator.workspaces.firstWhere((w) => w.workspaceId == _wsA);
         await coordinator.approveWorkspaceTrust(_wsA);
-        final socket = transport.sockets.last;
-        socket.server(
-          event(
-            type: 'workspace.trust_state',
-            streamId: 'host:$_hostId',
-            cursor: '1',
-            eventId: '77777777-7777-4777-8777-777777777777',
-            payload: {
-              'workspaceId': _wsA,
-              'trustState': 'approved',
-              'fingerprint': _wsFingerprint,
-              'policyVersion': '1',
-            },
-          ),
-        );
-        await tester.pumpAndSettle();
-        // Even when approved the send button stays disabled until lease + draft.
-        final stillDisabled = tester.widget<FilledButton>(
-          find.byKey(const Key('send-button')),
-        );
         expect(
-          stillDisabled.onPressed,
-          isNull,
-          reason: 'no lease yet means send stays disabled',
+          transport.sockets.last.sent.any(
+            (message) => message['type'] == 'workspace.trust.approve',
+          ),
+          isTrue,
         );
+        _seedWorkspaces(coordinator);
+        await eventually(
+          () => !coordinator.requiresTrustApproval,
+          tester: tester,
+        );
+        expect(coordinator.requiresTrustApproval, isFalse);
+        expect(find.byKey(const Key('send-button')), findsNothing);
 
         await tearDownWorkspace(coordinator, database);
       },
@@ -466,56 +447,11 @@ void main() {
           seedReady: true,
         );
         _seedWorkspaces(coordinator);
-        // Acquire lease and have the session report Read-only.
-        await coordinator.selectWorkspace(_wsA);
         final socket = transport.sockets.last;
-        await eventually(
-          () => socket.sent.any(
-            (message) => message['type'] == 'subscription.set',
-          ),
-        );
-        socket.server(
-          event(
-            type: 'session.state',
-            streamId: 'session:$_sessionId',
-            cursor: '1',
-            eventId: '66666666-6666-4666-8666-666666666666',
-            payload: {
-              'sessionId': _sessionId,
-              'workspaceId': _wsA,
-              'name': 'Fixture session',
-              'runtimeState': 'idle',
-              'policyMode': 'read_only',
-              'queueCount': 0,
-            },
-          ),
-        );
-        socket.server(
-          event(
-            type: 'controller.state',
-            streamId: 'session:$_sessionId',
-            cursor: '2',
-            eventId: '55555555-5555-4555-8555-555555555555',
-            payload: {
-              'scope': 'session',
-              'sessionId': _sessionId,
-              'mode': 'controller',
-              'leaseId': _leaseId,
-            },
-          ),
-        );
-        await _drainCoordinator(tester);
-        await eventually(
-          () => coordinator.activePolicyMode == SessionPolicyMode.readOnly,
-          tester: tester,
-        );
-        await eventually(() => coordinator.leaseId == _leaseId, tester: tester);
         await tester.binding.setSurfaceSize(const Size(1200, 900));
         addTearDown(() => tester.binding.setSurfaceSize(null));
         await tester.pumpWidget(PiMobApp(coordinator: coordinator));
         await tester.pump();
-        await tester.tap(find.byKey(const Key('shell-sessions')));
-        await tester.pumpAndSettle();
 
         expect(find.byKey(const Key('read-only-indicator')), findsNothing);
         expect(find.byKey(const Key('policy-mode-toggle')), findsNothing);

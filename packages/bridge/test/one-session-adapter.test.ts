@@ -207,6 +207,7 @@ describe("OneSessionPiAdapter", () => {
     expect(store.listEvents(`session:${sessionId}`).some((event) => event.type === "compaction.state")).toBe(true);
     expect(store.listEvents(`session:${sessionId}`).some((event) => event.type === "retry.state")).toBe(true);
 
+    await expect(adapter.dispatch(makeCommand("unavailable-model", "model.set", `session:${sessionId}`, `session:${sessionId}`, { sessionId, modelId: "x" }))).rejects.toThrow("model.set provider unavailable");
     store.updateSessionState(sessionId, { ...store.sessionState(sessionId), runtimeState: "running" });
     await expect(adapter.dispatch(makeCommand("blocked-model", "model.set", `session:${sessionId}`, `session:${sessionId}`, { sessionId, modelId: "x" }))).rejects.toThrow("requires an idle session");
   });
