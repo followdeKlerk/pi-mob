@@ -89,6 +89,89 @@ void main() {
     }
   });
 
+  testWidgets('empty model catalogue creates a chat with the Pi default agent', (
+    tester,
+  ) async {
+    final fixture = await _readyFixture();
+    const workspaceId = '55555555-5555-4555-8555-555555555555';
+    const newSessionId = '66666666-6666-4666-8666-666666666666';
+    fixture.coordinator.debugSeedWorkspaces(const [
+      {
+        'workspaceId': workspaceId,
+        'displayName': 'mobile',
+        'rootLabel': '/Users/test',
+        'relativePath': 'mobile',
+        'availability': 'available',
+        'trustState': 'approved',
+        'fingerprint':
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        'policyVersion': '1',
+        'manifest': <Map<String, Object?>>[],
+      },
+    ]);
+    final socket = fixture.transport!.socket!;
+
+    await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
+    await tester.pump();
+    await tester.tap(find.byKey(const Key('activity-empty-go-sessions')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('new-chat-button')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('workspace-tile-$workspaceId')));
+    await _pumpUntil(
+      tester,
+      () => socket.sent.any((message) => message['type'] == 'model.list'),
+    );
+
+    final modelRequest = socket.sent.lastWhere(
+      (message) => message['type'] == 'model.list',
+    );
+    socket.server(
+      _response('model.list.result', const {
+        'items': <Object?>[],
+      }, requestId: modelRequest['requestId'] as String),
+    );
+    await _pumpUntil(
+      tester,
+      () => socket.sent.any((message) => message['type'] == 'session.create'),
+    );
+    final create = socket.sent.lastWhere(
+      (message) => message['type'] == 'session.create',
+    );
+    final createPayload = create['payload'] as Map<String, Object?>;
+    expect(createPayload.containsKey('modelId'), isFalse);
+    expect(createPayload.containsKey('provider'), isFalse);
+
+    socket.server(
+      _event(
+        type: 'session.summary',
+        streamId: 'host:11111111-1111-4111-8111-111111111111',
+        cursor: '1',
+        eventId: '77777777-7777-4777-8777-777777777777',
+        payload: {
+          'sessionId': newSessionId,
+          'workspaceId': workspaceId,
+          'name': 'mobile',
+          'runtimeState': 'idle',
+          'queueCount': 0,
+          'change': 'added',
+          'createdByCommandId': create['commandId'],
+        },
+      ),
+    );
+    await _pumpUntil(
+      tester,
+      () => fixture.coordinator.selectedSessionId == newSessionId,
+    );
+    expect(
+      fixture.coordinator.sessionCreation.phase,
+      SessionCreationPhase.created,
+    );
+    fixture.coordinator.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await fixture.database.close();
+  });
+
   testWidgets('empty Chat opens the same saved-chat drawer', (tester) async {
     final fixture = await _fixture();
     addTearDown(fixture.dispose);
@@ -138,10 +221,11 @@ Future<_Fixture> _fixture({bool withSession = false}) async {
 }
 
 final class _Fixture {
-  const _Fixture(this.database, this.coordinator);
+  const _Fixture(this.database, this.coordinator, [this.transport]);
 
   final AppDatabase database;
   final ConnectionCoordinator coordinator;
+  final _ReadyTransport? transport;
 
   Future<void> dispose() async {
     coordinator.dispose();
@@ -211,7 +295,15 @@ Future<_Fixture> _readyFixture() async {
   await _eventually(
     () => coordinator.isReady && coordinator.historyGateComplete,
   );
-  return _Fixture(database, coordinator);
+  return _Fixture(database, coordinator, transport);
+}
+
+Future<void> _pumpUntil(WidgetTester tester, bool Function() condition) async {
+  for (var attempt = 0; attempt < 300; attempt++) {
+    if (condition()) return;
+    await tester.pump(const Duration(milliseconds: 10));
+  }
+  throw TestFailure('Widget condition was not met');
 }
 
 Future<void> _eventually(bool Function() condition) async {
@@ -221,6 +313,19 @@ Future<void> _eventually(bool Function() condition) async {
   }
   throw TestFailure('Condition was not met');
 }
+
+Map<String, Object?> _event({
+  required String type,
+  required String streamId,
+  required String cursor,
+  required String eventId,
+  required Map<String, Object?> payload,
+}) => <String, Object?>{
+  ..._response(type, payload, requestId: null),
+  'eventId': eventId,
+  'streamId': streamId,
+  'cursor': cursor,
+};
 
 Map<String, Object?> _response(
   String type,

@@ -107,7 +107,7 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
         ),
       );
 
-  Future<ModelOption?> _chooseAgent() async {
+  Future<({String? modelId, String? provider})?> _chooseAgent() async {
     try {
       await widget.coordinator.requestModels();
     } on Object {
@@ -125,13 +125,13 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
         .where((model) => model.available && model.provider != null)
         .toList(growable: false);
     if (models.isEmpty) {
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        const SnackBar(content: Text('No configured agents are available')),
-      );
-      return null;
+      // A new host may not have a durable model catalogue until its first Pi
+      // session starts. Let the bridge create that session with Pi's default
+      // rather than trapping the valid zero-chat state.
+      return (modelId: null, provider: null);
     }
     ModelOption selected = models.first;
-    return showDialog<ModelOption>(
+    final chosen = await showDialog<ModelOption>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setDialogState) => AlertDialog(
@@ -175,6 +175,8 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
         ),
       ),
     );
+    if (chosen == null) return null;
+    return (modelId: chosen.id, provider: chosen.provider);
   }
 
   Future<void> _newChat() async {
@@ -184,10 +186,10 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     await widget.coordinator.selectWorkspaceEntry(workspace);
     if (widget.coordinator.requiresTrustApproval) return;
     final agent = await _chooseAgent();
-    if (agent == null || agent.provider == null) return;
+    if (agent == null) return;
     try {
       await widget.coordinator.createSession(
-        modelId: agent.id,
+        modelId: agent.modelId,
         provider: agent.provider,
       );
     } on Object {
