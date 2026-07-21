@@ -23,7 +23,9 @@ void main() {
     await tester.pump();
 
     expect(find.text('Saved chat'), findsOneWidget);
+    expect(find.byKey(const Key('shell-app-bar-title')), findsOneWidget);
     expect(find.byKey(const Key('open-chat-drawer')), findsOneWidget);
+    expect(find.byKey(const Key('open-model-picker')), findsOneWidget);
     expect(find.byKey(const Key('open-transcript-search')), findsOneWidget);
     expect(find.byKey(const Key('open-chat-controls')), findsNothing);
     expect(find.byType(NavigationBar), findsNothing);
@@ -47,7 +49,18 @@ void main() {
 
     expect(find.byKey(const Key('chat-session-drawer')), findsOneWidget);
     expect(find.byKey(const Key('saved-chat-list')), findsOneWidget);
-    expect(find.text('Saved chat'), findsWidgets);
+    expect(find.text('mobile'), findsWidgets);
+    expect(
+      find.byKey(const Key('drawer-connection-indicator')),
+      findsOneWidget,
+    );
+    expect(find.text('.'), findsNothing);
+    expect(find.text('Ready'), findsNothing);
+    expect(find.text('Working'), findsNothing);
+    expect(
+      find.byKey(const Key('chat-pill-22222222-2222-4222-8222-222222222222')),
+      findsNothing,
+    );
     expect(find.textContaining('Fixture host'), findsNothing);
     expect(find.byKey(const Key('new-chat-button')), findsOneWidget);
     expect(find.byKey(const Key('change-chat-folder')), findsNothing);
@@ -58,11 +71,69 @@ void main() {
       ),
       findsOneWidget,
     );
-    // M16-02: the saved-chat row shows a status pill.
-    expect(
-      find.byKey(const Key('chat-pill-22222222-2222-4222-8222-222222222222')),
-      findsOneWidget,
+  });
+
+  testWidgets('model picker loads the existing configured model sheet', (
+    tester,
+  ) async {
+    final fixture = await _readyFixture();
+    final socket = fixture.transport!.socket!;
+    const sessionId = '22222222-2222-4222-8222-222222222222';
+
+    // Seed the authoritative current chat, then keep this widget test focused
+    // on the app-bar route into the existing picker rather than duplicating
+    // subscription synchronization coverage.
+    socket.server(
+      _event(
+        type: 'session.summary',
+        streamId: 'host:11111111-1111-4111-8111-111111111111',
+        cursor: '1',
+        eventId: '33333333-3333-4333-8333-333333333333',
+        payload: const {
+          'sessionId': sessionId,
+          'name': 'Ready chat',
+          'runtimeState': 'idle',
+          'queueCount': 0,
+        },
+      ),
     );
+    await _pumpUntil(
+      tester,
+      () => fixture.coordinator.sessions.any(
+        (session) => session.sessionId == sessionId,
+      ),
+    );
+    fixture.coordinator.selectedSessionId = sessionId;
+    await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
+    await tester.pump();
+    expect(find.byKey(const Key('shell-app-bar-title')), findsOneWidget);
+    expect(find.byKey(const Key('open-model-picker')), findsOneWidget);
+
+    await tester.tap(find.byKey(const Key('open-model-picker')));
+    await _pumpUntil(
+      tester,
+      () => socket.sent.any((message) => message['type'] == 'model.list'),
+    );
+    final request = socket.sent.lastWhere(
+      (message) => message['type'] == 'model.list',
+    );
+    socket.server(
+      _response('model.list.result', const {
+        'items': [
+          {
+            'id': 'anthropic/sonnet',
+            'label': 'Sonnet',
+            'provider': 'anthropic',
+          },
+        ],
+      }, requestId: request['requestId'] as String),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('model-selector-dropdown')), findsOneWidget);
+    fixture.coordinator.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    await fixture.database.close();
   });
 
   _m16Affordances();
@@ -206,6 +277,7 @@ Future<_Fixture> _fixture({bool withSession = false}) async {
       const SessionState(
         sessionId: '22222222-2222-4222-8222-222222222222',
         hostId: hostId,
+        workspaceId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
         name: 'Saved chat',
         runtimeState: 'idle',
         queueCount: 0,
@@ -217,6 +289,22 @@ Future<_Fixture> _fixture({bool withSession = false}) async {
     database: database,
   );
   await coordinator.initialize(autoConnect: false);
+  if (withSession) {
+    coordinator.debugSeedWorkspaces(const [
+      {
+        'workspaceId': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+        'displayName': 'mobile',
+        'rootLabel': '/Users/test',
+        'relativePath': '.',
+        'availability': 'available',
+        'trustState': 'approved',
+        'fingerprint':
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+        'policyVersion': '1',
+        'manifest': <Map<String, Object?>>[],
+      },
+    ]);
+  }
   return _Fixture(database, coordinator);
 }
 
@@ -395,19 +483,24 @@ final class _Offline implements Exception {
 void _m16Affordances() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets(
-    'app bar shows a SessionStatePill for the selected chat runtime',
-    (tester) async {
-      final fixture = await _fixture(withSession: true);
-      addTearDown(fixture.dispose);
+  testWidgets('app bar keeps the chat title without runtime labels', (
+    tester,
+  ) async {
+    final fixture = await _fixture(withSession: true);
+    addTearDown(fixture.dispose);
 
-      await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
-      await tester.pump();
+    await tester.pumpWidget(PiMobApp(coordinator: fixture.coordinator));
+    await tester.pump();
 
-      expect(find.byKey(const Key('app-bar-state-pill')), findsOneWidget);
-      expect(find.byKey(const Key('app-bar-role')), findsOneWidget);
-    },
-  );
+    expect(find.byKey(const Key('shell-app-bar-title')), findsOneWidget);
+    expect(find.text('Saved chat'), findsOneWidget);
+    expect(find.byKey(const Key('app-bar-state-pill')), findsNothing);
+    expect(find.byKey(const Key('app-bar-role')), findsNothing);
+    expect(find.text('Ready'), findsNothing);
+    expect(find.text('Working'), findsNothing);
+    expect(find.text('Observer'), findsNothing);
+    expect(find.text('Controller'), findsNothing);
+  });
 
   testWidgets('app bar exposes a discoverable commands affordance', (
     tester,

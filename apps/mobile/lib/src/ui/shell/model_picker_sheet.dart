@@ -9,7 +9,15 @@ Future<void> showModelPickerSheet(
   BuildContext context,
   ConnectionCoordinator coordinator,
 ) async {
-  await coordinator.requestModels();
+  try {
+    await coordinator.requestModels();
+  } on Object {
+    if (!context.mounted) return;
+    ScaffoldMessenger.maybeOf(
+      context,
+    )?.showSnackBar(const SnackBar(content: Text('Could not load models.')));
+    return;
+  }
   if (!context.mounted) return;
   await showModalBottomSheet<void>(
     context: context,

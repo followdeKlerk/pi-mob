@@ -6,8 +6,8 @@ import '../../controls/control_view_data.dart';
 import '../../controls/supported_command_list.dart';
 import 'activity_destination.dart';
 import '../theme/pi_tokens.dart';
-import 'status_pill.dart';
 import 'chat_session_drawer.dart';
+import 'model_picker_sheet.dart';
 import 'session_sync_screen.dart';
 import 'transcript_search_sheet.dart';
 
@@ -66,6 +66,18 @@ class _AppShellState extends State<AppShell> {
 
   void _onCoordinatorChanged() {
     if (mounted) setState(() {});
+  }
+
+  /// Returns the label of the currently selected model for the open chat,
+  /// or `null` when no chat is open or no model has been chosen yet.
+  String? _currentModelLabel() {
+    final coordinator = widget.coordinator;
+    final modelId = coordinator.selectedControls?.modelId;
+    if (modelId == null) return null;
+    for (final model in coordinator.configuredModels) {
+      if (model.id == modelId) return model.label;
+    }
+    return modelId;
   }
 
   void _openChats() => _scaffoldKey.currentState?.openDrawer();
@@ -195,37 +207,12 @@ class _AppShellState extends State<AppShell> {
             : null,
         titleSpacing: chatOpen ? 0 : 16,
         title: chatOpen
-            ? Column(
+            ? Text(
+                selected?.name ?? 'Chat',
                 key: const Key('shell-app-bar-title'),
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    selected?.name ?? 'Chat',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontWeight: FontWeight.w600),
-                  ),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 4,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      SessionStatePill(
-                        key: const Key('app-bar-state-pill'),
-                        runtimeState:
-                            widget.coordinator.selectedRuntimeState ?? 'idle',
-                      ),
-                      Text(
-                        widget.coordinator.leaseId == null
-                            ? 'Observer'
-                            : 'Controller',
-                        key: const Key('app-bar-role'),
-                        style: Theme.of(context).textTheme.labelSmall,
-                      ),
-                    ],
-                  ),
-                ],
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(fontWeight: FontWeight.w600),
               )
             : const Text(
                 'Chats',
@@ -235,6 +222,20 @@ class _AppShellState extends State<AppShell> {
         centerTitle: false,
         actions: [
           if (chatOpen) ...[
+            Builder(
+              builder: (context) {
+                final modelLabel = _currentModelLabel();
+                return IconButton(
+                  key: const Key('open-model-picker'),
+                  tooltip: modelLabel == null
+                      ? 'Choose model'
+                      : 'Model: $modelLabel',
+                  onPressed: () =>
+                      showModelPickerSheet(context, widget.coordinator),
+                  icon: const Icon(Icons.smart_toy_outlined),
+                );
+              },
+            ),
             IconButton(
               key: const Key('open-commands'),
               tooltip: 'Commands and skills',

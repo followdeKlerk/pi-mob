@@ -10,7 +10,6 @@ import '../../notifications/notification_controller.dart';
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
 import 'motion_primitives.dart';
-import 'status_pill.dart';
 
 enum _ChatAction { rename, delete }
 
@@ -81,14 +80,21 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     return folder?.split('/').last ?? 'Untitled chat';
   }
 
-  String _context(SessionState session) {
+  String? _context(SessionState session) {
     final workspace = _workspaceFor(session.workspaceId);
-    final folder = workspace?.relativePath == '.'
-        ? workspace?.displayName
-        : workspace?.relativePath;
-    return folder == null
-        ? sessionStateLabel(session.runtimeState)
-        : '$folder · ${sessionStateLabel(session.runtimeState)}';
+    if (workspace == null) return null;
+    final title = _title(session).trim();
+
+    String? meaningful(String value) {
+      final candidate = value.trim();
+      if (candidate.isEmpty || candidate == '.' || candidate == title) {
+        return null;
+      }
+      return candidate;
+    }
+
+    return meaningful(workspace.relativePath) ??
+        meaningful(workspace.displayName);
   }
 
   Future<WorkspaceEntry?> _chooseFolder() =>
@@ -490,25 +496,19 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: Padding(
-                              padding: const EdgeInsets.only(top: PiSpacing.xs),
-                              child: Wrap(
-                                spacing: PiSpacing.xs,
-                                runSpacing: PiSpacing.xs,
-                                crossAxisAlignment: WrapCrossAlignment.center,
-                                children: [
-                                  Text(
-                                    _context(session),
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                  SessionStatePill(
-                                    key: Key('chat-pill-${session.sessionId}'),
-                                    runtimeState: session.runtimeState,
-                                  ),
-                                ],
+                            subtitle: switch (_context(session)) {
+                              final context? => Padding(
+                                padding: const EdgeInsets.only(
+                                  top: PiSpacing.xs,
+                                ),
+                                child: Text(
+                                  context,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
                               ),
-                            ),
+                              null => null,
+                            },
                             trailing: IconButton(
                               key: Key('chat-actions-${session.sessionId}'),
                               tooltip: 'Chat actions',
