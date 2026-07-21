@@ -96,6 +96,39 @@ void main() {
       expect(rows, hasLength(5));
     });
 
+    test('normalizes punctuation and escapes LIKE literals', () async {
+      for (final value in ['hello world', r'100%', 'a_b', r'c\d']) {
+        await db.upsertSearchEntry(
+          hostId: hostId,
+          sessionId: sessionA,
+          eventId: value,
+          cursor: value,
+          source: 'assistant',
+          summary: value,
+          tokens: value,
+          occurredAt: DateTime.utc(2026, 1, 1),
+          updatedAt: DateTime.utc(2026, 1, 1),
+        );
+      }
+      expect(
+        (await db.querySearchEntries(
+          hostId: hostId,
+          queryTokens: const ['hello, world'],
+          limit: 10,
+        )),
+        hasLength(1),
+      );
+      for (final value in ['100%', 'a_b', r'c\d']) {
+        expect(
+          (await db.querySearchEntries(
+            hostId: hostId,
+            queryTokens: [value],
+            limit: 10,
+          )),
+          hasLength(1),
+        );
+      }
+    });
     test('source filter narrows results to one source family', () async {
       await db.upsertSearchEntry(
         hostId: hostId,
@@ -230,7 +263,25 @@ void main() {
         );
         expect(oldest, hasLength(2));
         expect(oldest.first['cursor'], '0');
-        expect(oldest.last['cursor'], '1');
+        for (final cursor in ['2', '9', '10']) {
+          await db.upsertSearchEntry(
+            hostId: hostId,
+            sessionId: sessionA,
+            eventId: 'order-$cursor',
+            cursor: cursor,
+            source: 'assistant',
+            summary: 'order $cursor',
+            tokens: 'order',
+            occurredAt: DateTime.utc(2026, 1, 1),
+            updatedAt: DateTime.utc(2026, 1, 1),
+          );
+        }
+        final numericOldest = await db.searchEntriesOldestForSession(
+          hostId: hostId,
+          sessionId: sessionA,
+          limit: 3,
+        );
+        expect(numericOldest.map((row) => row['cursor']), ['0', '1', '2']);
       },
     );
 

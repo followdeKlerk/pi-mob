@@ -941,7 +941,9 @@ class AppDatabase extends _$AppDatabase {
   }) async {
     await _ensureSearchIndexSchema();
     final tokens = queryTokens
+        .expand((token) => _normalizeSearchToken(token).split(' '))
         .where((token) => token.isNotEmpty)
+        .toSet()
         .toList(growable: false);
     if (tokens.isEmpty || limit <= 0) {
       return const <Map<String, Object?>>[];
@@ -952,14 +954,15 @@ class AppDatabase extends _$AppDatabase {
     // like `squirrel` from accidentally matching `squirrels`.
     final tokenClauses = List<String>.generate(
       tokens.length,
-      (_) => "(' ' || tokens || ' ') LIKE ?",
+      (_) => "(' ' || tokens || ' ') LIKE ? ESCAPE '\\'",
     ).join(' AND ');
     final filterClause = sourceFilter == null || sourceFilter.isEmpty
         ? ''
         : ' AND source IN (${List<String>.generate(sourceFilter.length, (_) => '?').join(',')})';
     final variables = <Variable<Object>>[
       Variable<String>(hostId),
-      for (final token in tokens) Variable<String>('% $token %'),
+      for (final token in tokens)
+        Variable<String>('% ${_escapeLikeLiteral(token)} %'),
       if (sourceFilter != null)
         for (final source in sourceFilter) Variable<String>(source),
     ];
@@ -1037,7 +1040,7 @@ class AppDatabase extends _$AppDatabase {
     final rows = await customSelect(
       'SELECT event_id, cursor FROM search_entries '
       'WHERE host_id = ? AND session_id = ? '
-      'ORDER BY cursor ASC, updated_at ASC LIMIT ?',
+      'ORDER BY LENGTH(cursor) ASC, cursor ASC, updated_at ASC LIMIT ?',
       variables: [
         Variable.withString(hostId),
         Variable.withString(sessionId),
@@ -1081,6 +1084,54 @@ class AppDatabase extends _$AppDatabase {
 }
 
 String _bootstrapInstallationId() => const Uuid().v4().toLowerCase();
+
+/// Mirrors the per-character rules the indexer uses in
+/// `search_indexer.dart`'s private `_tokenize`: lowercase, keep only ASCII
+/// letters, ASCII digits, and the Latin Extended blocks the indexer
+/// retains, and collapse every other rune into a single separator. This
+/// keeps the DB-level LIKE clause consistent with the persisted `tokens`
+/// column regardless of how the caller pre-tokenised the query.
+String _normalizeSearchToken(String value) {
+  if (value.isEmpty) return '';
+  final lowered = value.toLowerCase();
+  final buf = StringBuffer();
+  var pendingSpace = false;
+  for (final rune in lowered.runes) {
+    final code = rune;
+    final isLetterOrDigit =
+        (code >= 0x41 && code <= 0x5a) ||
+        (code >= 0x61 && code <= 0x7a) ||
+        (code >= 0x00c0 && code <= 0x024f) ||
+        (code >= 0x1e00 && code <= 0x1eff) ||
+        (code >= 0x30 && code <= 0x39);
+    final isLikeLiteral = code == 0x25 || code == 0x5f || code == 0x5c;
+    if (isLetterOrDigit || isLikeLiteral) {
+      if (pendingSpace) buf.write(' ');
+      buf.write(String.fromCharCode(code));
+      pendingSpace = false;
+    } else {
+      pendingSpace = true;
+    }
+  }
+  return buf.toString().trim();
+}
+
+/// Escapes the SQLite `LIKE` wildcards (`%`, `_`) plus the escape
+/// character itself so a token containing those characters matches the
+/// persisted form literally rather than acting as a wildcard. The
+/// accompanying LIKE clause must use `ESCAPE '\'` for this to take
+/// effect.
+String _escapeLikeLiteral(String value) {
+  final buf = StringBuffer();
+  for (final rune in value.runes) {
+    final ch = String.fromCharCode(rune);
+    if (ch == r'\' || ch == '%' || ch == '_') {
+      buf.write(r'\');
+    }
+    buf.write(ch);
+  }
+  return buf.toString();
+}
 
 QueryExecutor _openConnection() {
   return driftDatabase(name: 'pi_mob');

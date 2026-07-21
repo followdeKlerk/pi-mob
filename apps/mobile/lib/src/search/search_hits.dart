@@ -47,9 +47,16 @@ class SearchHit {
   StreamCursor get cursorValue => StreamCursor.parse(cursor);
 
   String get snippet {
-    final start = matchStart;
-    final end = matchEnd;
-    if (start < 0 || end <= start) return summary;
+    if (summary.isEmpty) return summary;
+    // Clamp to the summary bounds so a stale or oversized match range
+    // (e.g. produced when no literal substring exists and the controller
+    // falls back to the trimmed query length) cannot throw a RangeError
+    // out of `replaceRange`. The clamp is a no-op for valid ranges and
+    // collapses invalid ones into a plain summary render.
+    final length = summary.length;
+    final start = matchStart.clamp(0, length);
+    final end = matchEnd.clamp(0, length);
+    if (end <= start) return summary;
     return summary.replaceRange(
       start,
       end,
