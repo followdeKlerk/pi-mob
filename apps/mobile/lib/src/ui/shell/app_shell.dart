@@ -7,6 +7,7 @@ import '../../controls/supported_command_list.dart';
 import 'activity_destination.dart';
 import '../theme/pi_tokens.dart';
 import 'chat_session_drawer.dart';
+import 'global_search_sheet.dart';
 import 'model_picker_sheet.dart';
 import 'session_sync_screen.dart';
 import 'transcript_search_sheet.dart';
@@ -248,6 +249,12 @@ class _AppShellState extends State<AppShell> {
               onPressed: () =>
                   showTranscriptSearch(context, widget.coordinator),
               icon: const Icon(Icons.search_rounded),
+            ),
+            IconButton(
+              key: const Key('open-global-search'),
+              tooltip: 'Search every chat',
+              onPressed: () => showGlobalSearch(context, widget.coordinator),
+              icon: const Icon(Icons.manage_search_rounded),
             ),
           ],
         ],
