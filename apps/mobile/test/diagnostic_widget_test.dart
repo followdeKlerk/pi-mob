@@ -192,10 +192,15 @@ void main() {
     await tester.pumpWidget(PiMobApp(coordinator: coordinator));
     await tester.pump();
 
-    // The saved-chat drawer shows the broken session runtime state.
+    // The saved-chat drawer keeps the chat available without repeating its
+    // runtime state; crash detail remains in the contextual chat surface.
     await tester.tap(find.byKey(const Key('open-chat-drawer')));
     await tester.pumpAndSettle();
-    expect(find.textContaining('Repeated crashes'), findsWidgets);
+    expect(
+      find.byKey(const Key('saved-chat-22222222-2222-4222-8222-222222222222')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Repeated crashes'), findsNothing);
     await tester.tap(find.byKey(const Key('close-chat-drawer')));
     await tester.pumpAndSettle();
 
