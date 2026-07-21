@@ -191,6 +191,9 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Set<String> _locallyDeletedSessionIds = {};
   final Map<String, SessionControlState> _sessionControls = {};
   final List<ModelOption> _models = [];
+  Completer<void>? _modelListCompleter;
+  Future<void>? _modelListFuture;
+  String? _modelListRequestId;
   final Map<String, SessionHistoryState> _history = {};
   final Map<String, _TranscriptEventsCache> _transcriptEventsCache = {};
   // In-flight `session.history.page` requests. The host may take several
@@ -773,10 +776,35 @@ final class ConnectionCoordinator extends ChangeNotifier
     await requestModels();
   }
 
-  Future<void> requestModels() async {
-    await _sendControl('model.list', <String, Object?>{
-      if (selectedSessionId != null) 'sessionId': selectedSessionId,
-    });
+  Future<void> requestModels() {
+    final pending = _modelListFuture;
+    if (pending != null) return pending;
+
+    final completer = Completer<void>();
+    final requestId = _id();
+    _modelListCompleter = completer;
+    _modelListRequestId = requestId;
+    final future = () async {
+      try {
+        await _sendControl('model.list', <String, Object?>{
+          if (selectedSessionId != null) 'sessionId': selectedSessionId,
+        }, requestId: requestId);
+        await completer.future.timeout(
+          const Duration(seconds: 8),
+          onTimeout: () => throw TimeoutException(
+            'Timed out waiting for the configured agent list.',
+          ),
+        );
+      } finally {
+        if (identical(_modelListCompleter, completer)) {
+          _modelListCompleter = null;
+          _modelListFuture = null;
+          _modelListRequestId = null;
+        }
+      }
+    }();
+    _modelListFuture = future;
+    return future;
   }
 
   Future<void> setModel(String modelId) {
@@ -2245,7 +2273,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       case 'workspace.search.result':
         _workspaceSearchResult(_workspaceSearchEpoch, payload);
       case 'model.list.result':
-        _modelListResult(payload);
+        _modelListResult(message, payload);
       case 'session.history.page.result':
         await _sessionHistoryPageResult(message, payload);
       case 'workspace.trust_state':
@@ -2882,7 +2910,17 @@ final class ConnectionCoordinator extends ChangeNotifier
     unawaited(_database.upsertSessionState(state));
   }
 
-  void _modelListResult(Map<String, Object?> payload) {
+  void _failModelListRequest(String message) {
+    final completer = _modelListCompleter;
+    if (completer != null && !completer.isCompleted) {
+      completer.completeError(StateError(message));
+    }
+  }
+
+  void _modelListResult(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) {
     final items = payload['items'];
     _models
       ..clear()
@@ -2904,6 +2942,13 @@ final class ConnectionCoordinator extends ChangeNotifier
       _sessionControls[id] = controls!.apply('model.state', <String, Object?>{
         'modelUnavailable': true,
       });
+    }
+    final completer = _modelListCompleter;
+    final responseRequestId = message['requestId'];
+    if (completer != null &&
+        !completer.isCompleted &&
+        responseRequestId == _modelListRequestId) {
+      completer.complete();
     }
   }
 
@@ -3335,6 +3380,18 @@ final class ConnectionCoordinator extends ChangeNotifier
       return;
     }
     final requestId = message['requestId'];
+    final modelCompleter = _modelListCompleter;
+    if (requestId is String &&
+        requestId == _modelListRequestId &&
+        modelCompleter != null &&
+        !modelCompleter.isCompleted) {
+      modelCompleter.completeError(
+        StateError(
+          '$code: ${payload['message'] ?? 'Could not load configured agents'}',
+        ),
+      );
+      return;
+    }
     final reconciledCommandId = requestId is String
         ? _pendingCurrentRequestCommand.remove(requestId)
         : null;
@@ -3526,12 +3583,16 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
-  Future<String> _sendControl(String type, Map<String, Object?> payload) async {
+  Future<String> _sendControl(
+    String type,
+    Map<String, Object?> payload, {
+    String? requestId,
+  }) async {
     final socket = _socket;
     if (socket == null || connectionId == null) throw StateError('Offline');
-    final requestId = _id();
-    await socket.send(_envelope(type, payload, requestId: requestId));
-    return requestId;
+    final resolvedRequestId = requestId ?? _id();
+    await socket.send(_envelope(type, payload, requestId: resolvedRequestId));
+    return resolvedRequestId;
   }
 
   Future<void> _sendCommand({
@@ -4034,6 +4095,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   void _socketEnded(Object? error, int epoch) {
     if (epoch != _connectionEpoch || _disposed) return;
     _failSessionCreation('The connection closed before the chat was created.');
+    _failModelListRequest('The connection closed before agents were loaded.');
     ++_connectionEpoch;
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
@@ -4118,6 +4180,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   Future<void> _closeSocket() async {
+    _failModelListRequest('The connection changed before agents were loaded.');
     _ackTimer?.cancel();
     _ackTimer = null;
     _leaseTimer?.cancel();

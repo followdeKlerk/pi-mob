@@ -108,7 +108,18 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
       );
 
   Future<ModelOption?> _chooseAgent() async {
-    await widget.coordinator.requestModels();
+    try {
+      await widget.coordinator.requestModels();
+    } on Object {
+      if (mounted) {
+        ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+          const SnackBar(
+            content: Text('Could not load agents. Check the connection.'),
+          ),
+        );
+      }
+      return null;
+    }
     if (!mounted) return null;
     final models = widget.coordinator.configuredModels
         .where((model) => model.available && model.provider != null)

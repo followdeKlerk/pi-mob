@@ -1485,7 +1485,18 @@ void main() {
     () async {
       await makeReady(coordinator, transport);
       final socket = transport.sockets.single;
-      await coordinator.requestModels();
+      var modelRequestCompleted = false;
+      final modelRequest = coordinator.requestModels().then(
+        (_) => modelRequestCompleted = true,
+      );
+      await eventually(
+        () => socket.sent.any((message) => message['type'] == 'model.list'),
+      );
+      expect(
+        modelRequestCompleted,
+        isFalse,
+        reason: 'the drawer must wait for the authoritative model list',
+      );
       final request = socket.sent.lastWhere(
         (message) => message['type'] == 'model.list',
       );
@@ -1500,6 +1511,8 @@ void main() {
           ],
         }, requestId: request['requestId'] as String),
       );
+      await modelRequest;
+      expect(modelRequestCompleted, isTrue);
       socket.server(
         event(
           type: 'model.state',
