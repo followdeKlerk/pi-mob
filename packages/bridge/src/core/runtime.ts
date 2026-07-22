@@ -12,6 +12,7 @@ import {
 } from "./process-projection";
 import { GitSummaryService } from "../git/summary-service";
 import { type PlanSourceService, isPlanUnavailable, boundPlanSnapshot } from "../plans/source-service";
+import { type ContextSourceService, type ContextMutationTarget, isContextUnavailable, boundContextSnapshot } from "../context/source-service";
 import {
   type DurableTrustPolicyStore,
   type HostPolicyService,
@@ -83,6 +84,39 @@ function boundHistoryPayload(payload: Record<string, unknown>): Record<string, u
   return visit(payload) as Record<string, unknown>;
 }
 
+/** R4 — Normalise the closed `ContextMutationTarget` from the wire
+ * payload. The runtime enforces a 3-shape union so a malicious or
+ * malformed target cannot smuggle private fields. */
+function normaliseContextTarget(value: Record<string, unknown>): ContextMutationTarget {
+  const kind = String(value.kind ?? "");
+  if (kind === "file") {
+    const path = String(value.path ?? "");
+    const revision = typeof value.revision === "string" ? value.revision : undefined;
+    const rawRanges = Array.isArray(value.ranges) ? value.ranges : undefined;
+    const ranges = rawRanges
+      ? rawRanges
+          .filter((entry): entry is Record<string, unknown> => !!entry && typeof entry === "object")
+          .map((entry) => ({
+            startLine: Number(entry.startLine ?? 1),
+            endLine: Number(entry.endLine ?? 1),
+          }))
+      : undefined;
+    return revision === undefined
+      ? ranges === undefined
+        ? { kind: "file", path }
+        : { kind: "file", path, ranges }
+      : ranges === undefined
+        ? { kind: "file", path, revision }
+        : { kind: "file", path, ranges, revision };
+  }
+  if (kind === "source") {
+    const sourceId = String(value.sourceId ?? "");
+    const revision = typeof value.revision === "string" ? value.revision : undefined;
+    return revision === undefined ? { kind: "source", sourceId } : { kind: "source", sourceId, revision };
+  }
+  return { kind: "all" };
+}
+
 function mobileTrustState(status: TrustState["status"]): "approved" | "unapproved" | "fingerprint_changed" {
   if (status === "trusted") return "approved";
   if (status === "changed") return "fingerprint_changed";
@@ -134,6 +168,11 @@ export interface DurableRuntimeOptions {
    * host-stream event so mobile renders "Plans unavailable" rather than
    * inventing steps from prose. */
   readonly plans?: PlanSourceService;
+  /** R4 — optional context-inspector authority. When omitted, the bridge
+   * never advertises `contexts.v1` and surfaces a truthful
+   * `context.unavailable` host-stream event so the mobile inspector
+   * shows explicit unavailable UX rather than fabricated state. */
+  readonly contexts?: ContextSourceService;
 }
 
 export class DurableBridgeRuntime implements BridgeRuntimePort {
@@ -152,6 +191,8 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private readonly inFlightGitSummaries = new Map<string, AbortController>();
   private readonly plans: PlanSourceService | null;
   private readonly inFlightPlanRequests = new Map<string, AbortController>();
+  private readonly contexts: ContextSourceService | null;
+  private readonly inFlightContextSnapshots = new Map<string, AbortController>();
   private readyState = false;
   private readonly searchCandidates = new Map<WorkspaceRootId, { canonicalPath: string; label: string }>();
   constructor(readonly options: DurableRuntimeOptions) {
@@ -164,6 +205,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     this.git = options.git ?? null;
     this.resolveGitCwd = options.resolveGitCwd ?? null;
     this.plans = options.plans ?? null;
+    this.contexts = options.contexts ?? null;
   }
   async start(): Promise<{ resumed: number; indeterminate: number }> {
     const recovered = await this.commands.recover(); this.readyState = true; return recovered;
@@ -181,6 +223,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (this.processes) caps.push("processes.v1");
     if (this.git) caps.push("git.v1");
     if (this.plans) caps.push("plans.v1");
+    if (this.contexts) caps.push("contexts.v1");
     return caps;
   }
 
@@ -266,6 +309,11 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (type === "git.summary.cancel") return this.gitSummaryCancel(payload);
     if (type === "plan.summary.request") return this.planSummaryRequest(payload);
     if (type === "plan.summary.cancel") return this.planSummaryCancel(payload);
+    if (type === "context.snapshot.request") return this.contextSnapshotRequest(payload);
+    if (type === "context.pin") return this.contextMutation("context.pin", payload);
+    if (type === "context.unpin") return this.contextMutation("context.unpin", payload);
+    if (type === "context.exclude") return this.contextMutation("context.exclude", payload);
+    if (type === "context.refresh") return this.contextMutation("context.refresh", payload);
     if (type === "policy.summary") {
       if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
       const eff = this.policy.hostPolicy.effective();
@@ -427,7 +475,64 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
 
   }
 
-  /** Routes all R3 reads through the only filesystem authority. */
+  /** R4 — `context.snapshot.request` runs the bounded context-inspector
+   * authority for one session and tracks the in-flight request so the
+   * bridge can cancel it. The response is the closed `ContextSnapshot`
+   * schema (`context.snapshot.result`). When the service truthfully
+   * reports the surface is unavailable, the bridge emits
+   * `context.unavailable` on the host stream and throws
+   * `unsupported_capability`; the schema forbids embedding
+   * `ContextUnavailable` inside `context.snapshot.result`. */
+  private async contextSnapshotRequest(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.contexts) throw new RuntimeProtocolError("unsupported_capability", "context inspector is unavailable on this host");
+    const sessionId = String(payload.sessionId ?? "");
+    const requestId = String(payload.requestId ?? "");
+    if (!sessionId) throw new RuntimeProtocolError("invalid_message", "sessionId is required");
+    if (!requestId) throw new RuntimeProtocolError("invalid_message", "requestId is required");
+    const controller = new AbortController();
+    this.inFlightContextSnapshots.set(requestId, controller);
+    try {
+      const result = await this.contexts.snapshot({ sessionId, signal: controller.signal });
+      if (isContextUnavailable(result)) {
+        this.options.store.appendEvent(
+          `host:${this.identity().hostId}`,
+          "context.unavailable",
+          { sessionId: result.sessionId, capability: result.capability, status: result.status },
+        );
+        throw new RuntimeProtocolError("unsupported_capability", result.status.reason);
+      }
+      return { ...boundContextSnapshot(result) };
+    } finally {
+      const tracked = this.inFlightContextSnapshots.get(requestId);
+      if (tracked === controller) this.inFlightContextSnapshots.delete(requestId);
+    }
+  }
+
+  /** R4 — `context.pin` / `context.unpin` / `context.exclude` /
+   * `context.refresh` are durable session commands per D-037. The
+   * bridge forwards them to the injected service; rejection surfaces
+   * as `unsupported_capability` so a stale tap never silently mutates
+   * the authoritative snapshot. */
+  private async contextMutation(
+    type: "context.pin" | "context.unpin" | "context.exclude" | "context.refresh",
+    payload: Record<string, unknown>,
+  ): Promise<Record<string, unknown>> {
+    if (!this.contexts) throw new RuntimeProtocolError("unsupported_capability", "context inspector is unavailable on this host");
+    const sessionId = String(payload.sessionId ?? "");
+    const expectedRevision = String(payload.expectedRevision ?? "");
+    const targetValue = payload.target;
+    if (!sessionId) throw new RuntimeProtocolError("invalid_message", "sessionId is required");
+    if (!expectedRevision) throw new RuntimeProtocolError("invalid_message", "expectedRevision is required");
+    if (!targetValue || typeof targetValue !== "object") throw new RuntimeProtocolError("invalid_message", "target is required");
+    const target = normaliseContextTarget(targetValue as Record<string, unknown>);
+    const result = await this.contexts.mutate({ sessionId, type, target, expectedRevision });
+    if (!result.accepted) {
+      throw new RuntimeProtocolError("unsupported_capability", result.rejectionReason ?? "context mutation rejected");
+    }
+    return { sessionId, type, accepted: true, revision: result.revision };
+  }
+
+    /** Routes all R3 reads through the only filesystem authority. */
   private workspaceFileControl(type: string, payload: Record<string, unknown>): Record<string, unknown> {
     const files = this.options.workspaceFiles;
     if (!files) throw new RuntimeProtocolError("unsupported_capability", "workspace file browsing is unavailable on this host");

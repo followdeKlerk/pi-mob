@@ -10,9 +10,9 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 
 - Repository: `/Users/nathandekleerk/github/pi-mob`
 - Branch: `main`
-- HEAD: `338ed1a feat(mobile): wire R2 plan summary request and stream events into coordinator`
+- HEAD: R4 bridge slice (commit pending in this turn)
 - Working tree: clean at handoff; this file is intentionally untracked until
-  the docs commit lands.
+  the docs commit lands (R4 work committed in this turn).
 
 ## Integrated in this continuation
 
@@ -83,6 +83,39 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
   - success path does NOT emit `git.unavailable`
   - `cwd unknown` does NOT emit `git.unavailable`
 - Frozen schemas and D-039 response shape unchanged.
+
+### R4 bridge context-inspector wiring (now committed)
+
+- New `packages/bridge/src/context/source-service.ts` defines
+  `ContextSourceService` (snapshot + mutate), the discriminated
+  `ContextSourceResult = ContextSnapshot | ContextUnavailable`, the
+  `boundContextSnapshot()` helper that clips every string/array to the
+  protocol LIMITS, and the closed `ContextMutationTarget` union
+  (`file`/`source`/`all`).
+- `DurableBridgeRuntime` now optionally accepts `contexts` (a
+  `ContextSourceService`). It advertises `contexts.v1` only when an
+  instance is installed and routes five new controls:
+  - `context.snapshot.request` (read; tracks in-flight requests so
+    the bridge can cancel; surfaces `context.unavailable` on the
+    host stream then rejects the response with
+    `unsupported_capability` when the service truthfully reports
+    unavailable).
+  - `context.pin` / `context.unpin` / `context.exclude` /
+    `context.refresh` (durable session commands per D-037; the
+    bridge forwards a normalised `ContextMutationTarget` and
+    surfaces rejection as `unsupported_capability` so a stale tap
+    never silently mutates the authoritative snapshot).
+- Eleven new bridge tests in
+  `packages/bridge/test/r4-runtime-integration.test.ts` cover
+  capability advertisement, the read/response shape (validated
+  against the shared protocol fixture), truthful unavailable host
+  event, the four mutation controls, missing-field rejection,
+  mutation rejection as `unsupported_capability`, and the
+  no-service `unsupported_capability` path.
+- 414 bridge tests pass (was 403, +11 R4).
+- 65 protocol-schema + protocol-fixture-runtime tests still pass.
+- `bun run typecheck` clean across root + bridge + schema +
+  protocol-fixtures + pi-extension.
 
 ### R2 mobile plan summary wiring (now committed)
 
