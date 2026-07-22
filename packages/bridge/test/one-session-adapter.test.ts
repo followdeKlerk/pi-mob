@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -23,6 +23,10 @@ import {
   createBridgeServer,
   type AdapterPort,
 } from "../src";
+import {
+  DurableRecipeActivityProjection,
+  importExternalSessionHistory,
+} from "../src/pi/external-history";
 
 class FakeRpc implements PiRpcClient {
   readonly requests: PiRpcRequestOptions[] = [];
@@ -299,6 +303,108 @@ describe("OneSessionPiAdapter", () => {
     expect(types).toContain("tool.completed");
     expect(types).toContain("turn.settled");
     expect(JSON.stringify(store.listEvents(streamId))).not.toContain("/private/repo");
+  });
+
+  test("durably projects recipe activity, suppresses raw reasoning, and dedupes restart replay", async () => {
+    const { store, adapter, hostStream, rpc } = setup();
+    await adapter.dispatch(makeCommand("create-recipe", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
+    await adapter.dispatch(makeCommand("turn-recipe", "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, {
+      sessionId, deliveryMode: "immediate", message: "run", attachmentIds: [],
+    }));
+
+    const publishedAfterCommit: boolean[] = [];
+    const detach = store.onEvent((event) => {
+      if (event.type !== "recipe.activity") return;
+      publishedAfterCommit.push(store.listEvents(event.streamId).some((stored) => stored.eventId === event.eventId));
+    });
+    rpc.emit({ type: "turn_start", sessionId });
+    rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } });
+    rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "private chain of thought" } });
+    rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "thinking_end", contentIndex: 0 } });
+    rpc.emit({ type: "tool_execution_start", sessionId, toolCallId: "tool-r1", toolName: "bash", args: { command: "printf ok" } });
+    rpc.emit({ type: "tool_execution_update", sessionId, toolCallId: "tool-r1", partialResult: "ok" });
+    rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "tool-r1", toolName: "bash", result: "ok", isError: false });
+    // RPC replay of the same terminal update must not create another recipe
+    // snapshot even though the normalized source event is still journaled.
+    rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "tool-r1", toolName: "bash", result: "ok", isError: false });
+    rpc.emit({ type: "agent_settled", sessionId });
+    detach();
+
+    const streamId = `session:${sessionId}`;
+    const events = store.listEvents(streamId);
+    const recipes = events.filter((event) => event.type === "recipe.activity");
+    expect(recipes.filter((event) => (event.payload as Record<string, unknown>).activityId === "0")).toHaveLength(2);
+    expect(recipes.filter((event) => (event.payload as Record<string, unknown>).activityId === "tool-r1")).toHaveLength(2);
+    expect(recipes.at(-1)?.payload).toMatchObject({
+      kind: "tool", activityId: "tool-r1", status: "completed", output: "ok",
+    });
+    expect(publishedAfterCommit.every(Boolean)).toBe(true);
+    expect(JSON.stringify(events)).not.toContain("private chain of thought");
+    expect(events.some((event) => event.type === "reasoning.delta")).toBe(false);
+
+    const beforeRestart = recipes.length;
+    adapter.close();
+    const restarted = new OneSessionPiAdapter({
+      store,
+      rpc,
+      workspace: {
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        rootPath: "/private/example/repo",
+        displayName: "example",
+        fingerprint: "fingerprint-fixture",
+        policyMode: "full",
+      },
+      now: () => 1_700_000_000_000,
+    });
+    expect(store.listEvents(streamId).filter((event) => event.type === "recipe.activity")).toHaveLength(beforeRestart);
+    restarted.close();
+  });
+
+  test("external history emits recipe activity without persisting private thinking", () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-mob-r1-history-"));
+    const source = join(directory, "session.jsonl");
+    const sessionId = "77777777-7777-4777-8777-777777777777";
+    const store = new BridgeStore(join(directory, "bridge.sqlite"), () => Date.parse("2026-01-01T00:00:10.000Z"));
+    store.ensureSession(sessionId, { externalSession: true });
+    store.ensureStream(`session:${sessionId}`, "session", sessionId);
+    writeFileSync(source, [
+      { type: "session", id: sessionId, version: 1 },
+      { type: "message", id: "user-1", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "run" }] } },
+      { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "assistant", content: [
+        { type: "thinking", thinking: "historical private chain of thought" },
+        { type: "toolCall", id: "history-tool", name: "bash", arguments: { command: "printf ok" } },
+      ] } },
+      { type: "message", id: "result-1", parentId: "assistant-1", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "toolResult", toolCallId: "history-tool", toolName: "bash", content: [{ type: "text", text: "ok" }], isError: false } },
+    ].map((entry) => JSON.stringify(entry)).join("\n"));
+
+    expect(importExternalSessionHistory(store, sessionId, source)).toBeGreaterThan(0);
+    const events = store.listEvents(`session:${sessionId}`);
+    expect(events.some((event) => event.type === "recipe.activity")).toBe(true);
+    expect(events.some((event) => event.type === "reasoning.delta")).toBe(false);
+    expect(JSON.stringify(events)).not.toContain("historical private chain of thought");
+    const latestTool = events.filter((event) => event.type === "recipe.activity" && event.payload.activityId === "history-tool").at(-1)!;
+    expect(latestTool.payload).toMatchObject({ status: "completed", output: "ok" });
+    expect((latestTool.payload.timing as Record<string, unknown>).durationMs).toBe(2000);
+    expect(importExternalSessionHistory(store, sessionId, source)).toBe(0);
+  });
+
+  test("history/live overlap dedupes recipe snapshots by stable identity", () => {
+    const store = new BridgeStore(join(mkdtempSync(join(tmpdir(), "pi-mob-r1-overlap-")), "bridge.sqlite"), () => Date.parse("2026-01-01T00:00:00.000Z"));
+    const sessionId = "88888888-8888-4888-8888-888888888888";
+    store.ensureSession(sessionId);
+    store.ensureStream(`session:${sessionId}`, "session", sessionId);
+    const projection = new DurableRecipeActivityProjection(store, sessionId);
+    projection.append("turn.started", { sessionId, turnId: "turn-1" });
+    projection.append("tool.started", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", arguments: { file: "README.md" }, historical: true });
+    projection.append("tool.completed", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", result: "ok", historical: true });
+    const beforeOverlap = store.listEvents(`session:${sessionId}`).filter((event) => event.type === "recipe.activity");
+
+    projection.append("tool.started", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", arguments: { file: "README.md" } });
+    projection.append("tool.completed", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", result: "ok" });
+    const afterOverlap = store.listEvents(`session:${sessionId}`).filter((event) => event.type === "recipe.activity");
+    expect(afterOverlap).toHaveLength(beforeOverlap.length);
+    expect(afterOverlap.at(-1)?.payload).toEqual(beforeOverlap.at(-1)?.payload);
   });
 
   test("shared RPC binds one notification listener across durable sessions", async () => {

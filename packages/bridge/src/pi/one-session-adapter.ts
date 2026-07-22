@@ -33,6 +33,7 @@ import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
 import type { AttachmentStore } from "../core/attachments";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
+import { DurableRecipeActivityProjection } from "./external-history";
 import { normalizeCommandCatalogue } from "./command-catalogue";
 import { ExportRegistry, ExportRegistryInvalidInputError, type ExportMetadata } from "./export-registry";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
@@ -254,6 +255,7 @@ export class OneSessionPiAdapter {
     { detach: () => void; refs: number }
   >();
   private readonly toolOutputLimiter = new ToolOutputLimiter();
+  private readonly recipeProjections = new Map<string, DurableRecipeActivityProjection>();
   private readonly policyBridge: OneSessionPolicyBridge | null;
   private readonly supervisor: ProcessSupervisor;
   private readonly reuseExistingOnCreate: boolean;
@@ -329,6 +331,31 @@ export class OneSessionPiAdapter {
       this.supervisor.register(id, "stopped");
       this.resolveRpc(id);
       this.bindSession(id);
+      this.recipeProjection(id).backfill();
+    }
+  }
+
+  private recipeProjection(sessionId: string): DurableRecipeActivityProjection {
+    let projection = this.recipeProjections.get(sessionId);
+    if (!projection) {
+      projection = new DurableRecipeActivityProjection(this.store, sessionId);
+      this.recipeProjections.set(sessionId, projection);
+    }
+    return projection;
+  }
+
+  private appendNormalizedEvent(
+    sessionId: string,
+    type: string,
+    payload: Record<string, unknown>,
+  ): import("../core/store").StoredEvent {
+    try {
+      return this.recipeProjection(sessionId).append(type, payload);
+    } catch (error) {
+      // The durable projection rebuilds itself after rollback; dropping the
+      // cached wrapper also protects a later retry after a store repair.
+      this.recipeProjections.delete(sessionId);
+      throw error;
     }
   }
 
@@ -337,6 +364,7 @@ export class OneSessionPiAdapter {
     for (const fn of this.globalDetach) fn();
     this.globalDetach.clear();
     this.notificationBindings.clear();
+    this.recipeProjections.clear();
     for (const entry of this.sessions.values()) entry.detach();
     this.sessions.clear();
   }
@@ -1562,15 +1590,23 @@ export class OneSessionPiAdapter {
     if (normalized.length === 0) return;
     const activeTurn = this.activeTurns.get(inferredSessionId);
     for (const event of normalized) {
+      // Pi's thinking deltas are private chain-of-thought. They have no
+      // provider-summary contract and must not enter the durable journal or a
+      // derived recipe payload.
+      if (event.type === "reasoning.delta") continue;
       if(["turn.failed","turn.aborted","turn.indeterminate"].includes(event.type)) this.store.orphanPendingDialogs(inferredSessionId);
+      const toolFailure = event.type === "tool.failed"
+        ? recipeToolFailure(event.payload)
+        : null;
       const enrichedPayload: Record<string, unknown> = {
         ...event.payload,
+        ...(toolFailure ? { errorInfo: toolFailure } : {}),
         ...(activeTurn ? { turnId: activeTurn.turnId } : {}),
         ...(activeTurn && event.type === "turn.started"
           ? { commandId: activeTurn.turnId, deliveryMode: activeTurn.deliveryMode, message: activeTurn.message }
           : {}),
       };
-      const storedEvent=this.store.appendEvent(streamId, event.type, enrichedPayload);
+      const storedEvent=this.appendNormalizedEvent(inferredSessionId, event.type, enrichedPayload);
       const notificationKind=classifyEvent({type:event.type,sessionId:inferredSessionId,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt,...(typeof enrichedPayload.errorCode==="string"?{errorCode:enrichedPayload.errorCode}:{}),...(typeof enrichedPayload.attentionState==="string"?{attentionState:enrichedPayload.attentionState}:{}),...(typeof enrichedPayload.runtimeState==="string"?{runtimeState:enrichedPayload.runtimeState}:{})});
       if(notificationKind) safePublishStatus(this.notificationService,{sessionId:inferredSessionId,kind:notificationKind,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt});
       const prior = this.store.sessionState(inferredSessionId) ?? {};
@@ -1603,6 +1639,22 @@ export class OneSessionPiAdapter {
     const onlySession = [...this.sessions.keys()][0];
     return onlySession ?? null;
   }
+}
+
+function recipeToolFailure(payload: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  if (payload.errorInfo && typeof payload.errorInfo === "object") {
+    return payload.errorInfo as Record<string, unknown>;
+  }
+  let message = "Tool failed";
+  const candidate = payload.result ?? payload.output;
+  if (typeof candidate === "string" && candidate.length > 0) message = candidate;
+  else if (candidate !== undefined) {
+    try {
+      const encoded = JSON.stringify(candidate);
+      if (encoded && encoded !== "{}") message = encoded;
+    } catch { /* normalization already replaced hostile values */ }
+  }
+  return { code: "tool_failed", message: message.slice(0, 512), retryable: false };
 }
 
 /** Test helper: a deterministic session id generator. */
