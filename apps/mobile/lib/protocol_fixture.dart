@@ -1675,7 +1675,14 @@ void _validateWorkspaceControlPayload(
       _uuidString(payload, 'workspaceId');
       _workspacePathString(payload, 'path');
       _positiveInteger(payload, 'rangeStart');
-      _positiveInteger(payload, 'rangeEnd');
+      final rangeEnd = _positiveInteger(payload, 'rangeEnd');
+      if (rangeEnd > 9007199254740991) {
+        throw ProtocolValidationException(
+          'payload.rangeEnd',
+          '<= Number.MAX_SAFE_INTEGER',
+          rangeEnd,
+        );
+      }
       if (payload.containsKey('expectedRevision')) {
         _revisionTokenString(payload, 'expectedRevision');
       }
