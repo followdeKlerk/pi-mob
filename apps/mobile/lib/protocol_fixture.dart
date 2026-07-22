@@ -1472,6 +1472,313 @@ String _oneOf(Map<String, Object?> object, String key, Set<String> allowed) {
   return value;
 }
 
+// =============================================================================
+// F0 — reusable shared-envelope helpers (D-036). These mirror the closed
+// `additionalProperties: false` TS schemas for recipe (R1) and plan (R2)
+// flows (RevisionTokenSchema, CapabilityStatusSchema, TimingSchema,
+// TruncationSchema, ErrorInfoSchema, ProviderSummarySchema). They are
+// intentionally unwired: callers will compose them into recipe/plan validators
+// in subsequent slices, so they live here as a single, audited surface that
+// matches the TS source one-to-one.
+// =============================================================================
+
+// F0 — RevisionTokenSchema pattern. Revision tokens are opaque, distinct
+// from DECIMAL_CURSOR_PATTERN so callers cannot substitute one for the
+// other. Pattern: `^[A-Za-z][A-Za-z0-9_.:-]{0,127}$` — at least one leading
+// ASCII letter, then up to 127 more from [A-Za-z0-9_.:-], total 1..128
+// UTF-16 code units.
+const _revisionTokenPattern = r'^[A-Za-z][A-Za-z0-9_.:-]{0,127}$';
+final RegExp _revisionToken = RegExp(_revisionTokenPattern);
+
+// F0 — closed-object allowed-key rejection. Mirrors TypeBox
+// `additionalProperties: false`: any key outside `allowed` is rejected so a
+// bridge call site cannot smuggle `private` / `internal` / `debug` keys
+// alongside the declared shape. `path` is the dotted diagnostic location of
+// the object (e.g. `payload.providerSummary.truncation`); `allowed` lists
+// every acceptable key. The helper reports the offending key (not the
+// whole object) so consumers can pin the exact violation.
+void _closedObject(
+  Map<String, Object?> object,
+  String path,
+  Set<String> allowed,
+) {
+  for (final key in object.keys) {
+    if (!allowed.contains(key)) {
+      throw ProtocolValidationException(
+        path,
+        'closed object with allowed keys ${allowed.join(', ')}',
+        key,
+      );
+    }
+  }
+}
+
+// F0 — bounded required string. Required, non-empty, and UTF-16 code unit
+// length must be <= `maximum` (matches TypeBox `minLength: 1, maxLength: N`
+// semantics on a string field). Use this when the schema calls for a
+// non-optional bounded identifier, title, or payload text.
+void _boundedRequiredString(
+  Map<String, Object?> object,
+  String key,
+  int maximum,
+) {
+  final value = _string(object, key);
+  if (value.length > maximum) {
+    throw ProtocolValidationException(key, '<= $maximum characters', value);
+  }
+}
+
+// F0 — bounded optional string. Mirrors `Type.Optional(boundedString)`:
+// the key MAY be absent (returns null) OR present with a non-empty bounded
+// string. A PRESENT null is explicitly rejected because the TS schema has
+// no `Type.Null()` union member on bounded string fields — null in such a
+// position is always a producer-side bug, never a legitimate absent
+// sentinel. Returns null when the key is absent, the validated string when
+// present.
+String? _boundedOptionalString(
+  Map<String, Object?> object,
+  String key,
+  int maximum,
+) {
+  if (!object.containsKey(key)) return null;
+  final value = object[key];
+  if (value is! String || value.isEmpty) {
+    throw ProtocolValidationException(key, 'non-empty string or absent', value);
+  }
+  if (value.length > maximum) {
+    throw ProtocolValidationException(key, '<= $maximum characters', value);
+  }
+  return value;
+}
+
+// F0 — opaque plan/recipe revision token. Validates a required string field
+// against the `_revisionToken` regex. Always use this (not `_string`) when
+// the field is documented as a `RevisionTokenSchema`, so a decimal cursor
+// cannot be smuggled in.
+String _revisionTokenString(Map<String, Object?> object, String key) {
+  final value = _string(object, key);
+  if (!_revisionToken.hasMatch(value)) {
+    throw ProtocolValidationException(key, 'revision token', value);
+  }
+  return value;
+}
+
+// F0 — CapabilityStatusSchema (D-036): closed discriminated union of
+// `available | degraded | unavailable | stale`. `available` permits
+// optional reason/remediation because green-path responses do not need an
+// incident narrative; degraded/unavailable/stale each REQUIRE nonempty
+// reason + remediation so callers always know what is broken and how to
+// fix it. Every variant accepts optional source (bounded 128), revision
+// (RevisionToken), and lastRefreshedAt (ISO-UTC). Closed at every variant
+// to prevent smuggling private bookkeeping fields.
+// ignore: unused_element
+void _validateCapabilityStatus(Map<String, Object?> object, String path) {
+  final state = _string(object, 'state');
+  switch (state) {
+    case 'available':
+      _closedObject(object, path, const <String>{
+        'state',
+        'reason',
+        'remediation',
+        'source',
+        'revision',
+        'lastRefreshedAt',
+      });
+      if (object.containsKey('reason')) {
+        _boundedRequiredString(object, 'reason', 512);
+      }
+      if (object.containsKey('remediation')) {
+        _boundedRequiredString(object, 'remediation', 512);
+      }
+      if (object.containsKey('source')) {
+        _boundedRequiredString(object, 'source', 128);
+      }
+      if (object.containsKey('revision')) {
+        _revisionTokenString(object, 'revision');
+      }
+      if (object.containsKey('lastRefreshedAt')) {
+        if (!_timestamp.hasMatch(_string(object, 'lastRefreshedAt'))) {
+          throw ProtocolValidationException(
+            'lastRefreshedAt',
+            'UTC RFC3339 timestamp',
+            object['lastRefreshedAt'],
+          );
+        }
+      }
+      return;
+    case 'degraded':
+    case 'unavailable':
+    case 'stale':
+      _closedObject(object, path, const <String>{
+        'state',
+        'reason',
+        'remediation',
+        'source',
+        'revision',
+        'lastRefreshedAt',
+      });
+      _boundedRequiredString(object, 'reason', 512);
+      _boundedRequiredString(object, 'remediation', 512);
+      if (object.containsKey('source')) {
+        _boundedRequiredString(object, 'source', 128);
+      }
+      if (object.containsKey('revision')) {
+        _revisionTokenString(object, 'revision');
+      }
+      if (object.containsKey('lastRefreshedAt')) {
+        if (!_timestamp.hasMatch(_string(object, 'lastRefreshedAt'))) {
+          throw ProtocolValidationException(
+            'lastRefreshedAt',
+            'UTC RFC3339 timestamp',
+            object['lastRefreshedAt'],
+          );
+        }
+      }
+      return;
+    default:
+      throw ProtocolValidationException(
+        'state',
+        'available, degraded, unavailable, or stale',
+        state,
+      );
+  }
+}
+
+// F0 — TimingSchema: closed bounded timing envelope. `startedAt` is
+// required and matches the canonical ISO-UTC pattern; `updatedAt`,
+// `finishedAt` (when present) must also match the ISO-UTC pattern;
+// `durationMs` (when present) must be a non-negative integer. Closed
+// against unknown sibling fields (timing is privacy-sensitive per
+// FIELD_GUIDE §"schema-authoring traps").
+// ignore: unused_element
+void _validateTiming(Map<String, Object?> object, String path) {
+  _closedObject(object, path, const <String>{
+    'startedAt',
+    'updatedAt',
+    'finishedAt',
+    'durationMs',
+  });
+  if (!_timestamp.hasMatch(_string(object, 'startedAt'))) {
+    throw ProtocolValidationException(
+      'startedAt',
+      'UTC RFC3339 timestamp',
+      object['startedAt'],
+    );
+  }
+  if (object.containsKey('updatedAt')) {
+    if (!_timestamp.hasMatch(_string(object, 'updatedAt'))) {
+      throw ProtocolValidationException(
+        'updatedAt',
+        'UTC RFC3339 timestamp',
+        object['updatedAt'],
+      );
+    }
+  }
+  if (object.containsKey('finishedAt')) {
+    if (!_timestamp.hasMatch(_string(object, 'finishedAt'))) {
+      throw ProtocolValidationException(
+        'finishedAt',
+        'UTC RFC3339 timestamp',
+        object['finishedAt'],
+      );
+    }
+  }
+  if (object.containsKey('durationMs')) {
+    _nonNegativeInteger(object, 'durationMs');
+  }
+}
+
+// F0 — TruncationSchema: closed truncation envelope. `retainedBytes` and
+// `totalBytes` are non-negative integers; `isTruncated` is a boolean;
+// `digest` (when present) matches lowercase-hex SHA-256. Closed against
+// unknown sibling fields. NOTE: the relational invariant
+// retainedBytes <= totalBytes and any NFC / byte-count claim live at the
+// bridge layer — the schema only constrains shape and sign.
+void _validateTruncation(Map<String, Object?> object, String path) {
+  _closedObject(object, path, const <String>{
+    'retainedBytes',
+    'totalBytes',
+    'digest',
+    'isTruncated',
+  });
+  _nonNegativeInteger(object, 'retainedBytes');
+  _nonNegativeInteger(object, 'totalBytes');
+  _boolean(object, 'isTruncated');
+  if (object.containsKey('digest')) {
+    final digest = _string(object, 'digest');
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
+      throw ProtocolValidationException('digest', 'lowercase SHA-256', digest);
+    }
+  }
+}
+
+// F0 — ErrorInfoSchema: closed typed error envelope. `code` is one of
+// `_errorCodes` (the frozen additive list — R1/R2 added
+// `recipe_unavailable` / `plan_unavailable` / `stale_plan_target` and the
+// R3/R4 file + context codes); `message` is the bounded 1..512-code-unit
+// human-readable incident text; `retryable` is a boolean; `recommendedDelayMs`
+// is an optional non-negative integer OR null (null means "the bridge has
+// no recommendation"). Closed against private/internal/debug context.
+// ignore: unused_element
+void _validateErrorInfo(Map<String, Object?> object, String path) {
+  _closedObject(object, path, const <String>{
+    'code',
+    'message',
+    'retryable',
+    'recommendedDelayMs',
+  });
+  final code = _string(object, 'code');
+  if (!_errorCodes.contains(code)) {
+    throw ProtocolValidationException('code', 'known error code', code);
+  }
+  _boundedRequiredString(object, 'message', 512);
+  _boolean(object, 'retryable');
+  if (object.containsKey('recommendedDelayMs')) {
+    final delay = object['recommendedDelayMs'];
+    if (delay != null && (delay is! int || delay < 0)) {
+      throw ProtocolValidationException(
+        'recommendedDelayMs',
+        'non-negative integer or null',
+        delay,
+      );
+    }
+  }
+}
+
+// F0 — ProviderSummarySchema (D-036): tagged, closed object whose only
+// valid `kind` is the literal `"provider_summary"`. `provider` and
+// `summary` are required 1..128 / 1..1024 UTF-16 code units; `model` is
+// optional 1..128 code units; `truncation` is optional TruncationSchema.
+// Raw thinking, reasoning deltas/steps, hidden metadata, and synthesized
+// summaries are NEVER valid here — the closed shape + bounded text fields
+// prevent private keys from being smuggled alongside the declared shape.
+// Absence of a provider summary is unavailable/empty state, not
+// permission to derive one.
+// ignore: unused_element
+void _validateProviderSummary(Map<String, Object?> object, String path) {
+  _closedObject(object, path, const <String>{
+    'kind',
+    'provider',
+    'model',
+    'summary',
+    'truncation',
+  });
+  final kind = _string(object, 'kind');
+  if (kind != 'provider_summary') {
+    throw ProtocolValidationException('kind', 'provider_summary literal', kind);
+  }
+  _boundedRequiredString(object, 'provider', 128);
+  _boundedOptionalString(object, 'model', 128);
+  _boundedRequiredString(object, 'summary', 1024);
+  if (object.containsKey('truncation')) {
+    final raw = object['truncation'];
+    if (raw is! Map) {
+      throw ProtocolValidationException('truncation', 'truncation object', raw);
+    }
+    _validateTruncation(Map<String, Object?>.from(raw), 'truncation');
+  }
+}
+
 String _sha256Hex(List<int> source) {
   final bytes = <int>[...source, 0x80];
   while (bytes.length % 64 != 56) {
