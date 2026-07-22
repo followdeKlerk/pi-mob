@@ -72,6 +72,17 @@ function processOutput(stream: "stdout" | "stderr" = "stdout", overrides: Record
 function processCommandPayload(): Record<string, unknown> {
   return { sessionId: ids.sessionId, processId: processFixture.processId, expectedRevision: processFixture.revision, lease: "session" };
 }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function cloneRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  return { ...value };
+}
+function cloneFirstRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!Array.isArray(value) || value.length === 0) throw new TypeError(`${label} must be a non-empty array`);
+  return cloneRecord(value[0], `${label}[0]`);
+}
 function gitSummary(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
     workspaceId: ids.workspaceId,
@@ -325,6 +336,28 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-process-stream", "event", eventEnvelope("process.output", { ...processOutput(), stream: "combined" })],
   ["invalid-process-host-stream", "event", { ...eventEnvelope("process.snapshot", processSnapshot()), streamId: `host:${ids.sessionId}` }],
 
+  // R6 focused schema-invalid evidence. Each fixture isolates one Git/CI
+  // invariant while retaining a complete, otherwise-valid payload.
+  ["invalid-git-summary-private-field", "event", { ...eventEnvelope("git.summary", { ...gitSummary(), private: "leak" }), streamId: `host:${ids.sessionId}` }],
+  ["invalid-git-summary-url-http", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ repositoryUrl: "http://example.test/pi-mob" }) }],
+  ["invalid-git-summary-url-hostless", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ repositoryUrl: "https:///pi-mob" }) }],
+  ["invalid-git-summary-url-bad", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ latestCommit: { ...cloneRecord(gitSummary().latestCommit, "gitSummary.latestCommit"), url: "https://example.test/white space" } }) }],
+  ["invalid-git-summary-failed-checks-21", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ failedChecks: Array.from({ length: LIMITS.maxFailedChecks + 1 }, (_, index) => ({ name: `check-${index}`, status: "failure" })) }) }],
+  ["invalid-git-summary-check-name-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ failedChecks: [{ ...cloneFirstRecord(gitSummary().failedChecks, "gitSummary.failedChecks"), name: "n".repeat(LIMITS.maxCheckNameLength + 1) }] }) }],
+  ["invalid-git-summary-check-log-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ failedChecks: [{ ...cloneFirstRecord(gitSummary().failedChecks, "gitSummary.failedChecks"), logSummary: "x".repeat(LIMITS.maxLogSummaryLength + 1) }] }) }],
+  ["invalid-git-summary-branch-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ branch: "b".repeat(LIMITS.maxBranchLength + 1) }) }],
+  ["invalid-git-summary-repository-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ repository: "r".repeat(LIMITS.maxRepositoryLabelLength + 1) }) }],
+  ["invalid-git-summary-count-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ changedCount: LIMITS.maxGitCount + 1 }) }],
+  ["invalid-git-summary-detached-branch-mismatch", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ detached: true, branch: "feature/git-ci" }) }],
+  ["invalid-git-summary-missing-ci-status", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: (() => { const { ciStatus: _ciStatus, ...missing } = gitSummary(); return missing; })() }],
+  ["invalid-git-summary-missing-failed-checks", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: (() => { const { failedChecks: _failedChecks, ...missing } = gitSummary(); return missing; })() }],
+  ["invalid-git-command-missing-session", "command", commandEnvelope("git.commit.request", (() => { const { sessionId: _sessionId, ...missing } = gitCommandPayload("git.commit.request"); return missing; })())],
+  ["invalid-git-command-missing-confirmation", "command", commandEnvelope("git.commit.request", (() => { const { confirmation: _confirmation, ...missing } = gitCommandPayload("git.commit.request"); return missing; })())],
+  ["invalid-git-command-missing-revision", "command", commandEnvelope("git.commit.request", (() => { const { expectedRevision: _expectedRevision, ...missing } = gitCommandPayload("git.commit.request"); return missing; })())],
+  ["invalid-git-summary-cancel-missing-target", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "git.summary.cancel", payload: {} }],
+  ["invalid-git-summary-session-stream", "event", { ...eventEnvelope("git.summary", gitSummary()), streamId: `session:${ids.sessionId}` }],
+  ["invalid-git-unavailable-private-field", "event", { ...eventEnvelope("git.unavailable", { workspaceId: ids.workspaceId, capability: "git-ci.v1", status: { state: "unavailable", reason: "Git provider is not configured", remediation: "Configure the provider and refresh" }, private: true }), streamId: `host:${ids.sessionId}` }],
+
   // D-037 focused schema-invalid evidence. Each message is otherwise a
   // complete valid envelope so the labelled invariant is the sole failure.
   ["invalid-workspace-path-traversal", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "workspace.tree.page", payload: { ...controlPayload("workspace.tree.page"), path: "src/../private" } }],
@@ -358,7 +391,7 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-malformed-envelope", "event", { cursor: "1" }],
 ];
 for (const [name, kind, message] of invalid) {
-  const expectation = name.startsWith("invalid-workspace-") || name.startsWith("invalid-context-") || name.startsWith("invalid-prompt-file-ref-") || name.startsWith("invalid-process-")
+  const expectation = name.startsWith("invalid-workspace-") || name.startsWith("invalid-context-") || name.startsWith("invalid-prompt-file-ref-") || name.startsWith("invalid-process-") || name.startsWith("invalid-git-")
     ? "expected-invalid"
     : undefined;
   emit(name, kind, false, message, expectation);
@@ -382,6 +415,15 @@ emit("semantic-invalid-process-stale-revision", "command", true,
 emit("semantic-invalid-process-joint-action-state", "command", true,
   commandEnvelope("process.restart", processCommandPayload()),
   "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", status: "running", supportedActions: ["stop", "restart"] });
+emit("semantic-invalid-git-commit-stale-revision", "command", true,
+  commandEnvelope("git.commit.request", gitCommandPayload("git.commit.request")),
+  "semantic-invalid", { outcome: "rejected", errorCode: "git_stale", currentRevision: "git-r2" });
+emit("semantic-invalid-git-commit-unsupported-action", "command", true,
+  commandEnvelope("git.commit.request", gitCommandPayload("git.commit.request")),
+  "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["refresh", "push_through_pi", "open_external"] });
+emit("semantic-invalid-git-push-unsupported-action", "command", true,
+  commandEnvelope("git.push.request", gitCommandPayload("git.push.request")),
+  "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["refresh", "commit_through_pi", "open_external"] });
 emit("future-optional-event", "event", true, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, summary: "safe" } });
 emit("future-required-event", "event", false, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: false } });
 emit("future-required-capability-event", "event", false, { ...base, eventId: ids.eventId, streamId: `host:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, requiredCapabilities: ["unsupported.v1"] } });

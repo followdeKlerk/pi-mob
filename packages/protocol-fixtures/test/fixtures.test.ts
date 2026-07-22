@@ -297,6 +297,116 @@ function validateProcessSemantics(message: Record<string, unknown>, authority: P
   return undefined;
 }
 
+const r6ExpectedInvalidFiles = [
+  "invalid-git-summary-private-field.json",
+  "invalid-git-summary-url-http.json",
+  "invalid-git-summary-url-hostless.json",
+  "invalid-git-summary-url-bad.json",
+  "invalid-git-summary-failed-checks-21.json",
+  "invalid-git-summary-check-name-oversize.json",
+  "invalid-git-summary-check-log-oversize.json",
+  "invalid-git-summary-branch-oversize.json",
+  "invalid-git-summary-repository-oversize.json",
+  "invalid-git-summary-count-oversize.json",
+  "invalid-git-summary-detached-branch-mismatch.json",
+  "invalid-git-summary-missing-ci-status.json",
+  "invalid-git-summary-missing-failed-checks.json",
+  "invalid-git-command-missing-session.json",
+  "invalid-git-command-missing-confirmation.json",
+  "invalid-git-command-missing-revision.json",
+  "invalid-git-summary-cancel-missing-target.json",
+  "invalid-git-summary-session-stream.json",
+  "invalid-git-unavailable-private-field.json",
+] as const;
+
+type R6ExpectedInvalidFile = typeof r6ExpectedInvalidFiles[number];
+
+function repairR6ExpectedInvalid(file: R6ExpectedInvalidFile, message: Record<string, unknown>): Record<string, unknown> {
+  const repaired = clone(message);
+  const payload = repaired.payload as Record<string, unknown>;
+  switch (file) {
+    case "invalid-git-summary-private-field.json":
+      delete payload.private;
+      break;
+    case "invalid-git-summary-url-http.json":
+    case "invalid-git-summary-url-hostless.json":
+      payload.repositoryUrl = "https://example.test/pi-mob";
+      break;
+    case "invalid-git-summary-url-bad.json":
+      (payload.latestCommit as Record<string, unknown>).url = "https://example.test/pi-mob/commit/aaa";
+      break;
+    case "invalid-git-summary-failed-checks-21.json":
+      payload.failedChecks = (payload.failedChecks as Array<unknown>).slice(0, LIMITS.maxFailedChecks);
+      break;
+    case "invalid-git-summary-check-name-oversize.json":
+      ((payload.failedChecks as Array<Record<string, unknown>>)[0]!).name = "protocol-schema";
+      break;
+    case "invalid-git-summary-check-log-oversize.json":
+      ((payload.failedChecks as Array<Record<string, unknown>>)[0]!).logSummary = "protocol schema generation differs from checked-in artifacts";
+      break;
+    case "invalid-git-summary-branch-oversize.json":
+      payload.branch = "feature/git-ci";
+      break;
+    case "invalid-git-summary-repository-oversize.json":
+      payload.repository = "pi-mob/pi-mob";
+      break;
+    case "invalid-git-summary-count-oversize.json":
+      payload.changedCount = 2;
+      break;
+    case "invalid-git-summary-detached-branch-mismatch.json":
+      payload.branch = null;
+      break;
+    case "invalid-git-summary-missing-ci-status.json":
+      payload.ciStatus = { state: "failure" };
+      break;
+    case "invalid-git-summary-missing-failed-checks.json":
+      payload.failedChecks = [{
+        name: "protocol-schema",
+        status: "failure",
+        summary: "schema check failed",
+        logSummary: "protocol schema generation differs from checked-in artifacts",
+        url: "https://example.test/pi-mob/checks/1",
+      }];
+      break;
+    case "invalid-git-command-missing-session.json":
+      payload.sessionId = "66666666-6666-4666-8666-666666666666";
+      break;
+    case "invalid-git-command-missing-confirmation.json":
+      payload.confirmation = {
+        confirmationId: "confirm-commit-1",
+        summary: "Commit the reviewed changes through Pi",
+      };
+      break;
+    case "invalid-git-command-missing-revision.json":
+      payload.expectedRevision = "git-r1";
+      break;
+    case "invalid-git-summary-cancel-missing-target.json":
+      payload.targetRequestId = "22222222-2222-4222-8222-222222222222";
+      break;
+    case "invalid-git-summary-session-stream.json":
+      repaired.streamId = "host:66666666-6666-4666-8666-666666666666";
+      break;
+    case "invalid-git-unavailable-private-field.json":
+      delete payload.private;
+      break;
+  }
+  return repaired;
+}
+
+type GitSemanticError = "git_stale" | "invalid_state";
+type GitAuthority = { readonly revision: string; readonly supportedActions: readonly string[] };
+function validateGitSemantics(message: Record<string, unknown>, authority: GitAuthority): GitSemanticError | undefined {
+  const payload = message.payload as Record<string, unknown>;
+  if (payload.expectedRevision !== authority.revision) return "git_stale";
+  const action = message.type === "git.commit.request"
+    ? "commit_through_pi"
+    : message.type === "git.push.request"
+    ? "push_through_pi"
+    : undefined;
+  if (action !== undefined && !authority.supportedActions.includes(action)) return "invalid_state";
+  return undefined;
+}
+
 test("R6 valid fixtures cover Git/CI commands, controls, events, responses, and stable errors", () => {
   const find = (file: string): FixtureRecord => JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
   expect(find("command-git-commit-request-valid.json").valid).toBe(true);
@@ -327,6 +437,60 @@ test("R6 valid fixtures cover Git/CI commands, controls, events, responses, and 
   expect((summary.failedChecks as Array<Record<string, unknown>>)[0]?.logSummary).toBe(
     "protocol schema generation differs from checked-in artifacts",
   );
+});
+
+test("R6 expected-invalid fixtures isolate one schema invariant and prove one-field repairs", () => {
+  for (const file of r6ExpectedInvalidFiles) {
+    const fixture = JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
+    expect(fixture.valid, file).toBe(false);
+    expect(fixture.expectation, file).toBe("expected-invalid");
+    expect(validateFixture(fixture), file).toBe(true);
+    const repairedMessage = repairR6ExpectedInvalid(file, fixture.message);
+    expect(JSON.stringify(repairedMessage), file).not.toBe(JSON.stringify(fixture.message));
+    expect(validateFixture({ ...clone(fixture), valid: true, message: repairedMessage }), file).toBe(true);
+  }
+});
+
+test("R6 semantic-invalid Git actions are schema-valid, hard-coded, and repaired one field at a time", () => {
+  const cases = [
+    {
+      file: "semantic-invalid-git-commit-stale-revision.json",
+      expected: "git_stale" as const,
+      authority: { revision: "git-r2", supportedActions: ["refresh", "commit_through_pi", "push_through_pi", "open_external"] },
+      metadata: { outcome: "rejected", errorCode: "git_stale", currentRevision: "git-r2" },
+    },
+    {
+      file: "semantic-invalid-git-commit-unsupported-action.json",
+      expected: "invalid_state" as const,
+      authority: { revision: "git-r1", supportedActions: ["refresh", "push_through_pi", "open_external"] },
+      metadata: { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["refresh", "push_through_pi", "open_external"] },
+    },
+    {
+      file: "semantic-invalid-git-push-unsupported-action.json",
+      expected: "invalid_state" as const,
+      authority: { revision: "git-r1", supportedActions: ["refresh", "commit_through_pi", "open_external"] },
+      metadata: { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["refresh", "commit_through_pi", "open_external"] },
+    },
+  ] as const;
+  for (const item of cases) {
+    const fixture = JSON.parse(readFileSync(join(corpus, item.file), "utf8")) as FixtureRecord;
+    expect(fixture.valid, item.file).toBe(true);
+    expect(fixture.expectation, item.file).toBe("semantic-invalid");
+    expect(validateFixture(fixture), item.file).toBe(true);
+    expect(validateGitSemantics(fixture.message, item.authority), item.file).toBe(item.expected);
+    expect(fixture.semanticExpectation).toEqual(item.metadata);
+
+    const repairedMessage = clone(fixture.message);
+    if (item.file === "semantic-invalid-git-commit-stale-revision.json") {
+      (repairedMessage.payload as Record<string, unknown>).expectedRevision = "git-r2";
+    } else if (item.file === "semantic-invalid-git-commit-unsupported-action.json") {
+      repairedMessage.type = "git.push.request";
+    } else {
+      repairedMessage.type = "git.commit.request";
+    }
+    expect(validateGitSemantics(repairedMessage, item.authority), item.file).toBeUndefined();
+    expect(validateFixture({ ...clone(fixture), message: repairedMessage }), item.file).toBe(true);
+  }
 });
 
 test("R5 semantic-invalid process actions are schema-valid, hard-coded, and repaired one field at a time", () => {

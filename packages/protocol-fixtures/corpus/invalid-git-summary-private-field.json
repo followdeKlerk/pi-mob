@@ -1,0 +1,63 @@
+{
+  "name": "invalid-git-summary-private-field",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "workspaceId": "88888888-8888-4888-8888-888888888888",
+      "revision": "git-r1",
+      "repositoryUrl": "https://example.test/pi-mob",
+      "repository": "pi-mob/pi-mob",
+      "detached": false,
+      "branch": "feature/git-ci",
+      "workingTreeState": "dirty",
+      "changedCount": 2,
+      "ahead": 1,
+      "behind": 0,
+      "latestCommit": {
+        "sha": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "message": "Add Git/CI attention protocol",
+        "author": "Pi Mobile",
+        "authoredAt": "2026-07-12T00:00:00.000Z",
+        "url": "https://example.test/pi-mob/commit/aaa"
+      },
+      "pullRequest": {
+        "number": 42,
+        "title": "Add Git/CI attention protocol",
+        "url": "https://example.test/pi-mob/pull/42"
+      },
+      "ciStatus": {
+        "state": "failure"
+      },
+      "failedChecks": [
+        {
+          "name": "protocol-schema",
+          "status": "failure",
+          "summary": "schema check failed",
+          "logSummary": "protocol schema generation differs from checked-in artifacts",
+          "url": "https://example.test/pi-mob/checks/1"
+        }
+      ],
+      "supportedActions": [
+        "refresh",
+        "commit_through_pi",
+        "push_through_pi",
+        "open_external"
+      ],
+      "capability": "git-ci.v1",
+      "lastRefreshedAt": "2026-07-12T00:00:00.000Z",
+      "private": "leak"
+    },
+    "eventId": "44444444-4444-4444-8444-444444444444",
+    "streamId": "host:66666666-6666-4666-8666-666666666666",
+    "cursor": "9007199254740992",
+    "type": "git.summary"
+  },
+  "expectation": "expected-invalid"
+}
