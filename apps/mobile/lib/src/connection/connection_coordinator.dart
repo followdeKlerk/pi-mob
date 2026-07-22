@@ -14,6 +14,7 @@ import '../domain/controller_lease.dart';
 import '../domain/interaction_state.dart';
 import '../domain/mobile_state.dart';
 import '../domain/prompt_send_lifecycle.dart';
+import '../domain/process_domain.dart';
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
@@ -101,6 +102,19 @@ typedef WorkspaceInfo = WorkspaceEntry;
 /// instead of silently overwriting a fresh page.
 class _HistoryRequest {
   const _HistoryRequest({required this.sessionId, required this.epoch});
+
+  final String sessionId;
+  final int epoch;
+}
+
+/// D-039 binds a session-less process snapshot result to the connection that
+/// requested it. Results are consumed once so a delayed duplicate can never
+/// clear a newer projection.
+class _ProcessSnapshotRequest {
+  const _ProcessSnapshotRequest({
+    required this.sessionId,
+    required this.epoch,
+  });
 
   final String sessionId;
   final int epoch;
@@ -200,6 +214,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   // seconds to return a large page; without bookkeeping we could apply a
   // response from a stale epoch after the user has reconnected.
   final Map<String, _HistoryRequest> _historyRequests = {};
+  final Map<String, _ProcessSnapshotRequest> _processSnapshotRequests = {};
+  ProcessDomainState _processes = const ProcessDomainState();
   final List<String> _historySyncQueue = [];
   final Map<String, String?> _historySyncLocalRevisions = {};
   String? _historySyncCurrentSessionId;
@@ -596,6 +612,27 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   int historyEventCount(String sessionId) => historyFor(sessionId).items.length;
 
+  ProcessDomainState get processes => _processes;
+
+  Future<void> requestProcessSnapshot(String sessionId) async {
+    final epoch = _connectionEpoch;
+    final requestId = _id();
+    // Register before write: a fast local socket may receive the response
+    // before `_sendControl` completes.
+    _processSnapshotRequests[requestId] = _ProcessSnapshotRequest(
+      sessionId: sessionId,
+      epoch: epoch,
+    );
+    try {
+      await _sendControl('process.snapshot.request', <String, Object?>{
+        'sessionId': sessionId,
+      }, requestId: requestId);
+    } catch (_) {
+      _processSnapshotRequests.remove(requestId);
+      rethrow;
+    }
+  }
+
   List<StreamEventState> transcriptEvents(String sessionId) {
     final history = _history[sessionId]?.items ?? const <StreamEventState>[];
     final live =
@@ -950,6 +987,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     // History requests are connection-epoch bound. Never carry a loading
     // latch or an HMAC page token across reconnects/bridge restarts.
     _historyRequests.clear();
+    _processSnapshotRequests.clear();
     _pendingCurrentRequestCommand.clear();
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
@@ -1130,6 +1168,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _models.clear();
     _history.clear();
     _historyRequests.clear();
+    _processSnapshotRequests.clear();
     _historyGateComplete = false;
     _historySyncCurrentSessionId = null;
     _historySyncQueue.clear();
@@ -2276,6 +2315,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         _modelListResult(message, payload);
       case 'session.history.page.result':
         await _sessionHistoryPageResult(message, payload);
+      case 'process.snapshot.result':
+        _processSnapshotResult(message, payload);
       case 'workspace.trust_state':
         _workspaceTrustStateEvent(payload);
       case 'command.current.result':
@@ -2788,6 +2829,15 @@ final class ConnectionCoordinator extends ChangeNotifier
       latestExtensionNotice =
           (payload['message'] ?? payload['text'] ?? payload['title'])
               ?.toString();
+    } else if (type == 'process.snapshot' ||
+        type == 'process.output' ||
+        type == 'process.output.page.result' ||
+        type == 'process.unavailable' ||
+        type == 'process.error') {
+      _processes = reduceProcess(_processes, <String, Object?>{
+        'type': type,
+        'payload': payload,
+      });
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final eventSessionId = payload['sessionId'];
       final eventCommandId = payload['commandId'];
@@ -3074,6 +3124,20 @@ final class ConnectionCoordinator extends ChangeNotifier
         ),
       );
     }
+  }
+
+  void _processSnapshotResult(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) {
+    final requestId = message['requestId'];
+    if (requestId is! String) return;
+    final request = _processSnapshotRequests.remove(requestId);
+    if (request == null || request.epoch != _connectionEpoch) return;
+    _processes = reduceProcess(_processes, <String, Object?>{
+      'type': 'process.snapshot.result',
+      'payload': payload,
+    }, requestedSessionId: request.sessionId);
   }
 
   void _workspaceList(Map<String, Object?> payload) {
@@ -3392,6 +3456,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       );
       return;
     }
+    if (requestId is String) _processSnapshotRequests.remove(requestId);
     final reconciledCommandId = requestId is String
         ? _pendingCurrentRequestCommand.remove(requestId)
         : null;
@@ -4097,6 +4162,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _failSessionCreation('The connection closed before the chat was created.');
     _failModelListRequest('The connection closed before agents were loaded.');
     ++_connectionEpoch;
+    _processSnapshotRequests.clear();
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
       _historySyncQueue.clear();
@@ -4230,6 +4296,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _failSessionCreation('Chat creation was cancelled.');
     _sessionCreationTimer?.cancel();
     ++_connectionEpoch;
+    _processSnapshotRequests.clear();
     _cancelReconnect();
     _ackTimer?.cancel();
     _leaseTimer?.cancel();

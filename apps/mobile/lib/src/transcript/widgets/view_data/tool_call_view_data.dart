@@ -220,7 +220,7 @@ class BashToolArgs {
     return BashToolArgs(
       command: command,
       cwd: cwd as String?,
-      timeoutMs: timeoutMs?.toInt(),
+      timeoutMs: timeoutMs is num ? timeoutMs.toInt() : null,
     );
   }
 }

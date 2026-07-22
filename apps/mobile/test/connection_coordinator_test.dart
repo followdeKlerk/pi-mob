@@ -65,6 +65,74 @@ void main() {
     await database.close();
   });
 
+  test('D-039 correlates and consumes empty process snapshot responses', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    socket.server(
+      event(
+        type: 'process.snapshot',
+        streamId: 'session:$sessionId',
+        cursor: '2',
+        eventId: '12121212-1212-4121-8121-121212121212',
+        payload: {
+          'sessionId': sessionId,
+          'processId': 'process-1',
+          'revision': 'r1',
+          'status': 'running',
+          'command': 'bun test',
+          'startedAt': '2026-07-15T00:00:00.000Z',
+          'capability': 'runtime.processes.v1',
+          'stale': false,
+          'supportedActions': ['stop'],
+        },
+      ),
+    );
+    await eventually(() => coordinator.processes.items.length == 1);
+
+    // An uncorrelated empty result has no session identity and must not clear
+    // the live projection.
+    socket.server(response('process.snapshot.result', {'items': []}));
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(coordinator.processes.items, hasLength(1));
+
+    final request = coordinator.requestProcessSnapshot(sessionId);
+    await eventually(
+      () => socket.sent.any(
+        (message) => message['type'] == 'process.snapshot.request',
+      ),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'process.snapshot.request')['requestId'] as String;
+    socket.server(response('process.snapshot.result', {'items': []}, requestId: requestId));
+    await request;
+    await eventually(() => coordinator.processes.items.isEmpty);
+
+    // A duplicate delayed response is consumed and cannot alter a new state.
+    socket.server(
+      event(
+        type: 'process.snapshot',
+        streamId: 'session:$sessionId',
+        cursor: '3',
+        eventId: '13131313-1313-4131-8131-131313131313',
+        payload: {
+          'sessionId': sessionId,
+          'processId': 'process-2',
+          'revision': 'r2',
+          'status': 'running',
+          'command': 'bun test',
+          'startedAt': '2026-07-15T00:00:00.000Z',
+          'capability': 'runtime.processes.v1',
+          'stale': false,
+          'supportedActions': ['stop'],
+        },
+      ),
+    );
+    await eventually(() => coordinator.processes.items.length == 1);
+    socket.server(response('process.snapshot.result', {'items': []}, requestId: requestId));
+    await Future<void>.delayed(const Duration(milliseconds: 10));
+    expect(coordinator.processes.items.single.processId, 'process-2');
+  });
+
   test(
     'manual pairing waits for accepted host identity on an explicit port',
     () async {
