@@ -40,6 +40,9 @@ export const EVENT_TYPES = [
   "tool.completed", "tool.failed", "tool.cancelled", "queue.snapshot", "model.state", "context.state", "retry.state",
   "compaction.state", "extension.dialog", "extension.notify", "extension.status", "extension.widget", "extension.title",
   "extension.editor_prefill",
+  // F0 — additive recipe (R1) and plan (R2) event families.
+  "recipe.activity", "recipe.unavailable",
+  "plan.snapshot", "plan.unavailable",
 ] as const;
 
 export const RESPONSE_TYPES = [
@@ -61,6 +64,8 @@ export const ERROR_CODES = [
   "attachment_unavailable", "export_unavailable", "payload_too_large", "rate_limited", "slow_consumer", "pi_unavailable",
   "pi_version_mismatch", "provider_interrupted", "permission_denied", "crash_loop", "database_unavailable", "storage_full",
   "migration_required", "internal_error",
+  // F0 — additive stability codes for recipe (R1) and plan (R2) flows.
+  "recipe_unavailable", "plan_unavailable", "stale_plan_target",
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -114,6 +119,51 @@ export const UuidSchema = Type.String({ pattern: UUID_PATTERN, $id: "pi-mob/prot
 export const DecimalCursorSchema = Type.String({ pattern: DECIMAL_CURSOR_PATTERN, $id: "pi-mob/protocol/decimal-cursor" });
 export const CapabilitySchema = Type.Union(SUPPORTED_CAPABILITIES.map((value) => Type.Literal(value)), { $id: "pi-mob/protocol/capability" });
 const Uuid = UuidSchema;
+
+// F0 — shared explicit primitives for recipe (R1) and plan (R2) flows.
+// RevisionToken is intentionally distinct from DECIMAL_CURSOR_PATTERN so that
+// callers cannot accidentally substitute one for the other.
+export const RevisionTokenSchema = Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", $id: "pi-mob/protocol/revision-token" });
+const CAPABILITY_STATES = ["available", "degraded", "unavailable"] as const;
+export const CapabilityStatusSchema = Type.Object({
+  state: Type.Union(CAPABILITY_STATES.map((value) => Type.Literal(value))),
+  reason: Type.Optional(Type.String({ minLength: 1 })),
+  remediation: Type.Optional(Type.String({ minLength: 1 })),
+  source: Type.Optional(Type.String({ minLength: 1 })),
+  revision: Type.Optional(RevisionTokenSchema),
+  lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+}, { additionalProperties: true, $id: "pi-mob/protocol/capability-status" });
+export const BoundsSchema = Type.Object({
+  maxItems: Type.Optional(Type.Integer({ minimum: 0 })),
+  maxBytes: Type.Optional(Type.Integer({ minimum: 0 })),
+  maxLines: Type.Optional(Type.Integer({ minimum: 0 })),
+  maxDepth: Type.Optional(Type.Integer({ minimum: 0 })),
+  maxDurationMs: Type.Optional(Type.Integer({ minimum: 0 })),
+}, { additionalProperties: true, $id: "pi-mob/protocol/bounds" });
+export const TruncationSchema = Type.Object({
+  retainedBytes: Type.Integer({ minimum: 0 }),
+  totalBytes: Type.Integer({ minimum: 0 }),
+  digest: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+  isTruncated: Type.Boolean(),
+}, { additionalProperties: true, $id: "pi-mob/protocol/truncation" });
+export const TimingSchema = Type.Object({
+  startedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+  updatedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  finishedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  durationMs: Type.Optional(Type.Integer({ minimum: 0 })),
+}, { additionalProperties: true, $id: "pi-mob/protocol/timing" });
+export const ErrorInfoSchema = Type.Object({
+  code: Type.Union(ERROR_CODES.map((value) => Type.Literal(value))),
+  message: Type.String({ minLength: 1 }),
+  retryable: Type.Boolean(),
+  recommendedDelayMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
+}, { additionalProperties: true, $id: "pi-mob/protocol/error-info" });
+export const ProviderSummarySchema = Type.Object({
+  kind: Type.Literal("provider_summary"),
+  provider: Type.String({ minLength: 1 }),
+  model: Type.Optional(Type.String({ minLength: 1 })),
+}, { additionalProperties: true, $id: "pi-mob/protocol/provider-summary" });
+
 const Payload = Type.Object({}, { additionalProperties: true });
 export const ProtocolVersionSchema = Type.Object({ major: Type.Literal(PROTOCOL_MAJOR), minor: Type.Integer({ minimum: 0 }) }, { additionalProperties: true, $id: "pi-mob/protocol/version" });
 const Protocol = ProtocolVersionSchema;
