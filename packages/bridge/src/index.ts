@@ -31,6 +31,7 @@ export { collectBuildMetadata, type BuildMetadata } from "./build-metadata";
 export * from "./pi/types";
 export * from "./pi/commands";
 export * from "./pi/command-catalogue";
+export * from "./pi/catalogue-service";
 export * from "./pi/normalize";
 export * from "./pi/jsonl";
 export * from "./pi/rpc-process";
