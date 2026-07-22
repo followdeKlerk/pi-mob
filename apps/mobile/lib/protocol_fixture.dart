@@ -17,6 +17,8 @@ final RegExp _streamId = RegExp(
 );
 const _workspacePathPattern =
     r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(?:/|$))[^\x00-\x1F\x7F]{1,1024}$';
+const _maxFileReferencePreviewLength = 4096;
+const _maxFileReferenceByteCount = 26_214_400;
 final RegExp _workspacePath = RegExp(_workspacePathPattern);
 
 bool _isWorkspacePath(String path) => _workspacePath.hasMatch(path);
@@ -1115,8 +1117,10 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
         _closedObject(fileRef, 'payload.fileRefs', const {
           'workspaceId',
           'path',
-          'digest',
+          'ranges',
           'revision',
+          'preview',
+          'byteCount',
         });
         _uuidString(fileRef, 'workspaceId');
         final path = _string(fileRef, 'path');
@@ -1127,15 +1131,53 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
             path,
           );
         }
-        final digest = _string(fileRef, 'digest');
-        if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
-          throw ProtocolValidationException(
-            'payload.fileRefs.digest',
-            'lowercase SHA-256',
-            digest,
-          );
+        if (fileRef.containsKey('ranges')) {
+          final ranges = _list(fileRef, 'ranges');
+          if (ranges.length > 16) {
+            throw ProtocolValidationException(
+              'payload.fileRefs.ranges',
+              '<= 16 items',
+              ranges.length,
+            );
+          }
+          for (final rangeValue in ranges) {
+            final range = _objectFrom(rangeValue, 'payload.fileRefs.ranges');
+            _closedObject(range, 'payload.fileRefs.ranges', const {
+              'startLine',
+              'endLine',
+              'label',
+            });
+            final start = _positiveInteger(range, 'startLine');
+            final end = _positiveInteger(range, 'endLine');
+            if (end < start) {
+              throw ProtocolValidationException(
+                'payload.fileRefs.ranges',
+                'endLine >= startLine',
+                range,
+              );
+            }
+            if (range.containsKey('label')) {
+              _boundedRequiredString(range, 'label', 64);
+            }
+          }
         }
         _revisionTokenString(fileRef, 'revision');
+        final preview = _stringAllowEmpty(fileRef, 'preview');
+        if (preview.length > _maxFileReferencePreviewLength) {
+          throw ProtocolValidationException(
+            'payload.fileRefs.preview',
+            '<= $_maxFileReferencePreviewLength characters',
+            preview,
+          );
+        }
+        final byteCount = _nonNegativeInteger(fileRef, 'byteCount');
+        if (byteCount > _maxFileReferenceByteCount) {
+          throw ProtocolValidationException(
+            'payload.fileRefs.byteCount',
+            '<= $_maxFileReferenceByteCount',
+            byteCount,
+          );
+        }
       }
     }
     if (payload.containsKey('planTarget')) {
