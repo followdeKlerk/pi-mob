@@ -1082,9 +1082,14 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
     }
     if (payload['planTarget'] != null) {
       final target = _object(payload, 'planTarget');
-      for (final field in const <String>['planId', 'stepId', 'revision']) {
-        _boundedString(target, field, 128);
-      }
+      _closedObject(target, 'payload.planTarget', const <String>{
+        'planId',
+        'stepId',
+        'revision',
+      });
+      _boundedRequiredString(target, 'planId', 128);
+      _boundedRequiredString(target, 'stepId', 128);
+      _revisionTokenString(target, 'revision');
     }
   }
   if (type == 'queue.remove') _uuidString(payload, 'queueItemId');

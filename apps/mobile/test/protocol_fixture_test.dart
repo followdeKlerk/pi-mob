@@ -3,6 +3,26 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/protocol_fixture.dart';
 import 'test_asset_loader.dart';
 
+Map<String, Object?> _promptSubmitWithPlanTarget(
+  Map<String, Object?> planTarget,
+) => <String, Object?>{
+  'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+  'messageId': '11111111-1111-4111-8111-111111111111',
+  'requestId': '22222222-2222-4222-8222-222222222222',
+  'connectionId': '33333333-3333-4333-8333-333333333333',
+  'commandId': '44444444-4444-4444-8444-444444444444',
+  'leaseId': '55555555-5555-4555-8555-555555555555',
+  'type': 'prompt.submit',
+  'sentAt': '2026-07-15T04:20:00.000Z',
+  'payload': <String, Object?>{
+    'sessionId': '66666666-6666-4666-8666-666666666666',
+    'deliveryMode': 'steer',
+    'message': 'Update the plan',
+    'attachmentIds': const <String>[],
+    'planTarget': planTarget,
+  },
+};
+
 void main() {
   test('shared corpus fixture labels match Dart validation', () async {
     final manifestRaw = await TestAssetLoader.loadString(
@@ -91,6 +111,60 @@ void main() {
       },
     });
     expect(decoded, isA<ProtocolEnvelope>());
+  });
+
+  test('prompt.submit accepts a valid bounded planTarget', () {
+    final boundedId = List<String>.filled(128, 'a').join();
+    expect(
+      validateProtocolFixture(
+        'command',
+        _promptSubmitWithPlanTarget(<String, Object?>{
+          'planId': boundedId,
+          'stepId': boundedId,
+          'revision': 'r1',
+        }),
+      ),
+      isA<ProtocolCommand>(),
+    );
+  });
+
+  test('prompt.submit planTarget requires revision', () {
+    expect(
+      () => validateProtocolFixture(
+        'command',
+        _promptSubmitWithPlanTarget(<String, Object?>{
+          'planId': 'plan-1',
+          'stepId': 'step-1',
+        }),
+      ),
+      throwsA(isA<ProtocolValidationException>()),
+    );
+  });
+
+  test('prompt.submit planTarget rejects private and decimal revisions', () {
+    final invalidTargets = <String, Map<String, Object?>>{
+      'private sibling': <String, Object?>{
+        'planId': 'plan-1',
+        'stepId': 'step-1',
+        'revision': 'r1',
+        'private': 'hidden',
+      },
+      'decimal revision': <String, Object?>{
+        'planId': 'plan-1',
+        'stepId': 'step-1',
+        'revision': '42',
+      },
+    };
+    for (final invalid in invalidTargets.entries) {
+      expect(
+        () => validateProtocolFixture(
+          'command',
+          _promptSubmitWithPlanTarget(invalid.value),
+        ),
+        throwsA(isA<ProtocolValidationException>()),
+        reason: invalid.key,
+      );
+    }
   });
 
   test('decimal cursors and shared semantic hashes match TypeScript', () async {
