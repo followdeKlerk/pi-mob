@@ -6,6 +6,7 @@
 /// embedded in any surface.
 library;
 
+export 'command_palette.dart';
 export 'compaction_controls.dart';
 export 'context_stats_card.dart';
 export 'control_view_data.dart';
