@@ -991,7 +991,7 @@
       "command.state"
     ],
     "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
-    "requiredCapability": "commands.v1",
+    "requiredCapability": "runtime.processes.v1",
     "requiresCommandId": true,
     "requiresLeaseId": true,
     "scope": "session",
@@ -1003,7 +1003,11 @@
       "invalid_message",
       "unsupported_capability",
       "invalid_state",
-      "idempotency_conflict"
+      "idempotency_conflict",
+      "process_unavailable",
+      "process_not_found",
+      "process_stale",
+      "process_failed"
     ],
     "type": "process.stop"
   },
@@ -1019,7 +1023,7 @@
       "command.state"
     ],
     "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
-    "requiredCapability": "commands.v1",
+    "requiredCapability": "runtime.processes.v1",
     "requiresCommandId": true,
     "requiresLeaseId": true,
     "scope": "session",
@@ -1031,7 +1035,11 @@
       "invalid_message",
       "unsupported_capability",
       "invalid_state",
-      "idempotency_conflict"
+      "idempotency_conflict",
+      "process_unavailable",
+      "process_not_found",
+      "process_stale",
+      "process_failed"
     ],
     "type": "process.restart"
   },
@@ -1047,7 +1055,7 @@
       "command.state"
     ],
     "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
-    "requiredCapability": "commands.v1",
+    "requiredCapability": "runtime.processes.v1",
     "requiresCommandId": true,
     "requiresLeaseId": true,
     "scope": "session",
@@ -1059,7 +1067,11 @@
       "invalid_message",
       "unsupported_capability",
       "invalid_state",
-      "idempotency_conflict"
+      "idempotency_conflict",
+      "process_unavailable",
+      "process_not_found",
+      "process_stale",
+      "process_failed"
     ],
     "type": "process.rerun"
   }

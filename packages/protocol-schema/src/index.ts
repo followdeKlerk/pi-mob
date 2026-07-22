@@ -221,7 +221,7 @@ export interface CommandMetadata {
   readonly type: CommandType;
   readonly scope: "host" | "session" | "host-or-session";
   readonly requiresLeaseId: boolean;
-  readonly requiredCapability: "commands.v1";
+  readonly requiredCapability: "commands.v1" | "runtime.processes.v1";
   readonly acceptedStates: readonly string[];
   readonly semanticHashFields: readonly ["type", "payload"];
   readonly idempotency: "command-id-semantic-payload-sha256";
@@ -240,18 +240,27 @@ const leaseFreeCommands = new Set<CommandType>([
   "notification.device.register",
   "notification.device.unregister",
 ]);
+// R5 — process.* commands are gated on `runtime.processes.v1` (the bridge
+// advertises the surface only when the host genuinely implements the
+// bounded process supervision; absence maps to the truthful
+// `process_unavailable` posture). The stableErrors list is the additive
+// process-specific subset of ERROR_CODES so clients can render a typed
+// failure with the same vocabulary the `process.error` event uses.
+const processCommands = new Set<CommandType>(["process.stop", "process.restart", "process.rerun"]);
+const processStableErrors = ["process_unavailable", "process_not_found", "process_stale", "process_failed"] as const;
+const baseStableErrors = ["invalid_message", "unsupported_capability", "invalid_state", "idempotency_conflict"] as const;
 
 export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map((type) => ({
   type,
   scope: controllerCommands.has(type) ? "host-or-session" : hostCommands.has(type) ? "host" : "session",
   requiresLeaseId: !leaseFreeCommands.has(type),
-  requiredCapability: "commands.v1",
+  requiredCapability: processCommands.has(type) ? "runtime.processes.v1" : "commands.v1",
   acceptedStates: ["protocol-valid", "capability-supported", "state-eligible"],
   semanticHashFields: ["type", "payload"],
   idempotency: "command-id-semantic-payload-sha256",
   recovery: "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
   journaledEffects: ["command.state"],
-  stableErrors: ["invalid_message", "unsupported_capability", "invalid_state", "idempotency_conflict"],
+  stableErrors: processCommands.has(type) ? [...baseStableErrors, ...processStableErrors] : [...baseStableErrors],
 }));
 
 const hostEventTypes = new Set<EventType>([
@@ -964,20 +973,31 @@ const WithOptionalRequest = { ...EnvelopeFields, requestId: Type.Optional(Uuid),
 const ClientEnvelope = { ...EnvelopeFields, requestId: Uuid, connectionId: Uuid };
 const SessionId = Uuid;
 const R5ProcessId = Type.String({ minLength: 1, maxLength: LIMITS.maxProcessIdLength });
-const R5WorkspacePath = Type.String({ minLength: 1, maxLength: LIMITS.maxProcessCwdLength, pattern: "^(?!/)(?!.*(?:^|/)\.\.(?:/|$)).+$" });
 const R5ProcessStatus = Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("stopped")]);
 const R5ProcessPort = Type.Object({ port: Type.Integer({ minimum: 1, maximum: 65535 }), protocol: Type.Union([Type.Literal("tcp"), Type.Literal("udp")]) }, { additionalProperties: false });
 const R5SupportedActions = Type.Array(Type.Union([Type.Literal("stop"), Type.Literal("restart"), Type.Literal("rerun")]), { maxItems: 3, uniqueItems: true });
+// R5 — `cwd` reuses the canonical R3 `WorkspacePathSchema` (root-relative,
+// no `..`/`.` segments, no backslashes, no double slashes, no leading slash,
+// bounded 1024 UTF-16 code units). The 1024 cap is identical to
+// `LIMITS.maxProcessCwdLength`, so the existing bound stays canonical while
+// the precise segment check (`foo/.` and `foo/..` and `foo/./bar` rejected)
+// is enforced everywhere — replacing the broken custom regex that allowed
+// `foo/./bar` and `foo//bar` to slip through.
 export const ProcessSnapshotSchema = Type.Object({
   sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, status: R5ProcessStatus,
   command: Type.String({ minLength: 1, maxLength: LIMITS.maxProcessCommandLength }), startedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
   capability: Type.Literal("runtime.processes.v1"), stale: Type.Boolean(),
   turnId: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxTurnIdLength })), toolCallId: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxTurnIdLength })),
-  pid: Type.Optional(Type.Integer({ minimum: 1 })), cwd: Type.Optional(R5WorkspacePath), finishedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  pid: Type.Optional(Type.Integer({ minimum: 1 })), cwd: Type.Optional(WorkspacePathSchema), finishedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
   durationMs: Type.Optional(Type.Integer({ minimum: 0 })), exitCode: Type.Optional(Type.Integer()), signal: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
   ports: Type.Optional(Type.Array(R5ProcessPort, { maxItems: LIMITS.maxProcessPorts })), supportedActions: R5SupportedActions,
 }, { additionalProperties: false, $id: "pi-mob/protocol/process-snapshot" });
-const R5OutputFields = { processId: R5ProcessId, revision: RevisionTokenSchema, stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]), content: Type.String({ maxLength: LIMITS.maxProcessOutputLength }), truncation: TruncationSchema, cursor: Type.Optional(DecimalCursorSchema), pageToken: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) };
+// R5 — `ProcessOutputSchema` is bounded, revision-bound, paged, and closed
+// for both `stdout` and `stderr`. `sessionId` is REQUIRED so every output
+// record is attributable to the owning session the same way the snapshot
+// event is — the bridge MUST thread the snapshot's sessionId into every
+// paged output record.
+const R5OutputFields = { sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]), content: Type.String({ maxLength: LIMITS.maxProcessOutputLength }), truncation: TruncationSchema, cursor: Type.Optional(DecimalCursorSchema), pageToken: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) };
 export const ProcessOutputSchema = Type.Object(R5OutputFields, { additionalProperties: false, $id: "pi-mob/protocol/process-output" });
 const R5ProcessCommand = Type.Object({ sessionId: SessionId, processId: R5ProcessId, expectedRevision: RevisionTokenSchema }, { additionalProperties: false });
 const R5ProcessMetadata = Type.Object({ lease: Type.Literal("session") }, { additionalProperties: false });

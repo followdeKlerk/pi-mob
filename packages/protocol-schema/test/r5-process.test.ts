@@ -57,6 +57,7 @@ function processSnapshot(overrides: Record<string, unknown> = {}) {
 
 function processOutput(overrides: Record<string, unknown> = {}) {
   return {
+    sessionId: uuid,
     processId: "process-1",
     revision,
     stream: "stdout",
@@ -140,6 +141,7 @@ test("R5 process snapshots close fields and enforce identifiers, paths, ports, a
 test("R5 keeps stdout and stderr distinct, bounded, revision-bound, paged, and closed", () => {
   const outputs = TypeCompiler.Compile(ProcessOutputSchema);
   const controls = TypeCompiler.Compile(ControlSchema);
+  const events = TypeCompiler.Compile(EventSchema);
   const responses = TypeCompiler.Compile(ResponseSchema);
 
   for (const stream of ["stdout", "stderr"]) {
@@ -149,6 +151,12 @@ test("R5 keeps stdout and stderr distinct, bounded, revision-bound, paged, and c
     } })).toBe(true);
     expect(responses.Check({ ...responseEnvelope, type: "process.output.page.result", payload: processOutput({ stream, cursor: "2", pageToken: "next" }) })).toBe(true);
   }
+  // ProcessOutputSchema requires sessionId in direct, event, and response use.
+  const outputWithoutSession = { processId: "process-1", revision, stream: "stdout", content: "ok", truncation };
+  expect(outputs.Check(outputWithoutSession)).toBe(false);
+  expect(events.Check({ ...eventEnvelope, type: "process.output", payload: outputWithoutSession })).toBe(false);
+  expect(responses.Check({ ...responseEnvelope, type: "process.output.page.result", payload: outputWithoutSession })).toBe(false);
+  expect(outputs.Check(processOutput({ sessionId: "not-a-uuid" }))).toBe(false);
   expect(outputs.Check(processOutput({ stream: "combined" }))).toBe(false);
   expect(outputs.Check(processOutput({ content: "x".repeat(LIMITS.maxProcessOutputLength + 1) }))).toBe(false);
   expect(outputs.Check(processOutput({ private: "leak" }))).toBe(false);
@@ -217,10 +225,21 @@ test("R5 process actions are durable session commands with lease, revision, meta
     expect(COMMAND_METADATA.find((entry) => entry.type === type)).toMatchObject({
       scope: "session",
       requiresLeaseId: true,
-      requiredCapability: "commands.v1",
+      requiredCapability: "runtime.processes.v1",
       semanticHashFields: ["type", "payload"],
       idempotency: "command-id-semantic-payload-sha256",
     });
+    const metadata = COMMAND_METADATA.find((entry) => entry.type === type);
+    expect(metadata?.stableErrors).toEqual([
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "process_unavailable",
+      "process_not_found",
+      "process_stale",
+      "process_failed",
+    ]);
   }
 
   const errors = TypeCompiler.Compile(ErrorSchema);
