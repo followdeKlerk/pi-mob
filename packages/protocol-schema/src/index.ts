@@ -614,6 +614,11 @@ const hostEventTypes = new Set<EventType>([
 	// event against its host workspace listing.
 	"git.summary",
 	"git.unavailable",
+	// R2 — plan.unavailable is the capability-state envelope (no sessionId) so
+	// it rides on the mandatory host stream. `plan.snapshot` carries a
+	// sessionId and stays on the per-session stream.
+	"recipe.unavailable",
+	"plan.unavailable",
 ]);
 export const EVENT_STREAM_OWNERSHIP: Readonly<
 	Record<EventType, StreamOwnership>

@@ -11,6 +11,7 @@ import {
   type ProcessOutputPageRequest,
 } from "./process-projection";
 import { GitSummaryService } from "../git/summary-service";
+import { type PlanSourceService, isPlanUnavailable, boundPlanSnapshot } from "../plans/source-service";
 import {
   type DurableTrustPolicyStore,
   type HostPolicyService,
@@ -128,6 +129,11 @@ export interface DurableRuntimeOptions {
   readonly git?: GitSummaryService;
   /** R6 — resolves a workspace to the cwd used by Git commands. */
   readonly resolveGitCwd?: (workspaceId: string) => string | undefined;
+  /** R2 — optional structured-plan authority. When omitted, the bridge
+   * never advertises `plans.v1` and surfaces a truthful `plan.unavailable`
+   * host-stream event so mobile renders "Plans unavailable" rather than
+   * inventing steps from prose. */
+  readonly plans?: PlanSourceService;
 }
 
 export class DurableBridgeRuntime implements BridgeRuntimePort {
@@ -144,6 +150,8 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private readonly git: GitSummaryService | null;
   private readonly resolveGitCwd: ((workspaceId: string) => string | undefined) | null;
   private readonly inFlightGitSummaries = new Map<string, AbortController>();
+  private readonly plans: PlanSourceService | null;
+  private readonly inFlightPlanRequests = new Map<string, AbortController>();
   private readyState = false;
   private readonly searchCandidates = new Map<WorkspaceRootId, { canonicalPath: string; label: string }>();
   constructor(readonly options: DurableRuntimeOptions) {
@@ -155,6 +163,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     this.processes = options.processes ?? null;
     this.git = options.git ?? null;
     this.resolveGitCwd = options.resolveGitCwd ?? null;
+    this.plans = options.plans ?? null;
   }
   async start(): Promise<{ resumed: number; indeterminate: number }> {
     const recovered = await this.commands.recover(); this.readyState = true; return recovered;
@@ -171,6 +180,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (this.options.workspaceFiles) caps.push("files.v1");
     if (this.processes) caps.push("processes.v1");
     if (this.git) caps.push("git.v1");
+    if (this.plans) caps.push("plans.v1");
     return caps;
   }
 
@@ -254,6 +264,8 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (type === "process.output.page") return this.processOutputPage(payload);
     if (type === "git.summary.request") return this.gitSummaryRequest(payload);
     if (type === "git.summary.cancel") return this.gitSummaryCancel(payload);
+    if (type === "plan.summary.request") return this.planSummaryRequest(payload);
+    if (type === "plan.summary.cancel") return this.planSummaryCancel(payload);
     if (type === "policy.summary") {
       if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
       const eff = this.policy.hostPolicy.effective();
@@ -358,6 +370,61 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       return { targetRequestId, cancelled: true };
     }
     return { targetRequestId, cancelled: false };
+  }
+
+  /** R2 — `plan.summary.request` runs the bounded structured-plan authority
+   * for a session/turn and tracks the in-flight request so
+   * `plan.summary.cancel` can abort it by request ID. The response is the
+   * closed `PlanSnapshot` schema (`plan.snapshot.result`). When the source
+   * truthfully reports the surface is unavailable, the bridge emits
+   * `plan.unavailable` on the host stream and throws
+   * `unsupported_capability`; the schema forbids embedding `PlanUnavailable`
+   * inside `plan.snapshot.result`. The control returns a Promise; the
+   * server already awaits it. */
+  private async planSummaryRequest(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.plans) throw new RuntimeProtocolError("unsupported_capability", "structured plans are unavailable on this host");
+    const sessionId = String(payload.sessionId ?? "");
+    const turnId = String(payload.turnId ?? "");
+    const requestId = String(payload.requestId ?? "");
+    if (!sessionId) throw new RuntimeProtocolError("invalid_message", "sessionId is required");
+    if (!turnId) throw new RuntimeProtocolError("invalid_message", "turnId is required");
+    if (!requestId) throw new RuntimeProtocolError("invalid_message", "requestId is required");
+    const controller = new AbortController();
+    this.inFlightPlanRequests.set(requestId, controller);
+    try {
+      const result = await this.plans.snapshot({ sessionId, turnId, signal: controller.signal });
+      if (isPlanUnavailable(result)) {
+        // PlanUnavailable: surface it on the host stream then reject the
+        // synchronous response. Mirror R6 so mobile correlates the throw
+        // with the stream event by capability.
+        this.options.store.appendEvent(
+          `host:${this.identity().hostId}`,
+          "plan.unavailable",
+          { capability: result.capability, status: result.status },
+        );
+        throw new RuntimeProtocolError("unsupported_capability", result.status.reason);
+      }
+      return { ...boundPlanSnapshot(result) };
+    } finally {
+      const tracked = this.inFlightPlanRequests.get(requestId);
+      if (tracked === controller) this.inFlightPlanRequests.delete(requestId);
+    }
+  }
+
+  /** R2 — `plan.summary.cancel` aborts the in-flight request recorded under
+   * `targetRequestId`. The cancel is a no-op when no matching in-flight
+   * request exists. Mirrors R6 cancellation shape exactly. */
+  private planSummaryCancel(payload: Record<string, unknown>): Record<string, unknown> {
+    const targetRequestId = String(payload.targetRequestId ?? "");
+    if (!targetRequestId) throw new RuntimeProtocolError("invalid_message", "targetRequestId is required");
+    const controller = this.inFlightPlanRequests.get(targetRequestId);
+    if (controller) {
+      controller.abort();
+      this.inFlightPlanRequests.delete(targetRequestId);
+      return { targetRequestId, cancelled: true };
+    }
+    return { targetRequestId, cancelled: false };
+
   }
 
   /** Routes all R3 reads through the only filesystem authority. */

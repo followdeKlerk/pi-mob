@@ -364,20 +364,39 @@ test("D-036 event payloads are registered with session ownership", () => {
     arguments: "{}",
     output: "ok",
   } })).toBe(true);
-  expect(events.Check({ ...envelope, type: "recipe.unavailable", payload: {
-    capability: RECIPE_CAPABILITY,
-    status: { state: "unavailable", reason: "off", remediation: "enable" },
-  } })).toBe(true);
+  // recipe.unavailable rides on the host stream (capability-state envelope).
+  expect(events.Check({
+    ...envelope,
+    streamId: `host:${uuid}`,
+    type: "recipe.unavailable",
+    payload: {
+      capability: RECIPE_CAPABILITY,
+      status: { state: "unavailable", reason: "off", remediation: "enable" },
+    },
+  })).toBe(true);
+  // plan.snapshot rides on the session stream because it carries a sessionId.
   expect(events.Check({ ...envelope, type: "plan.snapshot", payload: {
     planId: "p1", revision: "r1", sessionId: uuid, turnId: "turn-1",
     source: "session-bridge", stale: false, capability: { state: "available" },
     steps: [],
   } })).toBe(true);
-  expect(events.Check({ ...envelope, type: "plan.unavailable", payload: {
-    capability: PLAN_CAPABILITY,
-    status: { state: "stale", reason: "old", remediation: "refresh" },
-  } })).toBe(true);
-  for (const type of ["recipe.activity", "recipe.unavailable", "plan.snapshot", "plan.unavailable"] as const) expect(EVENT_STREAM_OWNERSHIP[type]).toBe("session");
+  // plan.unavailable rides on the host stream (capability-state envelope).
+  expect(events.Check({
+    ...envelope,
+    streamId: `host:${uuid}`,
+    type: "plan.unavailable",
+    payload: {
+      capability: PLAN_CAPABILITY,
+      status: { state: "stale", reason: "old", remediation: "refresh" },
+    },
+  })).toBe(true);
+  // Recipe activity + plan snapshot ride on the per-session stream because
+  // they carry a sessionId; recipe.unavailable + plan.unavailable are pure
+  // capability-state envelopes and ride on the host stream (mirroring R6
+  // git.unavailable) so the mobile coordinator can correlate the throw
+  // with the stream event without holding a session subscription.
+  for (const type of ["recipe.activity", "plan.snapshot"] as const) expect(EVENT_STREAM_OWNERSHIP[type]).toBe("session");
+  for (const type of ["recipe.unavailable", "plan.unavailable"] as const) expect(EVENT_STREAM_OWNERSHIP[type]).toBe("host");
 });
 
 test("D-036 prompt.submit preserves legacy payload and uses planTarget (not target) with required revision", () => {
