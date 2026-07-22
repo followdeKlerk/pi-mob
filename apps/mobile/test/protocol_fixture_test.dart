@@ -50,9 +50,8 @@ Map<String, Object?> _validFileRef() => <String, Object?>{
   'ranges': <Object?>[
     <String, Object?>{'startLine': 4, 'endLine': 9, 'label': 'Parser'},
   ],
+  'digest': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
   'revision': 'file-r1',
-  'preview': 'Parser parse(String source)',
-  'byteCount': 4096,
 };
 
 Map<String, Object?> _recipeEvent(String type, Map<String, Object?> payload) =>
@@ -433,8 +432,7 @@ void main() {
       <Object?>[privateRef],
       null,
       <Object?>[_validFileRef()..['ranges'] = null],
-      <Object?>[_validFileRef()..['preview'] = null],
-      <Object?>[_validFileRef()..['byteCount'] = null],
+      <Object?>[_validFileRef()..['digest'] = null],
     ]) {
       expect(
         () => validateProtocolFixture(
@@ -476,9 +474,11 @@ void main() {
             'label': List<String>.filled(65, 'x').join(),
           },
         ],
-      'preview': _validFileRef()
-        ..['preview'] = List<String>.filled(4097, 'x').join(),
-      'byte count': _validFileRef()..['byteCount'] = 26_214_401,
+      'missing digest': _validFileRef()..remove('digest'),
+      'short digest': _validFileRef()
+        ..['digest'] = List<String>.filled(63, 'a').join(),
+      'uppercase digest': _validFileRef()
+        ..['digest'] = List<String>.filled(64, 'A').join(),
     };
     for (final invalid in invalidRefs.entries) {
       expect(
