@@ -254,7 +254,9 @@ test("R5 valid fixtures carry exhaustive controls, capability, snapshots, and di
   const hello = find("hello-valid.json");
   expect((hello.message.payload as Record<string, unknown>).requiredCapabilities).not.toContain("runtime.processes.v1");
   expect((hello.message.payload as Record<string, unknown>).optionalCapabilities).toContain("runtime.processes.v1");
+  expect((hello.message.payload as Record<string, unknown>).optionalCapabilities).toContain("git-ci.v1");
   expect((find("response-hello-accepted-valid.json").message.payload as Record<string, unknown>).capabilities).toContain("runtime.processes.v1");
+  expect((find("response-hello-accepted-valid.json").message.payload as Record<string, unknown>).capabilities).toContain("git-ci.v1");
   expect(find("command-process-stop-valid.json").valid).toBe(true);
   expect(find("control-process-snapshot-request-valid.json").valid).toBe(true);
   expect(find("control-process-output-page-valid.json").valid).toBe(true);
@@ -294,6 +296,35 @@ function validateProcessSemantics(message: Record<string, unknown>, authority: P
   if (action === "process.restart" && authority.status === "running") return "invalid_state";
   return undefined;
 }
+
+test("R6 valid fixtures cover Git/CI commands, controls, events, responses, and stable errors", () => {
+  const find = (file: string): FixtureRecord => JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
+  expect(find("command-git-commit-request-valid.json").valid).toBe(true);
+  expect(find("command-git-push-request-valid.json").valid).toBe(true);
+  expect(find("control-git-summary-request-valid.json").valid).toBe(true);
+  expect(find("control-git-summary-cancel-valid.json").valid).toBe(true);
+  expect(find("event-git-summary-valid.json").valid).toBe(true);
+  expect(find("event-git-unavailable-valid.json").valid).toBe(true);
+  expect(find("response-git-summary-result-valid.json").valid).toBe(true);
+  for (const code of [
+    "git_unavailable",
+    "git_remote_missing",
+    "git_provider_unavailable",
+    "git_auth_missing",
+    "git_stale",
+    "git_action_failed",
+  ]) {
+    expect(find(`error-${code.replaceAll("_", "-")}-valid.json`).valid).toBe(true);
+  }
+  const summary = find("event-git-summary-valid.json").message.payload as Record<string, unknown>;
+  expect(summary).toMatchObject({
+    workspaceId: "88888888-8888-4888-8888-888888888888",
+    revision: "git-r1",
+    capability: "git-ci.v1",
+    repository: "pi-mob/pi-mob",
+    branch: "feature/git-ci",
+  });
+});
 
 test("R5 semantic-invalid process actions are schema-valid, hard-coded, and repaired one field at a time", () => {
   const cases = [

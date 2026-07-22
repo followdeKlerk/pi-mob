@@ -72,6 +72,55 @@ function processOutput(stream: "stdout" | "stderr" = "stdout", overrides: Record
 function processCommandPayload(): Record<string, unknown> {
   return { sessionId: ids.sessionId, processId: processFixture.processId, expectedRevision: processFixture.revision, lease: "session" };
 }
+function gitSummary(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    workspaceId: ids.workspaceId,
+    revision: "git-r1",
+    repositoryUrl: "https://example.test/pi-mob",
+    repository: "pi-mob/pi-mob",
+    detached: false,
+    branch: "feature/git-ci",
+    workingTreeState: "dirty",
+    changedCount: 2,
+    ahead: 1,
+    behind: 0,
+    latestCommit: {
+      sha: "a".repeat(40),
+      message: "Add Git/CI attention protocol",
+      author: "Pi Mobile",
+      authoredAt: base.sentAt,
+      url: "https://example.test/pi-mob/commit/aaa",
+    },
+    pullRequest: {
+      number: 42,
+      title: "Add Git/CI attention protocol",
+      url: "https://example.test/pi-mob/pull/42",
+    },
+    ciStatus: { state: "failure" },
+    failedChecks: [{
+      name: "protocol-schema",
+      status: "failure",
+      summary: "schema check failed",
+      url: "https://example.test/pi-mob/checks/1",
+    }],
+    supportedActions: ["refresh", "commit_through_pi", "push_through_pi", "open_external"],
+    capability: "git-ci.v1",
+    lastRefreshedAt: base.sentAt,
+    ...overrides,
+  };
+}
+function gitCommandPayload(): Record<string, unknown> {
+  return {
+    sessionId: ids.sessionId,
+    workspaceId: ids.workspaceId,
+    expectedRevision: "git-r1",
+    confirmation: {
+      confirmationId: "confirm-1",
+      summary: "Commit the reviewed changes through Pi",
+    },
+    summaryHint: "Add Git/CI attention protocol",
+  };
+}
 function processUnavailablePayload(): Record<string, unknown> {
   return { sessionId: ids.sessionId, capability: "runtime.processes.v1", status: { state: "unavailable", reason: "Process supervision is not advertised by this host.", remediation: "Upgrade the host bridge or refresh capabilities.", source: "runtime-bridge", revision: "process-r1" } };
 }
@@ -91,6 +140,7 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "session.export") return { sessionId: ids.sessionId, format: "html" };
   if (type === "prompt.submit") return { sessionId: ids.sessionId, deliveryMode: "immediate", message: "fixture", attachmentIds: [] };
   if (["process.stop", "process.restart", "process.rerun"].includes(type)) return processCommandPayload();
+  if (["git.commit.request", "git.push.request"].includes(type)) return gitCommandPayload();
   if (type === "context.pin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", ranges: [FILE_RANGE], revision: "file-r1" } };
   if (type === "context.unpin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1" } };
   if (type === "context.exclude") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "source", sourceId: "source-fixture", revision: "file-r1" } };
@@ -155,6 +205,8 @@ function eventPayload(type: string): Record<string, unknown> {
   if (type === "process.output") return processOutput();
   if (type === "process.unavailable") return processUnavailablePayload();
   if (type === "process.error") return processErrorPayload();
+  if (type === "git.summary") return gitSummary();
+  if (type === "git.unavailable") return { workspaceId: ids.workspaceId, capability: "git-ci.v1", status: { state: "unavailable", reason: "Git provider is not configured", remediation: "Configure the provider and refresh" } };
 
   if (type === "controller.state") return { scope: "session", sessionId: ids.sessionId, mode: "controller", leaseId: ids.leaseId, installationId: ids.installationId, expiresAt: "2026-07-12T00:00:45.000Z", reclaimableUntil: "2026-07-12T00:01:00.000Z" };
   if (type === "command.state") return { commandId: ids.commandId, commandType: "prompt.submit", state: "accepted", errorCode: null };
@@ -164,7 +216,7 @@ function eventPayload(type: string): Record<string, unknown> {
   return { sessionId: ids.sessionId };
 }
 function responsePayload(type: string): Record<string, unknown> {
-  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
+  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1", "git-ci.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
   if (type === "subscription.accepted") return { streams: [{ streamId: `host:${ids.sessionId}`, mode: "replay" }] };
   if (type === "stream.sync.complete") return { streamId: `session:${ids.sessionId}`, currentCursor: "1", mode: "replay" };
   if (type === "stream.snapshot.begin") return { snapshotId: ids.sessionId, streamId: `session:${ids.sessionId}`, baselineCursor: "1" };
@@ -182,6 +234,7 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "context.snapshot.result") return contextSnapshot();
   if (type === "process.snapshot.result") return { items: [processSnapshot()] };
   if (type === "process.output.page.result") return processOutput();
+  if (type === "git.summary.result") return gitSummary();
   return { items: [] };
 }
 function controlPayload(type: string): Record<string, unknown> {
@@ -200,6 +253,8 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "context.snapshot.request") return { sessionId: ids.sessionId };
   if (type === "process.snapshot.request") return { sessionId: ids.sessionId };
   if (type === "process.output.page") return { sessionId: ids.sessionId, processId: processFixture.processId, revision: processFixture.revision, stream: "stdout", cursor: "9007199254740992", pageToken: "page-2" };
+  if (type === "git.summary.request") return { workspaceId: ids.workspaceId };
+  if (type === "git.summary.cancel") return { targetRequestId: ids.requestId };
   if (type === "model.list") return { sessionId: ids.sessionId };
   if (type === "command.current") return { commandId: ids.commandId };
   return {};
@@ -208,11 +263,12 @@ const hostEvents = new Set([
   "host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility",
   "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
   "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
+  "git.summary", "git.unavailable",
 ]);
 
 rmSync(corpus, { recursive: true, force: true });
 mkdirSync(corpus, { recursive: true });
-emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "future.optional"] } });
+emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "git-ci.v1", "future.optional"] } });
 for (const type of COMMAND_TYPES) emit(fileName("command", type), "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload: commandPayload(type) });
 for (const type of CONTROL_TYPES) emit(fileName("control", type), "control", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, type, payload: controlPayload(type) });
 for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: type === "recipe.activity" ? recipeActivity("thinking") : type === "recipe.unavailable" ? { capability: "recipes.v1", status: capabilityStatus("unavailable") } : type === "plan.snapshot" ? planSnapshot() : type === "plan.unavailable" ? { capability: "plans.v1", status: capabilityStatus("stale") } : eventPayload(type) });

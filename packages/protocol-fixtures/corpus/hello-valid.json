@@ -19,6 +19,7 @@
       ],
       "optionalCapabilities": [
         "runtime.processes.v1",
+        "git-ci.v1",
         "future.optional"
       ]
     },

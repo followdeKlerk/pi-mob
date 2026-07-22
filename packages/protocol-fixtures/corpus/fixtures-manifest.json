@@ -70,6 +70,16 @@
     "kind": "command"
   },
   {
+    "file": "command-git-commit-request-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-git-push-request-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
     "file": "command-host-display_name-set-valid.json",
     "valid": true,
     "kind": "command"
@@ -240,6 +250,16 @@
     "kind": "control"
   },
   {
+    "file": "control-git-summary-cancel-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-git-summary-request-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
     "file": "control-host-snapshot-request-valid.json",
     "valid": true,
     "kind": "control"
@@ -376,6 +396,36 @@
   },
   {
     "file": "error-file-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-action-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-auth-missing-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-provider-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-remote-missing-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -676,6 +726,16 @@
   },
   {
     "file": "event-extension-widget-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-git-summary-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-git-unavailable-valid.json",
     "valid": true,
     "kind": "event"
   },
@@ -1324,6 +1384,11 @@
   },
   {
     "file": "response-controller-renew-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-git-summary-result-valid.json",
     "valid": true,
     "kind": "response"
   },

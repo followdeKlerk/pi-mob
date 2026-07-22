@@ -787,6 +787,7 @@ const _supportedCapabilities = <String>{
   'files.v1',
   'contexts.v1',
   'runtime.processes.v1',
+  'git-ci.v1',
 };
 const _commandTypes = <String>{
   'controller.acquire',
@@ -827,6 +828,8 @@ const _commandTypes = <String>{
   'process.stop',
   'process.restart',
   'process.rerun',
+  'git.commit.request',
+  'git.push.request',
 };
 const _controlTypes = <String>{
   'subscription.set',
@@ -848,6 +851,8 @@ const _controlTypes = <String>{
   'context.snapshot.request',
   'process.snapshot.request',
   'process.output.page',
+  'git.summary.request',
+  'git.summary.cancel',
 };
 const _leaseFreeCommands = <String>{
   'controller.acquire',
@@ -879,6 +884,7 @@ const _responseTypes = <String>{
   'context.snapshot.result',
   'process.snapshot.result',
   'process.output.page.result',
+  'git.summary.result',
 };
 const _eventTypes = <String>{
   'host.state',
@@ -945,6 +951,8 @@ const _eventTypes = <String>{
   'process.output',
   'process.unavailable',
   'process.error',
+  'git.summary',
+  'git.unavailable',
 };
 const _hostEventTypes = <String>{
   'host.state',
@@ -962,6 +970,8 @@ const _hostEventTypes = <String>{
   'workspace.file.metadata',
   'workspace.file.stale',
   'workspace.file.unavailable',
+  'git.summary',
+  'git.unavailable',
 };
 const _dualStreamEventTypes = <String>{'command.state', 'error.event'};
 const _errorCodes = <String>{
@@ -1021,6 +1031,12 @@ const _errorCodes = <String>{
   'process_not_found',
   'process_stale',
   'process_failed',
+  'git_unavailable',
+  'git_remote_missing',
+  'git_provider_unavailable',
+  'git_auth_missing',
+  'git_stale',
+  'git_action_failed',
 };
 String _nfc(String value) => unorm.nfc(value);
 void _requireEnvelope(Map<String, Object?> json) {
