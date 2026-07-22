@@ -73,6 +73,13 @@ class GitCheckData {
   final String? url;
 }
 
+const _gitUnavailableStates = <String>{
+  'advertised',
+  'unavailable',
+  'stale',
+  'error',
+};
+
 @immutable
 class GitSummaryData {
   const GitSummaryData({
@@ -113,6 +120,7 @@ class GitSummaryData {
 
   bool get canCommit => supportedActions.contains('commit_through_pi');
   bool get canPush => supportedActions.contains('push_through_pi');
+  bool get canOpenExternal => supportedActions.contains('open_external');
 
   static GitSummaryData? tryParse(Map<String, Object?> json) {
     final workspaceId = _boundedString(json['workspaceId'], maxLength: 128);
@@ -214,7 +222,7 @@ class GitUnavailableData {
     }
     final map = Map<String, Object?>.from(status);
     final state = _boundedString(map['state'], maxLength: 16);
-    final reason = _boundedString(
+    final reason = _optionalBoundedString(
       map['reason'],
       maxLength: _maxCheckSummaryLength,
     );
@@ -222,11 +230,28 @@ class GitUnavailableData {
       map['remediation'],
       maxLength: _maxCheckSummaryLength,
     );
-    if (state == null) return null;
     if (state == 'available') {
       return GitUnavailableData(
         workspaceId: workspaceId,
-        reason: 'available',
+        reason: 'advertised',
+        message: reason ?? 'Git is available',
+        remediation: remediation,
+      );
+    }
+    if (state == 'degraded') {
+      if (reason == null || remediation == null) return null;
+      return GitUnavailableData(
+        workspaceId: workspaceId,
+        reason: 'advertised',
+        message: reason,
+        remediation: remediation,
+      );
+    }
+    if (state == null || !_gitUnavailableStates.contains(state)) return null;
+    if (state == 'advertised') {
+      return GitUnavailableData(
+        workspaceId: workspaceId,
+        reason: state,
         message: reason ?? 'Git is available',
         remediation: remediation,
       );
@@ -320,9 +345,11 @@ String? _enumString(Object? value, Set<String> allowed) {
 }
 
 int? _boundedInt(Object? value) {
-  if (value is! num) return null;
+  if (value is! num || !value.isFinite) return null;
   final result = value.toInt();
-  if (result < 0 || result > _maxGitCount) return null;
+  if (result.toDouble() != value || result < 0 || result > _maxGitCount) {
+    return null;
+  }
   return result;
 }
 
@@ -361,16 +388,16 @@ GitCommitData? _parseCommit(Object? value) {
 GitPullRequestData? _parsePullRequest(Object? value) {
   if (value is! Map) return null;
   final map = Map<String, Object?>.from(value);
-  final number = map['number'];
+  final number = _boundedInt(map['number']);
   final title = _boundedString(
     map['title'],
     maxLength: _maxPullRequestTitleLength,
   );
   final url = _safeUrl(map['url']);
-  if (number is! num || number.toInt() < 1 || title == null || url == null) {
+  if (number == null || number < 1 || title == null || url == null) {
     return null;
   }
-  return GitPullRequestData(number: number.toInt(), title: title, url: url);
+  return GitPullRequestData(number: number, title: title, url: url);
 }
 
 String? _parseCiState(Object? value) {

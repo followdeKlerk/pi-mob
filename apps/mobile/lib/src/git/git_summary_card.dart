@@ -88,7 +88,8 @@ class GitSummaryCard extends StatelessWidget {
                   if (summary.latestCommit.author != null)
                     Text(summary.latestCommit.author!),
                   Text(summary.latestCommit.authoredAt),
-                  if (callbacks.onOpenExternal != null &&
+                  if (summary.canOpenExternal &&
+                      callbacks.onOpenExternal != null &&
                       isSafeGitExternalUrl(summary.latestCommit.url))
                     TextButton(
                       onPressed: () =>
@@ -108,7 +109,8 @@ class GitSummaryCard extends StatelessWidget {
                     Text(
                       '#${summary.pullRequest!.number} ${summary.pullRequest!.title}',
                     ),
-                    if (callbacks.onOpenExternal != null &&
+                    if (summary.canOpenExternal &&
+                        callbacks.onOpenExternal != null &&
                         isSafeGitExternalUrl(summary.pullRequest!.url))
                       TextButton(
                         onPressed: () =>
@@ -130,7 +132,8 @@ class GitSummaryCard extends StatelessWidget {
                       Text('${check.name} · ${check.status}'),
                       if (check.summary != null) Text(check.summary!),
                       if (check.logSummary != null) Text(check.logSummary!),
-                      if (callbacks.onOpenExternal != null &&
+                      if (summary.canOpenExternal &&
+                          callbacks.onOpenExternal != null &&
                           check.url != null &&
                           isSafeGitExternalUrl(check.url!))
                         TextButton(
@@ -163,7 +166,8 @@ class GitSummaryCard extends StatelessWidget {
                     onPressed: callbacks.onRefresh,
                     child: const Text('Refresh'),
                   ),
-                if (callbacks.onOpenExternal != null &&
+                if (summary.canOpenExternal &&
+                    callbacks.onOpenExternal != null &&
                     isSafeGitExternalUrl(summary.repositoryUrl))
                   TextButton(
                     onPressed: () =>

@@ -213,13 +213,14 @@ class BashToolArgs {
     if (cwd != null && cwd is! String) {
       throw const FormatException('bash `cwd` must be a string');
     }
-    if (timeoutMs != null && timeoutMs is! int) {
+    if (timeoutMs != null &&
+        (timeoutMs is! num || !timeoutMs.isFinite || timeoutMs.toInt() != timeoutMs)) {
       throw const FormatException('bash `timeoutMs` must be an integer');
     }
     return BashToolArgs(
       command: command,
       cwd: cwd as String?,
-      timeoutMs: timeoutMs as int?,
+      timeoutMs: timeoutMs?.toInt(),
     );
   }
 }

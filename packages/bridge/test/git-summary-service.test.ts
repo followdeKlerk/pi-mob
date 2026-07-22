@@ -149,23 +149,30 @@ describe("provider validation", () => {
   });
 
   test("validates bounded PR and failed-check links when the provider payload is well formed", async () => {
+    const calls: Array<{ repository: string; branch: string | null; sha: string; timeoutMs: number }> = [];
     const result = await new GitSummaryService({
       runner: runner(baseOutputs()),
       provider: {
-        summary: async () => ({
-          pullRequest: { number: 42, title: "Open PR", url: "https://github.com/acme/repo/pull/42" },
-          ciStatus: { state: "failure" },
-          failedChecks: [{
-            name: "schema",
-            status: "failure",
-            summary: "schema failed",
-            logSummary: "details",
-            url: "https://github.com/acme/repo/actions/runs/1",
-          }],
-        }),
+        summary: async (input) => {
+          calls.push(input);
+          return {
+            pullRequest: { number: 42, title: "Open PR", url: "https://github.com/acme/repo/pull/42" },
+            ciStatus: { state: "failure" },
+            failedChecks: [{
+              name: "schema",
+              status: "failure",
+              summary: "schema failed",
+              logSummary: "details",
+              url: "https://github.com/acme/repo/actions/runs/1",
+            }],
+          };
+        },
       },
       supportedActions: ["refresh", "open_external"],
+      timeoutMs: 1234,
     }).summarize(workspaceId, "/repo");
+
+    expect(calls).toEqual([{ repository: "acme/repo", branch: "main", sha: "abcdef1234567890abcdef1234567890abcdef12", timeoutMs: 1234 }]);
 
     expect(validSummaryPayload(result)).toBe(true);
     expect(result).toMatchObject({
@@ -174,6 +181,38 @@ describe("provider validation", () => {
       failedChecks: [{ name: "schema", status: "failure", summary: "schema failed", logSummary: "details" }],
       supportedActions: ["refresh", "open_external"],
     });
+  });
+
+  test("rejects fractional PR numbers from the provider payload", async () => {
+    const result = await new GitSummaryService({
+      runner: runner(baseOutputs()),
+      provider: {
+        summary: async () => ({
+          pullRequest: { number: 42.5, title: "Open PR", url: "https://github.com/acme/repo/pull/42" },
+          ciStatus: { state: "failure" },
+          failedChecks: [],
+        }),
+      },
+    }).summarize(workspaceId, "/repo");
+
+    expect(validUnavailablePayload(result)).toBe(true);
+    expect(result).toMatchObject({ status: { reason: "Git provider returned an invalid summary payload" } });
+  });
+
+  test("returns unavailable when the provider call exceeds timeoutMs", async () => {
+    const result = await new GitSummaryService({
+      runner: runner(baseOutputs()),
+      provider: {
+        summary: async ({ timeoutMs }) => {
+          await new Promise((resolve) => setTimeout(resolve, timeoutMs + 20));
+          return { ciStatus: { state: "success" }, failedChecks: [] };
+        },
+      },
+      timeoutMs: 10,
+    }).summarize(workspaceId, "/repo");
+
+    expect(validUnavailablePayload(result)).toBe(true);
+    expect(result).toMatchObject({ status: { reason: "Git summary refresh timed out or was cancelled" } });
   });
 });
 

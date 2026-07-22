@@ -30,7 +30,7 @@ export interface GitCommandRunner {
 
 export interface GitCiProvider {
   /** Provider data is authoritative only when this callback is supplied. */
-  summary(input: { repository: string; branch: string | null; sha: string }): Promise<unknown>;
+  summary(input: { repository: string; branch: string | null; sha: string; timeoutMs: number }): Promise<unknown>;
 }
 
 export interface GitSummaryServiceOptions {
@@ -219,7 +219,7 @@ function isAbortLike(error: unknown): boolean {
 }
 
 function isTimeoutLike(error: unknown): boolean {
-  return error instanceof Error && /timeout|timed out/u.test(`${error.name} ${error.message}`);
+  return error instanceof Error && /timeout|timed out/iu.test(`${error.name} ${error.message}`);
 }
 
 function abortPromise(signal: AbortSignal | undefined): Promise<never> {
@@ -230,6 +230,17 @@ function abortPromise(signal: AbortSignal | undefined): Promise<never> {
       return;
     }
     signal.addEventListener("abort", () => reject(new DOMException("Aborted", "AbortError")), { once: true });
+  });
+}
+
+function timeoutPromise(timeoutMs: number): Promise<never> {
+  return new Promise((_, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`Timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    if (typeof timer === "object" && timer !== null && "unref" in timer && typeof timer.unref === "function") {
+      timer.unref();
+    }
   });
 }
 
@@ -335,8 +346,9 @@ export class GitSummaryService {
         let providerSummary: unknown;
         try {
           providerSummary = await Promise.race([
-            this.options.provider.summary({ repository, branch, sha }),
+            this.options.provider.summary({ repository, branch, sha, timeoutMs: this.timeoutMs }),
             abortPromise(signal),
+            timeoutPromise(this.timeoutMs),
           ]);
         } catch (error) {
           if (isAbortLike(error) || isTimeoutLike(error)) throw error;

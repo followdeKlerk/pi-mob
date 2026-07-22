@@ -123,6 +123,66 @@ void main() {
     expect(state.unavailable?.remediation, 'Retry later');
   });
 
+  test(
+    'git unavailable parser closes state to advertised, unavailable, stale, or error',
+    () {
+      final available = reduceGit(const GitState(), 'git.unavailable', {
+        'workspaceId': 'git-workspace',
+        'capability': 'git-ci.v1',
+        'status': {'state': 'available'},
+      });
+      expect(available.unavailable?.reason, 'advertised');
+
+      final degraded = reduceGit(const GitState(), 'git.unavailable', {
+        'workspaceId': 'git-workspace',
+        'capability': 'git-ci.v1',
+        'status': {
+          'state': 'degraded',
+          'reason': 'Provider degraded',
+          'remediation': 'Retry later',
+        },
+      });
+      expect(degraded.unavailable?.reason, 'advertised');
+      expect(degraded.unavailable?.message, 'Provider degraded');
+
+      final stale = reduceGit(const GitState(), 'git.unavailable', {
+        'workspaceId': 'git-workspace',
+        'capability': 'git-ci.v1',
+        'status': {
+          'state': 'stale',
+          'reason': 'Snapshot stale',
+          'remediation': 'Refresh',
+        },
+      });
+      expect(stale.unavailable?.reason, 'stale');
+
+      final invalid = reduceGit(const GitState(), 'git.unavailable', {
+        'workspaceId': 'git-workspace',
+        'capability': 'git-ci.v1',
+        'status': {'state': 'unknown'},
+      });
+      expect(invalid.unavailable?.reason, 'invalid_payload');
+    },
+  );
+
+  test('rejects fractional bounded integers and pull request numbers', () {
+    final fractionalCounts = reduceGit(const GitState(), 'git.summary', {
+      ...validSummary(),
+      'changedCount': 1.5,
+    });
+    expect(fractionalCounts.summary, isNull);
+
+    final fractionalPr = reduceGit(const GitState(), 'git.summary', {
+      ...validSummary(),
+      'pullRequest': {
+        'number': 42.5,
+        'title': 'Add Git summary',
+        'url': 'https://example.test/pi-mob/pull/42',
+      },
+    });
+    expect(fractionalPr.summary, isNull);
+  });
+
   test('strict HTTPS validation matches the Git external surface', () {
     expect(isSafeGitExternalUrl('https://example.test/pi-mob'), isTrue);
     expect(
