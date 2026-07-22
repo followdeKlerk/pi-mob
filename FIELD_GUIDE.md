@@ -7,13 +7,16 @@ wins.
 
 ## Canonical references (read in this order)
 
-1. [`NEXT_AGENT_STATUS.md`](NEXT_AGENT_STATUS.md) — current handoff, worktrees, blockers.
-2. [`WORKING.md`](WORKING.md) — active checkpoint and immediate next actions.
-3. [`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) — canonical plan for R1–R12 (authoritative for leaf specs, integration phases, gates).
-4. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, authority, state machines.
-5. [`docs/PRODUCT.md`](docs/PRODUCT.md) — product statement, journeys, non-goals.
-6. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decisions with review triggers.
-7. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) — version pins and host floors.
+1. [`WORKING.md`](WORKING.md) — tracked active checkpoint and immediate next actions.
+2. [`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) — canonical plan for R1–R12 (authoritative for leaf specs, integration phases, gates).
+3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, authority, state machines.
+4. [`docs/PRODUCT.md`](docs/PRODUCT.md) — product statement, journeys, non-goals.
+5. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decisions with review triggers.
+6. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) — version pins and host floors.
+
+`NEXT_AGENT_STATUS.md`, when present, is an untracked historical handoff and is
+not a canonical planning or repository-state source. Verify any claims in it
+against the tracked references above and `git status`.
 
 ## 1. Product invariants
 
@@ -68,12 +71,12 @@ on the existing branch first, freeze the relevant contract, then rebase and
 selectively merge.
 
 Canonical list, paths, branches, and current treatment:
-[`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) §4 (cross-checked
-against `NEXT_AGENT_STATUS.md`).
+[`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) §4 (verified
+against the actual worktree branches at the documentation checkpoint).
 
-**Known incidental noise to restore before any candidate commit:**
-`feat/agent-supervision` touches `bun.lock` only by removing semver carets on
-unrelated existing dependencies. Restore before committing:
+**Incidental-noise safeguard:** if `feat/agent-supervision` shows a `bun.lock`
+diff consisting only of removed semver carets on unrelated existing
+dependencies, restore it before any candidate commit:
 
 ```bash
 git -C /private/tmp/pi-mob-agents restore bun.lock

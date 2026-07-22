@@ -2,7 +2,11 @@
 
 **Status:** planning artifact only; no implementation is authorized by this document.
 **Canonical checkout:** `/Users/nathandekleerk/github/pi-mob`
-**Baseline:** `main` at `a0d49fb` (`a0d49fb38454219fb7ec3fad204972a8e87566f0`), one commit ahead of `origin/main`.
+**Planning baseline:** `main` at `a0d49fb` (`a0d49fb38454219fb7ec3fad204972a8e87566f0`).
+The approved planning documents were integrated separately at the canonical
+checkpoint recorded by the repository's commit history; this plan's baseline
+is intentionally historical so candidate diffs remain reviewable against the
+same starting point.
 
 The product remains an accountless, chat-first remote Pi control surface: fluent Codex-style conversation, not a mobile IDE. This is the acceptance contract for the remaining twelve requirements and the integration plan for the preserved candidate worktrees.
 
@@ -53,8 +57,8 @@ Preserve every candidate until its reviewed replacement is integrated and verifi
 
 | Branch | Worktree and current treatment |
 | --- | --- |
-| `feat/global-search` | `/private/tmp/pi-mob-search` — uncommitted search implementation; preserve and audit against all-source search/deep-link requirements. |
-| `feat/agent-supervision` | `/private/tmp/pi-mob-agents` — uncommitted agent files/tests; preserve. The incidental `bun.lock` caret-only edit is not feature work and must be restored before a candidate commit. |
+| `feat/global-search` | `/private/tmp/pi-mob-search` — committed repair candidate at `f159c6d`; preserve and audit against D-035 and all-source search/deep-link requirements before integration. |
+| `feat/agent-supervision` | `/private/tmp/pi-mob-agents` — committed candidate at `80fce2d`; preserve and audit against explicit Pi contracts before integration. |
 | `feat/recipe-durability` | `/private/tmp/pi-mob-recipe` — empty at `ba25eac`; retain for R1. |
 | `feat/scoped-rebuilds` | `/private/tmp/pi-mob-scoped` — empty at `ba25eac`; retain for R11. |
 | `perf/projection-shell` | `/private/tmp/pi-mob-projection` — empty duplicate candidate; retain until R11 owner decides whether it supersedes scoped rebuilds. |
@@ -195,7 +199,7 @@ Every leaf must provide one authoritative source/contract, one persistence/repla
 
 ## 7. Integration phases and gates
 
-1. **Preserve/freeze:** record this plan, leave all worktrees intact, review uncommitted candidates, freeze F0, generate schemas/fixtures, and run the baseline.
+1. **Preserve/freeze:** record this plan, leave all worktrees intact, review preserved candidates, freeze F0, generate schemas/fixtures, and run the baseline.
 2. **Foundation/performance:** integrate R1, then R11; prove recipe identity, replay, scoped rebuilds, frame coalescing, and immediate auto-follow cancellation.
 3. **Runtime:** integrate R5 host/Pi process contract, mobile projection, bounds, stop, and reconnect before process-dependent inbox work.
 4. **Plans/files/context:** integrate R2 and R3 in parallel only in isolated directories; integrate R4 separately; central coordinator/database/shell wiring is sequential.

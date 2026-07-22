@@ -417,8 +417,10 @@ live event shape as authority.
 
 **Affected work and repair consequences:**
 
-- `feat/global-search` (`/private/tmp/pi-mob-search`) is blocked on this
-  decision and must not merge `409a39a`.  Its repair must replace event-ID maps
+- `feat/global-search` (`/private/tmp/pi-mob-search`) now carries the
+  committed repair candidate `f159c6d`.  It remains outside `main` pending
+  review against this decision and the R10 acceptance tests; do not merge
+  the rejected `409a39a` approach.  Its repair must replace event-ID maps
   and the terminal-event upsert key with `sourceKey`, add the documented
   scoped assemblers and cleanup, make the database migration preserve a typed
   deep-link target plus terminal cursor/event provenance, use numeric-cursor
