@@ -213,7 +213,7 @@ test("D-037 only the context snapshot is a read control/response", () => {
 
 test("D-037 context mutations are lease-required session commands with revision-bound targets", () => {
   const commands = TypeCompiler.Compile(CommandSchema);
-  const target = { path: "src/index.ts", ranges: [{ startLine: 1, endLine: 1 }] };
+  const target = { kind: "file", path: "src/index.ts", ranges: [{ startLine: 1, endLine: 1 }] };
   for (const type of ["context.pin", "context.unpin", "context.exclude", "context.refresh"] as const) {
     const message = { ...commandEnvelope, type, payload: { sessionId: uuid, expectedRevision: "context-r1", target } };
     expect(COMMAND_TYPES).toContain(type);
