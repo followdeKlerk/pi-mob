@@ -446,3 +446,64 @@ live event shape as authority.
 **Review when:** The protocol gains an explicit, provider-safe canonical final
 answer replacement field; Pi guarantees globally scoped content-block IDs; or
 the product deliberately changes its private-reasoning policy.
+
+## D-036 — F0 recipe, plan, and targeted-steering contract
+
+**Decision:** Accept the following F0 contract.
+
+- `LIMITS.maxPlanSteps` is **64**. A `plan.snapshot.steps` array has
+  `maxItems: 64`; 65 is invalid. This keeps a phone-sized authoritative plan
+  bounded without truncating or inventing steps.
+- `RecipeActivity.status` is exactly `pending`, `running`, `completed`,
+  `failed`, or `cancelled`. These are recipe activity states, not R2 plan-step
+  states (`pending`, `running`, `completed`, `blocked`, `skipped`).
+- `RecipeActivity` is a closed discriminated union of `thinking` and `tool`
+  activities, with shared opaque activity/turn IDs, ordinal, status, and
+  timing. Only the `thinking` arm may contain an optional
+  `ProviderSummary`; the `tool` arm must reject it. `ProviderSummary` means
+  a provider-supplied, displayable summary only: raw thinking, reasoning
+  deltas/steps, hidden metadata, and synthesized summaries are never valid in
+  either arm. Its nested shape remains closed. Absence of a provider summary
+  is unavailable/empty state, not permission to derive one.
+- `prompt.submit.planTarget` is an optional, closed object with required
+  `{ planId, stepId, revision }` (opaque IDs and `RevisionToken`). Omission
+  leaves every existing `prompt.submit` payload and its three delivery modes
+  valid, including legacy un-targeted `steer`. When present, the bridge must
+  accept it **only** with `deliveryMode: "steer"`; it must validate the
+  authoritative plan/step/revision before Pi dispatch and reject a stale or
+  unknown target with `stale_plan_target` (a non-steer target is
+  `invalid_state`). The target is part of the durable semantic payload, so an
+  idempotency retry cannot retarget a command.
+
+**Why:** R1 needs a finite lifecycle and a hard privacy boundary; R2 needs a
+small, replayable plan and revision-safe steering. Optional additive targeting
+preserves the established prompt contract while preventing an immediate or
+queued prompt from being misrepresented as a targeted plan action. This is
+consistent with `docs/REMAINING_UX_PLAN.md` §§2, R1, and R2, and with D-035's
+provider-summary-only reasoning policy.
+
+**Rejected alternatives:** A 65-step acceptance boundary; sharing plan
+`blocked`/`skipped` states with recipes; a generic/open activity payload or
+provider summary on tool activity; accepting a target for immediate/follow-up
+submission; and requiring a target for legacy steering.
+
+**Affected work and repair consequences:**
+
+- `feat/f0-protocol` must re-plan its uncommitted F0 slice around these exact
+  constants, discriminated/closed schemas, event fixtures, invalid 65-step and
+  privacy fixtures, generated artifacts, and schema/fixture gates. Its current
+  committed shared primitives are not approval of an open recipe payload.
+- `feat/recipe-durability` (R1) must persist/reduce only the union above and
+  never normalize raw thinking into `ProviderSummary`; test every terminal
+  recipe status and live/history deduplication.
+- `feat/structured-plans` (R2) must use the distinct plan-step state set and
+  the 64-step bound. Its targeted-steer flow must always send all three target
+  fields and handle `stale_plan_target` visibly.
+- The bridge central-integration owner must perform the steer-only and
+  authoritative revision checks before dispatch, preserving existing untargeted
+  prompt behavior. R10 remains bound by D-035 and must not index anything that
+  D-036 excludes.
+
+**Review when:** A demonstrated mobile/replay limit requires a different plan
+bound, Pi supplies an explicit additional recipe activity family, or a new
+provider-safe reasoning-summary contract is versioned with fixtures.
