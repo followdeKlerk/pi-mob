@@ -19,6 +19,23 @@ export const LIMITS = {
   maxSessionPageSize: 100,
   maxBackgroundSessionSubscriptions: 5,
   maxPlanSteps: 64,
+  // F0 — bounded opaque identifiers and bounded payload fields for recipe (R1)
+  // and plan (R2) flows. All values are UTF-16 code units (see the
+  // `maxLength` UTF-16 note in the FIELD_GUIDE). The shared primitives
+  // (activityId / turnId / planId / stepId / title / toolName) stay at 128 to
+  // keep one canonical bounded identifier surface; recipe arguments and
+  // output, and the optional plan blocker description, are conservative
+  // 240-code-unit defaults that comfortably fit mobile cards and never
+  // approach the 1 MiB JSON ceiling.
+  maxRecipeActivityIdLength: 128,
+  maxTurnIdLength: 128,
+  maxPlanIdLength: 128,
+  maxStepIdLength: 128,
+  maxRecipeTitleLength: 128,
+  maxToolNameLength: 128,
+  maxRecipeArgumentsLength: 240,
+  maxRecipeOutputLength: 240,
+  maxPlanBlockerLength: 240,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -137,6 +154,10 @@ export const CAPABILITY_STATES = ["available", "degraded", "unavailable", "stale
 // `source`/`revision`/`lastRefreshedAt` are optional context for every variant
 // and pinpoint which surface (host-bridge, session-bridge, pi runtime)
 // produced the status and against which revision the answer was computed.
+// EVERY variant uses `additionalProperties: false` so a bridge call site
+// cannot smuggle `private` / `internal` / `debug` bookkeeping fields through
+// a capability status. The status surface is one of the privacy-sensitive
+// nested shapes called out in FIELD_GUIDE §"schema-authoring traps".
 export const CapabilityStatusSchema = Type.Union([
   Type.Object({
     state: Type.Literal("available"),
@@ -145,7 +166,7 @@ export const CapabilityStatusSchema = Type.Union([
     source: Type.Optional(Type.String({ minLength: 1 })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
-  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#available" }),
+  }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#available" }),
   Type.Object({
     state: Type.Literal("degraded"),
     reason: Type.String({ minLength: 1 }),
@@ -153,7 +174,7 @@ export const CapabilityStatusSchema = Type.Union([
     source: Type.Optional(Type.String({ minLength: 1 })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
-  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#degraded" }),
+  }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#degraded" }),
   Type.Object({
     state: Type.Literal("unavailable"),
     reason: Type.String({ minLength: 1 }),
@@ -161,7 +182,7 @@ export const CapabilityStatusSchema = Type.Union([
     source: Type.Optional(Type.String({ minLength: 1 })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
-  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#unavailable" }),
+  }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#unavailable" }),
   Type.Object({
     state: Type.Literal("stale"),
     reason: Type.String({ minLength: 1 }),
@@ -169,7 +190,7 @@ export const CapabilityStatusSchema = Type.Union([
     source: Type.Optional(Type.String({ minLength: 1 })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
-  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#stale" }),
+  }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#stale" }),
 ], { $id: "pi-mob/protocol/capability-status" });
 export const BoundsSchema = Type.Object({
   maxItems: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -250,44 +271,127 @@ export const ProviderSummarySchema = Type.Object({
   truncation: Type.Optional(TruncationSchema),
 }, { additionalProperties: false, $id: "pi-mob/protocol/provider-summary" });
 
+// F0 — PlanTargetSchema is the closed, optional `planTarget` payload on
+// `prompt.submit`. Every field is REQUIRED and bounded as opaque text:
+//   - `planId` / `stepId`: 1..128 code units, opaque (the bridge resolves them
+//     against the authoritative plan snapshot and rejects stale or unknown
+//     targets with `stale_plan_target` BEFORE Pi dispatch).
+//   - `revision`: REQUIRED `RevisionTokenSchema` (1..128 code units, opaque,
+//     never a pure-decimal cursor). The revision is mandatory so an
+//     idempotency retry cannot retarget a command against a newer or older
+//     plan revision than the one the operator saw.
+// The schema is `additionalProperties: false` so the bridge cannot smuggle
+// `private` / `internal` / `debug` keys alongside the closed target shape.
+// D-036 note: steer-only is a BRIDGE semantic, not a schema semantic, so the
+// schema does not constrain `deliveryMode` here — `target` is closed shape
+// only, and a missing `planTarget` keeps every legacy `prompt.submit` valid.
 export const PlanTargetSchema = Type.Object({
-  planId: Type.String({ minLength: 1 }),
-  stepId: Type.String({ minLength: 1 }),
-  revision: Type.Optional(RevisionTokenSchema),
+  planId: Type.String({ minLength: 1, maxLength: LIMITS.maxPlanIdLength }),
+  stepId: Type.String({ minLength: 1, maxLength: LIMITS.maxStepIdLength }),
+  revision: RevisionTokenSchema,
 }, { additionalProperties: false, $id: "pi-mob/protocol/plan-target" });
 
+// F0 — RecipeActivitySchema is a CLOSED discriminated union of `thinking`
+// and `tool` arms. EVERY recipe activity carries the SAME shared identity
+// envelope so a mobile cache can replay / dedupe / correlate without
+// inspecting the discriminator:
+//   - `sessionId` (UUID): the owning session.
+//   - `turnId` (opaque, maxLength 128): the owning turn; never a cursor.
+//   - `activityId` (opaque, maxLength 128): the recipe activity's own id.
+//   - `ordinal` (non-negative integer): the turn-local activity order.
+//   - `status` (literal pending | running | completed | failed | cancelled):
+//     the recipe-activity lifecycle; distinct from the R2 plan-step states.
+//   - `timing` (TimingSchema): required timing envelope.
+//
+// The `thinking` arm permits ONLY:
+//   - `title` (1..128 code units), required — bounded display label.
+//   - `providerSummary` (ProviderSummarySchema), optional — provider-supplied,
+//     displayable summary only; never raw thinking, deltas, steps, hidden
+//     metadata, or synthesized summaries.
+//   - `truncation` (TruncationSchema), optional — truncation telemetry.
+//
+// The `tool` arm permits ONLY:
+//   - `title` (1..128 code units), required — bounded display label.
+//   - `toolName` (1..128 code units), required — bounded tool identifier.
+//   - `arguments` (1..240 code units), required — bounded tool arguments.
+//   - `output` (1..240 code units), required — bounded tool output.
+//   - `errorInfo` (ErrorInfoSchema), optional — typed tool error.
+//   - `truncation` (TruncationSchema), optional — truncation telemetry.
+// The `tool` arm MUST REJECT `providerSummary`: it is a thinking-only field.
+//
+// Both arms are `additionalProperties: false` so the bridge cannot smuggle
+// private fields (raw thinking, internal metadata, debug context) alongside
+// the declared activity shape.
 export const RecipeActivitySchema = Type.Union([
   Type.Object({
     kind: Type.Literal("thinking"),
+    sessionId: Uuid,
+    turnId: Type.String({ minLength: 1, maxLength: LIMITS.maxTurnIdLength }),
+    activityId: Type.String({ minLength: 1, maxLength: LIMITS.maxRecipeActivityIdLength }),
+    ordinal: Type.Integer({ minimum: 0 }),
     status: Type.Union(["pending", "running", "completed", "failed", "cancelled"].map((value) => Type.Literal(value))),
-    message: Type.String({ minLength: 1 }),
+    timing: TimingSchema,
+    title: Type.String({ minLength: 1, maxLength: LIMITS.maxRecipeTitleLength }),
     providerSummary: Type.Optional(ProviderSummarySchema),
-  }, { additionalProperties: false }),
+    truncation: Type.Optional(TruncationSchema),
+  }, { additionalProperties: false, $id: "pi-mob/protocol/recipe-activity#thinking" }),
   Type.Object({
     kind: Type.Literal("tool"),
+    sessionId: Uuid,
+    turnId: Type.String({ minLength: 1, maxLength: LIMITS.maxTurnIdLength }),
+    activityId: Type.String({ minLength: 1, maxLength: LIMITS.maxRecipeActivityIdLength }),
+    ordinal: Type.Integer({ minimum: 0 }),
     status: Type.Union(["pending", "running", "completed", "failed", "cancelled"].map((value) => Type.Literal(value))),
-    message: Type.String({ minLength: 1 }),
-    toolName: Type.String({ minLength: 1 }),
-  }, { additionalProperties: false }),
+    timing: TimingSchema,
+    title: Type.String({ minLength: 1, maxLength: LIMITS.maxRecipeTitleLength }),
+    toolName: Type.String({ minLength: 1, maxLength: LIMITS.maxToolNameLength }),
+    arguments: Type.String({ minLength: 1, maxLength: LIMITS.maxRecipeArgumentsLength }),
+    output: Type.String({ minLength: 1, maxLength: LIMITS.maxRecipeOutputLength }),
+    errorInfo: Type.Optional(ErrorInfoSchema),
+    truncation: Type.Optional(TruncationSchema),
+  }, { additionalProperties: false, $id: "pi-mob/protocol/recipe-activity#tool" }),
 ], { $id: "pi-mob/protocol/recipe-activity" });
 
+// F0 — PlanStepSchema is the closed, bounded shape for one R2 plan step.
+// Identifiers and titles are bounded opaque text; the `blocker` and `timing`
+// fields are optional so an idle step (status `pending` / `skipped`) can
+// publish without inventing blocker or timing metadata. The plan-step state
+// set (`pending | running | completed | blocked | skipped`) is distinct from
+// the recipe-activity state set.
 export const PlanStepSchema = Type.Object({
-  stepId: Type.String({ minLength: 1 }),
-  title: Type.String({ minLength: 1 }),
+  stepId: Type.String({ minLength: 1, maxLength: LIMITS.maxStepIdLength }),
+  title: Type.String({ minLength: 1, maxLength: LIMITS.maxRecipeTitleLength }),
   status: Type.Union(["pending", "running", "completed", "blocked", "skipped"].map((value) => Type.Literal(value))),
+  blocker: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxPlanBlockerLength })),
+  timing: Type.Optional(TimingSchema),
 }, { additionalProperties: false, $id: "pi-mob/protocol/plan-step" });
 
+// F0 — PlanSnapshotSchema is the closed R2 authoritative-plan event payload.
+// `planId` and the required `revision` pinpoint the snapshot; `steps` is a
+// closed array bounded by `LIMITS.maxPlanSteps` (64). Anything bigger is
+// rejected by the schema; the bridge never silently truncates.
 export const PlanSnapshotSchema = Type.Object({
-  planId: Type.String({ minLength: 1 }),
+  planId: Type.String({ minLength: 1, maxLength: LIMITS.maxPlanIdLength }),
   revision: RevisionTokenSchema,
   steps: Type.Array(PlanStepSchema, { maxItems: LIMITS.maxPlanSteps }),
 }, { additionalProperties: false, $id: "pi-mob/protocol/plan-snapshot" });
 
+// F0 — capability literal for the recipe (R1) unavailable surface.
+export const RECIPE_CAPABILITY = "recipes.v1" as const;
+// F0 — capability literal for the plan (R2) unavailable surface.
+export const PLAN_CAPABILITY = "plans.v1" as const;
+
+// F0 — RecipeUnavailableSchema / PlanUnavailableSchema carry the capability
+// identifier of the unavailable surface plus a closed `CapabilityStatus`.
+// `capability` is REQUIRED so a mobile client can attribute the unavailable
+// state to a specific surface without parsing the envelope type.
 export const RecipeUnavailableSchema = Type.Object({
+  capability: Type.Literal(RECIPE_CAPABILITY),
   status: CapabilityStatusSchema,
 }, { additionalProperties: false, $id: "pi-mob/protocol/recipe-unavailable" });
 
 export const PlanUnavailableSchema = Type.Object({
+  capability: Type.Literal(PLAN_CAPABILITY),
   status: CapabilityStatusSchema,
 }, { additionalProperties: false, $id: "pi-mob/protocol/plan-unavailable" });
 
@@ -332,7 +436,7 @@ const CommandPayloads = {
   "session.delete": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.restore": Type.Object({ sessionId: SessionId }, { additionalProperties: true }),
   "session.purge": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.fork": Type.Object({ sessionId: SessionId, entryId: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "session.clone": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.export": Type.Object({ sessionId: SessionId, format: Type.Literal("html") }, { additionalProperties: true }),
-  "prompt.submit": Type.Object({ sessionId: SessionId, deliveryMode: Type.Union([Type.Literal("immediate"), Type.Literal("steer"), Type.Literal("follow_up")]), message: Type.String(), attachmentIds: Type.Array(Uuid, { maxItems: LIMITS.maxAttachmentsPerPrompt }), target: Type.Optional(PlanTargetSchema) }, { additionalProperties: true }),
+  "prompt.submit": Type.Object({ sessionId: SessionId, deliveryMode: Type.Union([Type.Literal("immediate"), Type.Literal("steer"), Type.Literal("follow_up")]), message: Type.String(), attachmentIds: Type.Array(Uuid, { maxItems: LIMITS.maxAttachmentsPerPrompt }), planTarget: Type.Optional(PlanTargetSchema) }, { additionalProperties: true }),
   "turn.abort": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "queue.remove": Type.Object({ sessionId: SessionId, queueItemId: Uuid }, { additionalProperties: true }),
   "queue.clear": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "model.set": Type.Object({ sessionId: SessionId, modelId: Type.String({ minLength: 1 }), provider: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: true }),
   "thinking.set": Type.Object({ sessionId: SessionId, level: Type.String({ minLength: 1 }) }, { additionalProperties: true }), "steering_mode.set": Type.Object({ sessionId: SessionId, enabled: Type.Boolean() }, { additionalProperties: true }),
