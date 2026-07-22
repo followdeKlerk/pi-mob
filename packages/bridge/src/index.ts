@@ -63,4 +63,5 @@ export * from "./core/server";
 export * from "./core/workspace-policy";
 export * from "./core/workspace-files";
 export * from "./notifications";
+export * from "./git/summary-service";
 export * from "./ops";
