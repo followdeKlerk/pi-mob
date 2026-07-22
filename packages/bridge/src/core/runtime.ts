@@ -318,7 +318,23 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       if ("status" in summary && summary.capability === "git-ci.v1") {
         // GitUnavailable: the schema forbids embedding this in
         // git.summary.result. The bridge surfaces truthful unavailability
-        // through the host-stream `git.unavailable` event, not the response.
+        // through the host-stream `git.unavailable` event so subscribers see
+        // the closed { workspaceId, capability, status } envelope, then
+        // rejects the synchronous response with `unsupported_capability` so
+        // the mobile coordinator can correlate the unavailable state.
+        this.options.store.appendEvent(
+          `host:${this.identity().hostId}`,
+          "git.unavailable",
+          {
+            workspaceId: summary.workspaceId,
+            capability: summary.capability,
+            status: {
+              state: summary.status.state,
+              reason: summary.status.reason,
+              remediation: summary.status.remediation,
+            },
+          },
+        );
         throw new RuntimeProtocolError("unsupported_capability", summary.status.reason);
       }
       return { ...summary };

@@ -1,3 +1,4 @@
+import { validateFixture } from "@pi-mob/protocol-schema";
 import { describe, expect, test } from "bun:test";
 import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
@@ -268,5 +269,106 @@ describe("R6 runtime integration", () => {
       targetRequestId: "77777777-7777-4777-8777-777777777777",
     }) as { cancelled: boolean };
     expect(response.cancelled).toBe(false);
+  });
+});
+
+describe("R6 runtime integration — git.unavailable host-stream event", () => {
+  test("git.unavailable event lands on the host stream when the service reports GitUnavailable", async () => {
+    const git = new GitSummaryService({ runner: gitRunner({ "rev-parse --show-toplevel": { code: 0, stdout: "/repo\n" } }) });
+    const runtime = runtimeFor({ git, resolveGitCwd: () => "/repo" });
+    const hostStream = `host:${runtime.identity().hostId}`;
+
+    const captured: Array<{ type: string; payload: Record<string, unknown>; streamId: string }> = [];
+    const detach = runtime.options.store.onEvent((event) => {
+      if (event.type === "git.unavailable") captured.push({ type: event.type, payload: event.payload, streamId: event.streamId });
+    });
+
+    await expect(
+      runtime.control(connection, "git.summary.request", {
+        workspaceId,
+        requestId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).rejects.toThrow(/origin remote/i);
+
+    detach();
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]?.streamId).toBe(hostStream);
+    expect(captured[0]?.payload).toEqual({
+      workspaceId,
+      capability: "git-ci.v1",
+      status: {
+        state: "unavailable",
+        reason: "Repository has no origin remote",
+        remediation: "Configure an HTTPS-capable origin remote and refresh.",
+      },
+    });
+
+    // The emitted event must validate against the closed git.unavailable
+    // protocol envelope; a future schema change that breaks the bridge
+    // emit shape should fail this test loudly.
+    const event = captured[0];
+    if (!event) throw new Error("captured git.unavailable event is missing");
+    expect(
+      validateFixture({
+        name: "r5-r6-runtime-git-unavailable",
+        kind: "event",
+        valid: true,
+        message: {
+          protocol: { major: 1, minor: 0 },
+          messageId: "11111111-1111-4111-8111-111111111111",
+          sentAt: "2026-01-02T00:00:00.000Z",
+          eventId: "33333333-3333-4333-8333-333333333333",
+          streamId: hostStream,
+          cursor: "1",
+          type: "git.unavailable",
+          payload: event.payload,
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test("git.unavailable event is NOT emitted on the success path", async () => {
+    const git = new GitSummaryService({ runner: gitRunner(baseGitOutputs()) });
+    const runtime = runtimeFor({ git, resolveGitCwd: () => "/repo" });
+
+    const captured: string[] = [];
+    const detach = runtime.options.store.onEvent((event) => {
+      if (event.type === "git.unavailable") captured.push(event.payload.workspaceId as string);
+    });
+
+    const response = await runtime.control(connection, "git.summary.request", {
+      workspaceId,
+      requestId: "55555555-5555-4555-8555-555555555555",
+    });
+
+    detach();
+
+    expect((response as { repository: string }).repository).toBe("acme/repo");
+    expect(captured).toEqual([]);
+  });
+
+  test("git.unavailable event is NOT emitted when cwd is unknown (strict validation, not service truth)", async () => {
+    const git = new GitSummaryService({ runner: gitRunner(baseGitOutputs()) });
+    const runtime = runtimeFor({ git, resolveGitCwd: () => undefined });
+
+    const captured: string[] = [];
+    const detach = runtime.options.store.onEvent((event) => {
+      if (event.type === "git.unavailable") captured.push(event.payload.workspaceId as string);
+    });
+
+    await expect(
+      runtime.control(connection, "git.summary.request", {
+        workspaceId,
+        requestId: "55555555-5555-4555-8555-555555555555",
+      }),
+    ).rejects.toThrow(/cwd/i);
+
+    detach();
+
+    // cwd-unknown is a host-side validation failure, not a truthful Git
+    // unavailability. The bridge rejects the request without faking a
+    // git.unavailable event.
+    expect(captured).toEqual([]);
   });
 });
