@@ -10,16 +10,16 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 
 - Repository: `/Users/nathandekleerk/github/pi-mob`
 - Branch: `main`
-- HEAD: `WIP: emit git.unavailable host-stream event on runtime GitUnavailable`
-- Tracked working tree: clean at this handoff; this file is intentionally
-  untracked.
+- HEAD: `c2be64d docs: update active integration handoff`
+- Working tree: NOT clean at handoff — mobile R6 coordinator wiring is staged
+  for commit; this file is intentionally untracked.
 
 ## Integrated in this continuation
 
 ### `9604868 feat(bridge): route bounded workspace file controls`
 
 - `DurableBridgeRuntime` optionally accepts `WorkspaceFileService`.
-- Bounded tree/search/metadata/read controls route only through that service.
+- Bounded tree/search/metadata/read/read controls route only through that service.
 - `files.v1` is advertised only when the service is installed.
 - Prompt file references are revalidated immediately before command admission.
 - `attachmentIds` and `fileRefs` share the four-item budget.
@@ -63,7 +63,7 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 - Added focused runtime coverage in
   `packages/bridge/test/r5-r6-runtime-integration.test.ts`.
 
-### WIP: emit git.unavailable host-stream event on runtime GitUnavailable
+### `498ff8f feat(bridge): emit git.unavailable host-stream event on runtime GitUnavailable`
 
 - When `git.summary.request` produces a `GitUnavailable` from
   `GitSummaryService.summarize`, the runtime now appends a closed
@@ -84,23 +84,53 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
   - `cwd unknown` does NOT emit `git.unavailable`
 - Frozen schemas and D-039 response shape unchanged.
 
+### WIP (mobile R6 coordinator wiring — staged for commit)
+
+- `ConnectionCoordinator` now imports `GitState` and `reduceGit` and tracks a
+  `Map<String, _GitSummaryRequest>` keyed by requestId for in-flight
+  `git.summary.request` correlation (mirrors D-039 process snapshot pattern).
+- New public API: `GitState get git`, `Future<void> requestGitSummary(id)`,
+  `Future<void> cancelGitSummary(id)`.
+- Response router handles `git.summary.result`; event router handles the
+  host-stream `git.summary` and `git.unavailable` events.
+- **Critical journal-dispatch fix**: the early-return path in `_receive()`
+  for messages with `eventId`/`streamId`/`cursor` (host-stream events)
+  applies the Git projection BEFORE the cursor advance notifies subscribers.
+  Without this, the UI sees an out-of-order summary then unavailable.
+- `reduceGit` for `git.unavailable` now sets `summary: null` so a stale
+  summary cannot linger after the host signals truth.
+- Lifecycle clears (`_gitSummaryRequests.clear()`, `refreshing: false`)
+  added to reconnect, dispose, and socket-end paths alongside the existing
+  process snapshot clears.
+- Five new coordinator tests:
+  - request correlates `git.summary.result` to the workspace
+  - `git.unavailable` host-stream event marks the workspace unavailable
+    (summary cleared, message/workspaceId preserved)
+  - `cancelGitSummary` sends `git.summary.cancel` with the tracked requestId
+  - `cancelGitSummary` is a no-op when no in-flight request exists
+  - stale `git.summary.result` from a prior connection epoch is dropped
+
 ## Verification completed
 
 - `bun run typecheck`
-- Focused bridge R5/R6/R3/process/git tests (42 passing across the four
-  files), and full bridge suite (735 passing, 0 failing).
-- `git diff --check` clean on the runtime diff.
+- Focused bridge R5/R6/R3/process/git tests, and full bridge suite (735
+  passing, 0 failing).
+- `flutter analyze` clean.
+- `flutter test test/connection_coordinator_test.dart` 36 passing = 31 prior
+  + 5 R6.
+- Full `flutter test` for the mobile app: 466 passing, 0 failing.
+- `git diff --check` clean on the staged diff.
 
 ## Remaining priority work
 
-1. Complete mobile R1/R3/R5/R6 persistence/projection and app-shell
-   reachability. File and command insertion must update the draft only, never
-   submit it.
+1. Complete mobile R1/R3 persistence/projection and app-shell reachability.
+   File and command insertion must update the draft only, never submit it.
 2. Implement R2/R4, audit/complete R7–R12, repair global search before any
    remerge, and perform full test/APK/physical-Android/Tailscale validation.
-3. Optionally wire mobile `git.summary` / `git.unavailable` subscribers on top
-   of the new host-stream emission so the unreachable workspace UI updates
-   without a per-workspace refresh tap.
+3. R6 is now wired end-to-end on mobile; the next iteration should expose
+   `coordinator.git` to a `GitSummaryCard` widget that subscribes to the
+   coordinator so the unreachable workspace UI updates without a per-workspace
+   refresh tap.
 
 ## Cautions
 
