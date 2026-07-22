@@ -25,6 +25,7 @@ This document defines durable entities, identifiers, relationships, retention, m
 | `workspaceId` | bridge | host | No | No |
 | `sessionId` | bridge | host | No | No |
 | `turnId` | bridge | session | No | No |
+| `processId` | authoritative process registrar | session | No | No |
 | `recipeActivityId` | bridge/normalizer | turn + recipe family | No | No |
 | `planId` | authoritative plan producer | session/turn plan | No | No |
 | `planStepId` | authoritative plan producer | plan | No | No |
@@ -184,6 +185,63 @@ stderr_ring_metadata_json nullable
 ```
 
 PIDs are diagnostics only and are never assumed valid after bridge restart without OS verification.
+
+### 3.6a `registered_processes` and output
+
+These conceptual rows define the optional R5 persistence contract; they do not
+claim an implemented bridge registrar or mobile surface. They are distinct from
+`session_processes`, which describes the Pi RPC subprocess itself.
+
+```text
+registered_processes:
+  session_id FK
+  process_id
+  revision
+  source_registration_id
+  tool_call_id nullable
+  command_bounded
+  working_directory_display
+  status                 running | completed | failed | cancelled | stopped
+  pid_observed nullable
+  pid_verified_at nullable
+  started_at
+  finished_at nullable
+  duration_ms nullable
+  exit_code nullable
+  signal nullable
+  listening_ports_json nullable
+  capability_status_json
+  actions_json
+  source_stream_cursor
+  PRIMARY KEY (session_id, process_id)
+
+registered_process_output:
+  session_id FK
+  process_id FK
+  stream                 stdout | stderr
+  output_revision
+  retained_bytes
+  total_bytes
+  bounded_utf8_text nullable
+  sha256 nullable
+  truncated
+  availability_status_json
+  PRIMARY KEY (session_id, process_id, stream)
+```
+
+Only an explicit authoritative adapter/extension registration creates a row.
+Bash history, process-table scans, parsed output, and client-provided PIDs never
+do. `processId` is permanent for one registered instance; restart/rerun creates
+a new process ID and preserves the old terminal row. PID is observation-only,
+never an identifier or action target. Snapshot replacement and delta application
+are transactional by revision; output revisions prevent mixed pages. Separate
+stdout/stderr are stored only when the source guarantees separation.
+
+Stop/restart/rerun commands use the normal `commands` row. Their semantic hash
+includes command type, session ID, process ID, and expected process revision.
+Lease IDs remain audit metadata, not semantic identity. Accepted-but-unfinished
+actions survive restart; a dispatched action whose external effect cannot be
+proved becomes terminal `indeterminate` and is never automatically retried.
 
 ### 3.7 `turns`
 
@@ -601,6 +659,66 @@ Drafts never auto-submit after reconnect.
 
 Theme, reduced animation preference, transcript expansion preference, notification preview mode, and diagnostic options.
 
+### Reconstructible registered-process cache (R5)
+
+These permitted cache rows do not claim mobile or bridge implementation.
+
+```text
+process_snapshots:
+  host_id
+  session_id
+  revision
+  capability_status_json
+  last_refreshed_at
+  source_stream_cursor nullable
+  PRIMARY KEY (host_id, session_id)
+
+process_records:
+  host_id
+  session_id
+  process_id
+  process_revision
+  command_bounded
+  working_directory_display
+  status
+  pid_observed nullable
+  timing_json
+  termination_json nullable
+  listening_ports_json nullable
+  actions_json
+  capability_status_json
+  tool_call_id nullable
+  PRIMARY KEY (host_id, session_id, process_id)
+
+process_output_cache:
+  host_id
+  session_id
+  process_id
+  stream
+  output_revision
+  retained_bytes
+  total_bytes
+  bounded_utf8_text nullable
+  sha256 nullable
+  truncated
+  availability_status_json
+  PRIMARY KEY (host_id, session_id, process_id, stream)
+```
+
+The session stream owns process snapshots/deltas and their cursor. Cache apply is
+last-writer-by-cursor with an exact base revision; duplicate events are ignored,
+and a gap/base mismatch discards that session's process projection and requests
+a full snapshot. Historical tool/recipe rows are not part of this projection and
+are never deleted or rewritten during repair. Capability withdrawal stores
+explicit unavailable status rather than an empty snapshot. Host-generation
+change discards all process cache rows.
+
+Output text is reconstructible and participates in the global LRU; terminal
+metadata may remain while text is evicted. Mobile never persists an arbitrary
+PID target, action preview, or inferred port. Drafts and local composer prefill
+remain outside the process cache and cannot execute without a new durable
+command.
+
 ### Reconstructible files/context cache (R3/R4)
 
 These entities describe permitted mobile cache records; they do not claim that a particular client or bridge implementation already persists them.
@@ -709,6 +827,7 @@ A host snapshot contains:
 - session summaries,
 - workspace summary data needed by the current screen,
 - active-process capacity,
+- no R5 process list (registered-process state is session-owned),
 - controller-lease summaries for the requesting installation,
 - new host stream baseline.
 
@@ -736,7 +855,7 @@ Snapshots replace client cache for that stream atomically. The client must not m
 | Bridge event journal | 30 days, 100 MB per session stream |
 | Host stream journal | 30 days, 100 MB total |
 | Command IDs/state | Session lifetime plus deletion retention; at least latest 10,000 per session |
-| Mobile normalized cache | 30 days, 250 MB global LRU cap; viewed-file recents, metadata/pages, attachment references, and context projections are reconstructible and may be evicted earlier |
+| Mobile normalized cache | 30 days, 250 MB global LRU cap; process output/projections, viewed-file recents, metadata/pages, attachment references, and context projections are reconstructible and may be evicted earlier |
 | Unreferenced attachments | 24 hours |
 | Referenced prompt attachments | Until ingestion is complete, then cleanup; metadata retained with turn |
 | Exports | 24 hours |
