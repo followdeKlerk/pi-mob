@@ -66,6 +66,80 @@ Map<String, Object?> _recipeEvent(String type, Map<String, Object?> payload) =>
       'payload': payload,
     };
 
+Map<String, Object?> _contextSnapshotPayload({bool full = false}) {
+  final payload = <String, Object?>{
+    'sessionId': '33333333-3333-4333-8333-333333333333',
+    'revision': 'context-r1',
+    'source': 'session-bridge',
+    'stale': false,
+    'capability': <String, Object?>{'state': 'available'},
+    'lastRefreshedAt': '2026-07-15T04:20:00.000Z',
+  };
+  if (full) {
+    payload.addAll(<String, Object?>{
+      'model': <String, Object?>{
+        'provider': 'fixture-provider',
+        'modelId': 'fixture-model',
+      },
+      'thinkingLevel': 'low',
+      'instructions': 'Fixture workspace instructions.',
+      'pinnedFiles': <Object?>[
+        <String, Object?>{
+          'path': 'src/index.ts',
+          'pinnedAt': '2026-07-15T04:20:00.000Z',
+          'ranges': <Object?>[
+            <String, Object?>{
+              'startLine': 1,
+              'endLine': 3,
+              'label': 'Fixture selection',
+            },
+          ],
+          'revision': 'file-r1',
+        },
+      ],
+      'tokenUsage': <String, Object?>{
+        'inputTokens': '128',
+        'outputTokens': '32',
+        'cacheReadTokens': '16',
+        'cacheWriteTokens': '0',
+        'contextWindowTokens': '8192',
+        'usagePercent': 0.02,
+      },
+      'compacted': true,
+      'compactRevision': 'compact-r1',
+      'compactedAt': '2026-07-15T04:19:00.000Z',
+      'sources': <Object?>[
+        <String, Object?>{
+          'sourceId': 'source-fixture',
+          'sourceKind': 'file',
+          'summary': 'Pinned fixture file',
+          'stale': false,
+          'capability': <String, Object?>{'state': 'available'},
+          'revision': 'file-r1',
+          'lastRefreshedAt': '2026-07-15T04:20:00.000Z',
+        },
+      ],
+    });
+  }
+  return payload;
+}
+
+Map<String, Object?> _contextSnapshotEvent(Map<String, Object?> payload) =>
+    _recipeEvent('context.snapshot', payload);
+
+Map<String, Object?> _contextSnapshotResult(Map<String, Object?> payload) =>
+    <String, Object?>{
+      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-1111-111111111111',
+      'requestId': '22222222-2222-4222-2222-222222222222',
+      'type': 'context.snapshot.result',
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': payload,
+    };
+
+Map<String, Object?> _contextUnavailableEvent(Map<String, Object?> payload) =>
+    _recipeEvent('context.unavailable', payload);
+
 Map<String, Object?> _recipeActivity(String kind) => <String, Object?>{
   'kind': kind,
   'sessionId': '33333333-3333-4333-8333-333333333333',
@@ -326,6 +400,196 @@ void main() {
       );
     }
   });
+
+  test(
+    'context snapshots accept TS partial and full payloads in event and response',
+    () {
+      for (final full in const <bool>[false, true]) {
+        expect(
+          validateProtocolFixture(
+            'event',
+            _contextSnapshotEvent(_contextSnapshotPayload(full: full)),
+          ),
+          isA<ProtocolEvent>(),
+          reason: 'event full=$full',
+        );
+        expect(
+          validateProtocolFixture(
+            'response',
+            _contextSnapshotResult(_contextSnapshotPayload(full: full)),
+          ),
+          isA<ProtocolResponse>(),
+          reason: 'response full=$full',
+        );
+      }
+
+      final unavailable = <String, Object?>{
+        'sessionId': '33333333-3333-4333-8333-333333333333',
+        'capability': 'contexts.v1',
+        'status': <String, Object?>{
+          'state': 'unavailable',
+          'reason': 'Context inspector is unavailable.',
+          'remediation': 'Refresh the session context.',
+          'source': 'session-bridge',
+          'revision': 'context-r1',
+          'lastRefreshedAt': '2026-07-15T04:20:00.000Z',
+        },
+      };
+      expect(
+        validateProtocolFixture('event', _contextUnavailableEvent(unavailable)),
+        isA<ProtocolEvent>(),
+      );
+    },
+  );
+
+  test(
+    'context snapshot event and response reject the same R4 invalid shapes',
+    () {
+      Map<String, Object?> withToken(Object value) {
+        final payload = _contextSnapshotPayload(full: true);
+        (payload['tokenUsage']! as Map<String, Object?>)['inputTokens'] = value;
+        return payload;
+      }
+
+      Map<String, Object?> withUsagePercent(Object? value) {
+        final payload = _contextSnapshotPayload(full: true);
+        (payload['tokenUsage']! as Map<String, Object?>)['usagePercent'] =
+            value;
+        return payload;
+      }
+
+      Map<String, Object?> withRange(Object? range) {
+        final payload = _contextSnapshotPayload(full: true);
+        final pinned =
+            (payload['pinnedFiles']! as List<Object?>).first
+                as Map<String, Object?>;
+        pinned['ranges'] = <Object?>[range];
+        return payload;
+      }
+
+      Map<String, Object?> withSource(Map<String, Object?> changes) {
+        final payload = _contextSnapshotPayload(full: true);
+        final source =
+            (payload['sources']! as List<Object?>).first
+                as Map<String, Object?>;
+        source.addAll(changes);
+        return payload;
+      }
+
+      Map<String, Object?> withCapability(Map<String, Object?> capability) {
+        final payload = _contextSnapshotPayload();
+        payload['capability'] = capability;
+        return payload;
+      }
+
+      final invalid = <String, Map<String, Object?>>{
+        'private root field': _contextSnapshotPayload(full: true)
+          ..['private'] = 'hidden',
+        'missing revision': _contextSnapshotPayload()..remove('revision'),
+        'missing freshness': _contextSnapshotPayload()
+          ..remove('lastRefreshedAt'),
+        'token has 17 digits': withToken('99999999999999999'),
+        'token uses exponent': withToken('1e6'),
+        'usagePercent string': withUsagePercent('0.5'),
+        'usagePercent out of range': withUsagePercent(1.01),
+        'usagePercent explicit null': withUsagePercent(null),
+        'range is reversed': withRange(<String, Object?>{
+          'startLine': 3,
+          'endLine': 2,
+        }),
+        'range private field': withRange(<String, Object?>{
+          'startLine': 1,
+          'endLine': 2,
+          'private': true,
+        }),
+        'range explicit null': _contextSnapshotPayload(full: true)
+          ..['pinnedFiles'] = <Object?>[
+            <String, Object?>{
+              'path': 'src/index.ts',
+              'pinnedAt': '2026-07-15T04:20:00.000Z',
+              'ranges': null,
+              'revision': 'file-r1',
+            },
+          ],
+        'source id empty': withSource(<String, Object?>{'sourceId': ''}),
+        'source private field': withSource(<String, Object?>{'private': true}),
+        'source capability state invalid': withSource(<String, Object?>{
+          'capability': <String, Object?>{'state': 'unknown'},
+        }),
+        'root capability private field': withCapability(<String, Object?>{
+          'state': 'available',
+          'private': true,
+        }),
+        'root capability unavailable missing explanation': withCapability(
+          <String, Object?>{'state': 'unavailable'},
+        ),
+        'model explicit null': _contextSnapshotPayload()..['model'] = null,
+        'instructions explicit null': _contextSnapshotPayload()
+          ..['instructions'] = null,
+        'token usage explicit null': _contextSnapshotPayload()
+          ..['tokenUsage'] = null,
+        'sources explicit null': _contextSnapshotPayload()..['sources'] = null,
+      };
+
+      for (final invalidEntry in invalid.entries) {
+        expect(
+          () => validateProtocolFixture(
+            'event',
+            _contextSnapshotEvent(invalidEntry.value),
+          ),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: 'event ${invalidEntry.key}',
+        );
+        expect(
+          () => validateProtocolFixture(
+            'response',
+            _contextSnapshotResult(invalidEntry.value),
+          ),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: 'response ${invalidEntry.key}',
+        );
+      }
+    },
+  );
+
+  test(
+    'context unavailable rejects private, missing, and invalid capability status fields',
+    () {
+      Map<String, Object?> unavailable() => <String, Object?>{
+        'sessionId': '33333333-3333-4333-8333-333333333333',
+        'capability': 'contexts.v1',
+        'status': <String, Object?>{
+          'state': 'unavailable',
+          'reason': 'Context inspector is unavailable.',
+          'remediation': 'Refresh the session context.',
+        },
+      };
+
+      final invalid = <String, Map<String, Object?>>{
+        'private root field': unavailable()..['private'] = true,
+        'missing status': unavailable()..remove('status'),
+        'wrong capability': unavailable()..['capability'] = 'files.v1',
+        'status private field': unavailable()
+          ..['status'] = <String, Object?>{
+            'state': 'unavailable',
+            'reason': 'unavailable',
+            'remediation': 'refresh',
+            'private': true,
+          },
+        'status explicit null': unavailable()..['status'] = null,
+      };
+      for (final invalidEntry in invalid.entries) {
+        expect(
+          () => validateProtocolFixture(
+            'event',
+            _contextUnavailableEvent(invalidEntry.value),
+          ),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: invalidEntry.key,
+        );
+      }
+    },
+  );
 
   test('shared corpus fixture labels match Dart validation', () async {
     final manifestRaw = await TestAssetLoader.loadString(

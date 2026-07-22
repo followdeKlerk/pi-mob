@@ -1129,34 +1129,7 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
           );
         }
         if (fileRef.containsKey('ranges')) {
-          final ranges = _list(fileRef, 'ranges');
-          if (ranges.length > 16) {
-            throw ProtocolValidationException(
-              'payload.fileRefs.ranges',
-              '<= 16 items',
-              ranges.length,
-            );
-          }
-          for (final rangeValue in ranges) {
-            final range = _objectFrom(rangeValue, 'payload.fileRefs.ranges');
-            _closedObject(range, 'payload.fileRefs.ranges', const {
-              'startLine',
-              'endLine',
-              'label',
-            });
-            final start = _positiveInteger(range, 'startLine');
-            final end = _positiveInteger(range, 'endLine');
-            if (end < start) {
-              throw ProtocolValidationException(
-                'payload.fileRefs.ranges',
-                'endLine >= startLine',
-                range,
-              );
-            }
-            if (range.containsKey('label')) {
-              _boundedRequiredString(range, 'label', 64);
-            }
-          }
+          _validateLineRanges(fileRef['ranges'], 'payload.fileRefs.ranges');
         }
         final digest = _string(fileRef, 'digest');
         if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
@@ -1250,34 +1223,7 @@ void _validateContextMutationPayload(Map<String, Object?> payload) {
         );
       }
       if (target.containsKey('ranges')) {
-        final ranges = _list(target, 'ranges');
-        if (ranges.length > 16) {
-          throw ProtocolValidationException(
-            'payload.target.ranges',
-            '<= 16 items',
-            ranges.length,
-          );
-        }
-        for (final item in ranges) {
-          final range = _objectFrom(item, 'payload.target.ranges');
-          _closedObject(range, 'payload.target.ranges', const {
-            'startLine',
-            'endLine',
-            'label',
-          });
-          final start = _positiveInteger(range, 'startLine');
-          final end = _positiveInteger(range, 'endLine');
-          if (end < start) {
-            throw ProtocolValidationException(
-              'payload.target.ranges',
-              'endLine >= startLine',
-              range,
-            );
-          }
-          if (range.containsKey('label')) {
-            _boundedRequiredString(range, 'label', 64);
-          }
-        }
+        _validateLineRanges(target['ranges'], 'payload.target.ranges');
       }
       if (target.containsKey('revision')) {
         _revisionTokenString(target, 'revision');
@@ -1303,6 +1249,232 @@ int _positiveInteger(Map<String, Object?> object, String key) {
     throw ProtocolValidationException(key, 'positive integer', value);
   }
   return value;
+}
+
+void _validateLineRanges(Object? raw, String path) {
+  if (raw is! List) {
+    throw ProtocolValidationException(path, 'array', raw);
+  }
+  if (raw.length > 16) {
+    throw ProtocolValidationException(path, '<= 16 items', raw.length);
+  }
+  for (final item in raw) {
+    final range = _objectFrom(item, path);
+    _closedObject(range, path, const {'startLine', 'endLine', 'label'});
+    final start = _positiveInteger(range, 'startLine');
+    final end = _positiveInteger(range, 'endLine');
+    if (end < start) {
+      throw ProtocolValidationException(path, 'endLine >= startLine', range);
+    }
+    if (range.containsKey('label')) {
+      _boundedRequiredString(range, 'label', 64);
+    }
+  }
+}
+
+void _validateContextSnapshotPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'revision',
+    'source',
+    'stale',
+    'capability',
+    'model',
+    'thinkingLevel',
+    'instructions',
+    'pinnedFiles',
+    'tokenUsage',
+    'compacted',
+    'compactRevision',
+    'compactedAt',
+    'sources',
+    'lastRefreshedAt',
+  });
+  _uuidString(payload, 'sessionId');
+  _revisionTokenString(payload, 'revision');
+  _boundedRequiredString(payload, 'source', 128);
+  _boolean(payload, 'stale');
+  _validateCapabilityStatus(
+    _object(payload, 'capability'),
+    'payload.capability',
+  );
+
+  if (payload.containsKey('model')) {
+    final model = _object(payload, 'model');
+    _closedObject(model, 'payload.model', const {'provider', 'modelId'});
+    _boundedRequiredString(model, 'provider', 128);
+    _boundedRequiredString(model, 'modelId', 128);
+  }
+  if (payload.containsKey('thinkingLevel')) {
+    _boundedRequiredString(payload, 'thinkingLevel', 32);
+  }
+  if (payload.containsKey('instructions')) {
+    final instructions = _stringAllowEmpty(payload, 'instructions');
+    if (instructions.length > 4096) {
+      throw ProtocolValidationException(
+        'instructions',
+        '<= 4096 characters',
+        instructions,
+      );
+    }
+  }
+  if (payload.containsKey('pinnedFiles')) {
+    final pinnedFiles = _list(payload, 'pinnedFiles');
+    if (pinnedFiles.length > 64) {
+      throw ProtocolValidationException(
+        'payload.pinnedFiles',
+        '<= 64 items',
+        pinnedFiles.length,
+      );
+    }
+    for (var index = 0; index < pinnedFiles.length; index++) {
+      final pinned = _objectFrom(
+        pinnedFiles[index],
+        'payload.pinnedFiles[$index]',
+      );
+      _closedObject(pinned, 'payload.pinnedFiles[$index]', const {
+        'path',
+        'pinnedAt',
+        'ranges',
+        'revision',
+      });
+      _workspacePathString(pinned, 'path');
+      _validateUtcTimestamp(pinned, 'pinnedAt');
+      if (pinned.containsKey('ranges')) {
+        _validateLineRanges(
+          pinned['ranges'],
+          'payload.pinnedFiles[$index].ranges',
+        );
+      }
+      _revisionTokenString(pinned, 'revision');
+    }
+  }
+  if (payload.containsKey('tokenUsage')) {
+    _validateTokenUsage(_object(payload, 'tokenUsage'), 'payload.tokenUsage');
+  }
+  if (payload.containsKey('compacted')) {
+    _boolean(payload, 'compacted');
+  }
+  if (payload.containsKey('compactRevision')) {
+    _revisionTokenString(payload, 'compactRevision');
+  }
+  if (payload.containsKey('compactedAt')) {
+    _validateUtcTimestamp(payload, 'compactedAt');
+  }
+  if (payload.containsKey('sources')) {
+    final sources = _list(payload, 'sources');
+    if (sources.length > 64) {
+      throw ProtocolValidationException(
+        'payload.sources',
+        '<= 64 items',
+        sources.length,
+      );
+    }
+    for (var index = 0; index < sources.length; index++) {
+      _validateContextSource(
+        _objectFrom(sources[index], 'payload.sources[$index]'),
+        'payload.sources[$index]',
+      );
+    }
+  }
+  _validateUtcTimestamp(payload, 'lastRefreshedAt');
+}
+
+void _validateContextUnavailablePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const {
+    'sessionId',
+    'capability',
+    'status',
+  });
+  _uuidString(payload, 'sessionId');
+  final capability = _string(payload, 'capability');
+  if (capability != 'contexts.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'contexts.v1 literal',
+      capability,
+    );
+  }
+  _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
+}
+
+void _validateTokenUsage(Map<String, Object?> usage, String path) {
+  _closedObject(usage, path, const <String>{
+    'inputTokens',
+    'outputTokens',
+    'cacheReadTokens',
+    'cacheWriteTokens',
+    'contextWindowTokens',
+    'usagePercent',
+  });
+  for (final field in const <String>['inputTokens', 'outputTokens']) {
+    _validateTokenDecimal(usage, field);
+  }
+  for (final field in const <String>[
+    'cacheReadTokens',
+    'cacheWriteTokens',
+    'contextWindowTokens',
+  ]) {
+    if (usage.containsKey(field)) _validateTokenDecimal(usage, field);
+  }
+  if (usage.containsKey('usagePercent')) {
+    final value = usage['usagePercent'];
+    if (value is! num || !value.isFinite || value < 0 || value > 1) {
+      throw ProtocolValidationException(
+        '$path.usagePercent',
+        'number between 0 and 1',
+        value,
+      );
+    }
+  }
+}
+
+void _validateTokenDecimal(Map<String, Object?> usage, String key) {
+  final value = usage[key];
+  if (value is! String || !RegExp(r'^(0|[1-9][0-9]{0,15})$').hasMatch(value)) {
+    throw ProtocolValidationException(
+      key,
+      'canonical decimal string with at most 16 digits',
+      value,
+    );
+  }
+}
+
+void _validateContextSource(Map<String, Object?> source, String path) {
+  _closedObject(source, path, const <String>{
+    'sourceId',
+    'sourceKind',
+    'summary',
+    'stale',
+    'capability',
+    'revision',
+    'lastRefreshedAt',
+  });
+  _boundedRequiredString(source, 'sourceId', 128);
+  _boundedRequiredString(source, 'sourceKind', 32);
+  final summary = _stringAllowEmpty(source, 'summary');
+  if (summary.length > 240) {
+    throw ProtocolValidationException(
+      '$path.summary',
+      '<= 240 characters',
+      summary,
+    );
+  }
+  _boolean(source, 'stale');
+  _validateCapabilityStatus(_object(source, 'capability'), '$path.capability');
+  if (source.containsKey('revision')) {
+    _revisionTokenString(source, 'revision');
+  }
+  if (source.containsKey('lastRefreshedAt')) {
+    _validateUtcTimestamp(source, 'lastRefreshedAt');
+  }
+}
+
+void _validateUtcTimestamp(Map<String, Object?> object, String key) {
+  final value = _string(object, key);
+  if (!_timestamp.hasMatch(value)) {
+    throw ProtocolValidationException(key, 'UTC RFC3339 timestamp', value);
+  }
 }
 
 void _validateEventPayload(String type, Map<String, Object?> payload) {
@@ -1587,35 +1759,10 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
     _object(payload, 'file');
   }
   if (type == 'context.snapshot') {
-    _uuidString(payload, 'sessionId');
-    final tokenUsage = _object(payload, 'tokenUsage');
-    for (final field in const <String>[
-      'inputTokens',
-      'outputTokens',
-      'cacheReadTokens',
-      'cacheWriteTokens',
-      'contextWindowTokens',
-    ]) {
-      if (!tokenUsage.containsKey(field)) {
-        if (field == 'inputTokens' || field == 'outputTokens') {
-          throw ProtocolValidationException(
-            'payload.tokenUsage.$field',
-            'required canonical decimal string',
-            null,
-          );
-        }
-        continue;
-      }
-      final value = tokenUsage[field];
-      if (value is! String ||
-          !RegExp(r'^(0|[1-9][0-9]{0,15})$').hasMatch(value)) {
-        throw ProtocolValidationException(
-          'payload.tokenUsage.$field',
-          'canonical decimal string with at most 16 digits',
-          value,
-        );
-      }
-    }
+    _validateContextSnapshotPayload(payload);
+  }
+  if (type == 'context.unavailable') {
+    _validateContextUnavailablePayload(payload);
   }
 }
 
@@ -1727,6 +1874,10 @@ void _validateWorkspaceControlPayload(
 }
 
 void _validateResponsePayload(String type, Map<String, Object?> payload) {
+  if (type == 'context.snapshot.result') {
+    _validateContextSnapshotPayload(payload);
+  }
+
   if (type == 'workspace.tree.page.result') {
     _closedObject(payload, 'payload', const <String>{
       'workspaceId',
