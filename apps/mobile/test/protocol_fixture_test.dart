@@ -70,7 +70,58 @@ Map<String, Object?> _contextUnpin(Map<String, Object?> target) =>
       },
     };
 
+Map<String, Object?> _workspaceControl(String type, String path) =>
+    <String, Object?>{
+      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-1111-111111111111',
+      'requestId': '22222222-2222-4222-2222-222222222222',
+      'connectionId': '33333333-3333-4333-3333-333333333333',
+      'type': type,
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': <String, Object?>{
+        'workspaceId': '44444444-4444-4444-4444-444444444444',
+        'path': path,
+      },
+    };
+
 void main() {
+  test('workspace path validation is shared across all R3 controls', () {
+    const controls = <String>[
+      'workspace.tree.page',
+      'workspace.file.search',
+      'workspace.file.content.search',
+      'workspace.file.metadata',
+      'workspace.file.read',
+    ];
+    final invalidPaths = <String>[
+      '.',
+      '..',
+      './src',
+      '../secrets',
+      'foo/./bar',
+      'foo/../bar',
+      '/etc/passwd',
+      r'foo\bar',
+      'foo//bar',
+      'foo\u0000bar',
+      'x' * 1025,
+    ];
+
+    for (final type in controls) {
+      expect(
+        ProtocolEnvelope.fromJson(_workspaceControl(type, '.git/config')),
+        isA<ProtocolControl>(),
+      );
+      for (final path in invalidPaths) {
+        expect(
+          () => ProtocolEnvelope.fromJson(_workspaceControl(type, path)),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: '$type: ${jsonEncode(path)}',
+        );
+      }
+    }
+  });
+
   test('context target kind is required and must match its shape', () {
     for (final target in <Map<String, Object?>>[
       <String, Object?>{'path': 'src/index.ts'},

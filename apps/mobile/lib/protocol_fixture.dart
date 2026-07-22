@@ -15,6 +15,11 @@ final RegExp _optionalEventType = RegExp(
 final RegExp _streamId = RegExp(
   '^(?:host|session):${_uuidPattern.substring(1, _uuidPattern.length - 1)}\$',
 );
+const _workspacePathPattern =
+    r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(?:/|$))[^\x00-\x1F\x7F]{1,1024}$';
+final RegExp _workspacePath = RegExp(_workspacePathPattern);
+
+bool _isWorkspacePath(String path) => _workspacePath.hasMatch(path);
 
 class ProtocolValidationException implements FormatException {
   ProtocolValidationException(this.path, this.expected, this.actual);
@@ -289,6 +294,16 @@ final class ProtocolControl extends ProtocolEnvelope {
       if (size < 1 || size > 100) {
         throw ProtocolValidationException('pageSize', '1..100', size);
       }
+    }
+    if (const <String>{
+      'workspace.tree.page',
+      'workspace.file.search',
+      'workspace.file.content.search',
+    }.contains(type)) {
+      if (payload.containsKey('path')) _workspacePathString(payload, 'path');
+    }
+    if (type == 'workspace.file.metadata' || type == 'workspace.file.read') {
+      _workspacePathString(payload, 'path');
     }
     if (type == 'workspace.search') _stringAllowEmpty(payload, 'query');
     if (type == 'model.list' && payload['sessionId'] != null) {
@@ -1008,6 +1023,13 @@ void _requireEnvelope(Map<String, Object?> json) {
   _object(json, 'payload');
 }
 
+void _workspacePathString(Map<String, Object?> object, String key) {
+  final path = _string(object, key);
+  if (!_isWorkspacePath(path)) {
+    throw ProtocolValidationException(key, 'workspace-relative path', path);
+  }
+}
+
 void _validateCommandPayload(String type, Map<String, Object?> payload) {
   if (type == 'controller.acquire' ||
       type == 'controller.takeover' ||
@@ -1099,9 +1121,7 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
         });
         _uuidString(fileRef, 'workspaceId');
         final path = _string(fileRef, 'path');
-        if (!RegExp(
-          r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(/|$))[^\x00-\x1F\x7F]{1,1024}$',
-        ).hasMatch(path)) {
+        if (!_isWorkspacePath(path)) {
           throw ProtocolValidationException(
             'payload.fileRefs.path',
             'workspace-relative path',
@@ -1190,10 +1210,7 @@ void _validateContextMutationPayload(Map<String, Object?> payload) {
         'revision',
       });
       final path = _string(target, 'path');
-      final pathPattern = RegExp(
-        r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(/|$))[^\x00-\x1F\x7F]{1,1024}$',
-      );
-      if (!pathPattern.hasMatch(path))
+      if (!_isWorkspacePath(path))
         throw ProtocolValidationException(
           'payload.target.path',
           'workspace-relative path',
