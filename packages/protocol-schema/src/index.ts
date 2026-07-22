@@ -180,33 +180,37 @@ export const BoundsSchema = Type.Object({
 /**
  * Cross-field truncation telemetry for shared protocol payloads.
  *
- * UTF-8 semantics (enforced by the bridge before publish and re-checked on
- * receive):
- *   - `retainedBytes` and `totalBytes` count RAW UTF-8 CODE UNITS over the
- *     canonical NFC-normalized form of the truncated field. They are NOT
- *     Unicode scalar counts and NOT grapheme-cluster counts; callers that
- *     need either MUST derive them from the surviving payload bytes.
- *   - When `digest` is present it is the lowercase-hex SHA-256 of the FULL
- *     truncated field's UTF-8 byte stream (the un-trimmed value), not of
- *     the retained prefix.
+ * Schema-scope guarantees ONLY:
+ *   - `retainedBytes` and `totalBytes` are non-negative integers (shape +
+ *     sign enforced by the validator).
+ *   - `isTruncated` is a boolean.
+ *   - When present, `digest` matches the canonical lowercase-hex SHA-256
+ *     pattern (length + alphabet).
+ *   - No unknown sibling fields are accepted: `additionalProperties: false`
+ *     means the schema rejects extras such as a private "internal" key
+ *     nested alongside the declared properties.
  *
- * Cross-field invariants enforced by the bridge:
- *   - `retainedBytes <= totalBytes` MUST hold; bridge rejects publish otherwise.
- *   - `isTruncated === true` implies `retainedBytes < totalBytes`; the
- *     bridge will not emit `truncated=false` with `retainedBytes < totalBytes`.
- *   - When sibling fields carry their own TruncationSchema (e.g. a recipe
- *     activity entry that cites a truncated tool output), the bridge emits
- *     the TruncationSchema on EVERY truncated sibling; partial truncation
- *     telemetry is treated as a schema violation, not an omission.
- *   - `digest` length and hex alphabet are validated via the regex pattern;
- *     a non-64-char or non-hex value is a hard reject, never silently coerced.
+ * Out-of-scope for the schema (MUST be enforced by the bridge later):
+ *   - The relational invariant `retainedBytes <= totalBytes`.
+ *   - The implication `isTruncated === true` => `retainedBytes < totalBytes`
+ *     (and the dual: `isTruncated === false` => `retainedBytes === totalBytes`).
+ *   - Any claim that `retainedBytes`/`totalBytes` are NFC-normalized byte
+ *     counts; the schema does not look at the truncated payload and cannot
+ *     prove normalization. The bridge MUST perform NFC + byte measurement
+ *     before publish and re-verify on receive.
+ *   - Exact digest correctness: the regex only constrains the hex form, not
+ *     whether the digest matches the un-trimmed field's UTF-8 bytes. The
+ *     bridge MUST recompute and verify the SHA-256 before emitting.
+ *   - Coverage: a payload that mentions truncation on one sibling but omits
+ *     it on another truncated sibling is a violation the bridge detects at
+ *     publish time; the schema cannot see sibling fields.
  */
 export const TruncationSchema = Type.Object({
   retainedBytes: Type.Integer({ minimum: 0 }),
   totalBytes: Type.Integer({ minimum: 0 }),
   digest: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
   isTruncated: Type.Boolean(),
-}, { additionalProperties: true, $id: "pi-mob/protocol/truncation" });
+}, { additionalProperties: false, $id: "pi-mob/protocol/truncation" });
 export const TimingSchema = Type.Object({
   startedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
   updatedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
@@ -219,18 +223,29 @@ export const ErrorInfoSchema = Type.Object({
   retryable: Type.Boolean(),
   recommendedDelayMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
 }, { additionalProperties: true, $id: "pi-mob/protocol/error-info" });
-// F0 — ProviderSummarySchema is a tagged, closed object: `summary` carries
-// the rendered provider description (1–4096 UTF-8 code units, enforced by the
-// bridge at publish and at receive via `maxLength`), and an optional
-// `truncation` block describing how the summary was clipped when the source
-// exceeded the 4096-byte limit. `additionalProperties: false` means the bridge
-// will reject any unknown sibling field (thinking level, raw metadata, etc.)
-// rather than silently forward it to mobile clients.
+// F0 — ProviderSummarySchema is a tagged, closed object. Length bounds are
+// deliberately CONSERVATIVE and expressed in JSON-Schema / TypeBox semantics,
+// which count UTF-16 code units (a.k.a. JS string `.length`), NOT raw UTF-8
+// bytes:
+//   - `provider` / `model`: 1..128 UTF-16 code units. Short identifiers; any
+//     realistic vendor name plus a sane model slug fits well under 128.
+//   - `summary`: 1..1024 UTF-16 code units. The product ceiling is 4096 UTF-8
+//     bytes; the worst-case UTF-8 size for a 1024-code-unit string is 3072
+//     bytes (1024 × 3, every code unit a 3-byte BMP character), so 1024
+//     code units is a guaranteed-safe upper bound that can never overflow
+//     the 4096-byte ceiling regardless of Unicode content.
+// Future bridge (NOT in this schema): the bridge MUST re-measure `summary`
+// after UTF-8 encoding and reject any value whose byte length exceeds 4096.
+// The schema cannot encode "max UTF-8 bytes" directly, so this byte ceiling
+// lives as a bridge-level invariant until the schema layer can express it.
+// `additionalProperties: false` means the bridge will reject any unknown
+// sibling field (thinking level, raw metadata, etc.) rather than silently
+// forward it to mobile clients.
 export const ProviderSummarySchema = Type.Object({
   kind: Type.Literal("provider_summary"),
-  provider: Type.String({ minLength: 1 }),
-  model: Type.Optional(Type.String({ minLength: 1 })),
-  summary: Type.String({ minLength: 1, maxLength: 4096 }),
+  provider: Type.String({ minLength: 1, maxLength: 128 }),
+  model: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+  summary: Type.String({ minLength: 1, maxLength: 1024 }),
   truncation: Type.Optional(TruncationSchema),
 }, { additionalProperties: false, $id: "pi-mob/protocol/provider-summary" });
 

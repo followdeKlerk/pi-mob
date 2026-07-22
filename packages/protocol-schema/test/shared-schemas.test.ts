@@ -134,17 +134,17 @@ test("ErrorInfoSchema admits the new stability codes and ProviderSummarySchema i
 
 test("ProviderSummarySchema enforces summary length, truncation, and closed shape", () => {
   const provider = TypeCompiler.Compile(ProviderSummarySchema);
-  // summary — exactly 4096 is valid (the inclusive upper bound)
+  // summary — exactly 1024 ASCII code units is valid (the inclusive upper bound)
   expect(provider.Check({
     kind: "provider_summary",
     provider: "anthropic",
-    summary: "a".repeat(4096),
+    summary: "a".repeat(1024),
   })).toBe(true);
-  // summary — 4097 code units exceeds the cap and is invalid
+  // summary — 1025 ASCII code units exceeds the cap and is invalid
   expect(provider.Check({
     kind: "provider_summary",
     provider: "anthropic",
-    summary: "a".repeat(4097),
+    summary: "a".repeat(1025),
   })).toBe(false);
   // summary — missing entirely is invalid because it is required
   expect(provider.Check({ kind: "provider_summary", provider: "anthropic" })).toBe(false);
@@ -154,7 +154,7 @@ test("ProviderSummarySchema enforces summary length, truncation, and closed shap
   expect(provider.Check({
     kind: "provider_summary",
     provider: "anthropic",
-    summary: "a".repeat(4096),
+    summary: "a".repeat(1024),
     truncation: {
       retainedBytes: 4096,
       totalBytes: 8192,
@@ -169,5 +169,134 @@ test("ProviderSummarySchema enforces summary length, truncation, and closed shap
     provider: "anthropic",
     summary: "concise provider description",
     thinking: "high",
+  })).toBe(false);
+});
+
+test("ProviderSummarySchema.summary uses a conservative UTF-16 bound so any 1024-length Unicode string is safe", () => {
+  const provider = TypeCompiler.Compile(ProviderSummarySchema);
+  // 1024 emoji code units (512 astral code points × 2 UTF-16 code units each)
+  // is at the inclusive upper bound and therefore valid.
+  // `length` is the JS UTF-16 code-unit count, which is what TypeBox measures.
+  const maxEmoji = "😀".repeat(512);
+  expect(maxEmoji.length).toBe(1024);
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "anthropic",
+    summary: maxEmoji,
+  })).toBe(true);
+  // 1025 emoji code units (513 astral code points × 2 = 1026) exceeds the cap
+  // and is invalid. We construct 513 explicitly so the failure is unambiguous
+  // (not an off-by-one from a different emoji).
+  const overEmoji = "😀".repeat(513);
+  expect(overEmoji.length).toBe(1026);
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "anthropic",
+    summary: overEmoji,
+  })).toBe(false);
+  // Mixed astral + BMP content at exactly 1024 UTF-16 code units is also valid:
+  // the schema cannot reach beyond UTF-16 length, and 1024 × 3 = 3072 bytes
+  // worst case is still under the 4096-byte product ceiling the bridge
+  // enforces separately. Build deterministically so the length claim is
+  // exact, not approximate.
+  const builder: string[] = [];
+  let units = 0;
+  while (units + 2 <= 1024) {
+    builder.push("😀");
+    units += 2;
+  }
+  while (units < 1024) {
+    builder.push("a");
+    units += 1;
+  }
+  const mixedAt1024 = builder.join("");
+  expect(mixedAt1024.length).toBe(1024);
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "anthropic",
+    summary: mixedAt1024,
+  })).toBe(true);
+});
+
+test("ProviderSummarySchema rejects oversized provider and model identifiers", () => {
+  const provider = TypeCompiler.Compile(ProviderSummarySchema);
+  // provider — exactly 128 code units is valid
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "a".repeat(128),
+    summary: "ok",
+  })).toBe(true);
+  // provider — 129 code units exceeds the maxLength 128 cap
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "a".repeat(129),
+    summary: "ok",
+  })).toBe(false);
+  // provider — empty string violates minLength 1
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "",
+    summary: "ok",
+  })).toBe(false);
+  // model — exactly 128 code units is valid
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "anthropic",
+    model: "m".repeat(128),
+    summary: "ok",
+  })).toBe(true);
+  // model — 129 code units exceeds the maxLength 128 cap
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "anthropic",
+    model: "m".repeat(129),
+    summary: "ok",
+  })).toBe(false);
+  // model — empty string violates minLength 1
+  expect(provider.Check({
+    kind: "provider_summary",
+    provider: "anthropic",
+    model: "",
+    summary: "ok",
+  })).toBe(false);
+});
+
+test("TruncationSchema is closed: a private/internal sibling nested alongside the declared properties is rejected", () => {
+  const truncation = TypeCompiler.Compile(TruncationSchema);
+  // Baseline shape with all declared properties is valid.
+  expect(truncation.Check({
+    retainedBytes: 0,
+    totalBytes: 0,
+    isTruncated: false,
+  })).toBe(true);
+  // `internal` (and any other undeclared sibling) is rejected because the
+  // schema is `additionalProperties: false`. This protects against bridge
+  // call sites smuggling private bookkeeping through truncation telemetry.
+  expect(truncation.Check({
+    retainedBytes: 0,
+    totalBytes: 0,
+    isTruncated: false,
+    internal: { debug: "should not pass" },
+  })).toBe(false);
+  // A `private` sibling is similarly rejected (the literal property name the
+  // task description called out).
+  expect(truncation.Check({
+    retainedBytes: 0,
+    totalBytes: 0,
+    isTruncated: false,
+    private: true,
+  })).toBe(false);
+  // Sanity: the negative-byte shape and digest-format guards still hold
+  // alongside the closed-shape change.
+  expect(truncation.Check({
+    retainedBytes: -1,
+    totalBytes: 0,
+    isTruncated: false,
+  })).toBe(false);
+  expect(truncation.Check({
+    retainedBytes: 0,
+    totalBytes: 0,
+    digest: "not-a-digest",
+    isTruncated: false,
   })).toBe(false);
 });
