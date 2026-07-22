@@ -45,5 +45,6 @@ export * from "./core/runtime";
 export * from "./core/process-supervisor";
 export * from "./core/server";
 export * from "./core/workspace-policy";
+export * from "./notifications";
 export * from "./git/summary-service";
 export * from "./ops";
