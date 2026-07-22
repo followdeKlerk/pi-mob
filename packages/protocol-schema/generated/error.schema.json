@@ -180,6 +180,18 @@
             {
               "const": "internal_error",
               "type": "string"
+            },
+            {
+              "const": "recipe_unavailable",
+              "type": "string"
+            },
+            {
+              "const": "plan_unavailable",
+              "type": "string"
+            },
+            {
+              "const": "stale_plan_target",
+              "type": "string"
             }
           ]
         },

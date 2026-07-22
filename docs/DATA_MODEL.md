@@ -25,6 +25,10 @@ This document defines durable entities, identifiers, relationships, retention, m
 | `workspaceId` | bridge | host | No | No |
 | `sessionId` | bridge | host | No | No |
 | `turnId` | bridge | session | No | No |
+| `recipeActivityId` | bridge/normalizer | turn + recipe family | No | No |
+| `planId` | authoritative plan producer | session/turn plan | No | No |
+| `planStepId` | authoritative plan producer | plan | No | No |
+| `planRevision` | authoritative plan producer | plan version | No | Never reused for different plan content |
 | `commandId` | mobile | host | No | Never with a different payload |
 | `eventId` | bridge | host | No | No |
 | `streamId` | bridge | host/session | No | Stable while entity exists |
@@ -204,7 +208,78 @@ model_snapshot_json
 
 A turn record remains after session process restart and participates in snapshots.
 
-### 3.8 `commands`
+### 3.8 `recipe_activities`
+
+R1 persists the closed [D-036](DECISIONS.md#d-036--f0-recipe-plan-and-targeted-steering-contract) wire union, not raw provider reasoning:
+
+```text
+session_id FK
+turn_id FK
+activity_id
+ordinal non-negative
+kind                 thinking | tool
+status               pending | running | completed | failed | cancelled
+title
+started_at
+updated_at nullable
+finished_at nullable
+duration_ms nullable
+provider_summary_json nullable
+provider_summary_digest nullable
+tool_name nullable
+arguments_text nullable
+output_text nullable
+error_info_json nullable
+truncation_json nullable
+source_event_cursor nullable
+PRIMARY KEY (session_id, turn_id, activity_id)
+UNIQUE (session_id, turn_id, ordinal, activity_id)
+```
+
+The logical replay identity is `(sessionId, turnId, activityId)`; `eventId` and cursor identify delivery, not the activity. Live events, retained replay, snapshots, and imported Pi history upsert that same identity and MUST converge without duplicating or moving an activity to another turn. Ordinal establishes chronological recipe order within a turn; event cursors order revisions of the same activity.
+
+`kind` is immutable. Thinking rows may persist only a provider-supplied displayable `ProviderSummary`; they MUST NOT persist raw thinking, reasoning deltas/steps, hidden metadata, or a bridge/mobile synthesized summary. Tool rows MUST have tool name, bounded arguments and output and MUST NOT have a provider summary. Persisted values retain the protocol bounds, closed nested timing/error/truncation shapes, and all terminal status/timing metadata so database reopen and snapshot reconstruction produce the same recipe.
+
+### 3.9 `plans` and `plan_steps`
+
+R2 stores only plans from an explicitly vetted authoritative bridge/extension source; Markdown, checklist prose, reasoning, and arbitrary tool output never create plan records.
+
+```text
+plans:
+  session_id FK
+  turn_id FK
+  plan_id
+  revision
+  source
+  stale boolean
+  capability_status_json
+  published_event_cursor
+  superseded_at nullable
+  PRIMARY KEY (session_id, plan_id, revision)
+
+plan_steps:
+  session_id FK
+  plan_id
+  revision
+  step_id
+  ordinal
+  title
+  status               pending | running | completed | blocked | skipped
+  blocker nullable
+  timing_json nullable
+  PRIMARY KEY (session_id, plan_id, revision, step_id)
+  UNIQUE (session_id, plan_id, revision, ordinal)
+```
+
+A revision stores one complete ordered snapshot transactionally, with at most 64 steps. Revision tokens are opaque and are not stream cursors. Replay is last-writer-by-stream-cursor for a plan revision; duplicate delivery of the same event is ignored. A newer authoritative snapshot atomically supersedes the currently projected revision but older revisions remain available for command audit and replay retention. Host/bridge restart retains plan identity, revision, steps, and event cursors; snapshot recovery rebuilds the same current revision. Host-generation replacement invalidates mobile caches under the normal stream snapshot rules, not durable host plan identity.
+
+Targeted steering does not create a separate command type. `prompt.submit.planTarget` is part of the stored semantic payload/hash. Before accepting for Pi dispatch, bridge central integration alone verifies `deliveryMode: steer` and resolves the exact authoritative `(sessionId, planId, revision, stepId)`. Non-steer targeting fails with `invalid_state`; missing, superseded, stale, or unknown plan/revision/step fails with `stale_plan_target`. Accepted duplicate commands return stored state and never retarget, even after the authoritative revision advances. Untargeted legacy steering is unchanged.
+
+### 3.10 Recipe/plan capability state
+
+When authoritative data is absent, persistence/projectors retain an explicit `recipe.unavailable` (`recipes.v1`) or `plan.unavailable` (`plans.v1`) projection rather than fabricating an empty recipe/plan. Capability status is exactly `available`, `degraded`, `unavailable`, or `stale`; every non-available status retains required safe reason and remediation, while optional source/revision/refresh time support recovery diagnostics. These closed wire records exclude private/debug/provider-internal fields.
+
+### 3.11 `commands`
 
 ```text
 command_id PK
@@ -250,7 +325,7 @@ Payload hashing uses SHA-256 over RFC 8785-style canonical JSON of the command t
 
 Sensitive or large payload content may be stored as a redacted digest/reference while retaining enough normalized fields to recover accepted-but-undispatched safe commands. Prompts required for recovery are encrypted with host OS data protection or stored in the owner-only database; they never enter normal logs.
 
-### 3.9 `event_streams`
+### 3.12 `event_streams`
 
 ```text
 stream_id PK
@@ -265,7 +340,7 @@ minimum_retained_cursor_decimal
 
 Cursor values are decimal strings at the protocol boundary. SQLite may store them as INTEGER while values remain within signed 64-bit range, with conversion at the adapter boundary.
 
-### 3.10 `events`
+### 3.13 `events`
 
 ```text
 event_id PK
@@ -301,7 +376,7 @@ sensitive_status
 
 Classification drives retention, diagnostics, and notification redaction.
 
-### 3.11 `client_cursors`
+### 3.14 `client_cursors`
 
 ```text
 installation_id FK
@@ -313,7 +388,7 @@ PRIMARY KEY (installation_id, stream_id)
 
 Client acknowledgements are advisory for diagnostics and future compaction. Retention never depends solely on one client acknowledging data.
 
-### 3.12 `controller_leases`
+### 3.15 `controller_leases`
 
 ```text
 lease_id PK
@@ -331,7 +406,7 @@ revoked_at nullable
 
 Only one unexpired lease exists per scope/session. A database uniqueness strategy plus transaction prevents dual acquisition.
 
-### 3.13 `follow_up_queue`
+### 3.16 `follow_up_queue`
 
 ```text
 queue_item_id PK
@@ -359,7 +434,7 @@ failed
 
 Queue position is bridge-authoritative. Reordering, when implemented, is transactional and produces one queue snapshot event.
 
-### 3.14 `extension_dialogs`
+### 3.17 `extension_dialogs`
 
 ```text
 dialog_id PK
@@ -385,7 +460,7 @@ expired
 orphaned
 ```
 
-### 3.15 `attachments`
+### 3.18 `attachments`
 
 ```text
 attachment_id PK
@@ -418,7 +493,7 @@ Unique retry key: `(installation_id, client_upload_id)`.
 
 Same upload ID with different digest returns an idempotency conflict.
 
-### 3.16 `exports`
+### 3.19 `exports`
 
 ```text
 export_id PK
@@ -434,7 +509,7 @@ requested_by_installation_id
 
 Exports expire after 24 hours by default. Session deletion may shorten expiry.
 
-### 3.17 `notification_devices`
+### 3.20 `notification_devices`
 
 ```text
 notification_device_id PK
@@ -452,7 +527,7 @@ disabled_at nullable
 
 Provider tokens are secrets-at-rest on the host and excluded from backups unless the backup is protected equivalently.
 
-### 3.18 `maintenance`
+### 3.21 `maintenance`
 
 Includes:
 
@@ -545,6 +620,8 @@ A session snapshot contains:
 - effective policy,
 - current model/thinking/queue/retry/compaction state,
 - current pending extension dialog,
+- current recipe activities keyed by `(sessionId, turnId, activityId)` with chronological ordinal and terminal timing/error/truncation metadata,
+- current authoritative plan revision and its complete ordered (maximum 64) steps, or explicit recipe/plan unavailable capability state,
 - canonical normalized transcript rebuilt from Pi entries/messages,
 - active/last turn state,
 - new session stream baseline.

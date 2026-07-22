@@ -248,5 +248,25 @@
     "class": "event",
     "stream": "session",
     "type": "extension.editor_prefill"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "recipe.activity"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "recipe.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "plan.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "plan.unavailable"
   }
 ]

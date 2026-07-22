@@ -34,8 +34,26 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "extension.respond") return { sessionId: ids.sessionId, dialogId: ids.sessionId, response: {} };
   return { sessionId: ids.sessionId };
 }
+function eventEnvelope(type: string, payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type, payload };
+}
+function recipeActivity(kind: "thinking" | "tool", extra: Record<string, unknown> = {}): Record<string, unknown> {
+  const common = { kind, sessionId: ids.sessionId, turnId: "turn-fixture", activityId: "activity-fixture", ordinal: 0, status: "running", timing: { startedAt: base.sentAt }, title: "Fixture activity" };
+  return kind === "thinking" ? { ...common, providerSummary: { kind: "provider_summary", provider: "fixture", model: "fixture-model", summary: "Provider supplied summary" }, ...extra } : { ...common, toolName: "fixture-tool", arguments: "{}", output: "fixture output", ...extra };
+}
+function capabilityStatus(state: "unavailable" | "stale"): Record<string, unknown> {
+  return { state, reason: `fixture ${state}`, remediation: "refresh capability", source: "fixture", revision: "r1" };
+}
+function planSnapshot(): Record<string, unknown> {
+  return { planId: "plan-fixture", revision: "r1", sessionId: ids.sessionId, turnId: "turn-fixture", source: "fixture", stale: false, capability: { state: "available", source: "fixture", revision: "r1" }, steps: ["pending", "running", "completed", "blocked", "skipped"].map((status, i) => ({ stepId: `step-${i}`, title: `Step ${i}`, status })) };
+}
+
 function eventPayload(type: string): Record<string, unknown> {
   if (type === "session.summary") return { sessionId: ids.sessionId, runtimeState: "idle", queueCount: 0 };
+  if (type === "recipe.unavailable") return { capability: "recipes.v1", status: capabilityStatus("unavailable") };
+  if (type === "plan.snapshot") return planSnapshot();
+  if (type === "plan.unavailable") return { capability: "plans.v1", status: capabilityStatus("stale") };
+
   if (type === "controller.state") return { scope: "session", sessionId: ids.sessionId, mode: "controller", leaseId: ids.leaseId, installationId: ids.installationId, expiresAt: "2026-07-12T00:00:45.000Z", reclaimableUntil: "2026-07-12T00:01:00.000Z" };
   if (type === "command.state") return { commandId: ids.commandId, commandType: "prompt.submit", state: "accepted", errorCode: null };
   if (type === "tool.output") return { toolCallId: ids.sessionId, retainedBytes: 0, totalBytes: 0, isTruncated: false };
@@ -75,10 +93,18 @@ mkdirSync(corpus, { recursive: true });
 emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["future.optional"] } });
 for (const type of COMMAND_TYPES) emit(fileName("command", type), "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload: commandPayload(type) });
 for (const type of CONTROL_TYPES) emit(fileName("control", type), "control", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, type, payload: controlPayload(type) });
-for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: eventPayload(type) });
+for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: type === "recipe.activity" ? recipeActivity("thinking") : type === "recipe.unavailable" ? { capability: "recipes.v1", status: capabilityStatus("unavailable") } : type === "plan.snapshot" ? planSnapshot() : type === "plan.unavailable" ? { capability: "plans.v1", status: capabilityStatus("stale") } : eventPayload(type) });
 for (const type of RESPONSE_TYPES) emit(fileName("response", type), "response", true, { ...base, requestId: ids.requestId, ...(type === "command.receipt" ? { commandId: ids.commandId } : {}), type, payload: responsePayload(type) });
 for (const code of ERROR_CODES) emit(`error-${code.replaceAll("_", "-")}-valid`, "error", true, { ...base, requestId: ids.requestId, type: "error", payload: { code, message: "safe protocol error", retryable: false, details: {} } });
 emit("pairing-valid", "pairing", true, { kind: "pi-mob-host", version: 1, hostId: ids.sessionId, displayName: "fixture host", endpoint: "https://fixture-host.example", protocolMajor: 1 });
+emit("recipe-thinking-tool-valid", "event", true, eventEnvelope("recipe.activity", recipeActivity("thinking")));
+emit("recipe-tool-valid", "event", true, eventEnvelope("recipe.activity", recipeActivity("tool")));
+emit("recipe-unavailable-valid", "event", true, eventEnvelope("recipe.unavailable", { capability: "recipes.v1", status: capabilityStatus("unavailable") }));
+emit("plan-snapshot-all-statuses-valid", "event", true, eventEnvelope("plan.snapshot", planSnapshot()));
+emit("plan-unavailable-stale-valid", "event", true, eventEnvelope("plan.unavailable", { capability: "plans.v1", status: capabilityStatus("stale") }));
+emit("prompt-legacy-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: commandPayload("prompt.submit") });
+emit("prompt-steer-plan-target-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: { ...commandPayload("prompt.submit"), deliveryMode: "steer", planTarget: { planId: "plan-fixture", stepId: "step-1", revision: "r1" } } });
+
 emit("pairing-invalid-http", "pairing", false, { kind: "pi-mob-host", version: 1, hostId: ids.sessionId, displayName: "fixture host", endpoint: "http://fixture-host.example", protocolMajor: 1 });
 emit("attachment-response-valid", "attachment", true, { attachmentId: ids.messageId, sha256: "a".repeat(64), mimeType: "image/png", bytes: 1024, expiresAt: "2026-07-13T00:00:00.000Z" });
 emit("export-metadata-valid", "export", true, { exportId: ids.messageId, format: "html", bytes: 1024, sha256: "b".repeat(64), expiresAt: "2026-07-13T00:00:00.000Z" });
@@ -93,6 +119,13 @@ emit("command-semantic-conflict", "error", true, { ...base, requestId: ids.reque
 emit("command-metadata-retry", "command", true, { ...base, requestId: ids.eventId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "session.rename", payload: { sessionId: ids.sessionId, name: "fixture" } });
 const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-cursor-json-number", "event", { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: 9007199254740992, type: "turn.settled", payload: {} }],
+  ["invalid-recipe-tool-provider-summary", "event", eventEnvelope("recipe.activity", recipeActivity("tool", { providerSummary: { kind: "provider_summary", provider: "fixture", summary: "not allowed" } }))],
+  ["invalid-recipe-private-field", "event", eventEnvelope("recipe.activity", { ...recipeActivity("thinking"), private: "hidden" })],
+  ["invalid-recipe-oversize", "event", eventEnvelope("recipe.activity", recipeActivity("tool", { arguments: "x".repeat(241) }))],
+  ["invalid-plan-65-steps", "event", eventEnvelope("plan.snapshot", { ...planSnapshot(), steps: Array.from({ length: 65 }, (_, i) => ({ stepId: `step-${i}`, title: "Step", status: "pending" })) })],
+  ["invalid-plan-missing-turn-source", "event", eventEnvelope("plan.snapshot", (() => { const { turnId: _turnId, source: _source, ...missing } = planSnapshot(); return missing; })())],
+  ["invalid-prompt-plan-target-missing-revision", "command", { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: { ...commandPayload("prompt.submit"), deliveryMode: "steer", planTarget: { planId: "plan-fixture", stepId: "step-1" } } }],
+
   ["invalid-optional-event-type", "event", { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "1", type: "futureNotice", payload: { optional: true } }],
   ["invalid-uppercase-uuid", "command", { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", leaseId: ids.leaseId, type: "session.rename", payload: { sessionId: ids.sessionId, name: "fixture" } }],
   ["invalid-missing-payload", "response", { protocol: base.protocol, messageId: ids.messageId, sentAt: base.sentAt, requestId: ids.requestId, type: "hello.accepted" }],
