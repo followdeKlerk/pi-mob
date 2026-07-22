@@ -18,6 +18,7 @@ export const LIMITS = {
   maxQueuedFollowUps: 10,
   maxSessionPageSize: 100,
   maxBackgroundSessionSubscriptions: 5,
+  maxPlanSteps: 64,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -249,6 +250,47 @@ export const ProviderSummarySchema = Type.Object({
   truncation: Type.Optional(TruncationSchema),
 }, { additionalProperties: false, $id: "pi-mob/protocol/provider-summary" });
 
+export const PlanTargetSchema = Type.Object({
+  planId: Type.String({ minLength: 1 }),
+  stepId: Type.String({ minLength: 1 }),
+  revision: Type.Optional(RevisionTokenSchema),
+}, { additionalProperties: false, $id: "pi-mob/protocol/plan-target" });
+
+export const RecipeActivitySchema = Type.Union([
+  Type.Object({
+    kind: Type.Literal("thinking"),
+    status: Type.Union(["pending", "running", "completed", "failed", "cancelled"].map((value) => Type.Literal(value))),
+    message: Type.String({ minLength: 1 }),
+    providerSummary: Type.Optional(ProviderSummarySchema),
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("tool"),
+    status: Type.Union(["pending", "running", "completed", "failed", "cancelled"].map((value) => Type.Literal(value))),
+    message: Type.String({ minLength: 1 }),
+    toolName: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }),
+], { $id: "pi-mob/protocol/recipe-activity" });
+
+export const PlanStepSchema = Type.Object({
+  stepId: Type.String({ minLength: 1 }),
+  title: Type.String({ minLength: 1 }),
+  status: Type.Union(["pending", "running", "completed", "blocked", "skipped"].map((value) => Type.Literal(value))),
+}, { additionalProperties: false, $id: "pi-mob/protocol/plan-step" });
+
+export const PlanSnapshotSchema = Type.Object({
+  planId: Type.String({ minLength: 1 }),
+  revision: RevisionTokenSchema,
+  steps: Type.Array(PlanStepSchema, { maxItems: LIMITS.maxPlanSteps }),
+}, { additionalProperties: false, $id: "pi-mob/protocol/plan-snapshot" });
+
+export const RecipeUnavailableSchema = Type.Object({
+  status: CapabilityStatusSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/recipe-unavailable" });
+
+export const PlanUnavailableSchema = Type.Object({
+  status: CapabilityStatusSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/plan-unavailable" });
+
 const Payload = Type.Object({}, { additionalProperties: true });
 export const ProtocolVersionSchema = Type.Object({ major: Type.Literal(PROTOCOL_MAJOR), minor: Type.Integer({ minimum: 0 }) }, { additionalProperties: true, $id: "pi-mob/protocol/version" });
 const Protocol = ProtocolVersionSchema;
@@ -290,7 +332,7 @@ const CommandPayloads = {
   "session.delete": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.restore": Type.Object({ sessionId: SessionId }, { additionalProperties: true }),
   "session.purge": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.fork": Type.Object({ sessionId: SessionId, entryId: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "session.clone": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.export": Type.Object({ sessionId: SessionId, format: Type.Literal("html") }, { additionalProperties: true }),
-  "prompt.submit": Type.Object({ sessionId: SessionId, deliveryMode: Type.Union([Type.Literal("immediate"), Type.Literal("steer"), Type.Literal("follow_up")]), message: Type.String(), attachmentIds: Type.Array(Uuid, { maxItems: LIMITS.maxAttachmentsPerPrompt }) }, { additionalProperties: true }),
+  "prompt.submit": Type.Object({ sessionId: SessionId, deliveryMode: Type.Union([Type.Literal("immediate"), Type.Literal("steer"), Type.Literal("follow_up")]), message: Type.String(), attachmentIds: Type.Array(Uuid, { maxItems: LIMITS.maxAttachmentsPerPrompt }), target: Type.Optional(PlanTargetSchema) }, { additionalProperties: true }),
   "turn.abort": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "queue.remove": Type.Object({ sessionId: SessionId, queueItemId: Uuid }, { additionalProperties: true }),
   "queue.clear": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "model.set": Type.Object({ sessionId: SessionId, modelId: Type.String({ minLength: 1 }), provider: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: true }),
   "thinking.set": Type.Object({ sessionId: SessionId, level: Type.String({ minLength: 1 }) }, { additionalProperties: true }), "steering_mode.set": Type.Object({ sessionId: SessionId, enabled: Type.Boolean() }, { additionalProperties: true }),
@@ -316,6 +358,10 @@ const EventPayloads = {
   "tool.output": Type.Object({ toolCallId: Type.String({ minLength: 1, maxLength: 512 }), retainedBytes: Type.Integer({ minimum: 0 }), totalBytes: Type.Integer({ minimum: 0 }), digest: Type.Optional(Type.String()), isTruncated: Type.Boolean() }, { additionalProperties: true }),
   "extension.dialog": Type.Object({ dialogId: Uuid, method: Type.Union([Type.Literal("select"), Type.Literal("confirm"), Type.Literal("input"), Type.Literal("editor")]), expiresAt: Type.String({ pattern: ISO_UTC_PATTERN }) }, { additionalProperties: true }),
   "queue.snapshot": Type.Object({ items: Type.Array(Payload, { maxItems: LIMITS.maxQueuedFollowUps }) }, { additionalProperties: true }),
+  "recipe.activity": RecipeActivitySchema,
+  "recipe.unavailable": RecipeUnavailableSchema,
+  "plan.snapshot": PlanSnapshotSchema,
+  "plan.unavailable": PlanUnavailableSchema,
 } as const;
 const genericEventPayload = Type.Object({ sessionId: Type.Optional(SessionId) }, { additionalProperties: true });
 const ControlPayloads = {
