@@ -295,6 +295,13 @@ final class ProtocolControl extends ProtocolEnvelope {
         throw ProtocolValidationException('pageSize', '1..100', size);
       }
     }
+    if (type == 'process.snapshot.request') {
+      _closedObject(payload, 'payload', const <String>{'sessionId'});
+      _uuidString(payload, 'sessionId');
+    }
+    if (type == 'process.output.page') {
+      _validateProcessOutputPagePayload(payload);
+    }
     if (const <String>{
       'workspace.tree.page',
       'workspace.file.search',
@@ -779,6 +786,7 @@ const _supportedCapabilities = <String>{
   'notifications.v1',
   'files.v1',
   'contexts.v1',
+  'runtime.processes.v1',
 };
 const _commandTypes = <String>{
   'controller.acquire',
@@ -816,6 +824,9 @@ const _commandTypes = <String>{
   'context.unpin',
   'context.exclude',
   'context.refresh',
+  'process.stop',
+  'process.restart',
+  'process.rerun',
 };
 const _controlTypes = <String>{
   'subscription.set',
@@ -835,6 +846,8 @@ const _controlTypes = <String>{
   'workspace.file.metadata',
   'workspace.file.read',
   'context.snapshot.request',
+  'process.snapshot.request',
+  'process.output.page',
 };
 const _leaseFreeCommands = <String>{
   'controller.acquire',
@@ -864,6 +877,8 @@ const _responseTypes = <String>{
   'workspace.file.metadata.result',
   'workspace.file.read.result',
   'context.snapshot.result',
+  'process.snapshot.result',
+  'process.output.page.result',
 };
 const _eventTypes = <String>{
   'host.state',
@@ -926,6 +941,10 @@ const _eventTypes = <String>{
   'workspace.file.unavailable',
   'context.snapshot',
   'context.unavailable',
+  'process.snapshot',
+  'process.output',
+  'process.unavailable',
+  'process.error',
 };
 const _hostEventTypes = <String>{
   'host.state',
@@ -998,6 +1017,10 @@ const _errorCodes = <String>{
   'file_unavailable',
   'context_pin_failed',
   'context_unavailable',
+  'process_unavailable',
+  'process_not_found',
+  'process_stale',
+  'process_failed',
 };
 String _nfc(String value) => unorm.nfc(value);
 void _requireEnvelope(Map<String, Object?> json) {
@@ -1174,10 +1197,31 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
     _validateContextMutationPayload(payload);
     return;
   }
+  if (const <String>{
+    'process.stop',
+    'process.restart',
+    'process.rerun',
+  }.contains(type)) {
+    _validateProcessCommandPayload(payload);
+    return;
+  }
   if (type == 'extension.respond') {
     _uuidString(payload, 'dialogId');
     _object(payload, 'response');
   }
+}
+
+void _validateProcessCommandPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'processId',
+    'expectedRevision',
+    'lease',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'processId', 128);
+  _revisionTokenString(payload, 'expectedRevision');
+  _oneOf(payload, 'lease', const <String>{'session'});
 }
 
 void _validateContextMutationPayload(Map<String, Object?> payload) {
@@ -1800,6 +1844,201 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
   if (type == 'context.unavailable') {
     _validateContextUnavailablePayload(payload);
   }
+  if (type == 'process.snapshot') {
+    _validateProcessSnapshotPayload(payload);
+  }
+  if (type == 'process.output') {
+    _validateProcessOutputPayload(payload);
+  }
+  if (type == 'process.unavailable') {
+    _validateProcessUnavailablePayload(payload);
+  }
+  if (type == 'process.error') {
+    _validateProcessErrorPayload(payload);
+  }
+}
+
+void _validateProcessSnapshotPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'processId',
+    'revision',
+    'status',
+    'command',
+    'startedAt',
+    'capability',
+    'stale',
+    'turnId',
+    'toolCallId',
+    'pid',
+    'cwd',
+    'finishedAt',
+    'durationMs',
+    'exitCode',
+    'signal',
+    'ports',
+    'supportedActions',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'processId', 128);
+  _revisionTokenString(payload, 'revision');
+  _oneOf(payload, 'status', const <String>{
+    'running',
+    'completed',
+    'failed',
+    'stopped',
+  });
+  _boundedRequiredString(payload, 'command', 1024);
+  _validateUtcTimestamp(payload, 'startedAt');
+  if (_string(payload, 'capability') != 'runtime.processes.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'runtime.processes.v1 literal',
+      payload['capability'],
+    );
+  }
+  _boolean(payload, 'stale');
+  for (final field in const <String>['turnId', 'toolCallId']) {
+    if (payload.containsKey(field)) _boundedRequiredString(payload, field, 128);
+  }
+  if (payload.containsKey('pid')) _positiveInteger(payload, 'pid');
+  if (payload.containsKey('cwd')) _workspacePathString(payload, 'cwd');
+  if (payload.containsKey('finishedAt')) {
+    _validateUtcTimestamp(payload, 'finishedAt');
+  }
+  if (payload.containsKey('durationMs')) {
+    _nonNegativeInteger(payload, 'durationMs');
+  }
+  if (payload.containsKey('exitCode')) _integer(payload, 'exitCode');
+  if (payload.containsKey('signal')) {
+    _boundedRequiredString(payload, 'signal', 64);
+  }
+  if (payload.containsKey('ports')) {
+    final ports = _list(payload, 'ports');
+    if (ports.length > 32) {
+      throw ProtocolValidationException(
+        'payload.ports',
+        '<= 32 items',
+        ports.length,
+      );
+    }
+    for (final item in ports) {
+      final port = _objectFrom(item, 'payload.ports');
+      _closedObject(port, 'payload.ports', const <String>{'port', 'protocol'});
+      final number = _positiveInteger(port, 'port');
+      if (number > 65535) {
+        throw ProtocolValidationException(
+          'payload.ports.port',
+          '<= 65535',
+          number,
+        );
+      }
+      _oneOf(port, 'protocol', const <String>{'tcp', 'udp'});
+    }
+  }
+  final actions = _list(payload, 'supportedActions');
+  if (actions.length > 3) {
+    throw ProtocolValidationException(
+      'payload.supportedActions',
+      '<= 3 items',
+      actions.length,
+    );
+  }
+  final seen = <String>{};
+  for (final action in actions) {
+    if (action is! String ||
+        !const <String>{'stop', 'restart', 'rerun'}.contains(action) ||
+        !seen.add(action)) {
+      throw ProtocolValidationException(
+        'payload.supportedActions',
+        'unique stop, restart, or rerun actions',
+        action,
+      );
+    }
+  }
+}
+
+void _validateProcessOutputPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'processId',
+    'revision',
+    'stream',
+    'content',
+    'truncation',
+    'cursor',
+    'pageToken',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'processId', 128);
+  _revisionTokenString(payload, 'revision');
+  _oneOf(payload, 'stream', const <String>{'stdout', 'stderr'});
+  final content = _stringAllowEmpty(payload, 'content');
+  if (content.length > 262144) {
+    throw ProtocolValidationException(
+      'payload.content',
+      '<= 262144 characters',
+      content.length,
+    );
+  }
+  _validateTruncation(_object(payload, 'truncation'), 'payload.truncation');
+  if (payload.containsKey('cursor')) {
+    DecimalCursor.parse(_string(payload, 'cursor'));
+  }
+  if (payload.containsKey('pageToken')) {
+    _boundedRequiredString(payload, 'pageToken', 128);
+  }
+}
+
+void _validateProcessUnavailablePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'capability',
+    'status',
+  });
+  _uuidString(payload, 'sessionId');
+  if (_string(payload, 'capability') != 'runtime.processes.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'runtime.processes.v1 literal',
+      payload['capability'],
+    );
+  }
+  _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
+}
+
+void _validateProcessErrorPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'processId',
+    'revision',
+    'error',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'processId', 128);
+  _revisionTokenString(payload, 'revision');
+  _validateErrorInfo(_object(payload, 'error'), 'payload.error');
+}
+
+void _validateProcessOutputPagePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'processId',
+    'revision',
+    'stream',
+    'cursor',
+    'pageToken',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'processId', 128);
+  _revisionTokenString(payload, 'revision');
+  _oneOf(payload, 'stream', const <String>{'stdout', 'stderr'});
+  if (payload.containsKey('cursor')) {
+    DecimalCursor.parse(_string(payload, 'cursor'));
+  }
+  if (payload.containsKey('pageToken')) {
+    _boundedRequiredString(payload, 'pageToken', 128);
+  }
 }
 
 void _validateWorkspaceControlPayload(
@@ -2047,10 +2286,26 @@ void _validateFileReadResult(Map<String, Object?> result, String path) {
 }
 
 void _validateResponsePayload(String type, Map<String, Object?> payload) {
+  if (type == 'process.snapshot.result') {
+    _closedObject(payload, 'payload', const <String>{'items'});
+    final items = _list(payload, 'items');
+    if (items.length > 100) {
+      throw ProtocolValidationException(
+        'payload.items',
+        '<= 100 items',
+        items.length,
+      );
+    }
+    for (final item in items) {
+      _validateProcessSnapshotPayload(_objectFrom(item, 'payload.items'));
+    }
+  }
+  if (type == 'process.output.page.result') {
+    _validateProcessOutputPayload(payload);
+  }
   if (type == 'context.snapshot.result') {
     _validateContextSnapshotPayload(payload);
   }
-
   if (type == 'workspace.tree.page.result') {
     _closedObject(payload, 'payload', const <String>{
       'workspaceId',
@@ -2354,6 +2609,14 @@ List<Object?> _list(Map<String, Object?> object, String key) {
 bool _boolean(Map<String, Object?> object, String key) {
   final value = object[key];
   if (value is! bool) throw ProtocolValidationException(key, 'boolean', value);
+  return value;
+}
+
+int _integer(Map<String, Object?> object, String key) {
+  final value = object[key];
+  if (value is! int) {
+    throw ProtocolValidationException(key, 'integer', value);
+  }
   return value;
 }
 

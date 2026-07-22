@@ -1,0 +1,169 @@
+{
+  "name": "invalid-process-ports-33",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "sessionId": "66666666-6666-4666-8666-666666666666",
+      "processId": "process-fixture",
+      "revision": "process-r1",
+      "command": "bun test packages/protocol-fixtures",
+      "startedAt": "2026-07-12T00:00:01.000Z",
+      "turnId": "turn-fixture",
+      "toolCallId": "tool-fixture",
+      "pid": 4123,
+      "cwd": "packages/protocol-fixtures",
+      "ports": [
+        {
+          "port": 4000,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4001,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4002,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4003,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4004,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4005,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4006,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4007,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4008,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4009,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4010,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4011,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4012,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4013,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4014,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4015,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4016,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4017,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4018,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4019,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4020,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4021,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4022,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4023,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4024,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4025,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4026,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4027,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4028,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4029,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4030,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4031,
+          "protocol": "tcp"
+        },
+        {
+          "port": 4032,
+          "protocol": "tcp"
+        }
+      ],
+      "status": "running",
+      "capability": "runtime.processes.v1",
+      "stale": false,
+      "supportedActions": [
+        "stop"
+      ]
+    },
+    "eventId": "44444444-4444-4444-8444-444444444444",
+    "streamId": "session:66666666-6666-4666-8666-666666666666",
+    "cursor": "9007199254740992",
+    "type": "process.snapshot"
+  },
+  "expectation": "expected-invalid"
+}

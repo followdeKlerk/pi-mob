@@ -1,0 +1,31 @@
+{
+  "name": "invalid-process-missing-session",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "processId": "process-fixture",
+      "revision": "process-r1",
+      "stream": "stdout",
+      "content": "ok: process completed\n",
+      "truncation": {
+        "retainedBytes": 22,
+        "totalBytes": 22,
+        "isTruncated": false
+      },
+      "cursor": "9007199254740992",
+      "pageToken": "page-2"
+    },
+    "eventId": "44444444-4444-4444-8444-444444444444",
+    "streamId": "session:66666666-6666-4666-8666-666666666666",
+    "cursor": "9007199254740992",
+    "type": "process.output"
+  },
+  "expectation": "expected-invalid"
+}

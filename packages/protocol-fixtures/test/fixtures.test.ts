@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  COMMAND_TYPES, ERROR_CODES, EVENT_TYPES, LIMITS, RESPONSE_TYPES,
+  COMMAND_TYPES, CONTROL_TYPES, ERROR_CODES, EVENT_TYPES, LIMITS, RESPONSE_TYPES,
   canonicalSemanticCommand, semanticCommandSha256, validateFixture,
 } from "@pi-mob/protocol-schema";
 import { ProtocolScenarioMachine, fixtureManifest, listFixtures, type ProtocolScenario } from "../src/index.ts";
@@ -12,7 +12,7 @@ const corpus = new URL("../corpus/", import.meta.url).pathname;
 test("fixture corpus is exhaustive, sorted, round-trippable, and valid by label", () => {
   expect(fixtureManifest.length).toBeGreaterThan(100);
   expect(listFixtures()).toEqual([...listFixtures()].sort());
-  const covered = { command: new Set<string>(), event: new Set<string>(), response: new Set<string>(), error: new Set<string>() };
+  const covered = { command: new Set<string>(), control: new Set<string>(), event: new Set<string>(), response: new Set<string>(), error: new Set<string>() };
   for (const entry of fixtureManifest) {
     const fixture = JSON.parse(readFileSync(join(corpus, entry.file), "utf8")) as { readonly valid: boolean; readonly kind: string; readonly message: Record<string, unknown> };
     expect(fixture.valid).toBe(entry.valid);
@@ -28,6 +28,7 @@ test("fixture corpus is exhaustive, sorted, round-trippable, and valid by label"
     if (fixture.valid) assertCursorStrings(fixture.message, entry.file);
   }
   expect([...covered.command].sort()).toEqual([...COMMAND_TYPES].sort());
+  expect([...covered.control].sort()).toEqual([...CONTROL_TYPES].sort());
   expect([...covered.event].filter((type) => EVENT_TYPES.includes(type as never)).sort()).toEqual([...EVENT_TYPES].sort());
   expect([...covered.response].sort()).toEqual([...RESPONSE_TYPES].sort());
   expect([...covered.error].sort()).toEqual([...ERROR_CODES].sort());
@@ -187,6 +188,139 @@ test("D-037 invalid corpus isolates schema and semantic invariants", () => {
   }
 });
 
+const r5ExpectedInvalidFiles = [
+  "invalid-process-private-field.json",
+  "invalid-process-stdout-oversize.json",
+  "invalid-process-stderr-oversize.json",
+  "invalid-process-ports-33.json",
+  "invalid-process-missing-session.json",
+  "invalid-process-missing-process.json",
+  "invalid-process-missing-revision.json",
+  "invalid-process-pid.json",
+  "invalid-process-status.json",
+  "invalid-process-action.json",
+  "invalid-process-stream.json",
+  "invalid-process-host-stream.json",
+] as const;
+
+type R5ExpectedInvalidFile = typeof r5ExpectedInvalidFiles[number];
+
+function repairR5ExpectedInvalid(file: R5ExpectedInvalidFile, message: Record<string, unknown>): Record<string, unknown> {
+  const repaired = clone(message);
+  const payload = repaired.payload as Record<string, unknown>;
+  switch (file) {
+    case "invalid-process-private-field.json":
+      delete payload.private;
+      break;
+    case "invalid-process-stdout-oversize.json":
+      payload.content = "ok: process completed\n";
+      break;
+    case "invalid-process-stderr-oversize.json":
+      payload.content = "warning: fixture stderr\n";
+      break;
+    case "invalid-process-ports-33.json":
+      payload.ports = (payload.ports as Array<unknown>).slice(0, LIMITS.maxProcessPorts);
+      break;
+    case "invalid-process-missing-session.json":
+      payload.sessionId = "66666666-6666-4666-8666-666666666666";
+      break;
+    case "invalid-process-missing-process.json":
+      payload.processId = "process-fixture";
+      break;
+    case "invalid-process-missing-revision.json":
+      payload.revision = "process-r1";
+      break;
+    case "invalid-process-pid.json":
+      payload.pid = 4123;
+      break;
+    case "invalid-process-status.json":
+      payload.status = "running";
+      break;
+    case "invalid-process-action.json":
+      payload.supportedActions = ["stop"];
+      break;
+    case "invalid-process-stream.json":
+      payload.stream = "stdout";
+      break;
+    case "invalid-process-host-stream.json":
+      repaired.streamId = "session:66666666-6666-4666-8666-666666666666";
+      break;
+  }
+  return repaired;
+}
+
+test("R5 valid fixtures carry exhaustive controls, capability, snapshots, and distinct output streams", () => {
+  const find = (file: string): FixtureRecord => JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
+  const hello = find("hello-valid.json");
+  expect((hello.message.payload as Record<string, unknown>).requiredCapabilities).toContain("runtime.processes.v1");
+  expect((find("response-hello-accepted-valid.json").message.payload as Record<string, unknown>).capabilities).toContain("runtime.processes.v1");
+  expect(find("command-process-stop-valid.json").valid).toBe(true);
+  expect(find("control-process-snapshot-request-valid.json").valid).toBe(true);
+  expect(find("control-process-output-page-valid.json").valid).toBe(true);
+  expect(find("response-process-snapshot-result-valid.json").valid).toBe(true);
+  expect(find("response-process-output-page-result-valid.json").valid).toBe(true);
+
+  const snapshot = find("event-process-snapshot-valid.json").message.payload as Record<string, unknown>;
+  expect(snapshot).toMatchObject({ processId: "process-fixture", revision: "process-r1", status: "running", pid: 4123, cwd: "packages/protocol-fixtures", capability: "runtime.processes.v1", supportedActions: ["stop"] });
+  const stdout = find("event-process-output-valid.json").message.payload as Record<string, unknown>;
+  const stderr = find("process-output-stderr-valid.json").message.payload as Record<string, unknown>;
+  expect(stdout).toMatchObject({ sessionId: snapshot.sessionId, processId: snapshot.processId, revision: snapshot.revision, stream: "stdout", content: "ok: process completed\n" });
+  expect(stderr).toMatchObject({ sessionId: snapshot.sessionId, processId: snapshot.processId, revision: snapshot.revision, stream: "stderr", content: "warning: fixture stderr\n" });
+  for (const code of ["process_unavailable", "process_not_found", "process_stale", "process_failed"]) {
+    expect(find(`error-${code.replaceAll("_", "-")}-valid.json`).valid).toBe(true);
+  }
+});
+
+test("R5 expected-invalid fixtures isolate one schema invariant and prove one-field repairs", () => {
+  for (const file of r5ExpectedInvalidFiles) {
+    const fixture = JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
+    expect(fixture.valid, file).toBe(false);
+    expect(fixture.expectation, file).toBe("expected-invalid");
+    expect(validateFixture(fixture), file).toBe(true);
+    const repairedMessage = repairR5ExpectedInvalid(file, fixture.message);
+    expect(JSON.stringify(repairedMessage), file).not.toBe(JSON.stringify(fixture.message));
+    expect(validateFixture({ ...clone(fixture), valid: true, message: repairedMessage }), file).toBe(true);
+  }
+});
+
+type ProcessSemanticError = "invalid_state" | "process_stale";
+type ProcessAuthority = { readonly revision: string; readonly status: string; readonly supportedActions: readonly string[] };
+function validateProcessSemantics(message: Record<string, unknown>, authority: ProcessAuthority): ProcessSemanticError | undefined {
+  const payload = message.payload as Record<string, unknown>;
+  if (payload.expectedRevision !== authority.revision) return "process_stale";
+  const action = message.type as string;
+  if (!authority.supportedActions.includes(action.slice("process.".length))) return "invalid_state";
+  if (action === "process.restart" && authority.status === "running") return "invalid_state";
+  return undefined;
+}
+
+test("R5 semantic-invalid process actions are schema-valid, hard-coded, and repaired one field at a time", () => {
+  const cases = [
+    { file: "semantic-invalid-process-stop-unsupported.json", expected: "invalid_state" as const, authority: { revision: "process-r1", status: "completed", supportedActions: ["restart", "rerun"] } },
+    { file: "semantic-invalid-process-stale-revision.json", expected: "process_stale" as const, authority: { revision: "process-r2", status: "running", supportedActions: ["stop"] } },
+    { file: "semantic-invalid-process-joint-action-state.json", expected: "invalid_state" as const, authority: { revision: "process-r1", status: "running", supportedActions: ["stop", "restart"] } },
+  ] as const;
+  for (const item of cases) {
+    const fixture = JSON.parse(readFileSync(join(corpus, item.file), "utf8")) as FixtureRecord;
+    expect(fixture.valid, item.file).toBe(true);
+    expect(fixture.expectation, item.file).toBe("semantic-invalid");
+    expect(validateFixture(fixture), item.file).toBe(true);
+    // This expected code is selected by the test case, never by fixture metadata.
+    expect(validateProcessSemantics(fixture.message, item.authority), item.file).toBe(item.expected);
+    expect(fixture.semanticExpectation?.errorCode).toBe(item.expected);
+
+    const repairedMessage = clone(fixture.message);
+    if (item.file === "semantic-invalid-process-stop-unsupported.json") {
+      repairedMessage.type = "process.restart";
+    } else if (item.file === "semantic-invalid-process-stale-revision.json") {
+      (repairedMessage.payload as Record<string, unknown>).expectedRevision = "process-r2";
+    } else {
+      repairedMessage.type = "process.stop";
+    }
+    expect(validateProcessSemantics(repairedMessage, item.authority), item.file).toBeUndefined();
+    expect(validateFixture({ ...clone(fixture), message: repairedMessage }), item.file).toBe(true);
+  }
+});
 test("tool output boundary metadata remains exact and bounded", () => {
   const eventBoundary = JSON.parse(readFileSync(join(corpus, "tool-output-event-boundary.json"), "utf8"));
   const retainedBoundary = JSON.parse(readFileSync(join(corpus, "tool-output-retained-boundary.json"), "utf8"));
