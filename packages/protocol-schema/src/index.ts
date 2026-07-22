@@ -840,23 +840,17 @@ export const ContextUnavailableEventSchema = Type.Object({
 // closed so command hashing cannot hide private/debug routing data in it.
 // File and source targets cover pin/unpin/exclude; the `all` target is used by
 // a session-wide refresh. The bridge still resolves paths and source IDs.
-const ContextFileTargetSchema = Type.Union([
-  Type.Object({
-    path: WorkspacePathSchema,
-    ranges: Type.Optional(Type.Array(LineRangeSchema, { maxItems: LIMITS.maxPinnedRanges })),
-    revision: Type.Optional(RevisionTokenSchema),
-  }, { additionalProperties: false }),
-  Type.Object({
-    kind: Type.Literal("file"),
-    path: WorkspacePathSchema,
-    ranges: Type.Optional(Type.Array(LineRangeSchema, { maxItems: LIMITS.maxPinnedRanges })),
-    revision: Type.Optional(RevisionTokenSchema),
-  }, { additionalProperties: false }),
-]);
-const ContextSourceTargetSchema = Type.Union([
-  Type.Object({ sourceId: Type.String({ minLength: 1, maxLength: LIMITS.maxContextSourceIdLength }), revision: Type.Optional(RevisionTokenSchema) }, { additionalProperties: false }),
-  Type.Object({ kind: Type.Literal("source"), sourceId: Type.String({ minLength: 1, maxLength: LIMITS.maxContextSourceIdLength }), revision: Type.Optional(RevisionTokenSchema) }, { additionalProperties: false }),
-]);
+const ContextFileTargetSchema = Type.Object({
+  kind: Type.Literal("file"),
+  path: WorkspacePathSchema,
+  ranges: Type.Optional(Type.Array(LineRangeSchema, { maxItems: LIMITS.maxPinnedRanges })),
+  revision: Type.Optional(RevisionTokenSchema),
+}, { additionalProperties: false });
+const ContextSourceTargetSchema = Type.Object({
+  kind: Type.Literal("source"),
+  sourceId: Type.String({ minLength: 1, maxLength: LIMITS.maxContextSourceIdLength }),
+  revision: Type.Optional(RevisionTokenSchema),
+}, { additionalProperties: false });
 const ContextAllTargetSchema = Type.Object({ kind: Type.Literal("all") }, { additionalProperties: false });
 export const ContextMutationTargetSchema = Type.Union([
   ContextFileTargetSchema,
