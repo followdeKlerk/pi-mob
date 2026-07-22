@@ -83,6 +83,14 @@ test("serializes semantic commands with sorted keys and stable SHA-256", () => {
   }
 });
 
+test("context target kind participates in the semantic command hash", () => {
+  const omittedKind = { type: "context.unpin", payload: { sessionId: "66666666-6666-4666-8666-666666666666", expectedRevision: "context-r1", target: { path: "src/index.ts" } } };
+  const explicitFileKind = { type: "context.unpin", payload: { sessionId: "66666666-6666-4666-8666-666666666666", expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts" } } };
+
+  expect(canonicalSemanticCommand(omittedKind)).not.toBe(canonicalSemanticCommand(explicitFileKind));
+  expect(semanticCommandSha256(omittedKind)).not.toBe(semanticCommandSha256(explicitFileKind));
+});
+
 test("validates fixture labels against compiled TypeBox validators", () => {
   expect(validateFixture({ name: "ok", kind: "event", valid: true, message: { protocol: { major: 1, minor: 0 }, messageId: "11111111-1111-4111-8111-111111111111", eventId: "22222222-2222-4222-8222-222222222222", type: "turn.settled", sentAt: "2026-07-12T00:00:00.000Z", streamId: "session:33333333-3333-4333-8333-333333333333", cursor: "9007199254740992", payload: {} } })).toBe(true);
   expect(validateFixture({ name: "bad", kind: "event", valid: false, message: { cursor: 4 } })).toBe(true);

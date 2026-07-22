@@ -3,6 +3,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/protocol_fixture.dart';
 import 'test_asset_loader.dart';
 
+const Object _omittedLabel = Object();
+
 Map<String, Object?> _promptSubmitWithPlanTarget(
   Map<String, Object?>? planTarget,
 ) => <String, Object?>{
@@ -51,7 +53,79 @@ Map<String, Object?> _recipeActivity(String kind) => <String, Object?>{
   },
 };
 
+Map<String, Object?> _contextUnpin(Map<String, Object?> target) =>
+    <String, Object?>{
+      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'requestId': '22222222-2222-4222-8222-222222222222',
+      'connectionId': '33333333-3333-4333-8333-333333333333',
+      'commandId': '44444444-4444-4444-8444-444444444444',
+      'leaseId': '55555555-5555-4555-8555-555555555555',
+      'type': 'context.unpin',
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': <String, Object?>{
+        'sessionId': '66666666-6666-4666-8666-666666666666',
+        'expectedRevision': 'context-r1',
+        'target': target,
+      },
+    };
+
 void main() {
+  test('context target kind is required and must match its shape', () {
+    for (final target in <Map<String, Object?>>[
+      <String, Object?>{'path': 'src/index.ts'},
+      <String, Object?>{'kind': null, 'path': 'src/index.ts'},
+      <String, Object?>{'kind': 'source', 'path': 'src/index.ts'},
+    ]) {
+      expect(
+        () => validateProtocolFixture('command', _contextUnpin(target)),
+        throwsA(isA<ProtocolValidationException>()),
+        reason: target.toString(),
+      );
+    }
+    expect(
+      validateProtocolFixture(
+        'command',
+        _contextUnpin(<String, Object?>{
+          'kind': 'file',
+          'path': 'src/index.ts',
+        }),
+      ),
+      isA<ProtocolCommand>(),
+    );
+  });
+
+  test('context file range label is optional but strictly bounded', () {
+    Map<String, Object?> target([Object? label = _omittedLabel]) =>
+        <String, Object?>{
+          'kind': 'file',
+          'path': 'src/index.ts',
+          'ranges': <Object?>[
+            <String, Object?>{
+              'startLine': 1,
+              'endLine': 1,
+              if (!identical(label, _omittedLabel)) 'label': label,
+            },
+          ],
+        };
+
+    expect(
+      validateProtocolFixture('command', _contextUnpin(target())),
+      isA<ProtocolCommand>(),
+    );
+    expect(
+      validateProtocolFixture('command', _contextUnpin(target('selection'))),
+      isA<ProtocolCommand>(),
+    );
+    for (final label in <Object?>[null, 1, '', 'x' * 65]) {
+      expect(
+        () => validateProtocolFixture('command', _contextUnpin(target(label))),
+        throwsA(isA<ProtocolValidationException>()),
+        reason: 'label: $label',
+      );
+    }
+  });
+
   test('shared corpus fixture labels match Dart validation', () async {
     final manifestRaw = await TestAssetLoader.loadString(
       'packages/protocol-fixtures/corpus/fixtures-manifest.json',

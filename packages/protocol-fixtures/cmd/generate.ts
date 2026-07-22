@@ -45,7 +45,7 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "session.export") return { sessionId: ids.sessionId, format: "html" };
   if (type === "prompt.submit") return { sessionId: ids.sessionId, deliveryMode: "immediate", message: "fixture", attachmentIds: [] };
   if (type === "context.pin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", ranges: [FILE_RANGE], revision: "file-r1" } };
-  if (type === "context.unpin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { path: "src/index.ts", revision: "file-r1" } };
+  if (type === "context.unpin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1" } };
   if (type === "context.exclude") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "source", sourceId: "source-fixture", revision: "file-r1" } };
   if (type === "context.refresh") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "all" } };
   if (type === "queue.remove") return { sessionId: ids.sessionId, queueItemId: ids.sessionId };
@@ -206,6 +206,7 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-context-token-17-digit", "event", eventEnvelope("context.snapshot", { ...contextSnapshot(), tokenUsage: { inputTokens: "99999999999999999", outputTokens: "32" } })],
   ["invalid-context-missing-expected-revision", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, target: { kind: "file", path: "src/index.ts", revision: "file-r1" } })],
   ["invalid-context-missing-target", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, expectedRevision: "context-r1" })],
+  ["invalid-context-target-missing-kind", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { path: "src/index.ts", revision: "file-r1" } })],
   ["invalid-workspace-file-metadata-private-field", "response", { ...base, requestId: ids.requestId, type: "workspace.file.metadata.result", payload: { workspaceId: ids.workspaceId, file: { ...fileMetadata(), private: "leak" } } }],
   ["invalid-context-target-private-field", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1", private: "leak" } })],
   ["invalid-prompt-file-ref-private-field", "command", commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), fileRefs: [{ ...fileReference(), private: "leak" }] })],

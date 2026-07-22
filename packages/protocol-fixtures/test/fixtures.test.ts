@@ -72,6 +72,7 @@ const expectedInvalidFiles = [
   "invalid-context-token-17-digit.json",
   "invalid-context-missing-expected-revision.json",
   "invalid-context-missing-target.json",
+  "invalid-context-target-missing-kind.json",
   "invalid-workspace-file-metadata-private-field.json",
   "invalid-context-target-private-field.json",
   "invalid-prompt-file-ref-private-field.json",
@@ -110,6 +111,9 @@ function repairExpectedInvalid(file: ExpectedInvalidFile, message: Record<string
       break;
     case "invalid-context-missing-target.json":
       payload.target = { kind: "file", path: "src/index.ts", revision: "file-r1" };
+      break;
+    case "invalid-context-target-missing-kind.json":
+      (payload.target as Record<string, unknown>).kind = "file";
       break;
     case "invalid-workspace-file-metadata-private-field.json":
       delete (payload.file as Record<string, unknown>).private;

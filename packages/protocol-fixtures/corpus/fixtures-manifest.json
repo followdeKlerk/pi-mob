@@ -927,6 +927,12 @@
     "expectation": "expected-invalid"
   },
   {
+    "file": "invalid-context-target-missing-kind.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
     "file": "invalid-context-target-private-field.json",
     "valid": false,
     "kind": "command",

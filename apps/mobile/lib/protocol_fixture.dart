@@ -1080,6 +1080,45 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
         );
       }
     }
+    if (payload.containsKey('fileRefs')) {
+      final fileRefs = _list(payload, 'fileRefs');
+      if (fileRefs.length > 4) {
+        throw ProtocolValidationException(
+          'payload.fileRefs',
+          '<= 4 items',
+          fileRefs.length,
+        );
+      }
+      for (final item in fileRefs) {
+        final fileRef = _objectFrom(item, 'payload.fileRefs');
+        _closedObject(fileRef, 'payload.fileRefs', const {
+          'workspaceId',
+          'path',
+          'digest',
+          'revision',
+        });
+        _uuidString(fileRef, 'workspaceId');
+        final path = _string(fileRef, 'path');
+        if (!RegExp(
+          r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(/|$))[^\x00-\x1F\x7F]{1,1024}$',
+        ).hasMatch(path)) {
+          throw ProtocolValidationException(
+            'payload.fileRefs.path',
+            'workspace-relative path',
+            path,
+          );
+        }
+        final digest = _string(fileRef, 'digest');
+        if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
+          throw ProtocolValidationException(
+            'payload.fileRefs.digest',
+            'lowercase SHA-256',
+            digest,
+          );
+        }
+        _revisionTokenString(fileRef, 'revision');
+      }
+    }
     if (payload.containsKey('planTarget')) {
       final target = _object(payload, 'planTarget');
       _closedObject(target, 'payload.planTarget', const <String>{
@@ -1119,37 +1158,87 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
 }
 
 void _validateContextMutationPayload(Map<String, Object?> payload) {
-  _closedObject(payload, 'payload', const {'sessionId', 'expectedRevision', 'target'});
+  _closedObject(payload, 'payload', const {
+    'sessionId',
+    'expectedRevision',
+    'target',
+  });
   _uuidString(payload, 'sessionId');
   _revisionTokenString(payload, 'expectedRevision');
   final target = _object(payload, 'target');
-  if (!target.containsKey('kind')) throw ProtocolValidationException('payload.target.kind', 'required', null);
+  if (!target.containsKey('kind'))
+    throw ProtocolValidationException('payload.target.kind', 'required', null);
   switch (target['kind']) {
-    case 'all': _closedObject(target, 'payload.target', const {'kind'}); return;
+    case 'all':
+      _closedObject(target, 'payload.target', const {'kind'});
+      return;
     case 'source':
-      _closedObject(target, 'payload.target', const {'kind', 'sourceId', 'revision'});
+      _closedObject(target, 'payload.target', const {
+        'kind',
+        'sourceId',
+        'revision',
+      });
       _boundedRequiredString(target, 'sourceId', 128);
-      if (target.containsKey('revision')) _revisionTokenString(target, 'revision');
+      if (target.containsKey('revision'))
+        _revisionTokenString(target, 'revision');
       return;
     case 'file':
-      _closedObject(target, 'payload.target', const {'kind', 'path', 'ranges', 'revision'});
+      _closedObject(target, 'payload.target', const {
+        'kind',
+        'path',
+        'ranges',
+        'revision',
+      });
       final path = _string(target, 'path');
-      final pathPattern = RegExp(r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(/|$))[^\x00-\x1F\x7F]{1,1024}$');
-      if (!pathPattern.hasMatch(path)) throw ProtocolValidationException('payload.target.path', 'workspace-relative path', path);
+      final pathPattern = RegExp(
+        r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(/|$))[^\x00-\x1F\x7F]{1,1024}$',
+      );
+      if (!pathPattern.hasMatch(path))
+        throw ProtocolValidationException(
+          'payload.target.path',
+          'workspace-relative path',
+          path,
+        );
       if (target.containsKey('ranges')) {
         final ranges = _list(target, 'ranges');
-        if (ranges.length > 16) throw ProtocolValidationException('payload.target.ranges', '<= 16 items', ranges.length);
+        if (ranges.length > 16)
+          throw ProtocolValidationException(
+            'payload.target.ranges',
+            '<= 16 items',
+            ranges.length,
+          );
         for (final item in ranges) {
           final range = _objectFrom(item, 'payload.target.ranges');
-          _closedObject(range, 'payload.target.ranges', const {'startLine', 'endLine', 'label'});
-          final start = _positiveInteger(range, 'startLine'); final end = _positiveInteger(range, 'endLine');
-          if (end < start) throw ProtocolValidationException('payload.target.ranges', 'endLine >= startLine', range);
+          _closedObject(range, 'payload.target.ranges', const {
+            'startLine',
+            'endLine',
+            'label',
+          });
+          final start = _positiveInteger(range, 'startLine');
+          final end = _positiveInteger(range, 'endLine');
+          if (end < start)
+            throw ProtocolValidationException(
+              'payload.target.ranges',
+              'endLine >= startLine',
+              range,
+            );
+          if (range.containsKey('label')) {
+            _boundedRequiredString(range, 'label', 64);
+          }
         }
       }
-      if (target.containsKey('revision')) _revisionTokenString(target, 'revision'); return;
-    default: throw ProtocolValidationException('payload.target.kind', 'file, source, or all', target['kind']);
+      if (target.containsKey('revision'))
+        _revisionTokenString(target, 'revision');
+      return;
+    default:
+      throw ProtocolValidationException(
+        'payload.target.kind',
+        'file, source, or all',
+        target['kind'],
+      );
   }
 }
+
 Map<String, Object?> _objectFrom(Object? value, String path) {
   if (value is Map) return Map<String, Object?>.from(value);
   throw ProtocolValidationException(path, 'object', value);
@@ -1409,10 +1498,72 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
   }
   if (type == 'context.snapshot') {
     _uuidString(payload, 'sessionId');
+    final tokenUsage = _object(payload, 'tokenUsage');
+    for (final field in const <String>[
+      'inputTokens',
+      'outputTokens',
+      'cacheReadTokens',
+      'cacheWriteTokens',
+      'contextWindowTokens',
+    ]) {
+      if (!tokenUsage.containsKey(field)) {
+        if (field == 'inputTokens' || field == 'outputTokens') {
+          throw ProtocolValidationException(
+            'payload.tokenUsage.$field',
+            'required canonical decimal string',
+            null,
+          );
+        }
+        continue;
+      }
+      final value = tokenUsage[field];
+      if (value is! String ||
+          !RegExp(r'^(0|[1-9][0-9]{0,15})$').hasMatch(value)) {
+        throw ProtocolValidationException(
+          'payload.tokenUsage.$field',
+          'canonical decimal string with at most 16 digits',
+          value,
+        );
+      }
+    }
   }
 }
 
 void _validateResponsePayload(String type, Map<String, Object?> payload) {
+  if (type == 'workspace.file.metadata.result') {
+    _uuidString(payload, 'workspaceId');
+    final file = _object(payload, 'file');
+    _closedObject(file, 'payload.file', const {
+      'path',
+      'size',
+      'sha256',
+      'isBinary',
+      'modifiedAt',
+      'revision',
+      'lastReadAt',
+      'languageHint',
+    });
+    final size = _nonNegativeInteger(file, 'size');
+    if (size > 26214400) {
+      throw ProtocolValidationException(
+        'payload.file.size',
+        '<= 26214400 bytes',
+        size,
+      );
+    }
+  }
+  if (type == 'workspace.file.read.result') {
+    _uuidString(payload, 'workspaceId');
+    final result = _object(payload, 'result');
+    final content = _stringAllowEmpty(result, 'content');
+    if (content.length > 262144) {
+      throw ProtocolValidationException(
+        'payload.result.content',
+        '<= 262144 UTF-16 code units',
+        content.length,
+      );
+    }
+  }
   if (type == 'hello.accepted') {
     _uuidString(payload, 'connectionId');
     _uuidString(payload, 'hostId');
