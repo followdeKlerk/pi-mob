@@ -950,6 +950,18 @@
                   "type": "string"
                 },
                 {
+                  "const": "retry.auto.set",
+                  "type": "string"
+                },
+                {
+                  "const": "retry.abort",
+                  "type": "string"
+                },
+                {
+                  "const": "extension.respond",
+                  "type": "string"
+                },
+                {
                   "const": "context.pin",
                   "type": "string"
                 },
@@ -5592,7 +5604,7 @@
               "items": {
                 "$id": "pi-mob/protocol/workspace-path",
                 "maxLength": 1024,
-                "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                "pattern": "^(?!/)(?!.*//)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\x00-\\x1F\\x7F]{1,1024}$",
                 "type": "string"
               },
               "maxItems": 1024,
@@ -5873,7 +5885,7 @@
                 "path": {
                   "$id": "pi-mob/protocol/workspace-path",
                   "maxLength": 1024,
-                  "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                  "pattern": "^(?!/)(?!.*//)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\x00-\\x1F\\x7F]{1,1024}$",
                   "type": "string"
                 },
                 "revision": {
@@ -6000,7 +6012,7 @@
             "path": {
               "$id": "pi-mob/protocol/workspace-path",
               "maxLength": 1024,
-              "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+              "pattern": "^(?!/)(?!.*//)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\x00-\\x1F\\x7F]{1,1024}$",
               "type": "string"
             },
             "previousRevision": {
@@ -6547,7 +6559,7 @@
                   "path": {
                     "$id": "pi-mob/protocol/workspace-path",
                     "maxLength": 1024,
-                    "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                    "pattern": "^(?!/)(?!.*//)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\x00-\\x1F\\x7F]{1,1024}$",
                     "type": "string"
                   },
                   "pinnedAt": {
@@ -6834,24 +6846,24 @@
               "additionalProperties": false,
               "properties": {
                 "cacheReadTokens": {
-                  "minimum": 0,
-                  "type": "integer"
+                  "pattern": "^(0|[1-9][0-9]{0,15})$",
+                  "type": "string"
                 },
                 "cacheWriteTokens": {
-                  "minimum": 0,
-                  "type": "integer"
+                  "pattern": "^(0|[1-9][0-9]{0,15})$",
+                  "type": "string"
                 },
                 "contextWindowTokens": {
-                  "minimum": 0,
-                  "type": "integer"
+                  "pattern": "^(0|[1-9][0-9]{0,15})$",
+                  "type": "string"
                 },
                 "inputTokens": {
-                  "minimum": 0,
-                  "type": "integer"
+                  "pattern": "^(0|[1-9][0-9]{0,15})$",
+                  "type": "string"
                 },
                 "outputTokens": {
-                  "minimum": 0,
-                  "type": "integer"
+                  "pattern": "^(0|[1-9][0-9]{0,15})$",
+                  "type": "string"
                 },
                 "usagePercent": {
                   "maximum": 1,

@@ -111,6 +111,7 @@ export const COMMAND_TYPES = [
   "session.delete", "session.restore", "session.purge", "session.fork", "session.clone", "session.export",
   "prompt.submit", "turn.abort", "queue.remove", "queue.clear", "model.set", "thinking.set",
   "steering_mode.set", "follow_up_mode.set", "compaction.start", "compaction.auto.set",
+  "retry.auto.set", "retry.abort", "extension.respond",
   // F0 — additive context-inspector (R4) mutations. These are durable,
   // session-scoped commands; they are intentionally not controls/results.
   "context.pin", "context.unpin", "context.exclude", "context.refresh",
@@ -559,10 +560,14 @@ export const CONTEXTS_CAPABILITY = "contexts.v1" as const;
 // `..`-escape rejection against the workspace root — those invariants
 // require filesystem state and cannot be expressed in a regex without
 // losing honest closed-shape guarantees. The schema rejects a leading
-// slash, a literal `..` or `.` segment, backslashes, and NUL/CR/LF so
-// any caller passing a manifest path already violates the contract
-// before the bridge ever touches the filesystem.
-export const WORKSPACE_PATH_PATTERN = "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$";
+// slash, a literal `..` or `.` segment, backslashes, double slashes,
+// and NUL/CR/LF so any caller passing a manifest path already violates
+// the contract before the bridge ever touches the filesystem. The
+// segment check is precise: a `.` or `..` segment is rejected wherever
+// it appears (start, middle, or end of the path), but dotfile segments
+// like `.git` are explicitly permitted — only an exact `.` or exact
+// `..` segment is rejected.
+export const WORKSPACE_PATH_PATTERN = "^(?!/)(?!.*//)(?!.*\\\\)(?!.*(?:^|/)\\.\\.?(?:/|$))[^\\x00-\\x1F\\x7F]{1,1024}$";
 export const WorkspacePathSchema = Type.String({
   pattern: WORKSPACE_PATH_PATTERN,
   maxLength: LIMITS.maxWorkspacePathLength,
@@ -586,6 +591,7 @@ export const LineRangeSchema = Type.Object({
 export const FileNodeSchema = Type.Object({
   path: WorkspacePathSchema,
   kind: Type.Union([Type.Literal("file"), Type.Literal("directory")]),
+  depth: Type.Integer({ minimum: 0, maximum: LIMITS.maxTreeDepth }),
   size: Type.Optional(Type.Integer({ minimum: 0, maximum: LIMITS.maxFileSize })),
   childCount: Type.Optional(Type.Integer({ minimum: 0, maximum: LIMITS.maxTreePageItems })),
   modifiedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
@@ -739,18 +745,26 @@ export const PinnedFileSchema = Type.Object({
   revision: RevisionTokenSchema,
 }, { additionalProperties: false, $id: "pi-mob/protocol/pinned-file" });
 
-// F0 — R4 TokenUsageSchema. Closed, bounded token-usage telemetry. The
-// schema proves only the field shapes, the non-negative integer sign,
-// and the closed object envelope; the bridge computes the actual
+// F0 — R4 TokenUsageSchema. Closed, bounded token-usage telemetry. All
+// token-count fields are canonical decimal STRINGS — the bridge never
+// rounds or re-encodes the value, so JS `Number` precision loss is
+// impossible (a 17-digit value already exceeds Number.MAX_SAFE_INTEGER).
+// The pattern enforces a single canonical form: either the literal
+// "0" or a nonzero digit followed by 0..15 additional decimal digits,
+// so the maximum length is 16 digits (e.g. "9999999999999999"). No
+// leading zeros, no decimal point, no exponent notation, no sign. The
+// schema proves only the string shape; the bridge computes the actual
 // totals from provider-supplied usage and re-measures them at publish.
 // `usagePercent` (0..1) is an optional convenience field the inspector
-// surfaces as a progress indicator.
+// surfaces as a progress indicator and remains a numeric value because
+// it is a derived ratio, not a token count.
+export const TOKEN_USAGE_DIGITS_PATTERN = "^(0|[1-9][0-9]{0,15})$";
 export const TokenUsageSchema = Type.Object({
-  inputTokens: Type.Integer({ minimum: 0 }),
-  outputTokens: Type.Integer({ minimum: 0 }),
-  cacheReadTokens: Type.Optional(Type.Integer({ minimum: 0 })),
-  cacheWriteTokens: Type.Optional(Type.Integer({ minimum: 0 })),
-  contextWindowTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  inputTokens: Type.String({ pattern: TOKEN_USAGE_DIGITS_PATTERN }),
+  outputTokens: Type.String({ pattern: TOKEN_USAGE_DIGITS_PATTERN }),
+  cacheReadTokens: Type.Optional(Type.String({ pattern: TOKEN_USAGE_DIGITS_PATTERN })),
+  cacheWriteTokens: Type.Optional(Type.String({ pattern: TOKEN_USAGE_DIGITS_PATTERN })),
+  contextWindowTokens: Type.Optional(Type.String({ pattern: TOKEN_USAGE_DIGITS_PATTERN })),
   usagePercent: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
 }, { additionalProperties: false, $id: "pi-mob/protocol/token-usage" });
 
