@@ -1755,8 +1755,44 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
     _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
   }
   if (type == 'workspace.file.metadata') {
+    _closedObject(payload, 'payload', const <String>{
+      'workspaceId',
+      'file',
+      'previousRevision',
+      'capability',
+    });
     _uuidString(payload, 'workspaceId');
-    _object(payload, 'file');
+    _validateFileMetadata(_object(payload, 'file'), 'payload.file');
+    if (payload.containsKey('previousRevision')) {
+      _revisionTokenString(payload, 'previousRevision');
+    }
+    _validateFilesCapability(payload);
+  }
+  if (type == 'workspace.file.stale') {
+    _closedObject(payload, 'payload', const <String>{
+      'workspaceId',
+      'path',
+      'previousRevision',
+      'currentRevision',
+      'modifiedAt',
+      'capability',
+    });
+    _uuidString(payload, 'workspaceId');
+    _workspacePathString(payload, 'path');
+    _revisionTokenString(payload, 'previousRevision');
+    _revisionTokenString(payload, 'currentRevision');
+    _validateUtcTimestamp(payload, 'modifiedAt');
+    _validateFilesCapability(payload);
+  }
+  if (type == 'workspace.file.unavailable') {
+    _closedObject(payload, 'payload', const <String>{
+      'workspaceId',
+      'capability',
+      'status',
+    });
+    _uuidString(payload, 'workspaceId');
+    _validateFilesCapability(payload);
+    _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
   }
   if (type == 'context.snapshot') {
     _validateContextSnapshotPayload(payload);
@@ -1873,6 +1909,143 @@ void _validateWorkspaceControlPayload(
   }
 }
 
+void _validateWorkspacePageResponseFields(Map<String, Object?> payload) {
+  _uuidString(payload, 'workspaceId');
+  _revisionTokenString(payload, 'rootRevision');
+  if (payload.containsKey('nextPageToken') &&
+      payload['nextPageToken'] != null) {
+    _boundedRequiredString(payload, 'nextPageToken', 256);
+  }
+}
+
+void _validateFilesCapability(Map<String, Object?> payload) {
+  final capability = _string(payload, 'capability');
+  if (capability != 'files.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'files.v1 literal',
+      capability,
+    );
+  }
+}
+
+void _validateFileSearchMatch(Object? value, String path) {
+  final match = _objectFrom(value, path);
+  _closedObject(match, path, const <String>{
+    'path',
+    'matchStart',
+    'matchLength',
+  });
+  _workspacePathString(match, 'path');
+  if (match.containsKey('matchStart')) {
+    _nonNegativeInteger(match, 'matchStart');
+  }
+  if (match.containsKey('matchLength')) {
+    _positiveInteger(match, 'matchLength');
+  }
+}
+
+void _validateContentSearchMatch(Object? value, String path) {
+  final match = _objectFrom(value, path);
+  _closedObject(match, path, const <String>{
+    'path',
+    'line',
+    'column',
+    'matchStart',
+    'matchLength',
+    'lineText',
+  });
+  _workspacePathString(match, 'path');
+  _positiveInteger(match, 'line');
+  _positiveInteger(match, 'column');
+  _nonNegativeInteger(match, 'matchStart');
+  _positiveInteger(match, 'matchLength');
+  final lineText = _stringAllowEmpty(match, 'lineText');
+  if (lineText.length > 4096) {
+    throw ProtocolValidationException(
+      '$path.lineText',
+      '<= 4096 characters',
+      lineText,
+    );
+  }
+}
+
+void _validateFileMetadata(Map<String, Object?> file, String path) {
+  _closedObject(file, path, const <String>{
+    'path',
+    'size',
+    'sha256',
+    'isBinary',
+    'modifiedAt',
+    'revision',
+    'lastReadAt',
+    'languageHint',
+  });
+  _workspacePathString(file, 'path');
+  final size = _nonNegativeInteger(file, 'size');
+  if (size > 26214400) {
+    throw ProtocolValidationException('$path.size', '<= 26214400 bytes', size);
+  }
+  if (file.containsKey('sha256')) {
+    final digest = _string(file, 'sha256');
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
+      throw ProtocolValidationException(
+        '$path.sha256',
+        'lowercase SHA-256',
+        digest,
+      );
+    }
+  }
+  _boolean(file, 'isBinary');
+  _validateUtcTimestamp(file, 'modifiedAt');
+  _revisionTokenString(file, 'revision');
+  _validateUtcTimestamp(file, 'lastReadAt');
+  if (file.containsKey('languageHint')) {
+    _boundedRequiredString(file, 'languageHint', 32);
+  }
+}
+
+void _validateFileReadResult(Map<String, Object?> result, String path) {
+  _closedObject(result, path, const <String>{
+    'path',
+    'revision',
+    'rangeStart',
+    'rangeEnd',
+    'totalLines',
+    'content',
+    'encoding',
+    'isTruncated',
+    'truncation',
+    'lastModifiedAt',
+  });
+  _workspacePathString(result, 'path');
+  _revisionTokenString(result, 'revision');
+  _positiveInteger(result, 'rangeStart');
+  _positiveInteger(result, 'rangeEnd');
+  _nonNegativeInteger(result, 'totalLines');
+  final content = _stringAllowEmpty(result, 'content');
+  if (content.length > 524288) {
+    throw ProtocolValidationException(
+      '$path.content',
+      '<= 524288 characters',
+      content.length,
+    );
+  }
+  final encoding = _string(result, 'encoding');
+  if (encoding != 'utf-8') {
+    throw ProtocolValidationException(
+      '$path.encoding',
+      'utf-8 literal',
+      encoding,
+    );
+  }
+  _boolean(result, 'isTruncated');
+  if (result.containsKey('truncation')) {
+    _validateTruncation(_object(result, 'truncation'), '$path.truncation');
+  }
+  _validateUtcTimestamp(result, 'lastModifiedAt');
+}
+
 void _validateResponsePayload(String type, Map<String, Object?> payload) {
   if (type == 'context.snapshot.result') {
     _validateContextSnapshotPayload(payload);
@@ -1886,11 +2059,7 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
       'path',
       'items',
     });
-    _uuidString(payload, 'workspaceId');
-    _revisionTokenString(payload, 'rootRevision');
-    if (payload['nextPageToken'] != null) {
-      _boundedString(payload, 'nextPageToken', 256);
-    }
+    _validateWorkspacePageResponseFields(payload);
     if (payload.containsKey('path')) _workspacePathString(payload, 'path');
     final items = _list(payload, 'items');
     if (items.length > 200) {
@@ -1904,39 +2073,57 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
       _validateFileNode(items[index], 'payload.items[$index]');
     }
   }
-  if (type == 'workspace.file.metadata.result') {
-    _uuidString(payload, 'workspaceId');
-    final file = _object(payload, 'file');
-    _closedObject(file, 'payload.file', const {
-      'path',
-      'size',
-      'sha256',
-      'isBinary',
-      'modifiedAt',
-      'revision',
-      'lastReadAt',
-      'languageHint',
+  if (type == 'workspace.file.search.result') {
+    _closedObject(payload, 'payload', const <String>{
+      'workspaceId',
+      'rootRevision',
+      'nextPageToken',
+      'items',
     });
-    final size = _nonNegativeInteger(file, 'size');
-    if (size > 26214400) {
+    _validateWorkspacePageResponseFields(payload);
+    final items = _list(payload, 'items');
+    if (items.length > 100) {
       throw ProtocolValidationException(
-        'payload.file.size',
-        '<= 26214400 bytes',
-        size,
+        'payload.items',
+        '<= 100 items',
+        items.length,
       );
+    }
+    for (var index = 0; index < items.length; index++) {
+      _validateFileSearchMatch(items[index], 'payload.items[$index]');
     }
   }
-  if (type == 'workspace.file.read.result') {
-    _uuidString(payload, 'workspaceId');
-    final result = _object(payload, 'result');
-    final content = _stringAllowEmpty(result, 'content');
-    if (content.length > 262144) {
+  if (type == 'workspace.file.content.search.result') {
+    _closedObject(payload, 'payload', const <String>{
+      'workspaceId',
+      'rootRevision',
+      'nextPageToken',
+      'items',
+      'isTruncated',
+    });
+    _validateWorkspacePageResponseFields(payload);
+    final items = _list(payload, 'items');
+    if (items.length > 200) {
       throw ProtocolValidationException(
-        'payload.result.content',
-        '<= 262144 UTF-16 code units',
-        content.length,
+        'payload.items',
+        '<= 200 items',
+        items.length,
       );
     }
+    for (var index = 0; index < items.length; index++) {
+      _validateContentSearchMatch(items[index], 'payload.items[$index]');
+    }
+    _boolean(payload, 'isTruncated');
+  }
+  if (type == 'workspace.file.metadata.result') {
+    _closedObject(payload, 'payload', const <String>{'workspaceId', 'file'});
+    _uuidString(payload, 'workspaceId');
+    _validateFileMetadata(_object(payload, 'file'), 'payload.file');
+  }
+  if (type == 'workspace.file.read.result') {
+    _closedObject(payload, 'payload', const <String>{'workspaceId', 'result'});
+    _uuidString(payload, 'workspaceId');
+    _validateFileReadResult(_object(payload, 'result'), 'payload.result');
   }
   if (type == 'hello.accepted') {
     _uuidString(payload, 'connectionId');

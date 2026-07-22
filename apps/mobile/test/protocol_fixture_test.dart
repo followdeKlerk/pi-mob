@@ -235,6 +235,75 @@ Map<String, Object?> _workspaceTreeSnapshot(Object? change) =>
       },
     };
 
+Map<String, Object?> _workspaceResponse(
+  String type,
+  Map<String, Object?> payload,
+) => <String, Object?>{
+  'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+  'messageId': '11111111-1111-4111-8111-111111111111',
+  'requestId': '22222222-2222-4222-8222-222222222222',
+  'type': type,
+  'sentAt': '2026-07-15T04:20:00.000Z',
+  'payload': payload,
+};
+
+Map<String, Object?> _workspaceEvent(
+  String type,
+  Map<String, Object?> payload,
+) => <String, Object?>{
+  'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+  'messageId': '11111111-1111-4111-8111-111111111111',
+  'eventId': '22222222-2222-4222-8222-222222222222',
+  'streamId': 'host:33333333-3333-4333-8333-333333333333',
+  'cursor': '1',
+  'type': type,
+  'sentAt': '2026-07-15T04:20:00.000Z',
+  'payload': payload,
+};
+
+Map<String, Object?> _fileMetadata() => <String, Object?>{
+  'path': 'src/index.ts',
+  'size': 26214400,
+  'sha256': 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+  'isBinary': false,
+  'modifiedAt': '2026-07-15T04:19:00.000Z',
+  'revision': 'file-r1',
+  'lastReadAt': '2026-07-15T04:20:00.000Z',
+  'languageHint': 'x' * 32,
+};
+
+Map<String, Object?> _metadataResponse(Map<String, Object?> file) =>
+    _workspaceResponse('workspace.file.metadata.result', <String, Object?>{
+      'workspaceId': '44444444-4444-4444-8444-444444444444',
+      'file': file,
+    });
+
+Map<String, Object?> _metadataEvent(Map<String, Object?> file) =>
+    _workspaceEvent('workspace.file.metadata', <String, Object?>{
+      'workspaceId': '44444444-4444-4444-8444-444444444444',
+      'file': file,
+      'previousRevision': 'file-r0',
+      'capability': 'files.v1',
+    });
+
+Map<String, Object?> _fileReadResult() => <String, Object?>{
+  'path': 'src/index.ts',
+  'revision': 'file-r1',
+  'rangeStart': 1,
+  'rangeEnd': 1,
+  'totalLines': 1,
+  'content': 'fixture',
+  'encoding': 'utf-8',
+  'isTruncated': false,
+  'lastModifiedAt': '2026-07-15T04:19:00.000Z',
+};
+
+Map<String, Object?> _fileReadResponse(Map<String, Object?> result) =>
+    _workspaceResponse('workspace.file.read.result', <String, Object?>{
+      'workspaceId': '44444444-4444-4444-8444-444444444444',
+      'result': result,
+    });
+
 void main() {
   test('workspace path validation is shared across all R3 controls', () {
     const controls = <String>[
@@ -342,6 +411,496 @@ void main() {
         () => validateProtocolFixture('event', _workspaceTreeSnapshot(change)),
         throwsA(isA<ProtocolValidationException>()),
         reason: change.toString(),
+      );
+    }
+  });
+
+  test(
+    'filename and content search results accept item and page boundaries',
+    () {
+      final filenameItem = <String, Object?>{
+        'path': 'src/index.ts',
+        'matchStart': 0,
+        'matchLength': 1,
+      };
+      final filenamePayload = <String, Object?>{
+        'workspaceId': '44444444-4444-4444-8444-444444444444',
+        'rootRevision': 'tree-r1',
+        'nextPageToken': 'p' * 256,
+        'items': List<Object?>.generate(100, (_) => filenameItem),
+      };
+      expect(
+        validateProtocolFixture(
+          'response',
+          _workspaceResponse('workspace.file.search.result', filenamePayload),
+        ),
+        isA<ProtocolResponse>(),
+      );
+
+      final contentItem = <String, Object?>{
+        'path': 'src/index.ts',
+        'line': 1,
+        'column': 1,
+        'matchStart': 0,
+        'matchLength': 1,
+        'lineText': 'x' * 4096,
+      };
+      final contentPayload = <String, Object?>{
+        'workspaceId': '44444444-4444-4444-8444-444444444444',
+        'rootRevision': 'tree-r1',
+        'nextPageToken': null,
+        'items': List<Object?>.generate(200, (_) => contentItem),
+        'isTruncated': true,
+      };
+      expect(
+        validateProtocolFixture(
+          'response',
+          _workspaceResponse(
+            'workspace.file.content.search.result',
+            contentPayload,
+          ),
+        ),
+        isA<ProtocolResponse>(),
+      );
+
+      filenamePayload
+        ..['nextPageToken'] = null
+        ..['items'] = <Object?>[
+          <String, Object?>{'path': 'README.md'},
+        ];
+      contentPayload['items'] = <Object?>[
+        <String, Object?>{...contentItem, 'lineText': ''},
+      ];
+      expect(
+        validateProtocolFixture(
+          'response',
+          _workspaceResponse('workspace.file.search.result', filenamePayload),
+        ),
+        isA<ProtocolResponse>(),
+      );
+      expect(
+        validateProtocolFixture(
+          'response',
+          _workspaceResponse(
+            'workspace.file.content.search.result',
+            contentPayload,
+          ),
+        ),
+        isA<ProtocolResponse>(),
+      );
+    },
+  );
+
+  test(
+    'filename and content search results reject closed, missing, and oversized shapes',
+    () {
+      Map<String, Object?> filenamePayload() => <String, Object?>{
+        'workspaceId': '44444444-4444-4444-8444-444444444444',
+        'rootRevision': 'tree-r1',
+        'items': <Object?>[
+          <String, Object?>{
+            'path': 'src/index.ts',
+            'matchStart': 0,
+            'matchLength': 1,
+          },
+        ],
+      };
+      Map<String, Object?> contentPayload() => <String, Object?>{
+        'workspaceId': '44444444-4444-4444-8444-444444444444',
+        'rootRevision': 'tree-r1',
+        'items': <Object?>[
+          <String, Object?>{
+            'path': 'src/index.ts',
+            'line': 1,
+            'column': 1,
+            'matchStart': 0,
+            'matchLength': 1,
+            'lineText': 'fixture',
+          },
+        ],
+        'isTruncated': false,
+      };
+
+      final invalid = <String, Map<String, Object?>>{
+        'filename private root': _workspaceResponse(
+          'workspace.file.search.result',
+          filenamePayload()..['private'] = true,
+        ),
+        'filename missing revision': _workspaceResponse(
+          'workspace.file.search.result',
+          filenamePayload()..remove('rootRevision'),
+        ),
+        'filename oversized items': _workspaceResponse(
+          'workspace.file.search.result',
+          filenamePayload()
+            ..['items'] = List<Object?>.generate(
+              101,
+              (_) => <String, Object?>{'path': 'src/index.ts'},
+            ),
+        ),
+        'filename private item': _workspaceResponse(
+          'workspace.file.search.result',
+          filenamePayload()
+            ..['items'] = <Object?>[
+              <String, Object?>{'path': 'src/index.ts', 'private': true},
+            ],
+        ),
+        'filename nullable offset': _workspaceResponse(
+          'workspace.file.search.result',
+          filenamePayload()
+            ..['items'] = <Object?>[
+              <String, Object?>{'path': 'src/index.ts', 'matchStart': null},
+            ],
+        ),
+        'content private item': _workspaceResponse(
+          'workspace.file.content.search.result',
+          contentPayload()
+            ..['items'] = <Object?>[
+              <String, Object?>{
+                'path': 'src/index.ts',
+                'line': 1,
+                'column': 1,
+                'matchStart': 0,
+                'matchLength': 1,
+                'lineText': 'fixture',
+                'private': true,
+              },
+            ],
+        ),
+        'content missing line': _workspaceResponse(
+          'workspace.file.content.search.result',
+          contentPayload()
+            ..['items'] = <Object?>[
+              <String, Object?>{
+                'path': 'src/index.ts',
+                'column': 1,
+                'matchStart': 0,
+                'matchLength': 1,
+                'lineText': 'fixture',
+              },
+            ],
+        ),
+        'content oversized line text': _workspaceResponse(
+          'workspace.file.content.search.result',
+          contentPayload()
+            ..['items'] = <Object?>[
+              <String, Object?>{
+                'path': 'src/index.ts',
+                'line': 1,
+                'column': 1,
+                'matchStart': 0,
+                'matchLength': 1,
+                'lineText': 'x' * 4097,
+              },
+            ],
+        ),
+        'content oversized items': _workspaceResponse(
+          'workspace.file.content.search.result',
+          contentPayload()
+            ..['items'] = List<Object?>.generate(
+              201,
+              (_) => <String, Object?>{
+                'path': 'src/index.ts',
+                'line': 1,
+                'column': 1,
+                'matchStart': 0,
+                'matchLength': 1,
+                'lineText': '',
+              },
+            ),
+        ),
+        'content nullable truncation flag': _workspaceResponse(
+          'workspace.file.content.search.result',
+          contentPayload()..['isTruncated'] = null,
+        ),
+      };
+      for (final entry in invalid.entries) {
+        expect(
+          () => validateProtocolFixture('response', entry.value),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: entry.key,
+        );
+      }
+
+      for (final type in const <String>[
+        'workspace.file.search.result',
+        'workspace.file.content.search.result',
+      ]) {
+        for (final token in <Object?>['', 'p' * 257, 1]) {
+          final payload = type == 'workspace.file.search.result'
+              ? filenamePayload()
+              : contentPayload();
+          payload['nextPageToken'] = token;
+          expect(
+            () => validateProtocolFixture(
+              'response',
+              _workspaceResponse(type, payload),
+            ),
+            throwsA(isA<ProtocolValidationException>()),
+            reason: '$type page token $token',
+          );
+        }
+      }
+    },
+  );
+
+  test('file metadata event and response share the complete TS validator', () {
+    for (final envelope in <Map<String, Object?>>[
+      _metadataResponse(_fileMetadata()),
+      _metadataEvent(_fileMetadata()),
+    ]) {
+      expect(
+        validateProtocolFixture(
+          envelope.containsKey('eventId') ? 'event' : 'response',
+          envelope,
+        ),
+        envelope.containsKey('eventId')
+            ? isA<ProtocolEvent>()
+            : isA<ProtocolResponse>(),
+      );
+    }
+
+    final minimal = _fileMetadata()
+      ..remove('sha256')
+      ..remove('languageHint');
+    expect(
+      validateProtocolFixture('response', _metadataResponse(minimal)),
+      isA<ProtocolResponse>(),
+    );
+  });
+
+  test(
+    'file metadata event and response reject the same nested invalid shapes',
+    () {
+      final invalidFiles = <String, Map<String, Object?>>{
+        'private field': _fileMetadata()..['private'] = true,
+        'missing isBinary': _fileMetadata()..remove('isBinary'),
+        'oversized file': _fileMetadata()..['size'] = 26214401,
+        'nullable digest': _fileMetadata()..['sha256'] = null,
+        'nullable language': _fileMetadata()..['languageHint'] = null,
+        'invalid path': _fileMetadata()..['path'] = '../private',
+        'invalid revision': _fileMetadata()..['revision'] = '42',
+        'missing lastReadAt': _fileMetadata()..remove('lastReadAt'),
+      };
+      for (final entry in invalidFiles.entries) {
+        for (final envelope in <Map<String, Object?>>[
+          _metadataResponse(Map<String, Object?>.from(entry.value)),
+          _metadataEvent(Map<String, Object?>.from(entry.value)),
+        ]) {
+          expect(
+            () => validateProtocolFixture(
+              envelope.containsKey('eventId') ? 'event' : 'response',
+              envelope,
+            ),
+            throwsA(isA<ProtocolValidationException>()),
+            reason:
+                '${envelope.containsKey('eventId') ? 'event' : 'response'} ${entry.key}',
+          );
+        }
+      }
+      final invalidEnvelopes = <String, Map<String, Object?>>{
+        'private response payload': _workspaceResponse(
+          'workspace.file.metadata.result',
+          <String, Object?>{
+            'workspaceId': '44444444-4444-4444-8444-444444444444',
+            'file': _fileMetadata(),
+            'private': true,
+          },
+        ),
+        'private event payload':
+            _workspaceEvent('workspace.file.metadata', <String, Object?>{
+              'workspaceId': '44444444-4444-4444-8444-444444444444',
+              'file': _fileMetadata(),
+              'capability': 'files.v1',
+              'private': true,
+            }),
+        'nullable previous revision':
+            _workspaceEvent('workspace.file.metadata', <String, Object?>{
+              'workspaceId': '44444444-4444-4444-8444-444444444444',
+              'file': _fileMetadata(),
+              'previousRevision': null,
+              'capability': 'files.v1',
+            }),
+        'missing event capability':
+            _workspaceEvent('workspace.file.metadata', <String, Object?>{
+              'workspaceId': '44444444-4444-4444-8444-444444444444',
+              'file': _fileMetadata(),
+            }),
+      };
+      for (final entry in invalidEnvelopes.entries) {
+        expect(
+          () => validateProtocolFixture(
+            entry.value.containsKey('eventId') ? 'event' : 'response',
+            entry.value,
+          ),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: entry.key,
+        );
+      }
+    },
+  );
+
+  test('file read results validate full bounds and truncation shape', () {
+    final boundary = _fileReadResult()
+      ..['content'] = 'x' * 524288
+      ..['isTruncated'] = true
+      ..['truncation'] = <String, Object?>{
+        'retainedBytes': 524288,
+        'totalBytes': 600000,
+        'isTruncated': true,
+        'digest':
+            'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      };
+    expect(
+      validateProtocolFixture('response', _fileReadResponse(boundary)),
+      isA<ProtocolResponse>(),
+    );
+    expect(
+      validateProtocolFixture(
+        'response',
+        _fileReadResponse(_fileReadResult()..['content'] = ''),
+      ),
+      isA<ProtocolResponse>(),
+    );
+  });
+
+  test(
+    'file read results reject private, missing, oversized, and nullable fields',
+    () {
+      final invalidResults = <String, Map<String, Object?>>{
+        'private result': _fileReadResult()..['private'] = true,
+        'missing encoding': _fileReadResult()..remove('encoding'),
+        'oversized content': _fileReadResult()..['content'] = 'x' * 524289,
+        'zero range start': _fileReadResult()..['rangeStart'] = 0,
+        'negative total lines': _fileReadResult()..['totalLines'] = -1,
+        'wrong encoding': _fileReadResult()..['encoding'] = 'utf-16',
+        'nullable truncation': _fileReadResult()..['truncation'] = null,
+        'private truncation': _fileReadResult()
+          ..['truncation'] = <String, Object?>{
+            'retainedBytes': 1,
+            'totalBytes': 2,
+            'isTruncated': true,
+            'private': true,
+          },
+        'missing modification time': _fileReadResult()
+          ..remove('lastModifiedAt'),
+      };
+      for (final entry in invalidResults.entries) {
+        expect(
+          () => validateProtocolFixture(
+            'response',
+            _fileReadResponse(entry.value),
+          ),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: entry.key,
+        );
+      }
+
+      final privatePayload = <String, Object?>{
+        'workspaceId': '44444444-4444-4444-8444-444444444444',
+        'result': _fileReadResult(),
+        'private': true,
+      };
+      expect(
+        () => validateProtocolFixture(
+          'response',
+          _workspaceResponse('workspace.file.read.result', privatePayload),
+        ),
+        throwsA(isA<ProtocolValidationException>()),
+      );
+    },
+  );
+
+  test('workspace stale and unavailable events match closed TS shapes', () {
+    Map<String, Object?> stale() => <String, Object?>{
+      'workspaceId': '44444444-4444-4444-8444-444444444444',
+      'path': 'src/index.ts',
+      'previousRevision': 'file-r1',
+      'currentRevision': 'file-r2',
+      'modifiedAt': '2026-07-15T04:20:00.000Z',
+      'capability': 'files.v1',
+    };
+    Map<String, Object?> unavailable() => <String, Object?>{
+      'workspaceId': '44444444-4444-4444-8444-444444444444',
+      'capability': 'files.v1',
+      'status': <String, Object?>{
+        'state': 'unavailable',
+        'reason': 'File browser unavailable.',
+        'remediation': 'Refresh the workspace.',
+        'source': 'workspace-index',
+        'revision': 'file-r2',
+        'lastRefreshedAt': '2026-07-15T04:20:00.000Z',
+      },
+    };
+
+    expect(
+      validateProtocolFixture(
+        'event',
+        _workspaceEvent('workspace.file.stale', stale()),
+      ),
+      isA<ProtocolEvent>(),
+    );
+    expect(
+      validateProtocolFixture(
+        'event',
+        _workspaceEvent('workspace.file.unavailable', unavailable()),
+      ),
+      isA<ProtocolEvent>(),
+    );
+
+    final invalid = <String, Map<String, Object?>>{
+      'stale private root': _workspaceEvent(
+        'workspace.file.stale',
+        stale()..['private'] = true,
+      ),
+      'stale missing revision': _workspaceEvent(
+        'workspace.file.stale',
+        stale()..remove('currentRevision'),
+      ),
+      'stale nullable revision': _workspaceEvent(
+        'workspace.file.stale',
+        stale()..['previousRevision'] = null,
+      ),
+      'stale invalid path': _workspaceEvent(
+        'workspace.file.stale',
+        stale()..['path'] = '../private',
+      ),
+      'stale wrong capability': _workspaceEvent(
+        'workspace.file.stale',
+        stale()..['capability'] = 'contexts.v1',
+      ),
+      'unavailable private root': _workspaceEvent(
+        'workspace.file.unavailable',
+        unavailable()..['private'] = true,
+      ),
+      'unavailable missing status': _workspaceEvent(
+        'workspace.file.unavailable',
+        unavailable()..remove('status'),
+      ),
+      'unavailable nullable status': _workspaceEvent(
+        'workspace.file.unavailable',
+        unavailable()..['status'] = null,
+      ),
+      'unavailable private status': _workspaceEvent(
+        'workspace.file.unavailable',
+        unavailable()
+          ..['status'] = <String, Object?>{
+            'state': 'unavailable',
+            'reason': 'unavailable',
+            'remediation': 'refresh',
+            'private': true,
+          },
+      ),
+      'unavailable missing explanation': _workspaceEvent(
+        'workspace.file.unavailable',
+        unavailable()..['status'] = <String, Object?>{'state': 'unavailable'},
+      ),
+    };
+    for (final entry in invalid.entries) {
+      expect(
+        () => validateProtocolFixture('event', entry.value),
+        throwsA(isA<ProtocolValidationException>()),
+        reason: entry.key,
       );
     }
   });
