@@ -10,7 +10,7 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 
 - Repository: `/Users/nathandekleerk/github/pi-mob`
 - Branch: `main`
-- HEAD: `WIP: integrate R5/R6 runtime/process/git wiring`
+- HEAD: `WIP: emit git.unavailable host-stream event on runtime GitUnavailable`
 - Tracked working tree: clean at this handoff; this file is intentionally
   untracked.
 
@@ -39,7 +39,7 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 - Repaired a Dart static-type error in `BashToolArgs.fromMap` that blocked the
   coordinator test compilation.
 
-### WIP: integrate R5/R6 runtime/process/git wiring
+### `83b84d9 feat(bridge): wire R5 process and R6 git services into runtime dispatch`
 
 - `DurableBridgeRuntime` optionally accepts `AuthoritativeProcessRegistry`,
   `GitSummaryService`, and `resolveGitCwd`.
@@ -63,26 +63,44 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 - Added focused runtime coverage in
   `packages/bridge/test/r5-r6-runtime-integration.test.ts`.
 
+### WIP: emit git.unavailable host-stream event on runtime GitUnavailable
+
+- When `git.summary.request` produces a `GitUnavailable` from
+  `GitSummaryService.summarize`, the runtime now appends a closed
+  `git.unavailable` event to the host stream before throwing
+  `unsupported_capability`. Subscribers receive `{ workspaceId, capability:
+  "git-ci.v1", status: { state: "unavailable", reason, remediation } }` as
+  the truthful Git/CI surface state.
+- The response is still rejected with `unsupported_capability` so the
+  `git.summary.result` envelope never embeds the unavailable shape; mobile
+  coordinators can correlate the throw with the stream event by `workspaceId`.
+- `cwd unknown` and "git service not installed" paths do NOT emit
+  `git.unavailable`: those are host-side validation failures, not truthful
+  Git surface state, and the bridge refuses to fabricate stream events.
+- Added three new tests:
+  - `git.unavailable` event lands on the host stream (with
+    `validateFixture` schema assertion)
+  - success path does NOT emit `git.unavailable`
+  - `cwd unknown` does NOT emit `git.unavailable`
+- Frozen schemas and D-039 response shape unchanged.
+
 ## Verification completed
 
 - `bun run typecheck`
-- Focused bridge R5/R6/R3/process/git tests (39 passing across the four
-  files), and full bridge suite (732 passing, 0 failing).
+- Focused bridge R5/R6/R3/process/git tests (42 passing across the four
+  files), and full bridge suite (735 passing, 0 failing).
 - `git diff --check` clean on the runtime diff.
 
 ## Remaining priority work
 
-1. Wire `AuthoritativeProcessRegistry` and `GitSummaryService` into the
-   bridge **server dispatch** so the `git.unavailable` host-stream event is
-   emitted alongside the `unsupported_capability` response when the service
-   reports `GitUnavailable`. Preserve explicit unavailable state, output
-   paging, cancellation, and Pi-owned commit/push admission; do not change
-   frozen schemas or the D-039 response shape.
-2. Complete mobile R1/R3/R5/R6 persistence/projection and app-shell
+1. Complete mobile R1/R3/R5/R6 persistence/projection and app-shell
    reachability. File and command insertion must update the draft only, never
    submit it.
-3. Implement R2/R4, audit/complete R7–R12, repair global search before any
+2. Implement R2/R4, audit/complete R7–R12, repair global search before any
    remerge, and perform full test/APK/physical-Android/Tailscale validation.
+3. Optionally wire mobile `git.summary` / `git.unavailable` subscribers on top
+   of the new host-stream emission so the unreachable workspace UI updates
+   without a per-workspace refresh tap.
 
 ## Cautions
 
