@@ -1594,7 +1594,7 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
     });
     _uuidString(payload, 'workspaceId');
     _revisionTokenString(payload, 'rootRevision');
-    if (payload.containsKey('nextPageToken')) {
+    if (payload['nextPageToken'] != null) {
       _boundedString(payload, 'nextPageToken', 256);
     }
     if (payload.containsKey('path')) _workspacePathString(payload, 'path');
