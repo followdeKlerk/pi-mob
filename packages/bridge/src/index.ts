@@ -42,7 +42,7 @@ export * from "./core/attachments";
 export * from "./core/binary-http";
 export * from "./core/domain";
 export * from "./core/runtime";
-export * from "./core/process-supervisor";
+export * from "./core/process-projection";
 export * from "./core/server";
 export * from "./core/workspace-policy";
 export * from "./notifications";
