@@ -614,3 +614,67 @@ IDs, leases, durable idempotency, or replayable outcomes.
 invalidations insufficient, a versioned aggregate prompt-context resource
 model replaces the four-item limit, or a new protocol major explicitly changes
 command/lease/idempotency semantics.
+
+## D-038 — Exact discriminant for durable context mutation targets
+
+**Decision:** Every `ContextMutationTarget` in `context.pin`,
+`context.unpin`, `context.exclude`, and `context.refresh` MUST carry an
+explicit `kind`; v1 has this closed discriminated union:
+
+```text
+{ kind: "file",   path, ranges?, revision? }
+{ kind: "source", sourceId,     revision? }
+{ kind: "all" }
+```
+
+`kind` is required even where the sibling fields would currently identify the
+variant. A missing `kind`, an unknown kind, or fields from another variant is
+invalid. `kind: "all"` remains the session-wide refresh target described by
+D-037; command-specific target eligibility remains a bridge semantic rule, not
+an excuse to infer a target variant from its fields.
+
+**Why:** These are durable, semantically hashed commands that must retain the
+same meaning across TypeScript, generated JSON Schema, fixtures, bridge
+replay, and Dart. Shape inference (`path` means file; `sourceId` means source)
+makes the wire union ambiguous as variants evolve, permits two serializations
+of the same intent, and forces every consumer to reproduce precedence rules.
+An exact discriminator gives one canonical serialized representation, direct
+exhaustive dispatch in both languages, closed-variant validation, and a
+single-invariant negative fixture for missing `kind`.
+
+**Rejected alternatives:** Retaining the permissive TypeScript union with
+kind-less file/source shapes; accepting kind omission only for legacy
+`context.unpin`; and treating Dart's field-based fallback as a compatibility
+adapter. F0 R4 is not yet a released wire surface, so preserving that
+accidental fixture shape is less valuable than a stable cross-language
+contract. A generic optional `kind` with bridge normalization is also rejected:
+normalization changes the semantic-hash input and hides invalid data before it
+can be reported to the caller.
+
+**Affected work and repair consequences:**
+
+- **F0 protocol owner / `feat/f0-protocol-rest`:** replace the nested
+  kind-less file/source unions in `ContextMutationTargetSchema` with the three
+  exact closed variants above; regenerate every schema/catalogue artifact.
+  Update the D-037/D-038 schema proof so each valid command uses an explicit
+  kind and file/source targets without it fail.
+- **Fixture owner:** change the generated valid `context.unpin` fixture to
+  `kind: "file"`; do not hand-edit the corpus. Generate an
+  `invalid-context-target-missing-kind` fixture that otherwise contains a
+  valid file target, register it in the manifest, and add the corresponding
+  one-field repair (`kind: "file"`) to the TypeScript fixture proof. Keep
+  file, source, and all as independently valid exact-shape examples.
+- **Dart/mobile protocol owner:** make `_validateContextMutationPayload`
+  require and switch on `target.kind`; remove the `sourceId` and fallback-file
+  inference paths. Add direct Dart parity coverage that rejects omitted kind
+  and accepts each exact variant, then consume the regenerated shared corpus.
+- **Bridge/R4 owners:** emit and hash the explicit `kind` without silently
+  filling it in. Reject old kind-less payloads before persistence or dispatch;
+  because R4 is unreleased, no wire migration or compatibility decoder is
+  authorized. Preserve D-037 lease, expected-revision, command-state, and
+  snapshot rules.
+
+**Review when:** A released protocol version needs a documented compatibility
+window for already-persisted kind-less commands, or a new target variant is
+versioned with an explicit literal, fixtures, generated schemas, and Dart
+parity proof.
