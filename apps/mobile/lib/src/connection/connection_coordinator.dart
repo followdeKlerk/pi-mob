@@ -16,6 +16,7 @@ import '../domain/mobile_state.dart';
 import '../domain/prompt_send_lifecycle.dart';
 import '../domain/process_domain.dart';
 import '../git/git_domain.dart' show GitState, reduceGit;
+import '../plans/plan_domain.dart' show PlanState, reducePlan;
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
@@ -135,6 +136,21 @@ class _GitSummaryRequest {
   final int epoch;
 }
 
+/// R2 — Tracks an in-flight `plan.summary.request` so the response can be
+/// correlated by request ID and connection epoch. Mirrors the D-039
+/// pattern used by process snapshots and git summary.
+class _PlanSummaryRequest {
+  const _PlanSummaryRequest({
+    required this.sessionId,
+    required this.turnId,
+    required this.epoch,
+  });
+
+  final String sessionId;
+  final String turnId;
+  final int epoch;
+}
+
 class _PendingPrompt {
   _PendingPrompt({
     required this.sessionId,
@@ -233,6 +249,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   ProcessDomainState _processes = const ProcessDomainState();
   final Map<String, _GitSummaryRequest> _gitSummaryRequests = {};
   GitState _git = const GitState();
+  final Map<String, _PlanSummaryRequest> _planSummaryRequests = {};
+  PlanState _plans = const PlanState();
   final List<String> _historySyncQueue = [];
   final Map<String, String?> _historySyncLocalRevisions = {};
   String? _historySyncCurrentSessionId;
@@ -631,6 +649,7 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   ProcessDomainState get processes => _processes;
   GitState get git => _git;
+  PlanState get plans => _plans;
 
   /// Sends a bounded `git.summary.request` for [workspaceId] and tracks the
   /// request ID so the matching `git.summary.result` (or stream `git.summary`)
@@ -660,6 +679,58 @@ final class ConnectionCoordinator extends ChangeNotifier
       notifyListeners();
       rethrow;
     }
+  }
+
+  /// R2 — Sends a bounded `plan.summary.request` for the session/turn pair
+  /// and tracks the request ID so the matching `plan.snapshot.result` (or
+  /// host-stream `plan.snapshot` / `plan.unavailable`) can be correlated.
+  /// When the host advertised `plans.v1`, this is the only path to a
+  /// structured plan surface. When the service truthfully reports
+  /// `plan.unavailable`, the host emits the stream event directly and the
+  /// response throws `unsupported_capability`; this method surfaces that
+  /// as a thrown error so the UI can distinguish "host has no plans" from
+  /// "session unreachable".
+  Future<void> requestPlanSummary(String sessionId, String turnId) async {
+    final epoch = _connectionEpoch;
+    final requestId = _id();
+    _planSummaryRequests[requestId] = _PlanSummaryRequest(
+      sessionId: sessionId,
+      turnId: turnId,
+      epoch: epoch,
+    );
+    _plans = _plans.copyWith(refreshing: true);
+    notifyListeners();
+    try {
+      await _sendControl('plan.summary.request', <String, Object?>{
+        'sessionId': sessionId,
+        'turnId': turnId,
+        'requestId': requestId,
+      }, requestId: requestId);
+    } catch (_) {
+      _planSummaryRequests.remove(requestId);
+      _plans = _plans.copyWith(refreshing: false);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// R2 — Cancels the in-flight `plan.summary.request` identified by
+  /// [requestId] by sending `plan.summary.cancel` with the tracked
+  /// `targetRequestId`. No-op when no in-flight request exists.
+  Future<void> cancelPlanSummary(String requestId) async {
+    final tracked = _planSummaryRequests.remove(requestId);
+    if (tracked == null) {
+      _plans = _plans.copyWith(refreshing: false);
+      notifyListeners();
+      return;
+    }
+    try {
+      await _sendControl('plan.summary.cancel', <String, Object?>{
+        'targetRequestId': requestId,
+      }, requestId: _id());
+    } catch (_) { /* socket may be closed; nothing to do */ }
+    _plans = _plans.copyWith(refreshing: false);
+    notifyListeners();
   }
 
   /// Cancels the in-flight `git.summary.request` for [workspaceId] by sending
@@ -1064,6 +1135,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     _processSnapshotRequests.clear();
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
+    _planSummaryRequests.clear();
+    _plans = _plans.copyWith(refreshing: false);
     _pendingCurrentRequestCommand.clear();
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
@@ -1111,12 +1184,17 @@ final class ConnectionCoordinator extends ChangeNotifier
           _messageTail = _messageTail
               .then((_) => _receive(raw, epoch))
               .catchError(
-                (Object error, StackTrace stack) =>
-                    _protocolFailure(error, epoch),
+                (Object error, StackTrace stack) {
+                  return _protocolFailure(error, epoch);
+                },
               );
         },
-        onError: (Object error, StackTrace stack) => _socketEnded(error, epoch),
-        onDone: () => _socketEnded(null, epoch),
+        onError: (Object error, StackTrace stack) {
+          _socketEnded(error, epoch);
+        },
+        onDone: () {
+          _socketEnded(null, epoch);
+        },
         cancelOnError: false,
       );
       phase = ConnectionPhase.handshaking;
@@ -1247,6 +1325,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     _processSnapshotRequests.clear();
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
+    _planSummaryRequests.clear();
+    _plans = _plans.copyWith(refreshing: false);
     _historyGateComplete = false;
     _historySyncCurrentSessionId = null;
     _historySyncQueue.clear();
@@ -2374,6 +2454,13 @@ final class ConnectionCoordinator extends ChangeNotifier
       if (type == 'git.summary' || type == 'git.unavailable') {
         _applyGitStreamEvent(type, payload);
       }
+      // R2 — both plan.unavailable (host stream capability envelope) and
+      // plan.snapshot (session stream authoritative projection) must apply
+      // before the cursor advance notifies subscribers so the UI sees an
+      // ordered plan projection rather than out-of-order transitions.
+      if (type == 'plan.unavailable' || type == 'plan.snapshot') {
+        _applyPlanStreamEvent(type, payload);
+      }
       _notify();
       return;
     }
@@ -2403,6 +2490,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         _processSnapshotResult(message, payload);
       case 'git.summary.result':
         _gitSummaryResult(message, payload);
+      case 'plan.snapshot.result':
+        _planSnapshotResult(message, payload);
       case 'workspace.trust_state':
         _workspaceTrustStateEvent(payload);
       case 'command.current.result':
@@ -2926,6 +3015,8 @@ final class ConnectionCoordinator extends ChangeNotifier
       });
     } else if (type == 'git.summary' || type == 'git.unavailable') {
       _applyGitStreamEvent(type, payload);
+    } else if (type == 'plan.snapshot' || type == 'plan.unavailable') {
+      _applyPlanStreamEvent(type, payload);
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final eventSessionId = payload['sessionId'];
       final eventCommandId = payload['commandId'];
@@ -3241,6 +3332,31 @@ final class ConnectionCoordinator extends ChangeNotifier
     final request = _gitSummaryRequests.remove(requestId);
     if (request == null || request.epoch != _connectionEpoch) return;
     _git = reduceGit(_git, 'git.summary.result', payload);
+    notifyListeners();
+  }
+
+  /// R2 — Correlates `plan.snapshot.result` by request ID and applies the
+  /// closed PlanSnapshot payload through `reducePlan`. Stale results from
+  /// prior connection epochs are dropped so a delayed response cannot
+  /// surface a stale plan after reconnect.
+  void _planSnapshotResult(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) {
+    final requestId = message['requestId'];
+    if (requestId is! String) return;
+    final request = _planSummaryRequests.remove(requestId);
+    if (request == null || request.epoch != _connectionEpoch) return;
+    _plans = reducePlan(_plans, 'plan.snapshot.result', payload);
+    notifyListeners();
+  }
+
+  /// R2 — Applies the host-stream `plan.snapshot` (session stream) and
+  /// `plan.unavailable` (host stream) events to the plan projection. The
+  /// host emits these whenever the per-session plan surface changes; the
+  /// coordinator reconciles them without requiring a new request tap.
+  void _applyPlanStreamEvent(String type, Map<String, Object?> payload) {
+    _plans = reducePlan(_plans, type, payload);
     notifyListeners();
   }
 
@@ -4280,6 +4396,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     _processSnapshotRequests.clear();
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
+    _planSummaryRequests.clear();
+    _plans = _plans.copyWith(refreshing: false);
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
       _historySyncQueue.clear();
@@ -4416,6 +4534,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     _processSnapshotRequests.clear();
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
+    _planSummaryRequests.clear();
+    _plans = _plans.copyWith(refreshing: false);
     _cancelReconnect();
     _ackTimer?.cancel();
     _leaseTimer?.cancel();

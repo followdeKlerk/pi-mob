@@ -903,6 +903,7 @@ const _responseTypes = <String>{
   'process.snapshot.result',
   'process.output.page.result',
   'git.summary.result',
+  'plan.snapshot.result',
 };
 const _eventTypes = <String>{
   'host.state',
@@ -990,6 +991,9 @@ const _hostEventTypes = <String>{
   'workspace.file.unavailable',
   'git.summary',
   'git.unavailable',
+  // Capability-state envelopes (no sessionId) ride the host stream.
+  'recipe.unavailable',
+  'plan.unavailable',
 };
 const _dualStreamEventTypes = <String>{'command.state', 'error.event'};
 const _errorCodes = <String>{

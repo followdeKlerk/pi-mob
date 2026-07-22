@@ -2138,6 +2138,141 @@ void main() {
     await eventually(() => coordinator.git.summary == null);
     pending.ignore();
   });
+
+  Map<String, Object?> validPlanSnapshotPayload() => <String, Object?>{
+      'planId': 'plan-1',
+      'revision': 'plan-r1',
+      'sessionId': sessionId,
+      'turnId': 'turn-1',
+      'source': 'session-bridge',
+      'stale': false,
+      'capability': {'state': 'available', 'source': 'session-bridge'},
+      'steps': <Object?>[
+        <String, Object?>{
+          'stepId': 'step-1',
+          'title': 'Read file',
+          'status': 'completed',
+        },
+        <String, Object?>{
+          'stepId': 'step-2',
+          'title': 'Patch',
+          'status': 'running',
+        },
+      ],
+    };
+
+  test('R2 plan summary request correlates plan.snapshot.result to the session', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final future = coordinator.requestPlanSummary(sessionId, 'turn-1');
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'plan.summary.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'plan.summary.request')['requestId'] as String;
+    expect(
+      socket.sent.lastWhere((message) => message['type'] == 'plan.summary.request')['payload'],
+      equals(<String, Object?>{'sessionId': sessionId, 'turnId': 'turn-1', 'requestId': requestId}),
+    );
+    socket.server(response('plan.snapshot.result', validPlanSnapshotPayload(), requestId: requestId));
+    await future;
+    await eventually(() => coordinator.plans.snapshot != null);
+    expect(coordinator.plans.snapshot!.planId, 'plan-1');
+    expect(coordinator.plans.snapshot!.steps, hasLength(2));
+    expect(coordinator.plans.refreshing, isFalse);
+  });
+
+  test('R2 plan.unavailable host-stream event marks the session unavailable', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    socket.server(
+      event(
+        type: 'plan.snapshot',
+        streamId: 'session:$sessionId',
+        cursor: '1',
+        eventId: 'cccccccc-1111-4111-8111-cccccccccccc',
+        payload: validPlanSnapshotPayload(),
+      ),
+    );
+    socket.server(
+      event(
+        type: 'plan.unavailable',
+        streamId: 'host:$hostId',
+        cursor: '2',
+        eventId: 'cccccccc-2222-4222-8222-cccccccccccc',
+        payload: <String, Object?>{
+          'capability': 'plans.v1',
+          'status': <String, Object?>{
+            'state': 'unavailable',
+            'reason': 'No vetted plan source installed',
+            'remediation': 'Install a vetted Pi extension that emits plan.snapshot events.',
+          },
+        },
+      ),
+    );
+    await eventually(() => coordinator.plans.unavailable != null);
+    await eventually(() => coordinator.plans.snapshot == null);
+    expect(coordinator.plans.unavailable!.reason, 'unavailable');
+    expect(coordinator.plans.unavailable!.message, 'No vetted plan source installed');
+    expect(coordinator.plans.unavailable!.remediation, contains('Pi extension'));
+  });
+
+  test('R2 cancelPlanSummary sends plan.summary.cancel with the tracked requestId', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final pending = coordinator.requestPlanSummary(sessionId, 'turn-1');
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'plan.summary.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'plan.summary.request')['requestId'] as String;
+    await coordinator.cancelPlanSummary(requestId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'plan.summary.cancel'),
+    );
+    final cancel = socket.sent
+        .lastWhere((message) => message['type'] == 'plan.summary.cancel')['payload'];
+    expect(cancel, equals(<String, Object?>{'targetRequestId': requestId}));
+    expect(coordinator.plans.refreshing, isFalse);
+    pending.ignore();
+  });
+
+  test('R2 cancelPlanSummary is a no-op when no in-flight request exists', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    await coordinator.cancelPlanSummary('nonexistent');
+    expect(
+      socket.sent.any((message) => message['type'] == 'plan.summary.cancel'),
+      isFalse,
+    );
+    expect(coordinator.plans.refreshing, isFalse);
+  });
+
+  test('R2 stale plan.snapshot.result from a prior connection epoch is dropped', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final pending = coordinator.requestPlanSummary(sessionId, 'turn-1');
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'plan.summary.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'plan.summary.request')['requestId'] as String;
+    await coordinator.connect('https://fixture.test');
+    final newSocket = transport.sockets.last;
+    newSocket.server(helloAccepted());
+    await eventually(
+      () => newSocket.sent.any((message) => message['type'] == 'subscription.set'),
+    );
+    newSocket.server(response(
+      'subscription.accepted',
+      {'streams': <Object?>[]},
+      requestId: newSocket.sent
+          .firstWhere((message) => message['type'] == 'subscription.set')['requestId'] as String,
+    ));
+    socket.server(response('plan.snapshot.result', validPlanSnapshotPayload(), requestId: requestId));
+    await eventually(() => coordinator.plans.snapshot == null);
+    pending.ignore();
+  });
 }
 
 Future<void> makeReady(

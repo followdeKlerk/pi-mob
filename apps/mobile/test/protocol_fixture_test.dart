@@ -66,6 +66,20 @@ Map<String, Object?> _recipeEvent(String type, Map<String, Object?> payload) =>
       'payload': payload,
     };
 
+/// Wraps an envelope for events that ride the host stream (capability
+/// envelopes such as `recipe.unavailable` and `plan.unavailable`).
+Map<String, Object?> _hostEvent(String type, Map<String, Object?> payload) =>
+    <String, Object?>{
+      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'eventId': '22222222-2222-4222-8222-222222222222',
+      'streamId': 'host:33333333-3333-4333-8333-333333333333',
+      'cursor': '1',
+      'type': type,
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': payload,
+    };
+
 Map<String, Object?> _contextSnapshotPayload({bool full = false}) {
   final payload = <String, Object?>{
     'sessionId': '33333333-3333-4333-8333-333333333333',
@@ -1493,7 +1507,7 @@ void main() {
     expect(
       validateProtocolFixture(
         'event',
-        _recipeEvent('recipe.unavailable', valid),
+        _hostEvent('recipe.unavailable', valid),
       ),
       isA<ProtocolEvent>(),
     );
