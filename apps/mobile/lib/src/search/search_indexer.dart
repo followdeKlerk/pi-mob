@@ -69,9 +69,8 @@ class SearchIndexer {
       ),
     );
     final updatedAt = _now().toUtc();
-    for (final event in events) {
-      final extracted = _extract(hostId, session, event);
-      if (extracted == null) continue;
+    final indexed = _extractAll(hostId, session, events);
+    for (final extracted in indexed) {
       await _database.upsertSearchEntry(
         hostId: extracted.hostId,
         sessionId: extracted.sessionId,
@@ -81,7 +80,7 @@ class SearchIndexer {
         summary: extracted.summary,
         tokens: extracted.tokens,
         occurredAt: extracted.occurredAt,
-        updatedAt: updatedAt,
+        updatedAt: extracted.occurredAt,
       );
     }
     await _ensurePerSessionCap(hostId, sessionId);
@@ -184,6 +183,61 @@ class SearchIndexer {
     }
   }
 
+  List<_Extracted> _extractAll(
+    String hostId,
+    SessionState session,
+    List<StreamEventState> events,
+  ) {
+    final output = <_Extracted>[];
+    final assistant = <String, StringBuffer>{};
+    final reasoning = <String, StringBuffer>{};
+    final tools = <String, Map<String, String>>{};
+    for (final event in events) {
+      final p = event.payload;
+      if (event.type == 'assistant.delta' || event.type == 'reasoning.delta') {
+        final text = _text(p['text'] ?? p['delta'] ?? p['content']);
+        if (text != null)
+          (event.type.startsWith('assistant') ? assistant : reasoning)
+              .putIfAbsent(event.eventId, StringBuffer.new)
+              .write(text);
+        continue;
+      }
+      if (event.type == 'tool.started') {
+        tools[event.eventId] = <String, String>{
+          'name': (p['toolName'] ?? p['name'] ?? '').toString(),
+          'arguments': _print(p['arguments'] ?? p['input']),
+        };
+        continue;
+      }
+      final extracted = _extract(hostId, session, event);
+      if (extracted != null) output.add(extracted);
+      if (event.type == 'assistant.completed' ||
+          event.type == 'reasoning.completed') {
+        final buf = event.type.startsWith('assistant')
+            ? assistant[event.eventId]
+            : reasoning[event.eventId];
+        if (buf != null && buf.isNotEmpty)
+          output.add(
+            _Extracted.from(
+              event,
+              hostId,
+              session,
+              event.type.startsWith('assistant')
+                  ? SearchSource.assistant
+                  : SearchSource.reasoning,
+              buf.toString(),
+            ),
+          );
+      }
+    }
+    return output;
+  }
+
+  static String? _text(Object? value) =>
+      value is String && value.trim().isNotEmpty ? value : null;
+  static String _print(Object? value) =>
+      value is String ? value : (value == null ? '' : _encodeJson(value));
+
   _Extracted? _extract(
     String hostId,
     SessionState session,
@@ -212,10 +266,13 @@ class SearchIndexer {
       final toolName = (event.payload['toolName'] ?? '').toString();
       final arguments = event.payload['arguments'];
       final output = event.payload['output'];
+      final result = event.payload['output'] ?? event.payload['result'];
+      final error = event.payload['error'];
       final parts = <String>[
         if (toolName.isNotEmpty) toolName,
-        if (arguments is Map) _encodeJson(arguments),
-        if (output is String && output.isNotEmpty) output,
+        if (arguments != null) _print(arguments),
+        if (result != null) _print(result),
+        if (error is Map) _print(error['message'] ?? error['code']),
       ];
       if (parts.isEmpty) return null;
       source = SearchSource.tool;
@@ -250,6 +307,22 @@ class SearchIndexer {
       occurredAt: event.occurredAt,
     );
   }
+}
+
+extension on _Extracted {
+  static _Extracted from(
+    StreamEventState event,
+    String hostId,
+    SessionState session,
+    SearchSource source,
+    String raw,
+  ) => _Extracted(
+    hostId: hostId,
+    sessionId: session.sessionId,
+    eventId: event.eventId,
+    cursor: event.cursor.value,
+    occurredAt: event.occurredAt,
+  );
 }
 
 /// Stable identifier used for the synthetic per-chat summary row. Lets a
