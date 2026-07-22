@@ -101,6 +101,7 @@ function gitSummary(overrides: Record<string, unknown> = {}): Record<string, unk
       name: "protocol-schema",
       status: "failure",
       summary: "schema check failed",
+      logSummary: "protocol schema generation differs from checked-in artifacts",
       url: "https://example.test/pi-mob/checks/1",
     }],
     supportedActions: ["refresh", "commit_through_pi", "push_through_pi", "open_external"],
@@ -109,16 +110,17 @@ function gitSummary(overrides: Record<string, unknown> = {}): Record<string, unk
     ...overrides,
   };
 }
-function gitCommandPayload(): Record<string, unknown> {
+function gitCommandPayload(type: string): Record<string, unknown> {
+  const isPush = type === "git.push.request";
   return {
     sessionId: ids.sessionId,
     workspaceId: ids.workspaceId,
     expectedRevision: "git-r1",
     confirmation: {
-      confirmationId: "confirm-1",
-      summary: "Commit the reviewed changes through Pi",
+      confirmationId: isPush ? "confirm-push-1" : "confirm-commit-1",
+      summary: isPush ? "Push the current branch through Pi" : "Commit the reviewed changes through Pi",
     },
-    summaryHint: "Add Git/CI attention protocol",
+    summaryHint: isPush ? "Push Git/CI attention protocol" : "Add Git/CI attention protocol",
   };
 }
 function processUnavailablePayload(): Record<string, unknown> {
@@ -140,7 +142,7 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "session.export") return { sessionId: ids.sessionId, format: "html" };
   if (type === "prompt.submit") return { sessionId: ids.sessionId, deliveryMode: "immediate", message: "fixture", attachmentIds: [] };
   if (["process.stop", "process.restart", "process.rerun"].includes(type)) return processCommandPayload();
-  if (["git.commit.request", "git.push.request"].includes(type)) return gitCommandPayload();
+  if (["git.commit.request", "git.push.request"].includes(type)) return gitCommandPayload(type);
   if (type === "context.pin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", ranges: [FILE_RANGE], revision: "file-r1" } };
   if (type === "context.unpin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1" } };
   if (type === "context.exclude") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "source", sourceId: "source-fixture", revision: "file-r1" } };

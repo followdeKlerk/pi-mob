@@ -324,6 +324,9 @@ test("R6 valid fixtures cover Git/CI commands, controls, events, responses, and 
     repository: "pi-mob/pi-mob",
     branch: "feature/git-ci",
   });
+  expect((summary.failedChecks as Array<Record<string, unknown>>)[0]?.logSummary).toBe(
+    "protocol schema generation differs from checked-in artifacts",
+  );
 });
 
 test("R5 semantic-invalid process actions are schema-valid, hard-coded, and repaired one field at a time", () => {

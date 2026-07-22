@@ -40,6 +40,7 @@
           "name": "protocol-schema",
           "status": "failure",
           "summary": "schema check failed",
+          "logSummary": "protocol schema generation differs from checked-in artifacts",
           "url": "https://example.test/pi-mob/checks/1"
         }
       ],
