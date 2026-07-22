@@ -233,18 +233,39 @@ export const TruncationSchema = Type.Object({
   digest: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
   isTruncated: Type.Boolean(),
 }, { additionalProperties: false, $id: "pi-mob/protocol/truncation" });
+// F0 — TimingSchema is a closed, bounded timing envelope. `startedAt` is
+// REQUIRED and matches the canonical ISO-UTC pattern; `updatedAt`,
+// `finishedAt`, and `durationMs` are optional and let a partial timing block
+// be published before the recipe activity finishes. `additionalProperties:
+// false` is mandatory: the timing surface is one of the privacy-sensitive
+// nested shapes called out in FIELD_GUIDE §"schema-authoring traps", and
+// closing the shape prevents a bridge call site from smuggling `private` /
+// `internal` / `debug` bookkeeping alongside the declared timing fields.
 export const TimingSchema = Type.Object({
   startedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
   updatedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
   finishedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
   durationMs: Type.Optional(Type.Integer({ minimum: 0 })),
-}, { additionalProperties: true, $id: "pi-mob/protocol/timing" });
+}, { additionalProperties: false, $id: "pi-mob/protocol/timing" });
+// F0 — ErrorInfoSchema is a closed, typed error envelope used by the recipe
+// (R1) tool arm and other surfaces. `code` is one of `ERROR_CODES` (a
+// frozen, additive list — see the F0 R1/R2 stability codes for the new
+// `recipe_unavailable` / `plan_unavailable` / `stale_plan_target` members),
+// `message` is a nonempty human-readable string, `retryable` is the
+// boolean the mobile client uses to drive the retry button, and
+// `recommendedDelayMs` is an optional bridge-suggested wait (null means
+// "the bridge has no recommendation"). `additionalProperties: false` is
+// mandatory: the error surface is one of the privacy-sensitive nested
+// shapes called out in FIELD_GUIDE §"schema-authoring traps", and closing
+// the shape prevents a bridge call site from smuggling `private` /
+// `internal` / `debug` context (raw stack frames, request ids, host
+// session secrets) alongside the declared error fields.
 export const ErrorInfoSchema = Type.Object({
   code: Type.Union(ERROR_CODES.map((value) => Type.Literal(value))),
   message: Type.String({ minLength: 1 }),
   retryable: Type.Boolean(),
   recommendedDelayMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
-}, { additionalProperties: true, $id: "pi-mob/protocol/error-info" });
+}, { additionalProperties: false, $id: "pi-mob/protocol/error-info" });
 // F0 — ProviderSummarySchema is a tagged, closed object. Length bounds are
 // deliberately CONSERVATIVE and expressed in JSON-Schema / TypeBox semantics,
 // which count UTF-16 code units (a.k.a. JS string `.length`), NOT raw UTF-8

@@ -375,3 +375,85 @@ test("D-036 prompt.submit preserves legacy payload and uses planTarget (not targ
   // Closed planTarget shape — private sibling is rejected.
   expect(commands.Check({ ...base, payload: { ...base.payload, planTarget: { planId: "p1", stepId: "s1", revision: "r1", private: "leak" } } })).toBe(false);
 });
+
+test("D-036 RecipeActivity timing and errorInfo nested objects are closed (no private/internal/debug siblings)", () => {
+  const activity = TypeCompiler.Compile(RecipeActivitySchema);
+  // Baseline thinking activity with the standard closed timing envelope is valid.
+  expect(activity.Check({
+    kind: "thinking",
+    ...sharedActivity,
+    status: "running",
+    title: "Working on it",
+    timing: { startedAt: "2026-07-15T00:00:00.000Z", updatedAt: "2026-07-15T00:01:00.000Z" },
+  })).toBe(true);
+  // A `private` sibling nested inside the timing envelope is rejected —
+  // the activity would otherwise smuggle a private bookkeeping field
+  // through the closed-shape change in TimingSchema.
+  expect(activity.Check({
+    kind: "thinking",
+    ...sharedActivity,
+    status: "running",
+    title: "Working on it",
+    timing: { startedAt: "2026-07-15T00:00:00.000Z", private: "leak" },
+  })).toBe(false);
+  // An `internal` sibling nested inside the timing envelope is rejected.
+  expect(activity.Check({
+    kind: "thinking",
+    ...sharedActivity,
+    status: "running",
+    title: "Working on it",
+    timing: { startedAt: "2026-07-15T00:00:00.000Z", internal: { debug: "x" } },
+  })).toBe(false);
+  // A `debug` sibling nested inside the timing envelope is rejected.
+  expect(activity.Check({
+    kind: "thinking",
+    ...sharedActivity,
+    status: "running",
+    title: "Working on it",
+    timing: { startedAt: "2026-07-15T00:00:00.000Z", debug: true },
+  })).toBe(false);
+  // Baseline tool activity with a closed errorInfo envelope is valid.
+  expect(activity.Check({
+    kind: "tool",
+    ...sharedActivity,
+    status: "failed",
+    title: "Reading file",
+    toolName: "read",
+    arguments: "{}",
+    output: "ok",
+    errorInfo: { code: "internal_error", message: "boom", retryable: false },
+  })).toBe(true);
+  // A `private` sibling nested inside the errorInfo envelope is rejected.
+  expect(activity.Check({
+    kind: "tool",
+    ...sharedActivity,
+    status: "failed",
+    title: "Reading file",
+    toolName: "read",
+    arguments: "{}",
+    output: "ok",
+    errorInfo: { code: "internal_error", message: "boom", retryable: false, private: "leak" },
+  })).toBe(false);
+  // An `internal` sibling nested inside the errorInfo envelope is rejected.
+  expect(activity.Check({
+    kind: "tool",
+    ...sharedActivity,
+    status: "failed",
+    title: "Reading file",
+    toolName: "read",
+    arguments: "{}",
+    output: "ok",
+    errorInfo: { code: "internal_error", message: "boom", retryable: false, internal: { stack: "x" } },
+  })).toBe(false);
+  // A `debug` sibling nested inside the errorInfo envelope is rejected.
+  expect(activity.Check({
+    kind: "tool",
+    ...sharedActivity,
+    status: "failed",
+    title: "Reading file",
+    toolName: "read",
+    arguments: "{}",
+    output: "ok",
+    errorInfo: { code: "internal_error", message: "boom", retryable: false, debug: { trace: "x" } },
+  })).toBe(false);
+});

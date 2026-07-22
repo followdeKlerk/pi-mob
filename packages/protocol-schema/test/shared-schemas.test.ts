@@ -300,3 +300,94 @@ test("TruncationSchema is closed: a private/internal sibling nested alongside th
     isTruncated: false,
   })).toBe(false);
 });
+
+test("TimingSchema is closed: a private/internal/debug sibling nested alongside the declared properties is rejected", () => {
+  const timing = TypeCompiler.Compile(TimingSchema);
+  // Baseline shape (startedAt only) is valid.
+  expect(timing.Check({ startedAt: "2026-07-15T00:00:00.000Z" })).toBe(true);
+  // Full shape with every declared field is valid.
+  expect(timing.Check({
+    startedAt: "2026-07-15T00:00:00.000Z",
+    updatedAt: "2026-07-15T00:01:00.000Z",
+    finishedAt: "2026-07-15T00:02:00.000Z",
+    durationMs: 120_000,
+  })).toBe(true);
+  // `internal` (and any other undeclared sibling) is rejected because the
+  // schema is `additionalProperties: false`. This protects against bridge
+  // call sites smuggling private bookkeeping through the timing surface.
+  expect(timing.Check({
+    startedAt: "2026-07-15T00:00:00.000Z",
+    internal: { debug: "should not pass" },
+  })).toBe(false);
+  // A `private` sibling is similarly rejected (the literal property name the
+  // task description called out).
+  expect(timing.Check({
+    startedAt: "2026-07-15T00:00:00.000Z",
+    private: true,
+  })).toBe(false);
+  // A `debug` sibling is similarly rejected.
+  expect(timing.Check({
+    startedAt: "2026-07-15T00:00:00.000Z",
+    debug: { trace: "x" },
+  })).toBe(false);
+  // Sanity: the pattern / minimum guards still hold alongside the
+  // closed-shape change.
+  expect(timing.Check({ startedAt: "2026-07-15 00:00:00" })).toBe(false);
+  expect(timing.Check({})).toBe(false);
+  expect(timing.Check({ startedAt: "2026-07-15T00:00:00.000Z", durationMs: -1 })).toBe(false);
+  expect(timing.Check({ startedAt: "2026-07-15T00:00:00.000Z", finishedAt: "not-iso" })).toBe(false);
+});
+
+test("ErrorInfoSchema is closed: a private/internal/debug sibling nested alongside the declared properties is rejected", () => {
+  const error = TypeCompiler.Compile(ErrorInfoSchema);
+  // Baseline shape is valid.
+  expect(error.Check({ code: "internal_error", message: "boom", retryable: false })).toBe(true);
+  // Full shape with the optional recommendedDelayMs is valid.
+  expect(error.Check({
+    code: "stale_plan_target",
+    message: "plan revision is stale",
+    retryable: false,
+    recommendedDelayMs: 250,
+  })).toBe(true);
+  // Null recommendedDelayMs is valid (the bridge has no recommendation).
+  expect(error.Check({
+    code: "internal_error",
+    message: "boom",
+    retryable: false,
+    recommendedDelayMs: null,
+  })).toBe(true);
+  // `internal` (and any other undeclared sibling) is rejected because the
+  // schema is `additionalProperties: false`. This protects against bridge
+  // call sites smuggling private context (raw stack frames, request ids,
+  // host session secrets) through the error surface.
+  expect(error.Check({
+    code: "internal_error",
+    message: "boom",
+    retryable: false,
+    internal: { stack: "should not pass" },
+  })).toBe(false);
+  // A `private` sibling is similarly rejected.
+  expect(error.Check({
+    code: "internal_error",
+    message: "boom",
+    retryable: false,
+    private: true,
+  })).toBe(false);
+  // A `debug` sibling is similarly rejected.
+  expect(error.Check({
+    code: "internal_error",
+    message: "boom",
+    retryable: false,
+    debug: { trace: "x" },
+  })).toBe(false);
+  // Sanity: the required-code and required-message guards still hold.
+  expect(error.Check({ code: "internal_error", retryable: false })).toBe(false);
+  expect(error.Check({ code: "missing_code", message: "x", retryable: false })).toBe(false);
+  expect(error.Check({ code: "internal_error", message: "", retryable: false })).toBe(false);
+  expect(error.Check({
+    code: "internal_error",
+    message: "boom",
+    retryable: false,
+    recommendedDelayMs: -1,
+  })).toBe(false);
+});
