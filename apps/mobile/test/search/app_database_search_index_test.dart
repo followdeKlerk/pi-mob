@@ -96,39 +96,96 @@ void main() {
       expect(rows, hasLength(5));
     });
 
-    test('normalizes punctuation and escapes LIKE literals', () async {
-      for (final value in ['hello world', r'100%', 'a_b', r'c\d']) {
-        await db.upsertSearchEntry(
-          hostId: hostId,
-          sessionId: sessionA,
-          eventId: value,
-          cursor: value,
-          source: 'assistant',
-          summary: value,
-          tokens: value,
-          occurredAt: DateTime.utc(2026, 1, 1),
-          updatedAt: DateTime.utc(2026, 1, 1),
-        );
-      }
-      expect(
-        (await db.querySearchEntries(
-          hostId: hostId,
-          queryTokens: const ['hello, world'],
-          limit: 10,
-        )),
-        hasLength(1),
-      );
-      for (final value in ['100%', 'a_b', r'c\d']) {
+    test(
+      'normalizes punctuation and strips LIKE wildcards from queries',
+      () async {
+        // Rows are stored as the indexer would have stored them: punctuation
+        // and LIKE wildcards are stripped/separated inside `_tokenize`, so
+        // the persisted `tokens` column never contains `%`, `_`, or `\`.
+        // Distractor rows are ones the pre-e741ea1 wildcard interpretation
+        // would have falsely returned because `%` was a multi-character
+        // wildcard and `_` was a single-character wildcard in the LIKE
+        // clause (the old code had no `ESCAPE` and no normalization).
+        final rows = <Map<String, String>>[
+          // hit: punctuation-split query must still find the two-token row.
+          {'eventId': 'hello world', 'cursor': '0', 'tokens': 'hello world'},
+          // hit + distractor: query `100%` used to match `1000 widgets` via
+          // `%` under the old LIKE behaviour. New behaviour strips `%` and
+          // queries the literal token `100`.
+          {'eventId': '100', 'cursor': '1', 'tokens': '100'},
+          {'eventId': '1000 widgets', 'cursor': '2', 'tokens': '1000 widgets'},
+          // hit + distractor: query `a_b` used to match `axb` via `_` under
+          // the old LIKE behaviour. New behaviour treats `_` as a separator
+          // so the query becomes two tokens `a` and `b`, which AND together.
+          {'eventId': 'a b', 'cursor': '3', 'tokens': 'a b'},
+          {'eventId': 'axb', 'cursor': '4', 'tokens': 'axb'},
+          // hit: query `c\d` is normalised to `c d` and matches the row the
+          // indexer would have stored for a summary containing a backslash.
+          {'eventId': 'c d', 'cursor': '5', 'tokens': 'c d'},
+        ];
+        for (final row in rows) {
+          await db.upsertSearchEntry(
+            hostId: hostId,
+            sessionId: sessionA,
+            eventId: row['eventId']!,
+            cursor: row['cursor']!,
+            source: 'assistant',
+            summary: row['tokens']!,
+            tokens: row['tokens']!,
+            occurredAt: DateTime.utc(2026, 1, 1),
+            updatedAt: DateTime.utc(2026, 1, 1),
+          );
+        }
+        Future<List<String>> idsFor(String token) async =>
+            (await db.querySearchEntries(
+              hostId: hostId,
+              queryTokens: [token],
+              limit: 10,
+            )).map((row) => row['eventId'] as String).toList();
+
+        // Punctuation-only tokens split into multiple normalized tokens; the
+        // LIKE clause ANDs them so the single hit survives and distractors
+        // without both tokens stay out.
         expect(
           (await db.querySearchEntries(
             hostId: hostId,
-            queryTokens: [value],
+            queryTokens: const ['hello, world'],
+            limit: 10,
+          )).map((row) => row['eventId']),
+          ['hello world'],
+        );
+        // `%` is stripped — the `1000 widgets` distractor that the old
+        // wildcard behaviour would have returned must NOT appear.
+        expect(await idsFor('100%'), ['100']);
+        // `_` is treated as a separator — the `axb` distractor that the old
+        // single-character wildcard would have returned must NOT appear, and
+        // the hit is the row containing both `a` and `b` as separate tokens.
+        expect(await idsFor('a_b'), ['a b']);
+        // `\` is treated as a separator — the row the indexer tokenises as
+        // `c d` survives.
+        expect(await idsFor(r'c\d'), ['c d']);
+        // A query that produces zero normalized tokens returns nothing
+        // rather than matching every row via empty-pattern wildcards.
+        expect(
+          (await db.querySearchEntries(
+            hostId: hostId,
+            queryTokens: const ['%'],
             limit: 10,
           )),
-          hasLength(1),
+          isEmpty,
         );
-      }
-    });
+        // A query that consists entirely of separators normalises to an
+        // empty token list and short-circuits to no rows.
+        expect(
+          (await db.querySearchEntries(
+            hostId: hostId,
+            queryTokens: const [r'__\\%%'],
+            limit: 10,
+          )),
+          isEmpty,
+        );
+      },
+    );
     test('source filter narrows results to one source family', () async {
       await db.upsertSearchEntry(
         hostId: hostId,

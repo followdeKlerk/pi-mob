@@ -932,7 +932,8 @@ class AppDatabase extends _$AppDatabase {
   /// Bounded query: scans the persisted tokens column for any of the
   /// normalized query tokens and returns up to [limit] hits, newest first.
   /// The caller is responsible for tokenization and for keeping the
-  /// summary length within [_kSearchSummaryCharCap].
+  /// summary length within [kSearchSummaryCharCap] (defined in
+  /// `search_indexer.dart`).
   Future<List<Map<String, Object?>>> querySearchEntries({
     required String hostId,
     required Iterable<String> queryTokens,
@@ -1088,9 +1089,11 @@ String _bootstrapInstallationId() => const Uuid().v4().toLowerCase();
 /// Mirrors the per-character rules the indexer uses in
 /// `search_indexer.dart`'s private `_tokenize`: lowercase, keep only ASCII
 /// letters, ASCII digits, and the Latin Extended blocks the indexer
-/// retains, and collapse every other rune into a single separator. This
-/// keeps the DB-level LIKE clause consistent with the persisted `tokens`
-/// column regardless of how the caller pre-tokenised the query.
+/// retains, and collapse every other rune into a single separator. SQLite
+/// `LIKE` wildcards (`%`, `_`) and the escape character (`\`) are therefore
+/// stripped — they are not preserved as literals. This keeps the DB-level
+/// LIKE clause consistent with the persisted `tokens` column regardless of
+/// how the caller pre-tokenised the query.
 String _normalizeSearchToken(String value) {
   if (value.isEmpty) return '';
   final lowered = value.toLowerCase();
@@ -1104,8 +1107,7 @@ String _normalizeSearchToken(String value) {
         (code >= 0x00c0 && code <= 0x024f) ||
         (code >= 0x1e00 && code <= 0x1eff) ||
         (code >= 0x30 && code <= 0x39);
-    final isLikeLiteral = code == 0x25 || code == 0x5f || code == 0x5c;
-    if (isLetterOrDigit || isLikeLiteral) {
+    if (isLetterOrDigit) {
       if (pendingSpace) buf.write(' ');
       buf.write(String.fromCharCode(code));
       pendingSpace = false;
@@ -1116,11 +1118,13 @@ String _normalizeSearchToken(String value) {
   return buf.toString().trim();
 }
 
-/// Escapes the SQLite `LIKE` wildcards (`%`, `_`) plus the escape
-/// character itself so a token containing those characters matches the
-/// persisted form literally rather than acting as a wildcard. The
-/// accompanying LIKE clause must use `ESCAPE '\'` for this to take
-/// effect.
+/// Defensively escapes the SQLite `LIKE` wildcards (`%`, `_`) plus the
+/// escape character itself so any bind parameter that somehow retains those
+/// characters is matched literally rather than acting as a wildcard. The
+/// accompanying LIKE clause uses `ESCAPE '\'` for this to take effect.
+/// After [_normalizeSearchToken] these characters are already stripped from
+/// the query side, but the escape still pays off for `summary`/`tokens`
+/// columns that may contain user-authored punctuation.
 String _escapeLikeLiteral(String value) {
   final buf = StringBuffer();
   for (final rune in value.runes) {
