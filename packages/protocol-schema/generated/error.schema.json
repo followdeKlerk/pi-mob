@@ -240,6 +240,30 @@
             {
               "const": "process_failed",
               "type": "string"
+            },
+            {
+              "const": "git_unavailable",
+              "type": "string"
+            },
+            {
+              "const": "git_remote_missing",
+              "type": "string"
+            },
+            {
+              "const": "git_provider_unavailable",
+              "type": "string"
+            },
+            {
+              "const": "git_auth_missing",
+              "type": "string"
+            },
+            {
+              "const": "git_stale",
+              "type": "string"
+            },
+            {
+              "const": "git_action_failed",
+              "type": "string"
             }
           ]
         },

@@ -109,6 +109,45 @@ export const LIMITS = {
   maxProcessOutputLength: 262144,
   maxProcessPorts: 32,
   maxProcessSnapshotItems: 100,
+  // F0 R6 — bounded surfaces for the lightweight Git/CI summary. Bounds are
+  // expressed in UTF-16 code units (see the `maxLength` UTF-16 note in the
+  // FIELD_GUIDE) so they stay consistent with every other F0 narrative /
+  // identifier / URL cap. None of the R6 payloads carry diff / stage / hunk
+  // / checkout fields: those belong to a future diff leaf and are explicitly
+  // excluded at the schema layer so a caller cannot smuggle them through.
+  //
+  //   - maxRepositoryLabelLength: 128 — opaque `owner/repo` style label.
+  //   - maxBranchLength: 128 — bounded branch name.
+  //   - maxFailedChecks: 20 — the bounded failed-check surface; the schema
+  //     rejects a 21st item, the bridge never silently truncates.
+  //   - maxCheckNameLength: 128 — bounded per-check identifier.
+  //   - maxCheckSummaryLength: 512 — bounded per-check narrative; shares the
+  //     canonical 512-code-unit narrative bound used by `reason` / `message`.
+  //   - maxExternalUrlLength: 1024 — bounded `https://` external URL (PR,
+  //     commit, check); longer URLs are rejected at the schema layer. The
+  //     regex additionally constrains the scheme + whitespace.
+  //   - maxCommitShaLength: 64 — bounded SHA-1/SHA-256 commit identifier.
+  //   - maxCommitMessageLength: 240 — bounded commit subject; the bridge
+  //     clips to the first line so a multi-KiB commit body never lands on
+  //     the summary card.
+  //   - maxCommitAuthorLength: 128 — bounded commit author label.
+  //   - maxGitPullRequestTitleLength: 240 — bounded PR title.
+  //   - maxGitConfirmationIdLength: 128 — bounded opaque confirmation id;
+  //     the bridge matches it against the user-confirmation record before
+  //     dispatch.
+  //   - maxGitSummaryHintLength: 240 — bounded commit/push prefill summary.
+  maxRepositoryLabelLength: 128,
+  maxBranchLength: 128,
+  maxFailedChecks: 20,
+  maxCheckNameLength: 128,
+  maxCheckSummaryLength: 512,
+  maxExternalUrlLength: 1024,
+  maxCommitShaLength: 64,
+  maxCommitMessageLength: 240,
+  maxCommitAuthorLength: 128,
+  maxGitPullRequestTitleLength: 240,
+  maxGitConfirmationIdLength: 128,
+  maxGitSummaryHintLength: 240,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -124,6 +163,14 @@ export const COMMAND_TYPES = [
   "context.pin", "context.unpin", "context.exclude", "context.refresh",
   // R5 — durable, revision-bound process actions.
   "process.stop", "process.restart", "process.rerun",
+  // F0 R6 — durable, revision-bound Git/CI actions. These are session-scoped
+  // commands that require the optional `git-ci.v1` capability; the bridge
+  // advertises the surface only when it genuinely implements the bounded
+  // Git/CI summary plus the explicit commit-through-Pi / push-through-Pi
+  // actions. The payloads deliberately omit diff/stage/hunk/checkout fields
+  // — the bridge never stages from mobile and never edits a hunk, so the
+  // schema closes that surface.
+  "git.commit.request", "git.push.request",
 ] as const;
 
 export const EVENT_TYPES = [
@@ -148,6 +195,14 @@ export const EVENT_TYPES = [
   // the standard CapabilityStatus envelope.
   "context.snapshot", "context.unavailable",
   "process.snapshot", "process.output", "process.unavailable", "process.error",
+  // F0 R6 — host-stream Git/CI event family. `git.summary` is the closed,
+  // bounded summary payload pushed whenever the host refreshes the per-
+  // workspace Git/CI state; `git.unavailable` carries the truthful no-
+  // capability envelope when the bridge advertises `git-ci.v1` but the
+  // surface is degraded / unreachable, mirroring the R3/R4 unavailable
+  // pattern. The summary event owns the workspaceId so the mobile client
+  // can reconcile it against the host workspace listing.
+  "git.summary", "git.unavailable",
 ] as const;
 
 export const RESPONSE_TYPES = [
@@ -164,6 +219,11 @@ export const RESPONSE_TYPES = [
   // receipts/state and the resulting context.snapshot event.
   "context.snapshot.result",
   "process.snapshot.result", "process.output.page.result",
+  // F0 R6 — additive Git/CI response. `git.summary.result` is the response
+  // payload for the `git.summary.request` control; the durable commit/push
+  // commands report through `command.receipt` / `command.state` / `command.
+  // current.result`, mirroring the R5 process pattern.
+  "git.summary.result",
 ] as const;
 export const SUPPORTED_CAPABILITIES = [
   "streams.v1", "commands.v1", "controller_leases.v1", "attachments.v1", "extension_dialogs.v1", "notifications.v1",
@@ -174,6 +234,15 @@ export const SUPPORTED_CAPABILITIES = [
   // unavailable" / "Context inspector unavailable" state, never to an
   // empty/fabricated tree/snapshot.
   "files.v1", "contexts.v1", "runtime.processes.v1",
+  // F0 R6 — additive capability literal for the lightweight Git/CI summary.
+  // The bridge advertises `git-ci.v1` only when the host genuinely implements
+  // the bounded summary surface (repository label / branch / clean-dirty /
+  // changed-count / ahead-behind / latest commit / bounded failed checks /
+  // validated external URLs / bounded supported actions) AND the explicit
+  // commit-through-Pi / push-through-Pi durable commands. Mobile clients
+  // map absence directly to the truthful "Git/CI unavailable" state; a
+  // fabricated summary is never published.
+  "git-ci.v1",
 ] as const;
 export const CONTROL_TYPES = [
   "subscription.set", "cursor.ack", "controller.renew", "host.snapshot.request", "session.snapshot.request",
@@ -182,6 +251,10 @@ export const CONTROL_TYPES = [
   // repeatable snapshot read; context mutations are durable commands above.
   "workspace.tree.page", "workspace.file.search", "workspace.file.content.search", "workspace.file.metadata", "workspace.file.read",
   "context.snapshot.request", "process.snapshot.request", "process.output.page",
+  // F0 R6 — repeatable, nonjournaled Git/CI summary read. The control carries
+  // `workspaceId` so the bridge can resolve the per-workspace summary; the
+  // durable commit/push commands are listed in COMMAND_TYPES above.
+  "git.summary.request",
 ] as const;
 
 export const ERROR_CODES = [
@@ -210,6 +283,20 @@ export const ERROR_CODES = [
   "file_stale", "file_unavailable",
   "context_pin_failed", "context_unavailable",
   "process_unavailable", "process_not_found", "process_stale", "process_failed",
+  // F0 R6 — additive stability codes for the lightweight Git/CI summary.
+  // Every code below is bounded, additive, and safe for direct display in
+  // the Git/CI inspector card. The mapping matches the truthful unavailable
+  // cards called out in REMAINING_UX_PLAN §R6:
+  //   - `git_unavailable`         — capability not advertised / surface gone
+  //   - `git_remote_missing`      — repository has no configured remote
+  //   - `git_provider_unavailable`— provider CLI / service is down
+  //   - `git_auth_missing`        — credentials absent or expired
+  //   - `git_stale`               — `expectedRevision` no longer matches
+  //                                 the authoritative summary revision
+  //   - `git_action_failed`       — durable commit/push refused or aborted
+  //                                 by the host / provider
+  "git_unavailable", "git_remote_missing", "git_provider_unavailable",
+  "git_auth_missing", "git_stale", "git_action_failed",
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -221,7 +308,7 @@ export interface CommandMetadata {
   readonly type: CommandType;
   readonly scope: "host" | "session" | "host-or-session";
   readonly requiresLeaseId: boolean;
-  readonly requiredCapability: "commands.v1" | "runtime.processes.v1";
+  readonly requiredCapability: "commands.v1" | "runtime.processes.v1" | "git-ci.v1";
   readonly acceptedStates: readonly string[];
   readonly semanticHashFields: readonly ["type", "payload"];
   readonly idempotency: "command-id-semantic-payload-sha256";
@@ -248,19 +335,35 @@ const leaseFreeCommands = new Set<CommandType>([
 // failure with the same vocabulary the `process.error` event uses.
 const processCommands = new Set<CommandType>(["process.stop", "process.restart", "process.rerun"]);
 const processStableErrors = ["process_unavailable", "process_not_found", "process_stale", "process_failed"] as const;
+// F0 R6 — git.commit.request / git.push.request are gated on the optional
+// `git-ci.v1` capability (the bridge advertises the surface only when it
+// genuinely implements the bounded Git/CI summary AND the explicit
+// commit-through-Pi / push-through-Pi durable commands). The stableErrors
+// list is the additive git-specific subset of ERROR_CODES so clients can
+// render a typed failure with the same vocabulary the `git.unavailable`
+// event uses.
+const gitCommands = new Set<CommandType>(["git.commit.request", "git.push.request"]);
+const gitStableErrors = [
+  "git_unavailable", "git_remote_missing", "git_provider_unavailable",
+  "git_auth_missing", "git_stale", "git_action_failed",
+] as const;
 const baseStableErrors = ["invalid_message", "unsupported_capability", "invalid_state", "idempotency_conflict"] as const;
 
 export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map((type) => ({
   type,
   scope: controllerCommands.has(type) ? "host-or-session" : hostCommands.has(type) ? "host" : "session",
   requiresLeaseId: !leaseFreeCommands.has(type),
-  requiredCapability: processCommands.has(type) ? "runtime.processes.v1" : "commands.v1",
+  requiredCapability: processCommands.has(type) ? "runtime.processes.v1" : gitCommands.has(type) ? "git-ci.v1" : "commands.v1",
   acceptedStates: ["protocol-valid", "capability-supported", "state-eligible"],
   semanticHashFields: ["type", "payload"],
   idempotency: "command-id-semantic-payload-sha256",
   recovery: "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
   journaledEffects: ["command.state"],
-  stableErrors: processCommands.has(type) ? [...baseStableErrors, ...processStableErrors] : [...baseStableErrors],
+  stableErrors: processCommands.has(type)
+    ? [...baseStableErrors, ...processStableErrors]
+    : gitCommands.has(type)
+      ? [...baseStableErrors, ...gitStableErrors]
+      : [...baseStableErrors],
 }));
 
 const hostEventTypes = new Set<EventType>([
@@ -268,6 +371,11 @@ const hostEventTypes = new Set<EventType>([
   "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
   // D-037: workspace invalidations are owned by the mandatory host stream.
   "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
+  // F0 R6: Git/CI summary / unavailable invalidations are owned by the
+  // mandatory host stream (v1 has no workspace stream class). Each payload
+  // carries the owning workspaceId so the mobile client can reconcile the
+  // event against its host workspace listing.
+  "git.summary", "git.unavailable",
 ]);
 export const EVENT_STREAM_OWNERSHIP: Readonly<Record<EventType, StreamOwnership>> = Object.fromEntries(
   EVENT_TYPES.map((type) => [type, type === "command.state" || type === "error.event" ? "host-or-session" : hostEventTypes.has(type) ? "host" : "session"]),
@@ -1007,6 +1115,257 @@ const R5ProcessMetadata = Type.Object({ lease: Type.Literal("session") }, { addi
 // union explicitly here. `additionalProperties: false` keeps the payload a
 // closed privacy boundary.
 const R5ProcessPayload = Type.Object({ ...R5ProcessCommand.properties, ...R5ProcessMetadata.properties }, { additionalProperties: false });
+
+// F0 R6 — capability literal for the lightweight Git/CI summary surface.
+// The bridge advertises `git-ci.v1` only when it genuinely implements the
+// bounded summary plus the explicit commit-through-Pi / push-through-Pi
+// durable commands. Absence maps to a truthful "Git/CI unavailable" card,
+// never to a fabricated summary.
+export const GIT_CI_CAPABILITY = "git-ci.v1" as const;
+
+// F0 R6 — ExternalUrlSchema. Validated `https://` URL the mobile client is
+// authorized to open externally. The regex is intentionally strict: the
+// scheme must be `https` (mobile opens external), the URL must contain no
+// whitespace or control characters (so a pasted manifest path cannot
+// smuggle a shell metacharacter), and the length is bounded by
+// `LIMITS.maxExternalUrlLength` (1024 UTF-16 code units). The bridge MUST
+// additionally verify the URL is reachable from the mobile client before
+// publishing; the schema can only enforce the static shape.
+export const EXTERNAL_URL_PATTERN = "^https://[^\\s\\x00-\\x1F]{1,1024}$";
+export const ExternalUrlSchema = Type.String({
+  pattern: EXTERNAL_URL_PATTERN,
+  maxLength: LIMITS.maxExternalUrlLength,
+  $id: "pi-mob/protocol/external-url",
+});
+
+// F0 R6 — GitRepositoryLabelSchema. Bounded opaque `owner/repo` style label
+// the inspector card renders directly. The pattern permits the canonical
+// GitHub-style slash and the punctuation `git remote -v` commonly prints
+// (`.`, `_`, `:`, `-`); whitespace, control characters, and a leading slash
+// are rejected so a manifest path or shell fragment cannot slip through.
+// `maxLength` mirrors `LIMITS.maxRepositoryLabelLength` (128 code units).
+export const GIT_REPOSITORY_LABEL_PATTERN = "^(?!/)[A-Za-z0-9._:/\\-]{1,128}$";
+export const GitRepositoryLabelSchema = Type.String({
+  pattern: GIT_REPOSITORY_LABEL_PATTERN,
+  maxLength: LIMITS.maxRepositoryLabelLength,
+  $id: "pi-mob/protocol/git-repository-label",
+});
+
+// F0 R6 — GitBranchSchema. Bounded opaque branch name. The pattern mirrors
+// `git check-ref-format --branch` plus the bounded length cap; whitespace,
+// control characters, leading/trailing slashes, and the literal `..` are
+// rejected at the schema layer so a reflog fragment cannot smuggle a
+// traversal into the inspector card.
+export const GIT_BRANCH_PATTERN = "^(?![/.])(?!.*(?:\\.\\.|@{))(?!.*//)[A-Za-z0-9._/\\-]{1,128}(?<!\\.lock)$";
+export const GitBranchSchema = Type.String({
+  pattern: GIT_BRANCH_PATTERN,
+  maxLength: LIMITS.maxBranchLength,
+  $id: "pi-mob/protocol/git-branch",
+});
+
+// F0 R6 — `workingTreeState` is the bounded clean / dirty / unknown triple.
+// `unknown` covers the truthful card when the bridge cannot reach the
+// repository (missing CLI, sandbox restriction, unauthenticated provider).
+// The state set is closed so the schema rejects arbitrary labels.
+export const GIT_WORKING_TREE_STATES = ["clean", "dirty", "unknown"] as const;
+
+// F0 R6 — CI / check status states. `success` / `failure` / `pending` /
+// `unknown` cover the truthful card when the bridge cannot reach the
+// provider; the state set is closed so the schema rejects arbitrary labels.
+export const GIT_CI_STATES = ["success", "failure", "pending", "unknown"] as const;
+
+// F0 R6 — supported Git/CI action set. `refresh` is the cancelable read,
+// `commit_through_pi` / `push_through_pi` route through the Pi runtime (the
+// bridge never stages from mobile and never edits a hunk), and
+// `open_external` opens a validated `https://` URL in the mobile browser.
+// The action set is closed so the schema rejects arbitrary labels.
+export const GIT_ACTIONS = ["refresh", "commit_through_pi", "push_through_pi", "open_external"] as const;
+
+// F0 R6 — GitWorkingTreeStateSchema is a closed literal union matching
+// `GIT_WORKING_TREE_STATES`. `closed shape` is enforced by the literal
+// union; a stray label is rejected at the schema layer.
+export const GitWorkingTreeStateSchema = Type.Union(
+  GIT_WORKING_TREE_STATES.map((value) => Type.Literal(value)),
+  { $id: "pi-mob/protocol/git-working-tree-state" },
+);
+
+// F0 R6 — GitCiStatusSchema. Closed one-level object carrying only the
+// aggregate CI state. `additionalProperties: false` means the schema
+// rejects arbitrary siblings (a per-check list lives on `failedChecks`,
+// never on `ciStatus`).
+export const GitCiStatusSchema = Type.Object({
+  state: Type.Union(GIT_CI_STATES.map((value) => Type.Literal(value))),
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-ci-status" });
+
+// F0 R6 — GitCheckRunSchema. One entry of the bounded failed-checks array.
+// `name` is the bounded identifier the inspector card renders directly;
+// `status` is the closed state literal; `summary` is the bounded narrative
+// (shares the 512-code-unit narrative bound used by `reason`/`message`);
+// `url` is an optional validated `https://` external URL the user can open
+// in the mobile browser. The schema is `additionalProperties: false` so a
+// bridge call site cannot smuggle a diff / log blob / raw output alongside
+// the declared check fields.
+export const GitCheckRunSchema = Type.Object({
+  name: Type.String({ minLength: 1, maxLength: LIMITS.maxCheckNameLength }),
+  status: Type.Union(GIT_CI_STATES.map((value) => Type.Literal(value))),
+  summary: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCheckSummaryLength })),
+  url: Type.Optional(ExternalUrlSchema),
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-check-run" });
+
+// F0 R6 — GitFailedChecksSchema. Closed container for the bounded
+// `failedChecks` array. `totalCount` is REQUIRED and bounded; the bridge
+// MUST keep `items.length <= LIMITS.maxFailedChecks` (20) and reflect the
+// authoritative provider count in `totalCount`. The schema is
+// `additionalProperties: false` so the bridge cannot smuggle a per-check
+// diff blob or raw log alongside the declared count.
+export const GitFailedChecksSchema = Type.Object({
+  totalCount: Type.Integer({ minimum: 0, maximum: LIMITS.maxFailedChecks }),
+  items: Type.Array(GitCheckRunSchema, { maxItems: LIMITS.maxFailedChecks }),
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-failed-checks" });
+
+// F0 R6 — GitPullRequestSchema. The bounded optional PR card. `number` is
+// the bounded positive PR number; `title` is the bounded narrative the
+// inspector card renders directly; `url` is the validated `https://` URL
+// the user can open externally. The schema is `additionalProperties: false`
+// so the bridge cannot smuggle a PR body or review-comment blob alongside
+// the declared PR fields.
+export const GitPullRequestSchema = Type.Object({
+  number: Type.Integer({ minimum: 1 }),
+  title: Type.String({ minLength: 1, maxLength: LIMITS.maxGitPullRequestTitleLength }),
+  url: ExternalUrlSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-pull-request" });
+
+// F0 R6 — GitLatestCommitSchema. Bounded, closed latest-commit card. `sha`
+// matches the canonical lowercase-hex SHA-1 / SHA-256 pattern; `message`
+// is the bounded subject (the bridge clips to the first line so a multi-
+// KiB commit body never lands on the inspector card); `author` is the
+// bounded author label; `authoredAt` is the canonical ISO-UTC timestamp.
+// The schema is `additionalProperties: false` so the bridge cannot smuggle
+// a diff blob or full commit body alongside the declared fields.
+export const GitLatestCommitSchema = Type.Object({
+  sha: Type.String({ pattern: "^[0-9a-f]{7,64}$", maxLength: LIMITS.maxCommitShaLength }),
+  message: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCommitMessageLength })),
+  author: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCommitAuthorLength })),
+  authoredAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-latest-commit" });
+
+// F0 R6 — GitSummarySchema. The closed, bounded authoritative summary the
+// host publishes as a `git.summary` event. Required identity / status
+// envelope:
+//   - `workspaceId` (UUID): the owning workspace.
+//   - `revision` (opaque RevisionToken): the authoritative summary revision;
+//     the durable commit/push commands carry `expectedRevision` so the bridge
+//     can reject a stale target with `git_stale` BEFORE Pi dispatch.
+//   - `repository` (bounded label): the opaque `owner/repo` label.
+//   - `branch` (bounded opaque): the active branch.
+//   - `workingTreeState` (closed literal): clean / dirty / unknown.
+//   - `changedCount`, `ahead`, `behind` (non-negative integers).
+//   - `latestCommit` (GitLatestCommitSchema): bounded latest-commit card.
+//   - `supportedActions` (closed literal set, unique): the actions the
+//     mobile client may take for THIS workspace right now.
+//   - `capability` (literal `git-ci.v1`): correlates the summary with the
+//     git surface capability.
+//   - `lastRefreshedAt` (canonical ISO-UTC): the bridge publish time.
+// Optional groups:
+//   - `pullRequest` (GitPullRequestSchema): the bounded PR card.
+//   - `ciStatus` (GitCiStatusSchema): the aggregate CI state.
+//   - `failedChecks` (GitFailedChecksSchema): the bounded failed-check list.
+//
+// Schema-scope guarantees ONLY:
+//   - shape, sign, length bounds, regex patterns, closed shape
+//   - required identity/status envelope
+//   - bounded failed-checks count (20)
+//   - validated `https://` external URLs (PR / check / commit — though
+//     commit URLs are bounded by the external-URL cap when present)
+//   - NO diff / stage / hunk / checkout fields: `additionalProperties: false`
+//     means the bridge cannot smuggle a future diff payload alongside the
+//     declared summary shape. A diff leaf must be its own additive leaf
+//     with its own additive command / response / event families.
+// Out-of-scope (MUST be enforced by the bridge at publish and at receive):
+//   - the relation `changedCount === 0` iff `workingTreeState === "clean"`
+//   - the validity of `latestCommit.sha` against the live repository
+//   - the validity of `ahead` / `behind` against the live remote
+//   - any cross-payload dedupe or ordering
+export const GitSummarySchema = Type.Object({
+  workspaceId: Uuid,
+  revision: RevisionTokenSchema,
+  repository: GitRepositoryLabelSchema,
+  branch: GitBranchSchema,
+  workingTreeState: GitWorkingTreeStateSchema,
+  changedCount: Type.Integer({ minimum: 0 }),
+  ahead: Type.Integer({ minimum: 0 }),
+  behind: Type.Integer({ minimum: 0 }),
+  latestCommit: GitLatestCommitSchema,
+  pullRequest: Type.Optional(GitPullRequestSchema),
+  ciStatus: Type.Optional(GitCiStatusSchema),
+  failedChecks: Type.Optional(GitFailedChecksSchema),
+  supportedActions: Type.Array(
+    Type.Union(GIT_ACTIONS.map((value) => Type.Literal(value))),
+    { maxItems: GIT_ACTIONS.length, uniqueItems: true },
+  ),
+  capability: Type.Literal(GIT_CI_CAPABILITY),
+  lastRefreshedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-summary" });
+
+// F0 R6 — GitUnavailableEventSchema. Truthful no-Git/CI-surface envelope.
+// Mirrors the R3/R4 unavailable pattern: closed object, capability
+// literal, closed `CapabilityStatus`. `workspaceId` is REQUIRED so the
+// mobile client can correlate the unavailable state with the host
+// workspace listing.
+export const GitUnavailableEventSchema = Type.Object({
+  workspaceId: Uuid,
+  capability: Type.Literal(GIT_CI_CAPABILITY),
+  status: CapabilityStatusSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-unavailable" });
+
+// F0 R6 — GitConfirmationSchema. Bounded confirmation proof the durable
+// commit/push commands carry. The bridge MUST match `confirmationId`
+// against an in-flight user-confirmation record before dispatch; the
+// schema cannot prove the match, only that the token is bounded opaque
+// text. `summary` is an optional bounded prefill summary (commit subject,
+// push annotation) the user reviewed before confirming. The schema is
+// `additionalProperties: false` so the bridge cannot smuggle a private
+// confirmation secret or raw diff alongside the declared confirmation
+// fields.
+export const GitConfirmationSchema = Type.Object({
+  confirmationId: Type.String({
+    minLength: 1,
+    maxLength: LIMITS.maxGitConfirmationIdLength,
+    pattern: "^[A-Za-z0-9._:-]{1,128}$",
+  }),
+  summary: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxGitSummaryHintLength })),
+}, { additionalProperties: false, $id: "pi-mob/protocol/git-confirmation" });
+
+// F0 R6 — `git.commit.request` and `git.push.request` durable payloads.
+// Schema-scope guarantees ONLY:
+//   - shape, sign, length bounds, regex patterns, closed shape
+//   - required `workspaceId`, `expectedRevision`, `confirmation`
+//   - the optional bounded `summaryHint` (prefill commit subject / push
+//     annotation)
+//   - NO diff / stage / hunk / checkout fields: `additionalProperties: false`
+//     means the bridge cannot smuggle a future diff payload, a staged hunk,
+//     or a checkout target alongside the declared payload shape.
+// Out-of-scope (MUST be enforced by the bridge at publish and at receive):
+//   - the relation `expectedRevision === summary.revision` (the bridge
+//     resolves and verifies; the schema cannot see siblings)
+//   - the actual `confirmationId` validity (the bridge matches against the
+//     user-confirmation record; the schema proves only opaque bounded text)
+//   - any cross-command dedupe or ordering
+//
+// The durable commands report through `command.receipt` / `command.state` /
+// `command.current.result`, mirroring the R5 process pattern; this payload
+// carries ONLY the workspace identity, the anti-stale revision, and the
+// confirmation metadata.
+const GitCommandFields = {
+  workspaceId: Uuid,
+  expectedRevision: RevisionTokenSchema,
+  confirmation: GitConfirmationSchema,
+  summaryHint: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxGitSummaryHintLength })),
+};
+export const GitCommandPayloadSchema = Type.Object(GitCommandFields, {
+  additionalProperties: false,
+  $id: "pi-mob/protocol/git-command-payload",
+});
 const ControllerScope = Type.Union([
   Type.Object({ scope: Type.Literal("host") }, { additionalProperties: true }),
   Type.Object({ scope: Type.Literal("session"), sessionId: SessionId }, { additionalProperties: true }),
@@ -1045,6 +1404,14 @@ const CommandPayloads = {
   "process.stop": R5ProcessPayload,
   "process.restart": R5ProcessPayload,
   "process.rerun": R5ProcessPayload,
+  // F0 R6 — durable, revision-bound Git/CI actions. Payload is
+  // `GitCommandPayloadSchema`: `workspaceId` + `expectedRevision` +
+  // `confirmation` (with optional bounded `summaryHint`). The bridge never
+  // stages from mobile and never edits a hunk, so the payload deliberately
+  // omits diff/stage/hunk/checkout fields; `additionalProperties: false`
+  // on the schema closes that surface.
+  "git.commit.request": GitCommandPayloadSchema,
+  "git.push.request": GitCommandPayloadSchema,
   "turn.abort": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "queue.remove": Type.Object({ sessionId: SessionId, queueItemId: Uuid }, { additionalProperties: true }),
   "queue.clear": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "model.set": Type.Object({ sessionId: SessionId, modelId: Type.String({ minLength: 1 }), provider: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: true }),
   "thinking.set": Type.Object({ sessionId: SessionId, level: Type.String({ minLength: 1 }) }, { additionalProperties: true }), "steering_mode.set": Type.Object({ sessionId: SessionId, enabled: Type.Boolean() }, { additionalProperties: true }),
@@ -1084,6 +1451,13 @@ const EventPayloads = {
   "process.output": ProcessOutputSchema,
   "process.unavailable": Type.Object({ sessionId: SessionId, capability: Type.Literal("runtime.processes.v1"), status: CapabilityStatusSchema }, { additionalProperties: false }),
   "process.error": Type.Object({ sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, error: ErrorInfoSchema }, { additionalProperties: false }),
+  // F0 R6 — host-stream Git/CI event payloads. `git.summary` carries the
+  // authoritative closed summary; `git.unavailable` carries the truthful
+  // no-capability envelope. Both are owned by the host stream (mirroring
+  // the D-037 R3 file-browser pattern) and carry `workspaceId` so the
+  // mobile client can reconcile against the host workspace listing.
+  "git.summary": GitSummarySchema,
+  "git.unavailable": GitUnavailableEventSchema,
 } as const;
 const genericEventPayload = Type.Object({ sessionId: Type.Optional(SessionId) }, { additionalProperties: true });
 const ControlPayloads = {
@@ -1104,6 +1478,7 @@ const ControlPayloads = {
   "context.snapshot.request": ContextSnapshotRequestPayloadSchema,
   "process.snapshot.request": Type.Object({ sessionId: SessionId }, { additionalProperties: false }),
   "process.output.page": Type.Object({ sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]), cursor: Type.Optional(DecimalCursorSchema), pageToken: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) }, { additionalProperties: false }),
+  "git.summary.request": Type.Object({ workspaceId: Uuid }, { additionalProperties: false }),
 } as const;
 export const SubscriptionSchema = ControlPayloads["subscription.set"];
 const ResponsePayloads = {
@@ -1127,6 +1502,7 @@ const ResponsePayloads = {
   "context.snapshot.result": ContextSnapshotSchema,
   "process.snapshot.result": Type.Object({ items: Type.Array(ProcessSnapshotSchema, { maxItems: LIMITS.maxProcessSnapshotItems }) }, { additionalProperties: false }),
   "process.output.page.result": ProcessOutputSchema,
+  "git.summary.result": GitSummarySchema,
 } as const;
 
 export const SnapshotSchema = Type.Union([

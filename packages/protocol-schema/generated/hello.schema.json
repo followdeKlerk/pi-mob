@@ -78,6 +78,10 @@
               {
                 "const": "runtime.processes.v1",
                 "type": "string"
+              },
+              {
+                "const": "git-ci.v1",
+                "type": "string"
               }
             ]
           },
