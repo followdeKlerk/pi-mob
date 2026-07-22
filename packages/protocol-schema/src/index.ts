@@ -124,15 +124,52 @@ const Uuid = UuidSchema;
 // RevisionToken is intentionally distinct from DECIMAL_CURSOR_PATTERN so that
 // callers cannot accidentally substitute one for the other.
 export const RevisionTokenSchema = Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$", $id: "pi-mob/protocol/revision-token" });
-const CAPABILITY_STATES = ["available", "degraded", "unavailable"] as const;
-export const CapabilityStatusSchema = Type.Object({
-  state: Type.Union(CAPABILITY_STATES.map((value) => Type.Literal(value))),
-  reason: Type.Optional(Type.String({ minLength: 1 })),
-  remediation: Type.Optional(Type.String({ minLength: 1 })),
-  source: Type.Optional(Type.String({ minLength: 1 })),
-  revision: Type.Optional(RevisionTokenSchema),
-  lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
-}, { additionalProperties: true, $id: "pi-mob/protocol/capability-status" });
+// F0 — capability states for recipe (R1) and plan (R2) flows. "stale" covers
+// revisions whose TTL or trust window has elapsed without an explicit outage.
+// Exported so bridge and schema consumers can iterate the full state set
+// without re-hardcoding the union of CapabilityStatusSchema variants.
+export const CAPABILITY_STATES = ["available", "degraded", "unavailable", "stale"] as const;
+// F0 — CapabilityStatusSchema is a discriminated union: "available" permits
+// optional reason/remediation because green-path responses don't need an
+// incident narrative; degraded/unavailable/stale each REQUIRE nonempty
+// reason+remediation so callers always know what is broken and how to fix it.
+// `source`/`revision`/`lastRefreshedAt` are optional context for every variant
+// and pinpoint which surface (host-bridge, session-bridge, pi runtime)
+// produced the status and against which revision the answer was computed.
+export const CapabilityStatusSchema = Type.Union([
+  Type.Object({
+    state: Type.Literal("available"),
+    reason: Type.Optional(Type.String({ minLength: 1 })),
+    remediation: Type.Optional(Type.String({ minLength: 1 })),
+    source: Type.Optional(Type.String({ minLength: 1 })),
+    revision: Type.Optional(RevisionTokenSchema),
+    lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#available" }),
+  Type.Object({
+    state: Type.Literal("degraded"),
+    reason: Type.String({ minLength: 1 }),
+    remediation: Type.String({ minLength: 1 }),
+    source: Type.Optional(Type.String({ minLength: 1 })),
+    revision: Type.Optional(RevisionTokenSchema),
+    lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#degraded" }),
+  Type.Object({
+    state: Type.Literal("unavailable"),
+    reason: Type.String({ minLength: 1 }),
+    remediation: Type.String({ minLength: 1 }),
+    source: Type.Optional(Type.String({ minLength: 1 })),
+    revision: Type.Optional(RevisionTokenSchema),
+    lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#unavailable" }),
+  Type.Object({
+    state: Type.Literal("stale"),
+    reason: Type.String({ minLength: 1 }),
+    remediation: Type.String({ minLength: 1 }),
+    source: Type.Optional(Type.String({ minLength: 1 })),
+    revision: Type.Optional(RevisionTokenSchema),
+    lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  }, { additionalProperties: true, $id: "pi-mob/protocol/capability-status#stale" }),
+], { $id: "pi-mob/protocol/capability-status" });
 export const BoundsSchema = Type.Object({
   maxItems: Type.Optional(Type.Integer({ minimum: 0 })),
   maxBytes: Type.Optional(Type.Integer({ minimum: 0 })),
@@ -140,6 +177,30 @@ export const BoundsSchema = Type.Object({
   maxDepth: Type.Optional(Type.Integer({ minimum: 0 })),
   maxDurationMs: Type.Optional(Type.Integer({ minimum: 0 })),
 }, { additionalProperties: true, $id: "pi-mob/protocol/bounds" });
+/**
+ * Cross-field truncation telemetry for shared protocol payloads.
+ *
+ * UTF-8 semantics (enforced by the bridge before publish and re-checked on
+ * receive):
+ *   - `retainedBytes` and `totalBytes` count RAW UTF-8 CODE UNITS over the
+ *     canonical NFC-normalized form of the truncated field. They are NOT
+ *     Unicode scalar counts and NOT grapheme-cluster counts; callers that
+ *     need either MUST derive them from the surviving payload bytes.
+ *   - When `digest` is present it is the lowercase-hex SHA-256 of the FULL
+ *     truncated field's UTF-8 byte stream (the un-trimmed value), not of
+ *     the retained prefix.
+ *
+ * Cross-field invariants enforced by the bridge:
+ *   - `retainedBytes <= totalBytes` MUST hold; bridge rejects publish otherwise.
+ *   - `isTruncated === true` implies `retainedBytes < totalBytes`; the
+ *     bridge will not emit `truncated=false` with `retainedBytes < totalBytes`.
+ *   - When sibling fields carry their own TruncationSchema (e.g. a recipe
+ *     activity entry that cites a truncated tool output), the bridge emits
+ *     the TruncationSchema on EVERY truncated sibling; partial truncation
+ *     telemetry is treated as a schema violation, not an omission.
+ *   - `digest` length and hex alphabet are validated via the regex pattern;
+ *     a non-64-char or non-hex value is a hard reject, never silently coerced.
+ */
 export const TruncationSchema = Type.Object({
   retainedBytes: Type.Integer({ minimum: 0 }),
   totalBytes: Type.Integer({ minimum: 0 }),
@@ -158,11 +219,20 @@ export const ErrorInfoSchema = Type.Object({
   retryable: Type.Boolean(),
   recommendedDelayMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
 }, { additionalProperties: true, $id: "pi-mob/protocol/error-info" });
+// F0 — ProviderSummarySchema is a tagged, closed object: `summary` carries
+// the rendered provider description (1–4096 UTF-8 code units, enforced by the
+// bridge at publish and at receive via `maxLength`), and an optional
+// `truncation` block describing how the summary was clipped when the source
+// exceeded the 4096-byte limit. `additionalProperties: false` means the bridge
+// will reject any unknown sibling field (thinking level, raw metadata, etc.)
+// rather than silently forward it to mobile clients.
 export const ProviderSummarySchema = Type.Object({
   kind: Type.Literal("provider_summary"),
   provider: Type.String({ minLength: 1 }),
   model: Type.Optional(Type.String({ minLength: 1 })),
-}, { additionalProperties: true, $id: "pi-mob/protocol/provider-summary" });
+  summary: Type.String({ minLength: 1, maxLength: 4096 }),
+  truncation: Type.Optional(TruncationSchema),
+}, { additionalProperties: false, $id: "pi-mob/protocol/provider-summary" });
 
 const Payload = Type.Object({}, { additionalProperties: true });
 export const ProtocolVersionSchema = Type.Object({ major: Type.Literal(PROTOCOL_MAJOR), minor: Type.Integer({ minimum: 0 }) }, { additionalProperties: true, $id: "pi-mob/protocol/version" });
