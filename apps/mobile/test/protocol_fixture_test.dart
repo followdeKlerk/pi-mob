@@ -4,7 +4,7 @@ import 'package:pi_mob/protocol_fixture.dart';
 import 'test_asset_loader.dart';
 
 Map<String, Object?> _promptSubmitWithPlanTarget(
-  Map<String, Object?> planTarget,
+  Map<String, Object?>? planTarget,
 ) => <String, Object?>{
   'protocol': const <String, Object?>{'major': 1, 'minor': 0},
   'messageId': '11111111-1111-4111-8111-111111111111',
@@ -165,6 +165,14 @@ void main() {
           'stepId': 'step-1',
         }),
       ),
+      throwsA(isA<ProtocolValidationException>()),
+    );
+  });
+
+  test('prompt.submit planTarget rejects explicit null', () {
+    expect(
+      () =>
+          validateProtocolFixture('command', _promptSubmitWithPlanTarget(null)),
       throwsA(isA<ProtocolValidationException>()),
     );
   });

@@ -1080,7 +1080,7 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
         );
       }
     }
-    if (payload['planTarget'] != null) {
+    if (payload.containsKey('planTarget')) {
       final target = _object(payload, 'planTarget');
       _closedObject(target, 'payload.planTarget', const <String>{
         'planId',
