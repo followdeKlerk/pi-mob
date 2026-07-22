@@ -252,7 +252,8 @@ function repairR5ExpectedInvalid(file: R5ExpectedInvalidFile, message: Record<st
 test("R5 valid fixtures carry exhaustive controls, capability, snapshots, and distinct output streams", () => {
   const find = (file: string): FixtureRecord => JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
   const hello = find("hello-valid.json");
-  expect((hello.message.payload as Record<string, unknown>).requiredCapabilities).toContain("runtime.processes.v1");
+  expect((hello.message.payload as Record<string, unknown>).requiredCapabilities).not.toContain("runtime.processes.v1");
+  expect((hello.message.payload as Record<string, unknown>).optionalCapabilities).toContain("runtime.processes.v1");
   expect((find("response-hello-accepted-valid.json").message.payload as Record<string, unknown>).capabilities).toContain("runtime.processes.v1");
   expect(find("command-process-stop-valid.json").valid).toBe(true);
   expect(find("control-process-snapshot-request-valid.json").valid).toBe(true);

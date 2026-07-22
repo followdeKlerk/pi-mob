@@ -15,10 +15,10 @@
       "installationId": "55555555-5555-4555-8555-555555555555",
       "requiredCapabilities": [
         "streams.v1",
-        "commands.v1",
-        "runtime.processes.v1"
+        "commands.v1"
       ],
       "optionalCapabilities": [
+        "runtime.processes.v1",
         "future.optional"
       ]
     },
