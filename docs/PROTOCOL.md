@@ -90,7 +90,7 @@ Immediately after WebSocket establishment, the client sends `hello` before any o
     "platform": "ios",
     "installationId": "919cd681-bd37-4451-9475-baf53ed29184",
     "requiredCapabilities": ["streams.v1", "commands.v1"],
-    "optionalCapabilities": ["attachments.v1", "extension_dialogs.v1", "notifications.v1", "files.v1", "contexts.v1", "runtime.processes.v1"]
+    "optionalCapabilities": ["attachments.v1", "extension_dialogs.v1", "notifications.v1", "files.v1", "contexts.v1", "runtime.processes.v1", "git-ci.v1"]
   }
 }
 ```
@@ -122,7 +122,8 @@ Bridge response:
       "extension_dialogs.v1",
       "files.v1",
       "contexts.v1",
-      "runtime.processes.v1"
+      "runtime.processes.v1",
+      "git-ci.v1"
     ],
     "limits": {
       "maxJsonBytes": 1048576,
@@ -143,8 +144,9 @@ Handshake rules:
 - Minor versions are additive.
 - An unknown required capability is fatal with `unsupported_capability`.
 - Unknown optional capabilities are ignored.
-- `files.v1` (R3 file browser), `contexts.v1` (R4 context inspector), and
-  `runtime.processes.v1` (R5 supervised-process runtime) are
+- `files.v1` (R3 file browser), `contexts.v1` (R4 context inspector),
+  `runtime.processes.v1` (R5 supervised-process runtime), and `git-ci.v1`
+  (R6 lightweight Git/CI summary plus commit/push-through-Pi actions) are
   independent, additive, **optional** capabilities. A bridge advertises one
   only when it implements the corresponding bounded surface. The v1 mobile
   client lists each in `optionalCapabilities`, never `requiredCapabilities`.
@@ -228,6 +230,7 @@ Mandatory after handshake. Carries:
 - host state/readiness/degradation/draining,
 - session summary additions/changes/removals,
 - workspace/trust summary changes,
+- workspace-scoped Git/CI summaries and truthful Git/CI unavailable state,
 - active-process capacity,
 - notification capability state,
 - R3 file-browser invalidations (`workspace.tree.snapshot`,
@@ -371,7 +374,7 @@ The bridge sends:
 
 The bridge captures snapshot state and baseline consistently so events cannot fall between snapshot and replay.
 
-Host snapshot includes readiness, capabilities, session summaries, workspace summaries needed by current screens, capacity, and requesting-installation lease summaries.
+Host snapshot includes readiness, capabilities, session summaries, workspace summaries needed by current screens, capacity, and requesting-installation lease summaries. It does not fabricate a Git/CI card; `git.summary.request` / `git.summary.result` and later `git.summary` / `git.unavailable` host-stream events remain the authoritative per-workspace Git surface.
 
 Session snapshot includes metadata, runtime/controller/policy/model/queue/retry/compaction state, pending dialog, active/last turn state, and a bounded recent canonical transcript. Older transcript history is loaded through pagination.
 
@@ -605,6 +608,8 @@ workspace.file.read
 context.snapshot.request
 process.snapshot.request
 process.output.page
+git.summary.request
+git.summary.cancel
 ```
 
 These requests are repeatable reads/control messages and use `requestId` where a response is expected. R3 controls, `context.snapshot.request`, `process.snapshot.request`, and `process.output.page` are repeatable, nonjournaled reads; they MUST NOT mutate durable host or session state. The three snapshot/output controls return `context.snapshot.result`, `process.snapshot.result`, and `process.output.page.result`, respectively. R3 invalidations and snapshot-confirmed outcomes from durable R4/R5 mutations travel on journaled streams (§14, §15), never as a side effect of a read control.
@@ -640,6 +645,13 @@ session.purge
 session.fork
 session.clone
 session.export
+```
+
+### Git/CI commands (R6)
+
+```text
+git.commit.request
+git.push.request
 ```
 
 ### Turn/queue commands
@@ -705,6 +717,35 @@ and compatibility between requested action, current status, and the snapshot's
 schema: a stale expected revision returns `process_stale`, while an unsupported
 or state-incompatible action returns `invalid_state`.
 
+### Git/CI commands (R6)
+
+The canonical R6 capability is `git-ci.v1`. Its read controls are
+`git.summary.request` and `git.summary.cancel`; their direct response is
+`git.summary.result`. Its host-stream events are exactly `git.summary` and
+`git.unavailable`. Its Git-specific stable errors are exactly
+`git_unavailable`, `git_remote_missing`, `git_provider_unavailable`,
+`git_auth_missing`, `git_stale`, and `git_action_failed`.
+
+Each R6 durable command is session-scoped, durable, and gated on `git-ci.v1`.
+In addition to the normal envelope `commandId` and `leaseId`, its closed
+payload contains `sessionId`, `workspaceId`, `expectedRevision`, required
+`confirmation`, and optional `summaryHint`. Commit and push execute through Pi;
+mobile never stages, edits hunks, shows a diff payload, or requests checkout.
+The schema closes that surface, so `diff`, `stage`, `hunk`, and `checkout`
+fields are rejected before dispatch.
+
+The schema validates only shape, bounds, and the closed payload. The bridge
+separately enforces authoritative workspace/session ownership, equality with
+current Git summary revision, confirmation-token validity, and compatibility
+between the requested action and the summary's current `supportedActions`.
+Those relational checks cannot be expressed by the command schema: a stale
+`expectedRevision` returns `git_stale`, an unsupported action returns
+`invalid_state`, and provider/remote/auth/runtime failures use the stable Git
+error codes above. As with all durable commands, idempotency is by `commandId`
+plus semantic payload hash, accepted-before-dispatch work may dispatch after
+recovery, and in-flight external effects that cannot be proven after a crash
+become `indeterminate` rather than being replayed automatically.
+
 ### Extension command
 
 ```text
@@ -742,6 +783,8 @@ workspace.tree.snapshot
 workspace.file.metadata
 workspace.file.stale
 workspace.file.unavailable
+git.summary
+git.unavailable
 command.state
 error.event
 ```
@@ -938,6 +981,72 @@ Live process records and historical transcript tools remain separate:
 events update the supervised runtime projection. A process event does not
 rewrite or delete the historical tool card; optional `toolCallId` and `turnId`
 only permit correlation.
+
+### Git/CI summary and actions (R6)
+
+`git-ci.v1` is the optional capability for this closed, bounded workspace
+surface. Both R6 events belong to the host stream and every R6 control is a
+repeatable nonjournaled workspace read/control.
+
+#### Summary reads, cancellation, and host events
+
+`git.summary.request` has the closed payload `{ workspaceId }`.
+`git.summary.cancel` has the closed payload `{ targetRequestId }` and cancels
+an in-flight summary request by that request UUID only. `git.summary.result`
+and `git.summary` carry the same closed `GitSummary` payload. `git.unavailable`
+has the closed payload `{ workspaceId, capability, status }`, where
+`capability` is exactly `git-ci.v1` and `status` is the shared closed
+capability-status shape. Missing capability advertisement or a workspace-scoped
+provider/remote/auth problem MUST degrade to `git.unavailable` or a stable Git
+error; the bridge MUST NOT fabricate an empty or best-effort summary.
+
+#### Git summary payload
+
+Each Git summary requires:
+
+- `workspaceId`, opaque `revision`, validated `repositoryUrl`, and bounded
+  repository label `repository`;
+- a discriminated `detached`/`branch` pair: attached summaries carry
+  `detached: false` with a bounded branch name, while detached summaries carry
+  `detached: true` and `branch: null`;
+- `workingTreeState`, exactly `clean`, `dirty`, or `unknown`;
+- bounded non-negative `changedCount`, `ahead`, and `behind` counts;
+- bounded `latestCommit` with lowercase-hex SHA (7-64 chars), authored time,
+  optional bounded message/author, and validated external HTTPS URL;
+- required aggregate `ciStatus`, required `failedChecks`, required unique
+  `supportedActions`, literal `capability: "git-ci.v1"`, and
+  `lastRefreshedAt`.
+
+Optional summary groups are bounded `pullRequest` and bounded per-check fields
+inside `failedChecks`. `supportedActions` is a unique subset of exactly
+`refresh`, `commit_through_pi`, `push_through_pi`, and `open_external`; it may
+be empty. `failedChecks` is a bounded list surface with no raw logs or diff
+content: the bridge may publish only capped check name/status/summary,
+optionally capped `logSummary`, and validated external HTTPS links.
+
+The schema guarantees closed fields, discriminated detached/branch shape,
+non-negative bounded counts, unique supported actions, and validated HTTPS URL
+shape without credentials or control characters. It does **not** prove the live
+repository state, remote truth, `workingTreeState`/count consistency, commit or
+PR existence, or URL reachability. The bridge separately verifies those
+relations and MUST validate that every external URL is safe HTTPS before
+publication.
+
+#### Durable commit/push through Pi
+
+`git.commit.request` and `git.push.request` are the only R6 mutations. Each
+requires the active session controller lease and a user-reviewed confirmation
+object with opaque `confirmationId` plus optional bounded summary text. Their
+semantic payload is `sessionId`, `workspaceId`, `expectedRevision`,
+`confirmation`, and optional `summaryHint`; envelope `leaseId` remains
+metadata. Commit/push run through Pi, not direct mobile Git execution.
+
+A stale `expectedRevision` rejects with `git_stale` before Pi dispatch.
+Capability loss, remote absence, provider unavailability, auth failure, or a
+refused/aborted action reject with the stable Git errors. Duplicate command IDs
+with the same semantic payload return current state without redispatch; a reused
+command ID with a different payload returns `idempotency_conflict`. The bridge
+never widens this surface into diff, stage, hunk, or checkout operations.
 
 ### Command state
 
@@ -1230,6 +1339,12 @@ export_unavailable
 recipe_unavailable
 plan_unavailable
 stale_plan_target
+git_unavailable
+git_remote_missing
+git_provider_unavailable
+git_auth_missing
+git_stale
+git_action_failed
 payload_too_large
 rate_limited
 slow_consumer
@@ -1282,6 +1397,17 @@ Defaults:
 - Maximum queued follow-ups: 10 per session.
 - Maximum background summary subscriptions: 5 plus one full session.
 - Maximum interactive extension dialog: 5 minutes.
+- Maximum Git repository label: 128 UTF-16 code units.
+- Maximum Git branch label: 128 UTF-16 code units.
+- Maximum failed checks surfaced: 20.
+- Maximum Git check name: 128 UTF-16 code units.
+- Maximum Git check summary: 512 UTF-16 code units.
+- Maximum Git check log summary: 4096 UTF-16 code units.
+- Maximum Git changed/ahead/behind count: 1,000,000.
+- Maximum external Git/PR/check/commit URL: 1024 UTF-16 code units.
+- Maximum commit SHA text: 64 lowercase hex chars.
+- Maximum commit message, PR title, and summary hint: 240 UTF-16 code units each.
+- Maximum commit author and Git confirmation ID: 128 UTF-16 code units each.
 
 Oversized tool output:
 
@@ -1374,6 +1500,13 @@ At minimum:
 - Running-at-crash indeterminate.
 - Immediate/steer/follow-up prompt paths.
 - Queue add/remove/clear/restart/full.
+- Git summary request/cancel/result, attached and detached branch summaries,
+  unavailable/degraded Git capability state, bounded failed checks/log
+  summaries, HTTPS URL validation, and the host-stream ownership of
+  `git.summary` / `git.unavailable`.
+- Durable commit/push-through-Pi acceptance, confirmation requirement, lease
+  requirement, stale revision rejection, unsupported-action rejection,
+  duplicate command replay, and indeterminate external crash recovery.
 - Every command and event type.
 - Session list/history pagination and changed revision.
 - Attachment retry/different-content conflict/expiry/malformed/oversized.

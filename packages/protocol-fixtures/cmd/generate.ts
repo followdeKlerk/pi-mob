@@ -72,6 +72,68 @@ function processOutput(stream: "stdout" | "stderr" = "stdout", overrides: Record
 function processCommandPayload(): Record<string, unknown> {
   return { sessionId: ids.sessionId, processId: processFixture.processId, expectedRevision: processFixture.revision, lease: "session" };
 }
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+function cloneRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!isRecord(value)) throw new TypeError(`${label} must be an object`);
+  return { ...value };
+}
+function cloneFirstRecord(value: unknown, label: string): Record<string, unknown> {
+  if (!Array.isArray(value) || value.length === 0) throw new TypeError(`${label} must be a non-empty array`);
+  return cloneRecord(value[0], `${label}[0]`);
+}
+function gitSummary(overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    workspaceId: ids.workspaceId,
+    revision: "git-r1",
+    repositoryUrl: "https://example.test/pi-mob",
+    repository: "pi-mob/pi-mob",
+    detached: false,
+    branch: "feature/git-ci",
+    workingTreeState: "dirty",
+    changedCount: 2,
+    ahead: 1,
+    behind: 0,
+    latestCommit: {
+      sha: "a".repeat(40),
+      message: "Add Git/CI attention protocol",
+      author: "Pi Mobile",
+      authoredAt: base.sentAt,
+      url: "https://example.test/pi-mob/commit/aaa",
+    },
+    pullRequest: {
+      number: 42,
+      title: "Add Git/CI attention protocol",
+      url: "https://example.test/pi-mob/pull/42",
+    },
+    ciStatus: { state: "failure" },
+    failedChecks: [{
+      name: "protocol-schema",
+      status: "failure",
+      summary: "schema check failed",
+      logSummary: "protocol schema generation differs from checked-in artifacts",
+      url: "https://example.test/pi-mob/checks/1",
+    }],
+    supportedActions: ["refresh", "commit_through_pi", "push_through_pi", "open_external"],
+    capability: "git-ci.v1",
+    lastRefreshedAt: base.sentAt,
+    ...overrides,
+  };
+}
+function gitCommandPayload(type: string): Record<string, unknown> {
+  const isPush = type === "git.push.request";
+  return {
+    sessionId: ids.sessionId,
+    workspaceId: ids.workspaceId,
+    expectedRevision: "git-r1",
+    confirmation: {
+      confirmationId: isPush ? "confirm-push-1" : "confirm-commit-1",
+      summary: isPush ? "Push the current branch through Pi" : "Commit the reviewed changes through Pi",
+    },
+    summaryHint: isPush ? "Push Git/CI attention protocol" : "Add Git/CI attention protocol",
+  };
+}
 function processUnavailablePayload(): Record<string, unknown> {
   return { sessionId: ids.sessionId, capability: "runtime.processes.v1", status: { state: "unavailable", reason: "Process supervision is not advertised by this host.", remediation: "Upgrade the host bridge or refresh capabilities.", source: "runtime-bridge", revision: "process-r1" } };
 }
@@ -91,6 +153,7 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "session.export") return { sessionId: ids.sessionId, format: "html" };
   if (type === "prompt.submit") return { sessionId: ids.sessionId, deliveryMode: "immediate", message: "fixture", attachmentIds: [] };
   if (["process.stop", "process.restart", "process.rerun"].includes(type)) return processCommandPayload();
+  if (["git.commit.request", "git.push.request"].includes(type)) return gitCommandPayload(type);
   if (type === "context.pin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", ranges: [FILE_RANGE], revision: "file-r1" } };
   if (type === "context.unpin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1" } };
   if (type === "context.exclude") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "source", sourceId: "source-fixture", revision: "file-r1" } };
@@ -155,6 +218,8 @@ function eventPayload(type: string): Record<string, unknown> {
   if (type === "process.output") return processOutput();
   if (type === "process.unavailable") return processUnavailablePayload();
   if (type === "process.error") return processErrorPayload();
+  if (type === "git.summary") return gitSummary();
+  if (type === "git.unavailable") return { workspaceId: ids.workspaceId, capability: "git-ci.v1", status: { state: "unavailable", reason: "Git provider is not configured", remediation: "Configure the provider and refresh" } };
 
   if (type === "controller.state") return { scope: "session", sessionId: ids.sessionId, mode: "controller", leaseId: ids.leaseId, installationId: ids.installationId, expiresAt: "2026-07-12T00:00:45.000Z", reclaimableUntil: "2026-07-12T00:01:00.000Z" };
   if (type === "command.state") return { commandId: ids.commandId, commandType: "prompt.submit", state: "accepted", errorCode: null };
@@ -164,7 +229,7 @@ function eventPayload(type: string): Record<string, unknown> {
   return { sessionId: ids.sessionId };
 }
 function responsePayload(type: string): Record<string, unknown> {
-  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
+  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1", "git-ci.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
   if (type === "subscription.accepted") return { streams: [{ streamId: `host:${ids.sessionId}`, mode: "replay" }] };
   if (type === "stream.sync.complete") return { streamId: `session:${ids.sessionId}`, currentCursor: "1", mode: "replay" };
   if (type === "stream.snapshot.begin") return { snapshotId: ids.sessionId, streamId: `session:${ids.sessionId}`, baselineCursor: "1" };
@@ -182,6 +247,7 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "context.snapshot.result") return contextSnapshot();
   if (type === "process.snapshot.result") return { items: [processSnapshot()] };
   if (type === "process.output.page.result") return processOutput();
+  if (type === "git.summary.result") return gitSummary();
   return { items: [] };
 }
 function controlPayload(type: string): Record<string, unknown> {
@@ -200,6 +266,8 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "context.snapshot.request") return { sessionId: ids.sessionId };
   if (type === "process.snapshot.request") return { sessionId: ids.sessionId };
   if (type === "process.output.page") return { sessionId: ids.sessionId, processId: processFixture.processId, revision: processFixture.revision, stream: "stdout", cursor: "9007199254740992", pageToken: "page-2" };
+  if (type === "git.summary.request") return { workspaceId: ids.workspaceId };
+  if (type === "git.summary.cancel") return { targetRequestId: ids.requestId };
   if (type === "model.list") return { sessionId: ids.sessionId };
   if (type === "command.current") return { commandId: ids.commandId };
   return {};
@@ -208,11 +276,12 @@ const hostEvents = new Set([
   "host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility",
   "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
   "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
+  "git.summary", "git.unavailable",
 ]);
 
 rmSync(corpus, { recursive: true, force: true });
 mkdirSync(corpus, { recursive: true });
-emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "future.optional"] } });
+emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "git-ci.v1", "future.optional"] } });
 for (const type of COMMAND_TYPES) emit(fileName("command", type), "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload: commandPayload(type) });
 for (const type of CONTROL_TYPES) emit(fileName("control", type), "control", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, type, payload: controlPayload(type) });
 for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: type === "recipe.activity" ? recipeActivity("thinking") : type === "recipe.unavailable" ? { capability: "recipes.v1", status: capabilityStatus("unavailable") } : type === "plan.snapshot" ? planSnapshot() : type === "plan.unavailable" ? { capability: "plans.v1", status: capabilityStatus("stale") } : eventPayload(type) });
@@ -267,6 +336,29 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-process-stream", "event", eventEnvelope("process.output", { ...processOutput(), stream: "combined" })],
   ["invalid-process-host-stream", "event", { ...eventEnvelope("process.snapshot", processSnapshot()), streamId: `host:${ids.sessionId}` }],
 
+  // R6 focused schema-invalid evidence. Each fixture isolates one Git/CI
+  // invariant while retaining a complete, otherwise-valid payload.
+  ["invalid-git-summary-private-field", "event", { ...eventEnvelope("git.summary", { ...gitSummary(), private: "leak" }), streamId: `host:${ids.sessionId}` }],
+  ["invalid-git-summary-url-http", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ repositoryUrl: "http://example.test/pi-mob" }) }],
+  ["invalid-git-summary-url-hostless", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ repositoryUrl: "https:///pi-mob" }) }],
+  ["invalid-git-summary-url-bad", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ latestCommit: { ...cloneRecord(gitSummary().latestCommit, "gitSummary.latestCommit"), url: "https://example.test/white space" } }) }],
+  ["invalid-git-summary-failed-checks-21", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ failedChecks: Array.from({ length: LIMITS.maxFailedChecks + 1 }, (_, index) => ({ name: `check-${index}`, status: "failure" })) }) }],
+  ["invalid-git-summary-check-name-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ failedChecks: [{ ...cloneFirstRecord(gitSummary().failedChecks, "gitSummary.failedChecks"), name: "n".repeat(LIMITS.maxCheckNameLength + 1) }] }) }],
+  ["invalid-git-summary-check-log-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ failedChecks: [{ ...cloneFirstRecord(gitSummary().failedChecks, "gitSummary.failedChecks"), logSummary: "x".repeat(LIMITS.maxLogSummaryLength + 1) }] }) }],
+  ["invalid-git-summary-branch-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ branch: "b".repeat(LIMITS.maxBranchLength + 1) }) }],
+  ["invalid-git-summary-repository-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ repository: "r".repeat(LIMITS.maxRepositoryLabelLength + 1) }) }],
+  ["invalid-git-summary-count-oversize", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ changedCount: LIMITS.maxGitCount + 1 }) }],
+  ["invalid-git-summary-detached-branch-mismatch", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: gitSummary({ detached: true, branch: "feature/git-ci" }) }],
+  ["invalid-git-summary-detached-missing-branch", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: (() => { const { branch: _branch, ...missing } = gitSummary({ detached: true, branch: null }); return missing; })() }],
+  ["invalid-git-summary-missing-ci-status", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: (() => { const { ciStatus: _ciStatus, ...missing } = gitSummary(); return missing; })() }],
+  ["invalid-git-summary-missing-failed-checks", "response", { ...base, requestId: ids.requestId, type: "git.summary.result", payload: (() => { const { failedChecks: _failedChecks, ...missing } = gitSummary(); return missing; })() }],
+  ["invalid-git-command-missing-session", "command", commandEnvelope("git.commit.request", (() => { const { sessionId: _sessionId, ...missing } = gitCommandPayload("git.commit.request"); return missing; })())],
+  ["invalid-git-command-missing-confirmation", "command", commandEnvelope("git.commit.request", (() => { const { confirmation: _confirmation, ...missing } = gitCommandPayload("git.commit.request"); return missing; })())],
+  ["invalid-git-command-missing-revision", "command", commandEnvelope("git.commit.request", (() => { const { expectedRevision: _expectedRevision, ...missing } = gitCommandPayload("git.commit.request"); return missing; })())],
+  ["invalid-git-summary-cancel-missing-target", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "git.summary.cancel", payload: {} }],
+  ["invalid-git-summary-session-stream", "event", { ...eventEnvelope("git.summary", gitSummary()), streamId: `session:${ids.sessionId}` }],
+  ["invalid-git-unavailable-private-field", "event", { ...eventEnvelope("git.unavailable", { workspaceId: ids.workspaceId, capability: "git-ci.v1", status: { state: "unavailable", reason: "Git provider is not configured", remediation: "Configure the provider and refresh" }, private: true }), streamId: `host:${ids.sessionId}` }],
+
   // D-037 focused schema-invalid evidence. Each message is otherwise a
   // complete valid envelope so the labelled invariant is the sole failure.
   ["invalid-workspace-path-traversal", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "workspace.tree.page", payload: { ...controlPayload("workspace.tree.page"), path: "src/../private" } }],
@@ -300,7 +392,7 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-malformed-envelope", "event", { cursor: "1" }],
 ];
 for (const [name, kind, message] of invalid) {
-  const expectation = name.startsWith("invalid-workspace-") || name.startsWith("invalid-context-") || name.startsWith("invalid-prompt-file-ref-") || name.startsWith("invalid-process-")
+  const expectation = name.startsWith("invalid-workspace-") || name.startsWith("invalid-context-") || name.startsWith("invalid-prompt-file-ref-") || name.startsWith("invalid-process-") || name.startsWith("invalid-git-")
     ? "expected-invalid"
     : undefined;
   emit(name, kind, false, message, expectation);
@@ -324,6 +416,15 @@ emit("semantic-invalid-process-stale-revision", "command", true,
 emit("semantic-invalid-process-joint-action-state", "command", true,
   commandEnvelope("process.restart", processCommandPayload()),
   "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", status: "running", supportedActions: ["stop", "restart"] });
+emit("semantic-invalid-git-commit-stale-revision", "command", true,
+  commandEnvelope("git.commit.request", gitCommandPayload("git.commit.request")),
+  "semantic-invalid", { outcome: "rejected", errorCode: "git_stale", currentRevision: "git-r2" });
+emit("semantic-invalid-git-commit-unsupported-action", "command", true,
+  commandEnvelope("git.commit.request", gitCommandPayload("git.commit.request")),
+  "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["refresh", "push_through_pi", "open_external"] });
+emit("semantic-invalid-git-push-unsupported-action", "command", true,
+  commandEnvelope("git.push.request", gitCommandPayload("git.push.request")),
+  "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["refresh", "commit_through_pi", "open_external"] });
 emit("future-optional-event", "event", true, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, summary: "safe" } });
 emit("future-required-event", "event", false, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: false } });
 emit("future-required-capability-event", "event", false, { ...base, eventId: ids.eventId, streamId: `host:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, requiredCapabilities: ["unsupported.v1"] } });

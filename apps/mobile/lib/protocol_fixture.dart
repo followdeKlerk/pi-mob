@@ -17,7 +17,17 @@ final RegExp _streamId = RegExp(
 );
 const _workspacePathPattern =
     r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(?:/|$))[^\x00-\x1F\x7F]{1,1024}$';
+const _externalUrlPattern =
+    r'^https://(?!(?:[^/?#]*@))(?=[^/?#]{1,253}(?:[/?#]|$))[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^\s\x00-\x1F\x7F]*)?$';
+const _gitRepositoryLabelPattern = r'^(?!/)[A-Za-z0-9._:/\-]{1,128}$';
+const _gitBranchPattern =
+    r'^(?![/.])(?!.*(?:\.\.|@{))(?!.*//)[A-Za-z0-9._/\-]{1,128}(?<!\.lock)$';
+const _gitConfirmationIdPattern = r'^[A-Za-z0-9._:-]{1,128}$';
 final RegExp _workspacePath = RegExp(_workspacePathPattern);
+final RegExp _externalUrl = RegExp(_externalUrlPattern);
+final RegExp _gitRepositoryLabel = RegExp(_gitRepositoryLabelPattern);
+final RegExp _gitBranch = RegExp(_gitBranchPattern);
+final RegExp _gitConfirmationId = RegExp(_gitConfirmationIdPattern);
 
 bool _isWorkspacePath(String path) => _workspacePath.hasMatch(path);
 
@@ -301,6 +311,14 @@ final class ProtocolControl extends ProtocolEnvelope {
     }
     if (type == 'process.output.page') {
       _validateProcessOutputPagePayload(payload);
+    }
+    if (type == 'git.summary.request') {
+      _closedObject(payload, 'payload', const <String>{'workspaceId'});
+      _uuidString(payload, 'workspaceId');
+    }
+    if (type == 'git.summary.cancel') {
+      _closedObject(payload, 'payload', const <String>{'targetRequestId'});
+      _uuidString(payload, 'targetRequestId');
     }
     if (const <String>{
       'workspace.tree.page',
@@ -787,6 +805,7 @@ const _supportedCapabilities = <String>{
   'files.v1',
   'contexts.v1',
   'runtime.processes.v1',
+  'git-ci.v1',
 };
 const _commandTypes = <String>{
   'controller.acquire',
@@ -827,6 +846,8 @@ const _commandTypes = <String>{
   'process.stop',
   'process.restart',
   'process.rerun',
+  'git.commit.request',
+  'git.push.request',
 };
 const _controlTypes = <String>{
   'subscription.set',
@@ -848,6 +869,8 @@ const _controlTypes = <String>{
   'context.snapshot.request',
   'process.snapshot.request',
   'process.output.page',
+  'git.summary.request',
+  'git.summary.cancel',
 };
 const _leaseFreeCommands = <String>{
   'controller.acquire',
@@ -879,6 +902,7 @@ const _responseTypes = <String>{
   'context.snapshot.result',
   'process.snapshot.result',
   'process.output.page.result',
+  'git.summary.result',
 };
 const _eventTypes = <String>{
   'host.state',
@@ -945,6 +969,8 @@ const _eventTypes = <String>{
   'process.output',
   'process.unavailable',
   'process.error',
+  'git.summary',
+  'git.unavailable',
 };
 const _hostEventTypes = <String>{
   'host.state',
@@ -962,6 +988,8 @@ const _hostEventTypes = <String>{
   'workspace.file.metadata',
   'workspace.file.stale',
   'workspace.file.unavailable',
+  'git.summary',
+  'git.unavailable',
 };
 const _dualStreamEventTypes = <String>{'command.state', 'error.event'};
 const _errorCodes = <String>{
@@ -1021,6 +1049,12 @@ const _errorCodes = <String>{
   'process_not_found',
   'process_stale',
   'process_failed',
+  'git_unavailable',
+  'git_remote_missing',
+  'git_provider_unavailable',
+  'git_auth_missing',
+  'git_stale',
+  'git_action_failed',
 };
 String _nfc(String value) => unorm.nfc(value);
 void _requireEnvelope(Map<String, Object?> json) {
@@ -1203,6 +1237,10 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
     'process.rerun',
   }.contains(type)) {
     _validateProcessCommandPayload(payload);
+    return;
+  }
+  if (const <String>{'git.commit.request', 'git.push.request'}.contains(type)) {
+    _validateGitCommandPayload(payload);
     return;
   }
   if (type == 'extension.respond') {
@@ -1856,6 +1894,12 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
   if (type == 'process.error') {
     _validateProcessErrorPayload(payload);
   }
+  if (type == 'git.summary') {
+    _validateGitSummaryPayload(payload);
+  }
+  if (type == 'git.unavailable') {
+    _validateGitUnavailablePayload(payload);
+  }
 }
 
 void _validateProcessSnapshotPayload(Map<String, Object?> payload) {
@@ -2039,6 +2083,249 @@ void _validateProcessOutputPagePayload(Map<String, Object?> payload) {
   if (payload.containsKey('pageToken')) {
     _boundedRequiredString(payload, 'pageToken', 128);
   }
+}
+
+void _validateExternalUrl(Map<String, Object?> object, String key) {
+  final value = _string(object, key);
+  if (value.length > 1024 || !_externalUrl.hasMatch(value)) {
+    throw ProtocolValidationException(key, 'validated https URL', value);
+  }
+}
+
+void _validateGitCommandPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'workspaceId',
+    'expectedRevision',
+    'confirmation',
+    'summaryHint',
+  });
+  _uuidString(payload, 'sessionId');
+  _uuidString(payload, 'workspaceId');
+  _revisionTokenString(payload, 'expectedRevision');
+  final confirmation = _object(payload, 'confirmation');
+  _closedObject(confirmation, 'payload.confirmation', const <String>{
+    'confirmationId',
+    'summary',
+  });
+  final confirmationId = _string(confirmation, 'confirmationId');
+  if (!_gitConfirmationId.hasMatch(confirmationId)) {
+    throw ProtocolValidationException(
+      'payload.confirmation.confirmationId',
+      'bounded confirmation token',
+      confirmationId,
+    );
+  }
+  if (confirmation.containsKey('summary')) {
+    _boundedRequiredString(confirmation, 'summary', 240);
+  }
+  if (payload.containsKey('summaryHint')) {
+    _boundedRequiredString(payload, 'summaryHint', 240);
+  }
+}
+
+void _validateGitCiStatus(Map<String, Object?> status, String path) {
+  _closedObject(status, path, const <String>{'state'});
+  _oneOf(status, 'state', const <String>{
+    'success',
+    'failure',
+    'pending',
+    'unknown',
+  });
+}
+
+void _validateGitCheckRun(Object? value, String path) {
+  final check = _objectFrom(value, path);
+  _closedObject(check, path, const <String>{
+    'name',
+    'status',
+    'summary',
+    'logSummary',
+    'url',
+  });
+  _boundedRequiredString(check, 'name', 128);
+  _oneOf(check, 'status', const <String>{
+    'success',
+    'failure',
+    'pending',
+    'unknown',
+  });
+  if (check.containsKey('summary')) {
+    _boundedRequiredString(check, 'summary', 512);
+  }
+  if (check.containsKey('logSummary')) {
+    _boundedRequiredString(check, 'logSummary', 4096);
+  }
+  if (check.containsKey('url')) {
+    _validateExternalUrl(check, 'url');
+  }
+}
+
+void _validateGitSummaryPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'workspaceId',
+    'revision',
+    'repositoryUrl',
+    'repository',
+    'detached',
+    'branch',
+    'workingTreeState',
+    'changedCount',
+    'ahead',
+    'behind',
+    'latestCommit',
+    'pullRequest',
+    'ciStatus',
+    'failedChecks',
+    'supportedActions',
+    'capability',
+    'lastRefreshedAt',
+  });
+  _uuidString(payload, 'workspaceId');
+  _revisionTokenString(payload, 'revision');
+  _validateExternalUrl(payload, 'repositoryUrl');
+  final repository = _string(payload, 'repository');
+  if (repository.length > 128 || !_gitRepositoryLabel.hasMatch(repository)) {
+    throw ProtocolValidationException(
+      'payload.repository',
+      'bounded repository label',
+      repository,
+    );
+  }
+  final detached = _boolean(payload, 'detached');
+  if (detached) {
+    if (!payload.containsKey('branch') || payload['branch'] != null) {
+      throw ProtocolValidationException(
+        'payload.branch',
+        'null when detached',
+        payload['branch'],
+      );
+    }
+  } else {
+    final branch = _string(payload, 'branch');
+    if (branch.length > 128 || !_gitBranch.hasMatch(branch)) {
+      throw ProtocolValidationException(
+        'payload.branch',
+        'bounded Git branch',
+        branch,
+      );
+    }
+  }
+  _oneOf(payload, 'workingTreeState', const <String>{
+    'clean',
+    'dirty',
+    'unknown',
+  });
+  for (final key in const <String>['changedCount', 'ahead', 'behind']) {
+    final count = _nonNegativeInteger(payload, key);
+    if (count > 1000000) {
+      throw ProtocolValidationException('payload.$key', '<= 1000000', count);
+    }
+  }
+  final latestCommit = _object(payload, 'latestCommit');
+  _closedObject(latestCommit, 'payload.latestCommit', const <String>{
+    'sha',
+    'message',
+    'author',
+    'authoredAt',
+    'url',
+  });
+  final sha = _string(latestCommit, 'sha');
+  if (!RegExp(r'^[0-9a-f]{7,64}$').hasMatch(sha)) {
+    throw ProtocolValidationException(
+      'payload.latestCommit.sha',
+      'lowercase commit sha',
+      sha,
+    );
+  }
+  if (latestCommit.containsKey('message')) {
+    _boundedRequiredString(latestCommit, 'message', 240);
+  }
+  if (latestCommit.containsKey('author')) {
+    _boundedRequiredString(latestCommit, 'author', 128);
+  }
+  _validateUtcTimestamp(latestCommit, 'authoredAt');
+  _validateExternalUrl(latestCommit, 'url');
+  if (payload.containsKey('pullRequest')) {
+    final pullRequest = _object(payload, 'pullRequest');
+    _closedObject(pullRequest, 'payload.pullRequest', const <String>{
+      'number',
+      'title',
+      'url',
+    });
+    final number = _positiveInteger(pullRequest, 'number');
+    if (number > 9007199254740991) {
+      throw ProtocolValidationException(
+        'payload.pullRequest.number',
+        '<= Number.MAX_SAFE_INTEGER',
+        number,
+      );
+    }
+    _boundedRequiredString(pullRequest, 'title', 240);
+    _validateExternalUrl(pullRequest, 'url');
+  }
+  _validateGitCiStatus(_object(payload, 'ciStatus'), 'payload.ciStatus');
+  final failedChecks = _list(payload, 'failedChecks');
+  if (failedChecks.length > 20) {
+    throw ProtocolValidationException(
+      'payload.failedChecks',
+      '<= 20 items',
+      failedChecks.length,
+    );
+  }
+  for (var index = 0; index < failedChecks.length; index += 1) {
+    _validateGitCheckRun(failedChecks[index], 'payload.failedChecks[$index]');
+  }
+  final supportedActions = _list(payload, 'supportedActions');
+  if (supportedActions.length > 4) {
+    throw ProtocolValidationException(
+      'payload.supportedActions',
+      '<= 4 items',
+      supportedActions.length,
+    );
+  }
+  final seenActions = <String>{};
+  for (final action in supportedActions) {
+    if (action is! String ||
+        !const <String>{
+          'refresh',
+          'commit_through_pi',
+          'push_through_pi',
+          'open_external',
+        }.contains(action) ||
+        !seenActions.add(action)) {
+      throw ProtocolValidationException(
+        'payload.supportedActions',
+        'unique supported Git actions',
+        action,
+      );
+    }
+  }
+  if (_string(payload, 'capability') != 'git-ci.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'git-ci.v1 literal',
+      payload['capability'],
+    );
+  }
+  _validateUtcTimestamp(payload, 'lastRefreshedAt');
+}
+
+void _validateGitUnavailablePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'workspaceId',
+    'capability',
+    'status',
+  });
+  _uuidString(payload, 'workspaceId');
+  if (_string(payload, 'capability') != 'git-ci.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'git-ci.v1 literal',
+      payload['capability'],
+    );
+  }
+  _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
 }
 
 void _validateWorkspaceControlPayload(
@@ -2379,6 +2666,9 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
     _closedObject(payload, 'payload', const <String>{'workspaceId', 'result'});
     _uuidString(payload, 'workspaceId');
     _validateFileReadResult(_object(payload, 'result'), 'payload.result');
+  }
+  if (type == 'git.summary.result') {
+    _validateGitSummaryPayload(payload);
   }
   if (type == 'hello.accepted') {
     _uuidString(payload, 'connectionId');

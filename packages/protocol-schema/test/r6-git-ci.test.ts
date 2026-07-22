@@ -47,6 +47,7 @@ function gitSummary(overrides: Record<string, unknown> = {}) {
     revision,
     repositoryUrl: "https://example.test/pi-mob",
     repository: "pi-mob/pi-mob",
+    detached: false,
     branch: "feature/git-ci",
     workingTreeState: "dirty",
     changedCount: 2,
@@ -101,7 +102,7 @@ test("R6 registers additive Git/CI protocol families without removing establishe
     "process.snapshot", "process.output", "git.summary", "git.unavailable",
   ]));
   expect(CONTROL_TYPES).toEqual(expect.arrayContaining([
-    "process.snapshot.request", "process.output.page", "git.summary.request",
+    "process.snapshot.request", "process.output.page", "git.summary.request", "git.summary.cancel",
   ]));
   expect(RESPONSE_TYPES).toEqual(expect.arrayContaining([
     "process.snapshot.result", "process.output.page.result", "git.summary.result",
@@ -127,6 +128,8 @@ test("R6 Git summaries cover the full bounded status card and optional groups", 
     supportedActions: [],
   }))).toBe(true);
   expect(summaries.Check(gitSummary({
+    detached: true,
+    branch: null,
     workingTreeState: "unknown",
     ciStatus: { state: "unknown" },
     failedChecks: [],
@@ -155,6 +158,10 @@ test("R6 Git summaries close fields and enforce identifiers, counts, URLs, check
     gitSummary({ repositoryUrl: "https://example.test/del\x7f" }),
     gitSummary({ repository: "owner/repo with spaces" }),
     gitSummary({ repository: "r".repeat(LIMITS.maxRepositoryLabelLength + 1) }),
+    gitSummary({ detached: undefined }),
+    gitSummary({ detached: true, branch: "feature/git-ci" }),
+    gitSummary({ detached: false, branch: null }),
+    gitSummary({ detached: "false" }),
     gitSummary({ branch: "../secret" }),
     gitSummary({ branch: "feature@{upstream}" }),
     gitSummary({ branch: "b".repeat(LIMITS.maxBranchLength + 1) }),
@@ -192,6 +199,18 @@ test("R6 summary read control and response use exact closed workspace payloads",
   const responses = TypeCompiler.Compile(ResponseSchema);
 
   expect(controls.Check({ ...controlEnvelope, type: "git.summary.request", payload: { workspaceId } })).toBe(true);
+  expect(controls.Check({ ...controlEnvelope, type: "git.summary.cancel", payload: { targetRequestId: uuid } })).toBe(true);
+  expect(controls.Check({ ...controlEnvelope, type: "git.summary.cancel", payload: {} })).toBe(false);
+  expect(controls.Check({
+    ...controlEnvelope,
+    type: "git.summary.cancel",
+    payload: { targetRequestId: "not-a-uuid" },
+  })).toBe(false);
+  expect(controls.Check({
+    ...controlEnvelope,
+    type: "git.summary.cancel",
+    payload: { targetRequestId: uuid, private: "leak" },
+  })).toBe(false);
   expect(controls.Check({ ...controlEnvelope, type: "git.summary.request", payload: {} })).toBe(false);
   expect(controls.Check({
     ...controlEnvelope,

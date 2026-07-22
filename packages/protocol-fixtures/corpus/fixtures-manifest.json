@@ -70,6 +70,16 @@
     "kind": "command"
   },
   {
+    "file": "command-git-commit-request-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-git-push-request-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
     "file": "command-host-display_name-set-valid.json",
     "valid": true,
     "kind": "command"
@@ -240,6 +250,16 @@
     "kind": "control"
   },
   {
+    "file": "control-git-summary-cancel-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-git-summary-request-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
     "file": "control-host-snapshot-request-valid.json",
     "valid": true,
     "kind": "control"
@@ -376,6 +396,36 @@
   },
   {
     "file": "error-file-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-action-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-auth-missing-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-provider-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-remote-missing-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-git-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -676,6 +726,16 @@
   },
   {
     "file": "event-extension-widget-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-git-summary-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-git-unavailable-valid.json",
     "valid": true,
     "kind": "event"
   },
@@ -1021,6 +1081,126 @@
     "kind": "event"
   },
   {
+    "file": "invalid-git-command-missing-confirmation.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-command-missing-revision.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-command-missing-session.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-branch-oversize.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-cancel-missing-target.json",
+    "valid": false,
+    "kind": "control",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-check-log-oversize.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-check-name-oversize.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-count-oversize.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-detached-branch-mismatch.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-detached-missing-branch.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-failed-checks-21.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-missing-ci-status.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-missing-failed-checks.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-private-field.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-repository-oversize.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-session-stream.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-url-bad.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-url-hostless.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-summary-url-http.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-git-unavailable-private-field.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
     "file": "invalid-malformed-envelope.json",
     "valid": false,
     "kind": "event"
@@ -1324,6 +1504,11 @@
   },
   {
     "file": "response-controller-renew-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-git-summary-result-valid.json",
     "valid": true,
     "kind": "response"
   },
@@ -1711,6 +1896,24 @@
     "file": "scenario-stream-gap.json",
     "valid": true,
     "kind": "event"
+  },
+  {
+    "file": "semantic-invalid-git-commit-stale-revision.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
+  },
+  {
+    "file": "semantic-invalid-git-commit-unsupported-action.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
+  },
+  {
+    "file": "semantic-invalid-git-push-unsupported-action.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
   },
   {
     "file": "semantic-invalid-process-joint-action-state.json",
