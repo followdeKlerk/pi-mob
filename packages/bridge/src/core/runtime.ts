@@ -6,6 +6,12 @@ import type { BridgeRuntimePort, ConnectionContext, SubscriptionMessage, Subscri
 import { type BridgeStore, StoreError, type LeaseMutation } from "./store";
 import { WorkspaceFileError, type WorkspaceFileService, type FileReference } from "./workspace-files";
 import {
+  AuthoritativeProcessRegistry,
+  type ProcessOutput,
+  type ProcessOutputPageRequest,
+} from "./process-projection";
+import { GitSummaryService } from "../git/summary-service";
+import {
   type DurableTrustPolicyStore,
   type HostPolicyService,
   type BoundedSearchFn,
@@ -116,6 +122,12 @@ export interface DurableRuntimeOptions {
   readonly defaultSessionPolicyMode?: HostPolicyMode;
   /** R3 — optional bounded, read-only workspace-file authority. */
   readonly workspaceFiles?: WorkspaceFileService;
+  /** R5 — optional authoritative process projection registry. */
+  readonly processes?: AuthoritativeProcessRegistry;
+  /** R6 — optional Git summary authority (rev-parse + remote + provider). */
+  readonly git?: GitSummaryService;
+  /** R6 — resolves a workspace to the cwd used by Git commands. */
+  readonly resolveGitCwd?: (workspaceId: string) => string | undefined;
 }
 
 export class DurableBridgeRuntime implements BridgeRuntimePort {
@@ -128,6 +140,10 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private readonly policy: RuntimePolicyHandler | null;
   private readonly defaultSessionPolicyMode: HostPolicyMode;
   private readonly historyTokenSecret = randomBytes(32);
+  private readonly processes: AuthoritativeProcessRegistry | null;
+  private readonly git: GitSummaryService | null;
+  private readonly resolveGitCwd: ((workspaceId: string) => string | undefined) | null;
+  private readonly inFlightGitSummaries = new Map<string, AbortController>();
   private readyState = false;
   private readonly searchCandidates = new Map<WorkspaceRootId, { canonicalPath: string; label: string }>();
   constructor(readonly options: DurableRuntimeOptions) {
@@ -136,6 +152,9 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     this.defaultSessionPolicyMode = options.defaultSessionPolicyMode ?? "full";
     this.commands = new DurableCommandService(options.store, options.adapter); this.streams = new StreamService(options.store); this.leases = new ControllerLeaseService(options.store);
     const identity = options.store.identity(); options.store.ensureStream(`host:${identity.hostId}`, "host");
+    this.processes = options.processes ?? null;
+    this.git = options.git ?? null;
+    this.resolveGitCwd = options.resolveGitCwd ?? null;
   }
   async start(): Promise<{ resumed: number; indeterminate: number }> {
     const recovered = await this.commands.recover(); this.readyState = true; return recovered;
@@ -148,7 +167,11 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   }
   setReadyForTest(ready: boolean): void { this.readyState = ready; }
   optionalCapabilities(): readonly string[] {
-    return this.options.workspaceFiles ? ["files.v1"] : [];
+    const caps: string[] = [];
+    if (this.options.workspaceFiles) caps.push("files.v1");
+    if (this.processes) caps.push("processes.v1");
+    if (this.git) caps.push("git.v1");
+    return caps;
   }
 
   subscribe(_connection: ConnectionContext, payload: Record<string, unknown>): SubscriptionResult {
@@ -188,7 +211,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     return { streams: accepted, messages };
   }
 
-  control(connection: ConnectionContext, type: string, payload: Record<string, unknown>): Record<string, unknown> | void {
+  control(connection: ConnectionContext, type: string, payload: Record<string, unknown>): Promise<Record<string, unknown> | void> | Record<string, unknown> | void {
     if (type === "cursor.ack") { this.streams.ack(connection.installationId, payload.cursors as Record<string,string>); return; }
     if (type === "controller.renew") {
       const leaseId = String(payload.leaseId ?? ""); const existing = this.options.store.leaseById(leaseId); if (!existing) throw new RuntimeProtocolError("stale_controller", "lease not found");
@@ -227,12 +250,98 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (type === "workspace.tree.page" || type === "workspace.file.search" || type === "workspace.file.content.search" || type === "workspace.file.metadata" || type === "workspace.file.read") {
       return this.workspaceFileControl(type, payload);
     }
+    if (type === "process.snapshot.request") return this.processSnapshotRequest(payload);
+    if (type === "process.output.page") return this.processOutputPage(payload);
+    if (type === "git.summary.request") return this.gitSummaryRequest(payload);
+    if (type === "git.summary.cancel") return this.gitSummaryCancel(payload);
     if (type === "policy.summary") {
       if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
       const eff = this.policy.hostPolicy.effective();
       return { mode: eff.mode, policyVersion: eff.rules.policyVersion, fingerprint: eff.rules.fingerprint };
     }
     return {};
+  }
+
+  /** R5 — `process.snapshot.request` returns the frozen closed
+   * `process.snapshot.result` shape (`{ items: ProcessSnapshot[] }`) for the
+   * requested session. D-039 correlation lives on the mobile side; the bridge
+   * only emits the authoritative per-session replacement, capped at
+   * `LIMITS.maxProcessSnapshotItems`. */
+  private processSnapshotRequest(payload: Record<string, unknown>): Record<string, unknown> {
+    if (!this.processes) throw new RuntimeProtocolError("unsupported_capability", "process projection is unavailable on this host");
+    const sessionId = String(payload.sessionId ?? "");
+    if (!sessionId) throw new RuntimeProtocolError("invalid_message", "sessionId is required");
+    const result = this.processes.snapshotResult(sessionId);
+    return { items: result.items.map((item) => ({ ...item })) };
+  }
+
+  /** R5 — `process.output.page` returns one bounded `ProcessOutput` payload,
+   * or `undefined` when no output is available for the requested cursor /
+   * pageToken. Cancellation of stale pagination is implicit: a request whose
+   * `cursor`/`pageToken` no longer matches the live output returns
+   * `undefined` rather than the previous page. */
+  private processOutputPage(payload: Record<string, unknown>): Record<string, unknown> | void {
+    if (!this.processes) throw new RuntimeProtocolError("unsupported_capability", "process projection is unavailable on this host");
+    const request: ProcessOutputPageRequest = {
+      sessionId: String(payload.sessionId ?? ""),
+      processId: String(payload.processId ?? ""),
+      revision: String(payload.revision ?? ""),
+      stream: payload.stream === "stderr" ? "stderr" : "stdout",
+      ...(typeof payload.cursor === "string" ? { cursor: payload.cursor } : {}),
+      ...(typeof payload.pageToken === "string" ? { pageToken: payload.pageToken } : {}),
+    };
+    const output: ProcessOutput | undefined = this.processes.outputPage(request);
+    if (!output) return;
+    return { ...output };
+  }
+
+  /** R6 — `git.summary.request` runs the bounded Git summary authority for
+   * a workspace and tracks the in-flight request so `git.summary.cancel` can
+   * abort it by request ID. The response is the closed `GitSummary` schema
+   * (`git.summary.result`). When the service truthfully reports the surface
+   * is unavailable for the workspace, the bridge throws
+   * `unsupported_capability`; the schema forbids embedding `GitUnavailable`
+   * inside `git.summary.result`. The control returns a Promise; the server
+   * already awaits it. */
+  private async gitSummaryRequest(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.git) throw new RuntimeProtocolError("unsupported_capability", "git summary is unavailable on this host");
+    const workspaceId = String(payload.workspaceId ?? "");
+    const requestId = String(payload.requestId ?? "");
+    if (!workspaceId) throw new RuntimeProtocolError("invalid_message", "workspaceId is required");
+    if (!requestId) throw new RuntimeProtocolError("invalid_message", "requestId is required");
+    const cwd = this.resolveGitCwd?.(workspaceId);
+    if (!cwd) throw new RuntimeProtocolError("unsupported_capability", "workspace cwd is unknown to the git service");
+    const controller = new AbortController();
+    this.inFlightGitSummaries.set(requestId, controller);
+    try {
+      const summary = await this.git.summarize(workspaceId, cwd, controller.signal);
+      if ("status" in summary && summary.capability === "git-ci.v1") {
+        // GitUnavailable: the schema forbids embedding this in
+        // git.summary.result. The bridge surfaces truthful unavailability
+        // through the host-stream `git.unavailable` event, not the response.
+        throw new RuntimeProtocolError("unsupported_capability", summary.status.reason);
+      }
+      return { ...summary };
+    } finally {
+      const tracked = this.inFlightGitSummaries.get(requestId);
+      if (tracked === controller) this.inFlightGitSummaries.delete(requestId);
+    }
+  }
+
+  /** R6 — `git.summary.cancel` aborts the in-flight request recorded under
+   * `targetRequestId`. No result payload is emitted; the schema declares no
+   * `.result` shape. The cancel is a no-op when no matching in-flight request
+   * exists. */
+  private gitSummaryCancel(payload: Record<string, unknown>): Record<string, unknown> {
+    const targetRequestId = String(payload.targetRequestId ?? "");
+    if (!targetRequestId) throw new RuntimeProtocolError("invalid_message", "targetRequestId is required");
+    const controller = this.inFlightGitSummaries.get(targetRequestId);
+    if (controller) {
+      controller.abort();
+      this.inFlightGitSummaries.delete(targetRequestId);
+      return { targetRequestId, cancelled: true };
+    }
+    return { targetRequestId, cancelled: false };
   }
 
   /** Routes all R3 reads through the only filesystem authority. */
