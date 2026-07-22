@@ -192,6 +192,38 @@
             {
               "const": "stale_plan_target",
               "type": "string"
+            },
+            {
+              "const": "path_not_found",
+              "type": "string"
+            },
+            {
+              "const": "path_outside_workspace",
+              "type": "string"
+            },
+            {
+              "const": "path_binary",
+              "type": "string"
+            },
+            {
+              "const": "path_oversize",
+              "type": "string"
+            },
+            {
+              "const": "file_stale",
+              "type": "string"
+            },
+            {
+              "const": "file_unavailable",
+              "type": "string"
+            },
+            {
+              "const": "context_pin_failed",
+              "type": "string"
+            },
+            {
+              "const": "context_unavailable",
+              "type": "string"
             }
           ]
         },

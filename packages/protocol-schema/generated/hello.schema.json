@@ -66,6 +66,14 @@
               {
                 "const": "notifications.v1",
                 "type": "string"
+              },
+              {
+                "const": "files.v1",
+                "type": "string"
+              },
+              {
+                "const": "contexts.v1",
+                "type": "string"
               }
             ]
           },

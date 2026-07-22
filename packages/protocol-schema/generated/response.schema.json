@@ -1184,6 +1184,1295 @@
         "requestId"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "$id": "pi-mob/protocol/file-node",
+                "additionalProperties": false,
+                "properties": {
+                  "childCount": {
+                    "maximum": 200,
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "isBinary": {
+                    "type": "boolean"
+                  },
+                  "kind": {
+                    "anyOf": [
+                      {
+                        "const": "file",
+                        "type": "string"
+                      },
+                      {
+                        "const": "directory",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "languageHint": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "modifiedAt": {
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                    "type": "string"
+                  },
+                  "path": {
+                    "$id": "pi-mob/protocol/workspace-path",
+                    "maxLength": 1024,
+                    "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                    "type": "string"
+                  },
+                  "sha256": {
+                    "pattern": "^[0-9a-f]{64}$",
+                    "type": "string"
+                  },
+                  "size": {
+                    "maximum": 26214400,
+                    "minimum": 0,
+                    "type": "integer"
+                  }
+                },
+                "required": [
+                  "path",
+                  "kind"
+                ],
+                "type": "object"
+              },
+              "maxItems": 200,
+              "type": "array"
+            },
+            "nextPageToken": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "path": {
+              "$id": "pi-mob/protocol/workspace-path",
+              "maxLength": 1024,
+              "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+              "type": "string"
+            },
+            "rootRevision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "workspaceId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "rootRevision",
+            "items"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "workspace.tree.page.result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "$id": "pi-mob/protocol/file-search-match",
+                "additionalProperties": false,
+                "properties": {
+                  "matchLength": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "matchStart": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "path": {
+                    "$id": "pi-mob/protocol/workspace-path",
+                    "maxLength": 1024,
+                    "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path"
+                ],
+                "type": "object"
+              },
+              "maxItems": 100,
+              "type": "array"
+            },
+            "nextPageToken": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rootRevision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "workspaceId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "rootRevision",
+            "items"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "workspace.file.search.result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "isTruncated": {
+              "type": "boolean"
+            },
+            "items": {
+              "items": {
+                "$id": "pi-mob/protocol/content-search-match",
+                "additionalProperties": false,
+                "properties": {
+                  "column": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "line": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "lineText": {
+                    "maxLength": 4096,
+                    "minLength": 0,
+                    "type": "string"
+                  },
+                  "matchLength": {
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "matchStart": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
+                  "path": {
+                    "$id": "pi-mob/protocol/workspace-path",
+                    "maxLength": 1024,
+                    "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "line",
+                  "column",
+                  "matchStart",
+                  "matchLength",
+                  "lineText"
+                ],
+                "type": "object"
+              },
+              "maxItems": 200,
+              "type": "array"
+            },
+            "nextPageToken": {
+              "anyOf": [
+                {
+                  "maxLength": 256,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "rootRevision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "workspaceId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "rootRevision",
+            "items",
+            "isTruncated"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "workspace.file.content.search.result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "file": {
+              "$id": "pi-mob/protocol/file-metadata",
+              "additionalProperties": false,
+              "properties": {
+                "isBinary": {
+                  "type": "boolean"
+                },
+                "languageHint": {
+                  "maxLength": 32,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "lastReadAt": {
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                  "type": "string"
+                },
+                "modifiedAt": {
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                  "type": "string"
+                },
+                "path": {
+                  "$id": "pi-mob/protocol/workspace-path",
+                  "maxLength": 1024,
+                  "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                  "type": "string"
+                },
+                "revision": {
+                  "$id": "pi-mob/protocol/revision-token",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                  "type": "string"
+                },
+                "sha256": {
+                  "pattern": "^[0-9a-f]{64}$",
+                  "type": "string"
+                },
+                "size": {
+                  "maximum": 26214400,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "path",
+                "size",
+                "isBinary",
+                "modifiedAt",
+                "revision",
+                "lastReadAt"
+              ],
+              "type": "object"
+            },
+            "workspaceId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "file"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "workspace.file.metadata.result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "result": {
+              "$id": "pi-mob/protocol/file-read-result",
+              "additionalProperties": false,
+              "properties": {
+                "content": {
+                  "maxLength": 524288,
+                  "minLength": 0,
+                  "type": "string"
+                },
+                "encoding": {
+                  "const": "utf-8",
+                  "type": "string"
+                },
+                "isTruncated": {
+                  "type": "boolean"
+                },
+                "lastModifiedAt": {
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                  "type": "string"
+                },
+                "path": {
+                  "$id": "pi-mob/protocol/workspace-path",
+                  "maxLength": 1024,
+                  "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                  "type": "string"
+                },
+                "rangeEnd": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "rangeStart": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "revision": {
+                  "$id": "pi-mob/protocol/revision-token",
+                  "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                  "type": "string"
+                },
+                "totalLines": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "truncation": {
+                  "$id": "pi-mob/protocol/truncation",
+                  "additionalProperties": false,
+                  "properties": {
+                    "digest": {
+                      "pattern": "^[0-9a-f]{64}$",
+                      "type": "string"
+                    },
+                    "isTruncated": {
+                      "type": "boolean"
+                    },
+                    "retainedBytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    },
+                    "totalBytes": {
+                      "minimum": 0,
+                      "type": "integer"
+                    }
+                  },
+                  "required": [
+                    "retainedBytes",
+                    "totalBytes",
+                    "isTruncated"
+                  ],
+                  "type": "object"
+                }
+              },
+              "required": [
+                "path",
+                "revision",
+                "rangeStart",
+                "rangeEnd",
+                "totalLines",
+                "content",
+                "encoding",
+                "isTruncated",
+                "lastModifiedAt"
+              ],
+              "type": "object"
+            },
+            "workspaceId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "result"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "workspace.file.read.result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "$id": "pi-mob/protocol/context-snapshot",
+          "additionalProperties": false,
+          "properties": {
+            "capability": {
+              "$id": "pi-mob/protocol/capability-status",
+              "anyOf": [
+                {
+                  "$id": "pi-mob/protocol/capability-status#available",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "available",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#degraded",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "degraded",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#unavailable",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#stale",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "stale",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "compacted": {
+              "type": "boolean"
+            },
+            "compactedAt": {
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+              "type": "string"
+            },
+            "compactRevision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "instructions": {
+              "maxLength": 4096,
+              "minLength": 0,
+              "type": "string"
+            },
+            "lastRefreshedAt": {
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+              "type": "string"
+            },
+            "model": {
+              "$id": "pi-mob/protocol/context-model",
+              "additionalProperties": false,
+              "properties": {
+                "modelId": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "provider": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                }
+              },
+              "required": [
+                "provider",
+                "modelId"
+              ],
+              "type": "object"
+            },
+            "pinnedFiles": {
+              "items": {
+                "$id": "pi-mob/protocol/pinned-file",
+                "additionalProperties": false,
+                "properties": {
+                  "path": {
+                    "$id": "pi-mob/protocol/workspace-path",
+                    "maxLength": 1024,
+                    "pattern": "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$",
+                    "type": "string"
+                  },
+                  "pinnedAt": {
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                    "type": "string"
+                  },
+                  "ranges": {
+                    "items": {
+                      "$id": "pi-mob/protocol/line-range",
+                      "additionalProperties": false,
+                      "properties": {
+                        "endLine": {
+                          "minimum": 1,
+                          "type": "integer"
+                        },
+                        "label": {
+                          "maxLength": 64,
+                          "minLength": 1,
+                          "type": "string"
+                        },
+                        "startLine": {
+                          "minimum": 1,
+                          "type": "integer"
+                        }
+                      },
+                      "required": [
+                        "startLine",
+                        "endLine"
+                      ],
+                      "type": "object"
+                    },
+                    "maxItems": 16,
+                    "type": "array"
+                  },
+                  "revision": {
+                    "$id": "pi-mob/protocol/revision-token",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "path",
+                  "pinnedAt",
+                  "revision"
+                ],
+                "type": "object"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "revision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "sessionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "source": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "sources": {
+              "items": {
+                "$id": "pi-mob/protocol/context-source",
+                "additionalProperties": false,
+                "properties": {
+                  "capability": {
+                    "$id": "pi-mob/protocol/capability-status",
+                    "anyOf": [
+                      {
+                        "$id": "pi-mob/protocol/capability-status#available",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "available",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "$id": "pi-mob/protocol/capability-status#degraded",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "degraded",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "reason",
+                          "remediation"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "$id": "pi-mob/protocol/capability-status#unavailable",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "unavailable",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "reason",
+                          "remediation"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "$id": "pi-mob/protocol/capability-status#stale",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "stale",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "reason",
+                          "remediation"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "lastRefreshedAt": {
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                    "type": "string"
+                  },
+                  "revision": {
+                    "$id": "pi-mob/protocol/revision-token",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "sourceKind": {
+                    "maxLength": 32,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "stale": {
+                    "type": "boolean"
+                  },
+                  "summary": {
+                    "maxLength": 240,
+                    "minLength": 0,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "sourceId",
+                  "sourceKind",
+                  "summary",
+                  "stale",
+                  "capability"
+                ],
+                "type": "object"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "stale": {
+              "type": "boolean"
+            },
+            "thinkingLevel": {
+              "maxLength": 32,
+              "minLength": 1,
+              "type": "string"
+            },
+            "tokenUsage": {
+              "$id": "pi-mob/protocol/token-usage",
+              "additionalProperties": false,
+              "properties": {
+                "cacheReadTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "cacheWriteTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "contextWindowTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "inputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "outputTokens": {
+                  "minimum": 0,
+                  "type": "integer"
+                },
+                "usagePercent": {
+                  "maximum": 1,
+                  "minimum": 0,
+                  "type": "number"
+                }
+              },
+              "required": [
+                "inputTokens",
+                "outputTokens"
+              ],
+              "type": "object"
+            }
+          },
+          "required": [
+            "sessionId",
+            "revision",
+            "source",
+            "stale",
+            "capability",
+            "lastRefreshedAt"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "context.snapshot.result",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId"
+      ],
+      "type": "object"
     }
   ]
 }

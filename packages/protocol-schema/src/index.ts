@@ -49,6 +49,59 @@ export const LIMITS = {
   maxRemediationLength: 512,
   maxCapabilitySourceLength: 128,
   maxErrorMessageLength: 512,
+  // F0 — bounded surfaces for the read-only workspace file browser (R3) and
+  // the separate context inspector (R4). Bounds are expressed in UTF-16
+  // code units (see the `maxLength` UTF-16 note in the FIELD_GUIDE).
+  //
+  //   R3 — read-only file browser
+  //   - maxWorkspacePathLength: 1024 — upper bound on a root-relative
+  //     workspace path. The bridge enforces canonicalization, rejects `..`
+  //     and symlink escapes, and never returns absolute paths.
+  //   - maxTreePageItems: 200, maxTreeDepth: 16 — bounded tree pagination.
+  //   - maxFilenameSearchItems: 100 — bounded filename-search results.
+  //   - maxContentSearchLines: 200, maxContentSearchBytes: 262144 (256 KiB)
+  //     — bounded content-search matches; the bridge additionally caps the
+  //     total UTF-8 bytes of the match window.
+  //   - maxFileReadLines: 2000, maxFileReadBytes: 524288 (512 KiB) — bounded
+  //     paginated text reads; rangeStart/rangeEnd are 1-based inclusive.
+  //   - maxFileSize: 26214400 (25 MiB) — total file-size cap before the
+  //     schema rejects the metadata payload with `path_oversize`.
+  //   - maxFileAttachmentRefs: 4 — bounded count of revision-bound file
+  //     attachment references per prompt; matches `maxAttachmentsPerPrompt`
+  //     so a prompt can carry at most four image attachments OR four file
+  //     references (not eight) without exceeding the per-prompt ceiling.
+  //   - maxLanguageHintLength: 32 — bounded language identifier on
+  //     metadata for syntax highlighting hints.
+  //
+  //   R4 — separate context inspector
+  //   - maxPinnedFiles: 64, maxPinnedRanges: 16 — bounded pin surface.
+  //   - maxContextInstructions: 4096 — bounded workspace instructions
+  //     published on the snapshot (the bridge must clip larger values).
+  //   - maxContextSourceSummary: 240 — bounded source summary text.
+  //   - maxContextSourceKindLength: 32 — bounded source-kind identifier.
+  //   - maxContextSourceIdLength: 128 — bounded source identifier; shares
+  //     the canonical 128-code-unit identifier surface used by activityId /
+  //     turnId / planId.
+  //   - maxContextTokenUsageDigits: 16 — upper bound on the JS
+  //     safe-integer decimal-digit count for token-usage telemetry.
+  maxWorkspacePathLength: 1024,
+  maxTreePageItems: 200,
+  maxTreeDepth: 16,
+  maxFilenameSearchItems: 100,
+  maxContentSearchLines: 200,
+  maxContentSearchBytes: 262_144,
+  maxFileReadLines: 2000,
+  maxFileReadBytes: 524_288,
+  maxFileSize: 26_214_400,
+  maxFileAttachmentRefs: 4,
+  maxLanguageHintLength: 32,
+  maxPinnedFiles: 64,
+  maxPinnedRanges: 16,
+  maxContextInstructions: 4096,
+  maxContextSourceSummary: 240,
+  maxContextSourceKindLength: 32,
+  maxContextSourceIdLength: 128,
+  maxContextTokenUsageDigits: 16,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -58,7 +111,9 @@ export const COMMAND_TYPES = [
   "session.delete", "session.restore", "session.purge", "session.fork", "session.clone", "session.export",
   "prompt.submit", "turn.abort", "queue.remove", "queue.clear", "model.set", "thinking.set",
   "steering_mode.set", "follow_up_mode.set", "compaction.start", "compaction.auto.set",
-  "retry.auto.set", "retry.abort", "extension.respond",
+  // F0 — additive context-inspector (R4) mutations. These are durable,
+  // session-scoped commands; they are intentionally not controls/results.
+  "context.pin", "context.unpin", "context.exclude", "context.refresh",
 ] as const;
 
 export const EVENT_TYPES = [
@@ -74,17 +129,48 @@ export const EVENT_TYPES = [
   // F0 — additive recipe (R1) and plan (R2) event families.
   "recipe.activity", "recipe.unavailable",
   "plan.snapshot", "plan.unavailable",
+  // F0 — additive read-only file-browser (R3) workspace events. D-037
+  // assigns all four to the mandatory host stream (v1 has no workspace
+  // stream class); each closed payload carries the owning workspaceId.
+  "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
+  // F0 — additive context-inspector (R4) session events. The snapshot
+  // event is a closed, bounded payload; the unavailable surface carries
+  // the standard CapabilityStatus envelope.
+  "context.snapshot", "context.unavailable",
 ] as const;
 
 export const RESPONSE_TYPES = [
   "hello.accepted", "subscription.accepted", "stream.sync.complete", "stream.snapshot.begin", "stream.snapshot.part",
   "stream.snapshot.end", "command.receipt", "command.current.result", "controller.renew.result", "session.list.result", "session.history.page.result",
   "workspace.list.result", "workspace.search.result", "model.list.result",
+  // F0 — additive file-browser (R3) responses. Every response is bounded
+  // and carries an opaque revision/page token so the mobile client can
+  // reconcile drift and resume pagination. None of these exposes a write /
+  // editor / diff / preview surface.
+  "workspace.tree.page.result", "workspace.file.search.result", "workspace.file.content.search.result", "workspace.file.metadata.result", "workspace.file.read.result",
+  // F0 — additive context-inspector (R4) responses. The snapshot response
+  // is the only read response; durable mutations report through command
+  // receipts/state and the resulting context.snapshot event.
+  "context.snapshot.result",
 ] as const;
 export const SUPPORTED_CAPABILITIES = [
   "streams.v1", "commands.v1", "controller_leases.v1", "attachments.v1", "extension_dialogs.v1", "notifications.v1",
+  // F0 — additive capability literals for R3 (file browser) and R4 (context
+  // inspector). The bridge advertises `files.v1` and/or `contexts.v1` only
+  // when the host genuinely implements the corresponding bounded surface;
+  // mobile clients map `unavailable` directly to a truthful "Files
+  // unavailable" / "Context inspector unavailable" state, never to an
+  // empty/fabricated tree/snapshot.
+  "files.v1", "contexts.v1",
 ] as const;
-export const CONTROL_TYPES = ["subscription.set", "cursor.ack", "controller.renew", "host.snapshot.request", "session.snapshot.request", "session.list", "session.history.page", "workspace.list", "workspace.search", "model.list", "command.current"] as const;
+export const CONTROL_TYPES = [
+  "subscription.set", "cursor.ack", "controller.renew", "host.snapshot.request", "session.snapshot.request",
+  "session.list", "session.history.page", "workspace.list", "workspace.search", "model.list", "command.current",
+  // R3 controls are repeatable, nonjournaled reads. R4 exposes only the
+  // repeatable snapshot read; context mutations are durable commands above.
+  "workspace.tree.page", "workspace.file.search", "workspace.file.content.search", "workspace.file.metadata", "workspace.file.read",
+  "context.snapshot.request",
+] as const;
 
 export const ERROR_CODES = [
   "invalid_message", "unsupported_protocol", "unsupported_capability", "host_identity_mismatch", "stale_connection",
@@ -97,6 +183,20 @@ export const ERROR_CODES = [
   "migration_required", "internal_error",
   // F0 — additive stability codes for recipe (R1) and plan (R2) flows.
   "recipe_unavailable", "plan_unavailable", "stale_plan_target",
+  // F0 — additive stability codes for the read-only file browser (R3) and
+  // the context inspector (R4). Every code below is bounded, additive, and
+  // safe for direct display in the inspector/ browser surface.
+  //   - `path_not_found`         — root-relative path does not exist
+  //   - `path_outside_workspace` — canonicalization/symlink/`..` escape
+  //   - `path_binary`            — file cannot be read as text
+  //   - `path_oversize`          — file exceeds the file-size cap
+  //   - `file_stale`             — attached file's revision has changed
+  //   - `file_unavailable`       — file surface unavailable / unreadable
+  //   - `context_pin_failed`     — pin / unpin / exclude refused
+  //   - `context_unavailable`    — context surface unavailable
+  "path_not_found", "path_outside_workspace", "path_binary", "path_oversize",
+  "file_stale", "file_unavailable",
+  "context_pin_failed", "context_unavailable",
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -141,7 +241,12 @@ export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map((t
   stableErrors: ["invalid_message", "unsupported_capability", "invalid_state", "idempotency_conflict"],
 }));
 
-const hostEventTypes = new Set<EventType>(["host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility", "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability"]);
+const hostEventTypes = new Set<EventType>([
+  "host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility",
+  "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
+  // D-037: workspace invalidations are owned by the mandatory host stream.
+  "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
+]);
 export const EVENT_STREAM_OWNERSHIP: Readonly<Record<EventType, StreamOwnership>> = Object.fromEntries(
   EVENT_TYPES.map((type) => [type, type === "command.state" || type === "error.event" ? "host-or-session" : hostEventTypes.has(type) ? "host" : "session"]),
 ) as Readonly<Record<EventType, StreamOwnership>>;
@@ -441,6 +546,381 @@ export const PlanUnavailableSchema = Type.Object({
   status: CapabilityStatusSchema,
 }, { additionalProperties: false, $id: "pi-mob/protocol/plan-unavailable" });
 
+// F0 — capability literal for the read-only file browser (R3).
+export const FILES_CAPABILITY = "files.v1" as const;
+// F0 — capability literal for the context inspector (R4).
+export const CONTEXTS_CAPABILITY = "contexts.v1" as const;
+
+// F0 — R3 WorkspacePathSchema. Root-relative workspace path. The schema
+// enforces only the static shape (length 1..1024 UTF-16 code units, no
+// NUL, no carriage return, no line feed, no leading slash, no `..`
+// segment, no backslash, no whitespace control characters). The bridge
+// additionally enforces canonicalization, symlink resolution, and
+// `..`-escape rejection against the workspace root — those invariants
+// require filesystem state and cannot be expressed in a regex without
+// losing honest closed-shape guarantees. The schema rejects a leading
+// slash, a literal `..` or `.` segment, backslashes, and NUL/CR/LF so
+// any caller passing a manifest path already violates the contract
+// before the bridge ever touches the filesystem.
+export const WORKSPACE_PATH_PATTERN = "^(?!\\.)(?!/)(?!.*//)(?!.*\\\\)(?!.*\\.\\.)[^\\x00-\\x1F\\x7F]{1,1024}$";
+export const WorkspacePathSchema = Type.String({
+  pattern: WORKSPACE_PATH_PATTERN,
+  maxLength: LIMITS.maxWorkspacePathLength,
+  $id: "pi-mob/protocol/workspace-path",
+});
+
+// F0 — R3 LineRangeSchema. A bounded 1-based inclusive line range. The
+// bridge MUST enforce `endLine >= startLine` and reject ranges that
+// exceed the file's actual line count with `path_oversize`.
+export const LineRangeSchema = Type.Object({
+  startLine: Type.Integer({ minimum: 1 }),
+  endLine: Type.Integer({ minimum: 1 }),
+  label: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+}, { additionalProperties: false, $id: "pi-mob/protocol/line-range" });
+
+// F0 — R3 FileNodeSchema. One entry of a paginated workspace tree. `kind`
+// distinguishes file vs directory. File-only fields (`size`, `sha256`,
+// `isBinary`, `modifiedAt`) are optional so a directory entry can omit
+// them and a sparsely-indexed tree can publish size without a digest.
+// All paths are root-relative.
+export const FileNodeSchema = Type.Object({
+  path: WorkspacePathSchema,
+  kind: Type.Union([Type.Literal("file"), Type.Literal("directory")]),
+  size: Type.Optional(Type.Integer({ minimum: 0, maximum: LIMITS.maxFileSize })),
+  childCount: Type.Optional(Type.Integer({ minimum: 0, maximum: LIMITS.maxTreePageItems })),
+  modifiedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  sha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+  isBinary: Type.Optional(Type.Boolean()),
+  languageHint: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxLanguageHintLength })),
+}, { additionalProperties: false, $id: "pi-mob/protocol/file-node" });
+
+// F0 — R3 FileSearchMatchSchema. A single filename-search hit. `matchStart`
+// and `matchLength` are byte offsets into the path string (UTF-8); the
+// bridge clamps invalid ranges before publish.
+export const FileSearchMatchSchema = Type.Object({
+  path: WorkspacePathSchema,
+  matchStart: Type.Optional(Type.Integer({ minimum: 0 })),
+  matchLength: Type.Optional(Type.Integer({ minimum: 1 })),
+}, { additionalProperties: false, $id: "pi-mob/protocol/file-search-match" });
+
+// F0 — R3 ContentSearchMatchSchema. A single content-search hit. `line` and
+// `column` are 1-based UTF-8 character positions into the line and the
+// lineText. `matchStart` is the byte offset of the match into `lineText`;
+// `matchLength` is the byte length. `lineText` is bounded and never
+// carries the surrounding untrimmed window.
+export const ContentSearchMatchSchema = Type.Object({
+  path: WorkspacePathSchema,
+  line: Type.Integer({ minimum: 1 }),
+  column: Type.Integer({ minimum: 1 }),
+  matchStart: Type.Integer({ minimum: 0 }),
+  matchLength: Type.Integer({ minimum: 1 }),
+  lineText: Type.String({ minLength: 0, maxLength: 4096 }),
+}, { additionalProperties: false, $id: "pi-mob/protocol/content-search-match" });
+
+// F0 — R3 FileMetadataSchema. Authoritative file metadata published in
+// response to `workspace.file.metadata` and pushed as a workspace event.
+// `size` and `modifiedAt` are REQUIRED; `sha256` is OPTIONAL because the
+// bridge may have a stat without a digest (a freshly written file the
+// host has not yet hashed). `isBinary` is REQUIRED so the mobile UI can
+// refuse to render text-mode view without re-fetching. `revision` pins
+// the metadata snapshot so the mobile client can detect drift; the
+// `lastReadAt` ISO timestamp is the bridge's read time of this snapshot.
+export const FileMetadataSchema = Type.Object({
+  path: WorkspacePathSchema,
+  size: Type.Integer({ minimum: 0, maximum: LIMITS.maxFileSize }),
+  sha256: Type.Optional(Type.String({ pattern: "^[0-9a-f]{64}$" })),
+  isBinary: Type.Boolean(),
+  modifiedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+  revision: RevisionTokenSchema,
+  lastReadAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+  languageHint: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxLanguageHintLength })),
+}, { additionalProperties: false, $id: "pi-mob/protocol/file-metadata" });
+
+// F0 — R3 FileReadResultSchema. A bounded, paginated text read. `rangeStart`
+// and `rangeEnd` are 1-based inclusive line indices into the file. The
+// bridge MUST enforce `endLine >= startLine`, `rangeEnd - rangeStart + 1
+// <= LIMITS.maxFileReadLines`, and UTF-8 byte budget
+// (`content.length` in UTF-8 <= LIMITS.maxFileReadBytes). `totalLines`
+// reports the file's full line count so the client can drive further
+// pages. `isTruncated` and the optional `truncation` block describe
+// whether the returned range itself was clipped to the byte budget.
+// `encoding` is fixed at `"utf-8"` for v1 — binary reads are rejected at
+// the bridge with `path_binary`. `lastModifiedAt` and `revision` mirror
+// the metadata; clients compare against their attachment references.
+export const FileReadResultSchema = Type.Object({
+  path: WorkspacePathSchema,
+  revision: RevisionTokenSchema,
+  rangeStart: Type.Integer({ minimum: 1 }),
+  rangeEnd: Type.Integer({ minimum: 1 }),
+  totalLines: Type.Integer({ minimum: 0 }),
+  content: Type.String({ minLength: 0, maxLength: LIMITS.maxFileReadBytes }),
+  encoding: Type.Literal("utf-8"),
+  isTruncated: Type.Boolean(),
+  truncation: Type.Optional(TruncationSchema),
+  lastModifiedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+}, { additionalProperties: false, $id: "pi-mob/protocol/file-read-result" });
+
+// F0 — R3 FileAttachmentReferenceSchema. A revision-bound file reference
+// attached to a `prompt.submit`. The bridge validates the reference at
+// send time: if `revision` no longer matches the current file revision,
+// the prompt is rejected with `file_stale` BEFORE dispatch. `ranges` is
+// optional and selects a line span; omitting it attaches the entire file.
+// `digest` is the file's SHA-256 at the time the user attached it so the
+// bridge can also reject a same-revision but byte-changed file (rare but
+// possible if the host allowed a same-revision rewrite). The schema is
+// `additionalProperties: false` so a caller cannot smuggle `private`,
+// `internal`, or `debug` fields alongside a closed attachment.
+export const FileAttachmentReferenceSchema = Type.Object({
+  workspaceId: Uuid,
+  path: WorkspacePathSchema,
+  ranges: Type.Optional(Type.Array(LineRangeSchema, { maxItems: LIMITS.maxPinnedRanges })),
+  digest: Type.String({ pattern: "^[0-9a-f]{64}$" }),
+  revision: RevisionTokenSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/file-attachment-reference" });
+
+// F0 — R3 WorkspaceTreeSnapshotEventSchema. A host-stream event scoped by
+// workspaceId that announces a new tree revision (lazy: the tree is not
+// pushed in full; the mobile client requests pages on demand). `rootRevision` is the
+// opaque revision of the entire workspace tree; `changeSet` lists paths
+// that have been added/removed/modified since the prior root revision.
+// `capability` is REQUIRED so a mobile client can correlate the snapshot
+// with the file-surface capability status.
+export const WorkspaceTreeSnapshotEventSchema = Type.Object({
+  workspaceId: Uuid,
+  rootRevision: RevisionTokenSchema,
+  changeSet: Type.Array(WorkspacePathSchema, { maxItems: 1024 }),
+  capability: Type.Literal(FILES_CAPABILITY),
+  status: CapabilityStatusSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/workspace-tree-snapshot" });
+
+// F0 — R3 WorkspaceFileMetadataEventSchema. A workspace-stream event that
+// pushes fresh metadata for a single file. `file` is the authoritative
+// metadata snapshot; `previousRevision` lets the client detect drift
+// without re-querying.
+export const WorkspaceFileMetadataEventSchema = Type.Object({
+  workspaceId: Uuid,
+  file: FileMetadataSchema,
+  previousRevision: Type.Optional(RevisionTokenSchema),
+  capability: Type.Literal(FILES_CAPABILITY),
+}, { additionalProperties: false, $id: "pi-mob/protocol/workspace-file-metadata" });
+
+// F0 — R3 WorkspaceFileStaleEventSchema. Emitted when a file revision
+// the mobile client has attached (or pinned in the context inspector)
+// has been replaced on disk. The event tells the client which path went
+// stale and the new authoritative revision so it can mark the attached
+// reference or pinned file stale and offer a refresh.
+export const WorkspaceFileStaleEventSchema = Type.Object({
+  workspaceId: Uuid,
+  path: WorkspacePathSchema,
+  previousRevision: RevisionTokenSchema,
+  currentRevision: RevisionTokenSchema,
+  modifiedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+  capability: Type.Literal(FILES_CAPABILITY),
+}, { additionalProperties: false, $id: "pi-mob/protocol/workspace-file-stale" });
+
+// F0 — R3 WorkspaceFileUnavailableEventSchema. Carries the capability
+// identifier of the file surface plus a closed `CapabilityStatus`.
+export const WorkspaceFileUnavailableEventSchema = Type.Object({
+  workspaceId: Uuid,
+  capability: Type.Literal(FILES_CAPABILITY),
+  status: CapabilityStatusSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/workspace-file-unavailable" });
+
+// F0 — R4 PinnedFileSchema. One entry in the inspector's `pinnedFiles`
+// array. `ranges` is optional: omitting it pins the entire file; each
+// range selects a 1-based inclusive line span. `pinnedAt` is the bridge
+// publish time; the schema is `additionalProperties: false` so a bridge
+// caller cannot smuggle `private`/`internal`/`debug` siblings alongside
+// the declared pin fields.
+export const PinnedFileSchema = Type.Object({
+  path: WorkspacePathSchema,
+  pinnedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+  ranges: Type.Optional(Type.Array(LineRangeSchema, { maxItems: LIMITS.maxPinnedRanges })),
+  revision: RevisionTokenSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/pinned-file" });
+
+// F0 — R4 TokenUsageSchema. Closed, bounded token-usage telemetry. The
+// schema proves only the field shapes, the non-negative integer sign,
+// and the closed object envelope; the bridge computes the actual
+// totals from provider-supplied usage and re-measures them at publish.
+// `usagePercent` (0..1) is an optional convenience field the inspector
+// surfaces as a progress indicator.
+export const TokenUsageSchema = Type.Object({
+  inputTokens: Type.Integer({ minimum: 0 }),
+  outputTokens: Type.Integer({ minimum: 0 }),
+  cacheReadTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  cacheWriteTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  contextWindowTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+  usagePercent: Type.Optional(Type.Number({ minimum: 0, maximum: 1 })),
+}, { additionalProperties: false, $id: "pi-mob/protocol/token-usage" });
+
+// F0 — R4 ContextSourceSchema. One source in the inspector's `sources`
+// array. `sourceKind` is bounded opaque text (file / instructions /
+// command_output / agent_output / ...). `summary` is bounded narrative
+// text — the inspector renders it directly, never reconstructs it. The
+// per-source `stale` boolean lets the inspector flag stale sources
+// individually (not just the global `stale` on the snapshot envelope).
+export const ContextSourceSchema = Type.Object({
+  sourceId: Type.String({ minLength: 1, maxLength: LIMITS.maxContextSourceIdLength }),
+  sourceKind: Type.String({ minLength: 1, maxLength: LIMITS.maxContextSourceKindLength }),
+  summary: Type.String({ minLength: 0, maxLength: LIMITS.maxContextSourceSummary }),
+  stale: Type.Boolean(),
+  capability: CapabilityStatusSchema,
+  revision: Type.Optional(RevisionTokenSchema),
+  lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+}, { additionalProperties: false, $id: "pi-mob/protocol/context-source" });
+
+// F0 — R4 ContextSnapshotSchema. The closed, bounded payload the
+// context inspector renders. Every field is REQUIRED when listed as
+// required; the optional groups are the genuinely optional bits the
+// bridge may omit (e.g. when there is no model yet, no instructions,
+// no pinned files, no token usage, no compaction yet). The required
+// identity/status envelope (`sessionId`, `revision`, `source`,
+// `stale`, `capability`) lets a mobile client attribute the snapshot
+// to its owning session, identify the producing surface, know whether
+// the snapshot is itself stale, and recover the same R4 capability
+// posture the unavailable surface would carry.
+//
+// Schema-scope guarantees ONLY:
+//   - shape, sign, length bounds, regex patterns, closed shape
+//   - required identity/status envelope
+// Out-of-scope (MUST be enforced by the bridge at publish and at
+// receive):
+//   - the relation `compacted === true` iff `compactRevision` and
+//     `compactedAt` are populated (the schema does not see siblings)
+//   - the validity of `model.provider`/`model.modelId` against the
+//     catalogue (the schema is permissive)
+//   - the actual values of `tokenUsage` (the bridge re-measures)
+//   - any cross-source dedupe or ordering (the schema preserves input
+//     order; the bridge deduplicates)
+export const ContextSnapshotSchema = Type.Object({
+  sessionId: Uuid,
+  revision: RevisionTokenSchema,
+  source: Type.String({ minLength: 1, maxLength: LIMITS.maxCapabilitySourceLength }),
+  stale: Type.Boolean(),
+  capability: CapabilityStatusSchema,
+  model: Type.Optional(Type.Object({
+    provider: Type.String({ minLength: 1, maxLength: 128 }),
+    modelId: Type.String({ minLength: 1, maxLength: 128 }),
+  }, { additionalProperties: false, $id: "pi-mob/protocol/context-model" })),
+  thinkingLevel: Type.Optional(Type.String({ minLength: 1, maxLength: 32 })),
+  instructions: Type.Optional(Type.String({ minLength: 0, maxLength: LIMITS.maxContextInstructions })),
+  pinnedFiles: Type.Optional(Type.Array(PinnedFileSchema, { maxItems: LIMITS.maxPinnedFiles })),
+  tokenUsage: Type.Optional(TokenUsageSchema),
+  compacted: Type.Optional(Type.Boolean()),
+  compactRevision: Type.Optional(RevisionTokenSchema),
+  compactedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  sources: Type.Optional(Type.Array(ContextSourceSchema, { maxItems: 64 })),
+  lastRefreshedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+}, { additionalProperties: false, $id: "pi-mob/protocol/context-snapshot" });
+
+// F0 — R4 ContextUnavailableEventSchema. Truthful no-context surface.
+export const ContextUnavailableEventSchema = Type.Object({
+  sessionId: Uuid,
+  capability: Type.Literal(CONTEXTS_CAPABILITY),
+  status: CapabilityStatusSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/context-unavailable" });
+
+// D-037 context mutations are durable commands. `expectedRevision` is the
+// authoritative session-snapshot revision and `target` is deliberately
+// closed so command hashing cannot hide private/debug routing data in it.
+// File and source targets cover pin/unpin/exclude; the `all` target is used by
+// a session-wide refresh. The bridge still resolves paths and source IDs.
+const ContextFileTargetSchema = Type.Union([
+  Type.Object({
+    path: WorkspacePathSchema,
+    ranges: Type.Optional(Type.Array(LineRangeSchema, { maxItems: LIMITS.maxPinnedRanges })),
+    revision: Type.Optional(RevisionTokenSchema),
+  }, { additionalProperties: false }),
+  Type.Object({
+    kind: Type.Literal("file"),
+    path: WorkspacePathSchema,
+    ranges: Type.Optional(Type.Array(LineRangeSchema, { maxItems: LIMITS.maxPinnedRanges })),
+    revision: Type.Optional(RevisionTokenSchema),
+  }, { additionalProperties: false }),
+]);
+const ContextSourceTargetSchema = Type.Union([
+  Type.Object({ sourceId: Type.String({ minLength: 1, maxLength: LIMITS.maxContextSourceIdLength }), revision: Type.Optional(RevisionTokenSchema) }, { additionalProperties: false }),
+  Type.Object({ kind: Type.Literal("source"), sourceId: Type.String({ minLength: 1, maxLength: LIMITS.maxContextSourceIdLength }), revision: Type.Optional(RevisionTokenSchema) }, { additionalProperties: false }),
+]);
+const ContextAllTargetSchema = Type.Object({ kind: Type.Literal("all") }, { additionalProperties: false });
+export const ContextMutationTargetSchema = Type.Union([
+  ContextFileTargetSchema,
+  ContextSourceTargetSchema,
+  ContextAllTargetSchema,
+], { $id: "pi-mob/protocol/context-mutation-target" });
+export const ContextMutationPayloadSchema = Type.Object({
+  sessionId: Uuid,
+  expectedRevision: RevisionTokenSchema,
+  target: ContextMutationTargetSchema,
+}, { additionalProperties: false, $id: "pi-mob/protocol/context-mutation-payload" });
+
+const PageTokenSchema = Type.Union([Type.String({ minLength: 1, maxLength: 256 }), Type.Null()]);
+const WorkspaceQuerySchema = Type.String({ minLength: 1, maxLength: 512 });
+const WorkspacePathOptional = Type.Optional(WorkspacePathSchema);
+const WorkspaceTreePagePayloadSchema = Type.Object({
+  workspaceId: Uuid,
+  path: WorkspacePathOptional,
+  rootRevision: Type.Optional(RevisionTokenSchema),
+  pageSize: Type.Integer({ minimum: 1, maximum: LIMITS.maxTreePageItems }),
+  pageToken: PageTokenSchema,
+}, { additionalProperties: false });
+const WorkspaceFileSearchPayloadSchema = Type.Object({
+  workspaceId: Uuid,
+  query: WorkspaceQuerySchema,
+  path: WorkspacePathOptional,
+  pageSize: Type.Optional(Type.Integer({ minimum: 1, maximum: LIMITS.maxFilenameSearchItems })),
+  pageToken: Type.Optional(PageTokenSchema),
+}, { additionalProperties: false });
+const WorkspaceContentSearchPayloadSchema = Type.Object({
+  workspaceId: Uuid,
+  query: WorkspaceQuerySchema,
+  path: WorkspacePathOptional,
+  pageSize: Type.Optional(Type.Integer({ minimum: 1, maximum: LIMITS.maxContentSearchLines })),
+  pageToken: Type.Optional(PageTokenSchema),
+}, { additionalProperties: false });
+const WorkspaceFileMetadataPayloadSchema = Type.Object({
+  workspaceId: Uuid,
+  path: WorkspacePathSchema,
+  expectedRevision: Type.Optional(RevisionTokenSchema),
+}, { additionalProperties: false });
+const WorkspaceFileReadPayloadSchema = Type.Object({
+  workspaceId: Uuid,
+  path: WorkspacePathSchema,
+  rangeStart: Type.Integer({ minimum: 1 }),
+  rangeEnd: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+  expectedRevision: Type.Optional(RevisionTokenSchema),
+}, { additionalProperties: false });
+const ContextSnapshotRequestPayloadSchema = Type.Object({ sessionId: Uuid }, { additionalProperties: false });
+const PageResponseFields = {
+  workspaceId: Uuid,
+  rootRevision: RevisionTokenSchema,
+  nextPageToken: Type.Optional(PageTokenSchema),
+};
+
+const R3TreePageResponseSchema = Type.Object({
+  ...PageResponseFields,
+  path: WorkspacePathOptional,
+  items: Type.Array(FileNodeSchema, { maxItems: LIMITS.maxTreePageItems }),
+}, { additionalProperties: false });
+const R3FileSearchResponseSchema = Type.Object({
+  ...PageResponseFields,
+  items: Type.Array(FileSearchMatchSchema, { maxItems: LIMITS.maxFilenameSearchItems }),
+}, { additionalProperties: false });
+const R3ContentSearchResponseSchema = Type.Object({
+  ...PageResponseFields,
+  items: Type.Array(ContentSearchMatchSchema, { maxItems: LIMITS.maxContentSearchLines }),
+  isTruncated: Type.Boolean(),
+}, { additionalProperties: false });
+const R3MetadataResponseSchema = Type.Object({
+  workspaceId: Uuid,
+  file: FileMetadataSchema,
+}, { additionalProperties: false });
+const R3ReadResponseSchema = Type.Object({
+  workspaceId: Uuid,
+  result: FileReadResultSchema,
+}, { additionalProperties: false });
+
 const Payload = Type.Object({}, { additionalProperties: true });
 export const ProtocolVersionSchema = Type.Object({ major: Type.Literal(PROTOCOL_MAJOR), minor: Type.Integer({ minimum: 0 }) }, { additionalProperties: true, $id: "pi-mob/protocol/version" });
 const Protocol = ProtocolVersionSchema;
@@ -482,7 +962,22 @@ const CommandPayloads = {
   "session.delete": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.restore": Type.Object({ sessionId: SessionId }, { additionalProperties: true }),
   "session.purge": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.fork": Type.Object({ sessionId: SessionId, entryId: Type.String({ minLength: 1 }) }, { additionalProperties: true }),
   "session.clone": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "session.export": Type.Object({ sessionId: SessionId, format: Type.Literal("html") }, { additionalProperties: true }),
-  "prompt.submit": Type.Object({ sessionId: SessionId, deliveryMode: Type.Union([Type.Literal("immediate"), Type.Literal("steer"), Type.Literal("follow_up")]), message: Type.String(), attachmentIds: Type.Array(Uuid, { maxItems: LIMITS.maxAttachmentsPerPrompt }), planTarget: Type.Optional(PlanTargetSchema) }, { additionalProperties: true }),
+  // The two prompt-context lists each have an individual four-item schema
+  // bound. D-037 requires the bridge to enforce the relational invariant
+  // `attachmentIds.length + fileRefs.length <= maxAttachmentsPerPrompt`
+  // before accepting; both arrays remain in the durable semantic payload/hash.
+  "prompt.submit": Type.Object({
+    sessionId: SessionId,
+    deliveryMode: Type.Union([Type.Literal("immediate"), Type.Literal("steer"), Type.Literal("follow_up")]),
+    message: Type.String(),
+    attachmentIds: Type.Array(Uuid, { maxItems: LIMITS.maxAttachmentsPerPrompt }),
+    fileRefs: Type.Optional(Type.Array(FileAttachmentReferenceSchema, { maxItems: LIMITS.maxFileAttachmentRefs })),
+    planTarget: Type.Optional(PlanTargetSchema),
+  }, { additionalProperties: true }),
+  "context.pin": ContextMutationPayloadSchema,
+  "context.unpin": ContextMutationPayloadSchema,
+  "context.exclude": ContextMutationPayloadSchema,
+  "context.refresh": ContextMutationPayloadSchema,
   "turn.abort": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "queue.remove": Type.Object({ sessionId: SessionId, queueItemId: Uuid }, { additionalProperties: true }),
   "queue.clear": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "model.set": Type.Object({ sessionId: SessionId, modelId: Type.String({ minLength: 1 }), provider: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: true }),
   "thinking.set": Type.Object({ sessionId: SessionId, level: Type.String({ minLength: 1 }) }, { additionalProperties: true }), "steering_mode.set": Type.Object({ sessionId: SessionId, enabled: Type.Boolean() }, { additionalProperties: true }),
@@ -512,6 +1007,12 @@ const EventPayloads = {
   "recipe.unavailable": RecipeUnavailableSchema,
   "plan.snapshot": PlanSnapshotSchema,
   "plan.unavailable": PlanUnavailableSchema,
+  "workspace.tree.snapshot": WorkspaceTreeSnapshotEventSchema,
+  "workspace.file.metadata": WorkspaceFileMetadataEventSchema,
+  "workspace.file.stale": WorkspaceFileStaleEventSchema,
+  "workspace.file.unavailable": WorkspaceFileUnavailableEventSchema,
+  "context.snapshot": ContextSnapshotSchema,
+  "context.unavailable": ContextUnavailableEventSchema,
 } as const;
 const genericEventPayload = Type.Object({ sessionId: Type.Optional(SessionId) }, { additionalProperties: true });
 const ControlPayloads = {
@@ -524,6 +1025,12 @@ const ControlPayloads = {
   "session.history.page": Type.Object({ sessionId: SessionId, pageSize: Type.Integer({ minimum: 1, maximum: LIMITS.maxSessionPageSize }), pageToken: Type.Union([Type.String(), Type.Null()]) }, { additionalProperties: true }),
   "workspace.list": Type.Object({}, { additionalProperties: true }), "workspace.search": Type.Object({ query: Type.String() }, { additionalProperties: true }),
   "model.list": Type.Object({ sessionId: Type.Optional(SessionId) }, { additionalProperties: true }), "command.current": Type.Object({ commandId: Uuid }, { additionalProperties: true }),
+  "workspace.tree.page": WorkspaceTreePagePayloadSchema,
+  "workspace.file.search": WorkspaceFileSearchPayloadSchema,
+  "workspace.file.content.search": WorkspaceContentSearchPayloadSchema,
+  "workspace.file.metadata": WorkspaceFileMetadataPayloadSchema,
+  "workspace.file.read": WorkspaceFileReadPayloadSchema,
+  "context.snapshot.request": ContextSnapshotRequestPayloadSchema,
 } as const;
 export const SubscriptionSchema = ControlPayloads["subscription.set"];
 const ResponsePayloads = {
@@ -539,6 +1046,12 @@ const ResponsePayloads = {
   "session.list.result": Type.Object({ items: Type.Array(Payload), snapshotRevision: Type.String(), nextPageToken: Type.Optional(Type.String()) }, { additionalProperties: true }),
   "session.history.page.result": Type.Object({ items: Type.Array(Payload), snapshotRevision: Type.String(), nextPageToken: Type.Optional(Type.String()) }, { additionalProperties: true }),
   "workspace.list.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }), "workspace.search.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }), "model.list.result": Type.Object({ items: Type.Array(Payload) }, { additionalProperties: true }),
+  "workspace.tree.page.result": R3TreePageResponseSchema,
+  "workspace.file.search.result": R3FileSearchResponseSchema,
+  "workspace.file.content.search.result": R3ContentSearchResponseSchema,
+  "workspace.file.metadata.result": R3MetadataResponseSchema,
+  "workspace.file.read.result": R3ReadResponseSchema,
+  "context.snapshot.result": ContextSnapshotSchema,
 } as const;
 
 export const SnapshotSchema = Type.Union([

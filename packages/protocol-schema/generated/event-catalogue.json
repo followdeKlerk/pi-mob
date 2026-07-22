@@ -268,5 +268,35 @@
     "class": "event",
     "stream": "session",
     "type": "plan.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "workspace.tree.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "workspace.file.metadata"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "workspace.file.stale"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "workspace.file.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "context.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "context.unavailable"
   }
 ]

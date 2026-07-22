@@ -395,7 +395,9 @@ test("D-036 prompt.submit preserves legacy payload and uses planTarget (not targ
   // it remains accepted, but it is not a typed/declared plan target.
   const commandSchemaText = JSON.stringify(CommandSchema);
   expect(commandSchemaText).toContain("planTarget");
-  expect(commandSchemaText).not.toContain('"target"');
+  // `target` is now intentionally present on the four durable context
+  // commands; it must not be confused with the prompt's `planTarget`.
+  expect(commandSchemaText).toContain('"target"');
   expect(commands.Check({ ...base, payload: { ...base.payload, target: { planId: "p1", stepId: "s1", revision: "r2" } } })).toBe(true);
   // Closed planTarget shape — private sibling is rejected.
   expect(commands.Check({ ...base, payload: { ...base.payload, planTarget: { planId: "p1", stepId: "s1", revision: "r1", private: "leak" } } })).toBe(false);

@@ -809,7 +809,7 @@
       "invalid_state",
       "idempotency_conflict"
     ],
-    "type": "retry.auto.set"
+    "type": "context.pin"
   },
   {
     "acceptedStates": [
@@ -837,7 +837,7 @@
       "invalid_state",
       "idempotency_conflict"
     ],
-    "type": "retry.abort"
+    "type": "context.unpin"
   },
   {
     "acceptedStates": [
@@ -865,6 +865,34 @@
       "invalid_state",
       "idempotency_conflict"
     ],
-    "type": "extension.respond"
+    "type": "context.exclude"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "context.refresh"
   }
 ]
