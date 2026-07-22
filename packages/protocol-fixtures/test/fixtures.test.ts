@@ -159,8 +159,16 @@ test("D-037 invalid corpus isolates schema and semantic invariants", () => {
     expect(fixture.valid).toBe(true);
     expect(fixture.expectation).toBe("semantic-invalid");
     expect(validateFixture(fixture)).toBe(true);
-    const expectedError = fixture.semanticExpectation?.errorCode as SemanticError;
-    const currentRevision = (fixture.semanticExpectation?.currentRevision as string | undefined) ?? "file-r1";
+    const isStaleRevision = file === "semantic-invalid-prompt-file-ref-stale-revision.json";
+    const expectedError: SemanticError = isStaleRevision ? "file_stale" : "invalid_message";
+    expect(fixture.semanticExpectation?.outcome).toBe("rejected");
+    expect(fixture.semanticExpectation?.errorCode).toBe(expectedError);
+    if (isStaleRevision) {
+      expect(fixture.semanticExpectation?.currentRevision).toBe("file-r2");
+    } else {
+      expect(fixture.semanticExpectation?.maxCombinedItems).toBe(4);
+    }
+    const currentRevision = isStaleRevision ? "file-r2" : "file-r1";
     expect(validatePromptSemantics(fixture.message, currentRevision)).toBe(expectedError);
 
     const repairedMessage = clone(fixture.message);
