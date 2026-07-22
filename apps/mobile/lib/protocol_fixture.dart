@@ -753,6 +753,8 @@ const _supportedCapabilities = <String>{
   'attachments.v1',
   'extension_dialogs.v1',
   'notifications.v1',
+  'files.v1',
+  'contexts.v1',
 };
 const _commandTypes = <String>{
   'controller.acquire',
@@ -786,6 +788,10 @@ const _commandTypes = <String>{
   'retry.auto.set',
   'retry.abort',
   'extension.respond',
+  'context.pin',
+  'context.unpin',
+  'context.exclude',
+  'context.refresh',
 };
 const _controlTypes = <String>{
   'subscription.set',
@@ -799,6 +805,12 @@ const _controlTypes = <String>{
   'workspace.search',
   'model.list',
   'command.current',
+  'workspace.tree.page',
+  'workspace.file.search',
+  'workspace.file.content.search',
+  'workspace.file.metadata',
+  'workspace.file.read',
+  'context.snapshot.request',
 };
 const _leaseFreeCommands = <String>{
   'controller.acquire',
@@ -822,6 +834,12 @@ const _responseTypes = <String>{
   'workspace.list.result',
   'workspace.search.result',
   'model.list.result',
+  'workspace.tree.page.result',
+  'workspace.file.search.result',
+  'workspace.file.content.search.result',
+  'workspace.file.metadata.result',
+  'workspace.file.read.result',
+  'context.snapshot.result',
 };
 const _eventTypes = <String>{
   'host.state',
@@ -874,6 +892,16 @@ const _eventTypes = <String>{
   'extension.widget',
   'extension.title',
   'extension.editor_prefill',
+  'recipe.activity',
+  'recipe.unavailable',
+  'plan.snapshot',
+  'plan.unavailable',
+  'workspace.tree.snapshot',
+  'workspace.file.metadata',
+  'workspace.file.stale',
+  'workspace.file.unavailable',
+  'context.snapshot',
+  'context.unavailable',
 };
 const _hostEventTypes = <String>{
   'host.state',
@@ -887,6 +915,10 @@ const _hostEventTypes = <String>{
   'workspace.summary',
   'workspace.trust_state',
   'notification.capability',
+  'workspace.tree.snapshot',
+  'workspace.file.metadata',
+  'workspace.file.stale',
+  'workspace.file.unavailable',
 };
 const _dualStreamEventTypes = <String>{'command.state', 'error.event'};
 const _errorCodes = <String>{
@@ -931,6 +963,17 @@ const _errorCodes = <String>{
   'storage_full',
   'migration_required',
   'internal_error',
+  'recipe_unavailable',
+  'plan_unavailable',
+  'stale_plan_target',
+  'path_not_found',
+  'path_outside_workspace',
+  'path_binary',
+  'path_oversize',
+  'file_stale',
+  'file_unavailable',
+  'context_pin_failed',
+  'context_unavailable',
 };
 String _nfc(String value) => unorm.nfc(value);
 void _requireEnvelope(Map<String, Object?> json) {
