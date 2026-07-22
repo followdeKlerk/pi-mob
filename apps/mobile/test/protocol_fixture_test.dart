@@ -70,19 +70,30 @@ Map<String, Object?> _contextUnpin(Map<String, Object?> target) =>
       },
     };
 
-Map<String, Object?> _workspaceControl(String type, String path) =>
-    <String, Object?>{
-      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
-      'messageId': '11111111-1111-4111-1111-111111111111',
-      'requestId': '22222222-2222-4222-2222-222222222222',
-      'connectionId': '33333333-3333-4333-3333-333333333333',
-      'type': type,
-      'sentAt': '2026-07-15T04:20:00.000Z',
-      'payload': <String, Object?>{
-        'workspaceId': '44444444-4444-4444-4444-444444444444',
-        'path': path,
-      },
-    };
+Map<String, Object?> _workspaceControl(String type, String path) {
+  final payload = <String, Object?>{
+    'workspaceId': '44444444-4444-4444-4444-444444444444',
+    'path': path,
+  };
+  switch (type) {
+    case 'workspace.tree.page':
+      payload.addAll(<String, Object?>{'pageSize': 200, 'pageToken': null});
+    case 'workspace.file.search':
+    case 'workspace.file.content.search':
+      payload['query'] = 'fixture';
+    case 'workspace.file.read':
+      payload.addAll(<String, Object?>{'rangeStart': 1, 'rangeEnd': 1});
+  }
+  return <String, Object?>{
+    'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+    'messageId': '11111111-1111-4111-1111-111111111111',
+    'requestId': '22222222-2222-4222-2222-222222222222',
+    'connectionId': '33333333-3333-4333-3333-333333333333',
+    'type': type,
+    'sentAt': '2026-07-15T04:20:00.000Z',
+    'payload': payload,
+  };
+}
 
 Map<String, Object?> _workspaceTreePage(Map<String, Object?> node) =>
     <String, Object?>{

@@ -299,11 +299,10 @@ final class ProtocolControl extends ProtocolEnvelope {
       'workspace.tree.page',
       'workspace.file.search',
       'workspace.file.content.search',
+      'workspace.file.metadata',
+      'workspace.file.read',
     }.contains(type)) {
-      if (payload.containsKey('path')) _workspacePathString(payload, 'path');
-    }
-    if (type == 'workspace.file.metadata' || type == 'workspace.file.read') {
-      _workspacePathString(payload, 'path');
+      _validateWorkspaceControlPayload(type, payload);
     }
     if (type == 'workspace.search') _stringAllowEmpty(payload, 'query');
     if (type == 'model.list' && payload['sessionId'] != null) {
@@ -1580,6 +1579,106 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
         );
       }
     }
+  }
+}
+
+void _validateWorkspaceControlPayload(
+  String type,
+  Map<String, Object?> payload,
+) {
+  void validatePageSize(int maximum, {bool required = false}) {
+    if (!payload.containsKey('pageSize')) {
+      if (required) {
+        throw ProtocolValidationException(
+          'payload.pageSize',
+          'required integer',
+          null,
+        );
+      }
+      return;
+    }
+    final size = _positiveInteger(payload, 'pageSize');
+    if (size > maximum) {
+      throw ProtocolValidationException(
+        'payload.pageSize',
+        '1..$maximum',
+        size,
+      );
+    }
+  }
+
+  void validatePageToken({bool required = false}) {
+    if (!payload.containsKey('pageToken')) {
+      if (required) {
+        throw ProtocolValidationException(
+          'payload.pageToken',
+          'required string or null',
+          null,
+        );
+      }
+      return;
+    }
+    if (payload['pageToken'] != null) {
+      _boundedString(payload, 'pageToken', 256);
+    }
+  }
+
+  switch (type) {
+    case 'workspace.tree.page':
+      _closedObject(payload, 'payload', const <String>{
+        'workspaceId',
+        'path',
+        'rootRevision',
+        'pageSize',
+        'pageToken',
+      });
+      _uuidString(payload, 'workspaceId');
+      if (payload.containsKey('path')) _workspacePathString(payload, 'path');
+      if (payload.containsKey('rootRevision')) {
+        _revisionTokenString(payload, 'rootRevision');
+      }
+      validatePageSize(200, required: true);
+      validatePageToken(required: true);
+    case 'workspace.file.search':
+    case 'workspace.file.content.search':
+      _closedObject(payload, 'payload', const <String>{
+        'workspaceId',
+        'query',
+        'path',
+        'pageSize',
+        'pageToken',
+      });
+      _uuidString(payload, 'workspaceId');
+      _boundedString(payload, 'query', 512);
+      if (payload.containsKey('path')) _workspacePathString(payload, 'path');
+      validatePageSize(type == 'workspace.file.search' ? 100 : 200);
+      validatePageToken();
+    case 'workspace.file.metadata':
+      _closedObject(payload, 'payload', const <String>{
+        'workspaceId',
+        'path',
+        'expectedRevision',
+      });
+      _uuidString(payload, 'workspaceId');
+      _workspacePathString(payload, 'path');
+      if (payload.containsKey('expectedRevision')) {
+        _revisionTokenString(payload, 'expectedRevision');
+      }
+    case 'workspace.file.read':
+      _closedObject(payload, 'payload', const <String>{
+        'workspaceId',
+        'path',
+        'rangeStart',
+        'rangeEnd',
+        'expectedRevision',
+      });
+      _uuidString(payload, 'workspaceId');
+      _workspacePathString(payload, 'path');
+      _positiveInteger(payload, 'rangeStart');
+      _positiveInteger(payload, 'rangeEnd');
+      if (payload.containsKey('expectedRevision')) {
+        _revisionTokenString(payload, 'expectedRevision');
+      }
   }
 }
 
