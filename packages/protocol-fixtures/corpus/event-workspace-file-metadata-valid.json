@@ -13,8 +13,8 @@
       "workspaceId": "88888888-8888-4888-8888-888888888888",
       "file": {
         "path": "src/index.ts",
-        "size": 12,
-        "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "size": 22,
+        "sha256": "a212c3cfbb7fb37382840024f7d9b80eed2b451790c544f5917042654dfee4de",
         "isBinary": false,
         "modifiedAt": "2026-07-12T00:00:00.000Z",
         "revision": "file-r1",

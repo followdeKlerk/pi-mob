@@ -18,9 +18,9 @@
           "path": "src/index.ts",
           "kind": "file",
           "depth": 0,
-          "size": 12,
+          "size": 22,
           "modifiedAt": "2026-07-12T00:00:00.000Z",
-          "sha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "sha256": "a212c3cfbb7fb37382840024f7d9b80eed2b451790c544f5917042654dfee4de",
           "isBinary": false,
           "languageHint": "typescript"
         }

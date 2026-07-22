@@ -15,7 +15,7 @@
       "target": {
         "kind": "source",
         "sourceId": "source-fixture",
-        "revision": "source-r1"
+        "revision": "file-r1"
       }
     },
     "requestId": "22222222-2222-4222-8222-222222222222",
