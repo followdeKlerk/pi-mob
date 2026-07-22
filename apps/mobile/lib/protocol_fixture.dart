@@ -1278,17 +1278,26 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
     _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
   }
   if (type == 'plan.snapshot') {
-    for (final field in const <String>[
+    _closedObject(payload, 'payload', const <String>{
       'planId',
       'revision',
+      'sessionId',
       'turnId',
       'source',
-    ]) {
-      _boundedString(payload, field, 128);
-    }
+      'stale',
+      'capability',
+      'steps',
+    });
+    _boundedString(payload, 'planId', 128);
+    _revisionTokenString(payload, 'revision');
     _uuidString(payload, 'sessionId');
+    _boundedString(payload, 'turnId', 128);
+    _boundedString(payload, 'source', 128);
     _boolean(payload, 'stale');
-    _object(payload, 'capability');
+    _validateCapabilityStatus(
+      _object(payload, 'capability'),
+      'payload.capability',
+    );
     final steps = _list(payload, 'steps');
     if (steps.length > 64) {
       throw ProtocolValidationException(
@@ -1306,6 +1315,13 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
         );
       }
       final step = Map<String, Object?>.from(item);
+      _closedObject(step, 'payload.steps[]', const <String>{
+        'stepId',
+        'title',
+        'status',
+        'blocker',
+        'timing',
+      });
       _boundedString(step, 'stepId', 128);
       _boundedString(step, 'title', 128);
       _oneOf(step, 'status', const <String>{
@@ -1315,7 +1331,23 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
         'blocked',
         'skipped',
       });
+      _boundedOptionalString(step, 'blocker', 240);
+      if (step.containsKey('timing')) {
+        _validateTiming(_object(step, 'timing'), 'payload.steps[].timing');
+      }
     }
+  }
+  if (type == 'plan.unavailable') {
+    _closedObject(payload, 'payload', const <String>{'capability', 'status'});
+    final capability = _string(payload, 'capability');
+    if (capability != 'plans.v1') {
+      throw ProtocolValidationException(
+        'payload.capability',
+        'plans.v1 literal',
+        capability,
+      );
+    }
+    _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
   }
   if (type == 'workspace.file.metadata') {
     _uuidString(payload, 'workspaceId');
