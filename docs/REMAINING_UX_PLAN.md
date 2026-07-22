@@ -1,7 +1,7 @@
 # pi-mob: remaining UX plan
 
 **Status:** planning artifact only; no implementation is authorized by this document.
-**Canonical checkout:** `/Users/nathandekleerk/github/pi-mob`
+**Canonical checkout:** repository root (`git rev-parse --show-toplevel`)
 **Planning baseline:** `main` at `a0d49fb` (`a0d49fb38454219fb7ec3fad204972a8e87566f0`).
 The approved planning documents were integrated separately at the canonical
 checkpoint recorded by the repository's commit history; this plan's baseline
