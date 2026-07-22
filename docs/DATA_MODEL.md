@@ -353,6 +353,67 @@ Targeted steering does not create a separate command type. `prompt.submit.planTa
 
 When authoritative data is absent, persistence/projectors retain an explicit `recipe.unavailable` (`recipes.v1`) or `plan.unavailable` (`plans.v1`) projection rather than fabricating an empty recipe/plan. Capability status is exactly `available`, `degraded`, `unavailable`, or `stale`; every non-available status retains required safe reason and remediation, while optional source/revision/refresh time support recovery diagnostics. These closed wire records exclude private/debug/provider-internal fields.
 
+### 3.10a Git/CI workspace projections (R6)
+
+These conceptual rows describe persistence permitted by the `git-ci.v1` wire
+contract; they do not claim that a bridge or mobile Git surface is already
+implemented. The authoritative R6 surface is a workspace-scoped host
+projection, not a session transcript event.
+
+```text
+git_workspace_summaries:
+  workspace_id PK/FK
+  revision
+  repository_url_https
+  repository_label
+  detached boolean
+  branch nullable
+  working_tree_state        clean | dirty | unknown
+  changed_count_bounded
+  ahead_bounded
+  behind_bounded
+  latest_commit_json
+  pull_request_json nullable
+  ci_status_json
+  failed_checks_json
+  supported_actions_json    unique subset of refresh | commit_through_pi | push_through_pi | open_external
+  capability                git-ci.v1
+  last_refreshed_at
+  source_stream_cursor nullable
+
+git_workspace_capability:
+  workspace_id PK/FK
+  capability                git-ci.v1
+  capability_status_json
+  source_stream_cursor nullable
+```
+
+`git.summary.result` and `git.summary` carry the same closed summary shape and
+upsert the current workspace summary by revision; duplicate host events are
+ignored by normal stream-cursor rules. `git.unavailable` stores explicit
+workspace capability status rather than fabricating an empty summary. Detached
+state is persisted truthfully as `detached: true` with `branch = null`; an
+attached branch persists `detached: false` with the bounded branch label.
+
+Bridge integration must validate safe external HTTPS URLs before publishing or
+persisting them, enforce bounded counts/check surfaces/supported actions, and
+retain only the declared summary fields. No diff, stage, hunk, checkout target,
+or raw CI log body belongs in these projections. The schema guarantees closed
+fields, bounds, and validated URL shape; it does not prove repository truth,
+remote reachability, commit/PR existence, or count/state consistency.
+
+`git.commit.request` and `git.push.request` use normal `commands` rows. Their
+closed semantic payload is `sessionId`, `workspaceId`, `expectedRevision`,
+required `confirmation`, and optional `summaryHint`; command type plus that
+payload is hashed, while envelope `leaseId` remains metadata. They require the
+active session controller lease, dispatch through Pi rather than direct mobile
+Git mutation, and reject stale revisions with `git_stale`. Accepted-but-
+unfinished commands survive restart. A dispatched commit/push whose external
+result cannot be proved after a crash becomes terminal `indeterminate` and is
+never automatically retried. Confirmation validation, supported-action checks,
+and provider/remote/auth/runtime failures remain bridge semantic invariants,
+not schema guarantees.
+
 ### 3.11 `commands`
 
 ```text
@@ -840,6 +901,57 @@ The host is authoritative for file bytes/metadata/revisions, attachment validity
 
 These rows are reconstructible and may be bounded by the global mobile-cache LRU or removed on host-generation change, capability withdrawal, clear-cache, or retention pressure. Repair discards the affected host/workspace/session projection, refetches controls or snapshots, and preserves paired hosts, drafts, preferences, and unsent local attachments. Missing, stale, denied, or unavailable host data is retained as explicit status rather than repaired into empty/current data.
 
+### Reconstructible Git/CI cache (R6)
+
+These permitted cache rows mirror the `git-ci.v1` workspace summary and
+truthful unavailable state. They are conceptual cache projections only and do
+not claim current mobile or bridge implementation.
+
+```text
+git_summary_cache:
+  host_id
+  workspace_id
+  revision
+  repository_url_https
+  repository_label
+  detached boolean
+  branch nullable
+  working_tree_state        clean | dirty | unknown
+  changed_count_bounded
+  ahead_bounded
+  behind_bounded
+  latest_commit_json
+  pull_request_json nullable
+  ci_status_json
+  failed_checks_json
+  supported_actions_json    unique subset of refresh | commit_through_pi | push_through_pi | open_external
+  capability                git-ci.v1
+  last_refreshed_at
+  source_stream_cursor nullable
+  PRIMARY KEY (host_id, workspace_id)
+
+git_capability_cache:
+  host_id
+  workspace_id
+  capability                git-ci.v1
+  capability_status_json
+  source_stream_cursor nullable
+  PRIMARY KEY (host_id, workspace_id)
+```
+
+`git.summary.result` and `git.summary` reconcile the same current summary shape
+for one workspace; duplicate host events are ignored by cursor rules.
+`git.unavailable` stores explicit capability status rather than fabricating an
+empty repository card. Detached state persists exactly as the wire contract
+states: detached rows have no branch, attached rows do. Mobile may evict these
+rows under the global LRU, on host-generation change, or when capability is
+withdrawn.
+
+The cache retains only bounded summary fields, revision, actions, and status.
+No diff, stage, hunk, checkout target, raw CI logs, host paths, or credentials
+belong in mobile storage. Cache state is read-only: commit/push still require a
+new durable command with controller lease, expected revision, and confirmation.
+
 Small sensitive platform values may use Keychain/Keystore-backed secure storage. Provider credentials are never mobile values.
 
 ## 5. Snapshot model
@@ -851,6 +963,7 @@ A host snapshot contains:
 - workspace summary data needed by the current screen,
 - active-process capacity,
 - no R5 process list (supervised-process events are session-owned),
+- no fabricated Git/CI card; Git/CI summary/unavailable state remains a separate workspace-scoped host projection fetched by `git.summary.request` and reconciled by `git.summary` / `git.unavailable`,
 - controller-lease summaries for the requesting installation,
 - new host stream baseline.
 
