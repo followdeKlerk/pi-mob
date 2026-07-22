@@ -2194,7 +2194,7 @@ void _validateGitSummaryPayload(Map<String, Object?> payload) {
   }
   final detached = _boolean(payload, 'detached');
   if (detached) {
-    if (payload['branch'] != null) {
+    if (!payload.containsKey('branch') || payload['branch'] != null) {
       throw ProtocolValidationException(
         'payload.branch',
         'null when detached',

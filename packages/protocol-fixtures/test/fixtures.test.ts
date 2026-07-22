@@ -309,6 +309,7 @@ const r6ExpectedInvalidFiles = [
   "invalid-git-summary-repository-oversize.json",
   "invalid-git-summary-count-oversize.json",
   "invalid-git-summary-detached-branch-mismatch.json",
+  "invalid-git-summary-detached-missing-branch.json",
   "invalid-git-summary-missing-ci-status.json",
   "invalid-git-summary-missing-failed-checks.json",
   "invalid-git-command-missing-session.json",
@@ -354,6 +355,9 @@ function repairR6ExpectedInvalid(file: R6ExpectedInvalidFile, message: Record<st
       payload.changedCount = 2;
       break;
     case "invalid-git-summary-detached-branch-mismatch.json":
+      payload.branch = null;
+      break;
+    case "invalid-git-summary-detached-missing-branch.json":
       payload.branch = null;
       break;
     case "invalid-git-summary-missing-ci-status.json":
