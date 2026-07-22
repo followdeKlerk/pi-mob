@@ -1509,6 +1509,43 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
     }
     _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
   }
+  if (type == 'workspace.tree.snapshot') {
+    _closedObject(payload, 'payload', const <String>{
+      'workspaceId',
+      'rootRevision',
+      'changeSet',
+      'capability',
+      'status',
+    });
+    _uuidString(payload, 'workspaceId');
+    _revisionTokenString(payload, 'rootRevision');
+    final changeSet = _list(payload, 'changeSet');
+    if (changeSet.length > 1024) {
+      throw ProtocolValidationException(
+        'payload.changeSet',
+        '<= 1024 items',
+        changeSet.length,
+      );
+    }
+    for (var index = 0; index < changeSet.length; index++) {
+      final item = changeSet[index];
+      if (item is! String || !_isWorkspacePath(item)) {
+        throw ProtocolValidationException(
+          'payload.changeSet[$index]',
+          'workspace-relative path',
+          item,
+        );
+      }
+    }
+    if (_string(payload, 'capability') != 'files.v1') {
+      throw ProtocolValidationException(
+        'payload.capability',
+        'files.v1 literal',
+        payload['capability'],
+      );
+    }
+    _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
+  }
   if (type == 'workspace.file.metadata') {
     _uuidString(payload, 'workspaceId');
     _object(payload, 'file');
@@ -1547,6 +1584,32 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
 }
 
 void _validateResponsePayload(String type, Map<String, Object?> payload) {
+  if (type == 'workspace.tree.page.result') {
+    _closedObject(payload, 'payload', const <String>{
+      'workspaceId',
+      'rootRevision',
+      'nextPageToken',
+      'path',
+      'items',
+    });
+    _uuidString(payload, 'workspaceId');
+    _revisionTokenString(payload, 'rootRevision');
+    if (payload.containsKey('nextPageToken')) {
+      _boundedString(payload, 'nextPageToken', 256);
+    }
+    if (payload.containsKey('path')) _workspacePathString(payload, 'path');
+    final items = _list(payload, 'items');
+    if (items.length > 200) {
+      throw ProtocolValidationException(
+        'payload.items',
+        '<= 200 items',
+        items.length,
+      );
+    }
+    for (var index = 0; index < items.length; index++) {
+      _validateFileNode(items[index], 'payload.items[$index]');
+    }
+  }
   if (type == 'workspace.file.metadata.result') {
     _uuidString(payload, 'workspaceId');
     final file = _object(payload, 'file');
@@ -1673,6 +1736,69 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
       }.contains(type) &&
       payload['nextPageToken'] != null) {
     _string(payload, 'nextPageToken');
+  }
+}
+
+void _validateFileNode(Object? value, String path) {
+  final node = _objectFrom(value, path);
+  _closedObject(node, path, const <String>{
+    'path',
+    'kind',
+    'depth',
+    'size',
+    'childCount',
+    'modifiedAt',
+    'sha256',
+    'isBinary',
+    'languageHint',
+  });
+  _workspacePathString(node, 'path');
+  _oneOf(node, 'kind', const <String>{'file', 'directory'});
+  final depth = _nonNegativeInteger(node, 'depth');
+  if (depth > 16) {
+    throw ProtocolValidationException('$path.depth', 'integer in 0..16', depth);
+  }
+  if (node.containsKey('size')) {
+    final size = _nonNegativeInteger(node, 'size');
+    if (size > 26214400) {
+      throw ProtocolValidationException(
+        '$path.size',
+        '<= 26214400 bytes',
+        size,
+      );
+    }
+  }
+  if (node.containsKey('childCount')) {
+    final childCount = _nonNegativeInteger(node, 'childCount');
+    if (childCount > 200) {
+      throw ProtocolValidationException(
+        '$path.childCount',
+        '<= 200',
+        childCount,
+      );
+    }
+  }
+  if (node.containsKey('modifiedAt') &&
+      !_timestamp.hasMatch(_string(node, 'modifiedAt'))) {
+    throw ProtocolValidationException(
+      '$path.modifiedAt',
+      'UTC RFC3339 timestamp',
+      node['modifiedAt'],
+    );
+  }
+  if (node.containsKey('sha256')) {
+    final digest = _string(node, 'sha256');
+    if (!RegExp(r'^[0-9a-f]{64}$').hasMatch(digest)) {
+      throw ProtocolValidationException(
+        '$path.sha256',
+        'lowercase SHA-256',
+        digest,
+      );
+    }
+  }
+  if (node.containsKey('isBinary')) _boolean(node, 'isBinary');
+  if (node.containsKey('languageHint')) {
+    _boundedString(node, 'languageHint', 32);
   }
 }
 

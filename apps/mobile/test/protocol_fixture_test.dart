@@ -84,6 +84,43 @@ Map<String, Object?> _workspaceControl(String type, String path) =>
       },
     };
 
+Map<String, Object?> _workspaceTreePage(Map<String, Object?> node) =>
+    <String, Object?>{
+      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'requestId': '22222222-2222-4222-8222-222222222222',
+      'type': 'workspace.tree.page.result',
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': <String, Object?>{
+        'workspaceId': '44444444-4444-4444-8444-444444444444',
+        'rootRevision': 'tree-r1',
+        'items': <Object?>[node],
+      },
+    };
+
+Map<String, Object?> _workspaceTreeSnapshot(Object? change) =>
+    <String, Object?>{
+      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'eventId': '22222222-2222-4222-8222-222222222222',
+      'streamId': 'host:33333333-3333-4333-8333-333333333333',
+      'cursor': '1',
+      'type': 'workspace.tree.snapshot',
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': <String, Object?>{
+        'workspaceId': '44444444-4444-4444-8444-444444444444',
+        'rootRevision': 'tree-r2',
+        'changeSet': <Object?>[change],
+        'capability': 'files.v1',
+        'status': <String, Object?>{
+          'state': 'available',
+          'source': 'workspace-index',
+          'revision': 'tree-r2',
+          'lastRefreshedAt': '2026-07-15T04:20:00.000Z',
+        },
+      },
+    };
+
 void main() {
   test('workspace path validation is shared across all R3 controls', () {
     const controls = <String>[
@@ -119,6 +156,79 @@ void main() {
           reason: '$type: ${jsonEncode(path)}',
         );
       }
+    }
+  });
+
+  test(
+    'workspace tree FileNode depth boundaries and closed shape match TS',
+    () {
+      Map<String, Object?> node(Object? depth) => <String, Object?>{
+        'path': 'src/index.ts',
+        'kind': 'file',
+        'depth': depth,
+        'size': 26214400,
+      };
+
+      for (final depth in const <int>[0, 16]) {
+        expect(
+          validateProtocolFixture('response', _workspaceTreePage(node(depth))),
+          isA<ProtocolResponse>(),
+          reason: 'depth $depth',
+        );
+      }
+      for (final depth in <Object?>[-1, 17, 1.5, '16', true, null]) {
+        expect(
+          () => validateProtocolFixture(
+            'response',
+            _workspaceTreePage(node(depth)),
+          ),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: 'depth $depth',
+        );
+      }
+      for (final invalid in <Map<String, Object?>>[
+        <String, Object?>{'path': 'src/index.ts', 'kind': 'file'},
+        <String, Object?>{'path': '../index.ts', 'kind': 'file', 'depth': 0},
+        <String, Object?>{'path': 'src', 'kind': 'folder', 'depth': 0},
+        <String, Object?>{
+          'path': 'src/index.ts',
+          'kind': 'file',
+          'depth': 0,
+          'private': true,
+        },
+        <String, Object?>{
+          'path': 'src/index.ts',
+          'kind': 'file',
+          'depth': 0,
+          'size': 26214401,
+        },
+      ]) {
+        expect(
+          () =>
+              validateProtocolFixture('response', _workspaceTreePage(invalid)),
+          throwsA(isA<ProtocolValidationException>()),
+          reason: invalid.toString(),
+        );
+      }
+    },
+  );
+
+  test('workspace tree snapshot changeSet items are closed paths', () {
+    expect(
+      validateProtocolFixture('event', _workspaceTreeSnapshot('.git/config')),
+      isA<ProtocolEvent>(),
+    );
+    for (final change in <Object?>[
+      '../private',
+      '/absolute',
+      <String, Object?>{'path': 'src/index.ts'},
+      null,
+    ]) {
+      expect(
+        () => validateProtocolFixture('event', _workspaceTreeSnapshot(change)),
+        throwsA(isA<ProtocolValidationException>()),
+        reason: change.toString(),
+      );
     }
   });
 
