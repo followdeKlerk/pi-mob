@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   AuthoritativeProcessRegistry,
+  type ProcessErrorEvent,
   type ProcessOutput,
   type ProcessSnapshot,
   type ProcessUnavailable,
@@ -52,6 +53,20 @@ function unavailable(overrides: Partial<ProcessUnavailable> = {}): ProcessUnavai
   };
 }
 
+function processError(overrides: Partial<ProcessErrorEvent> = {}): ProcessErrorEvent {
+  return {
+    sessionId,
+    processId: "process-1",
+    revision: "process-r1",
+    error: {
+      code: "process_failed",
+      message: "failed",
+      retryable: false,
+    },
+    ...overrides,
+  };
+}
+
 describe("authoritative process projection", () => {
   test("preserves simultaneous process ids for one session", () => {
     const registry = new AuthoritativeProcessRegistry();
@@ -86,14 +101,55 @@ describe("authoritative process projection", () => {
     registry.applySnapshot(snapshot({ processId: "process-2", revision: "process-r2", command: "bun run dev", supportedActions: ["restart"] }));
     registry.applyOutput(output({ content: "before\n" }));
 
-    registry.applySnapshotResult({
-      items: [snapshot({ revision: "process-r3", supportedActions: ["restart", "rerun"] })],
+    registry.applySnapshotResult(sessionId, {
+      items: [
+        snapshot({ revision: "process-r3", supportedActions: ["restart"] }),
+        snapshot({ revision: "process-r4", supportedActions: ["restart", "rerun"] }),
+      ],
     });
 
     expect(registry.get(sessionId, "process-2")).toBeUndefined();
     const current = registry.get(sessionId, "process-1");
-    expect(current?.revision).toBe("process-r3");
+    expect(current?.revision).toBe("process-r4");
     expect(current?.stdout).toBeUndefined();
+  });
+
+  test("empty snapshot result clears only the named session", () => {
+    const registry = new AuthoritativeProcessRegistry();
+    registry.applySnapshot(snapshot());
+    registry.applySnapshot(snapshot({ sessionId: "22222222-2222-4222-8222-222222222222", processId: "process-2" }));
+
+    registry.applySnapshotResult(sessionId, { items: [] });
+
+    expect(registry.get(sessionId, "process-1")).toBeUndefined();
+    expect(registry.get("22222222-2222-4222-8222-222222222222", "process-2")).toBeDefined();
+  });
+
+  test("mismatched snapshot result rejects without clearing either session", () => {
+    const otherSession = "22222222-2222-4222-8222-222222222222";
+    const registry = new AuthoritativeProcessRegistry();
+    registry.applySnapshot(snapshot());
+    registry.applySnapshot(snapshot({ sessionId: otherSession, processId: "process-2" }));
+
+    expect(() => registry.applySnapshotResult(sessionId, {
+      items: [snapshot({ sessionId: otherSession, processId: "process-2" })],
+    })).toThrow("session mismatch");
+
+    expect(registry.get(sessionId, "process-1")).toBeDefined();
+    expect(registry.get(otherSession, "process-2")).toBeDefined();
+  });
+
+  test("process error is retained for the matching revision only", () => {
+    const registry = new AuthoritativeProcessRegistry();
+    registry.applySnapshot(snapshot());
+    registry.applyError(processError());
+    expect(registry.get(sessionId, "process-1")?.error).toEqual(processError().error);
+
+    registry.applyError(processError({ revision: "process-r9" }));
+    expect(registry.get(sessionId, "process-1")?.error).toEqual(processError().error);
+
+    registry.applySnapshot(snapshot({ revision: "process-r2" }));
+    expect(registry.get(sessionId, "process-1")?.error).toBeUndefined();
   });
 
   test("unavailable clears actions until a fresh snapshot arrives", () => {

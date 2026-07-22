@@ -4,11 +4,19 @@ typedef _Json = Map<String, Object?>;
 
 enum MobileProcessAction { stop, restart, rerun }
 
+enum MobileProcessStatus { running, completed, failed, stopped }
+
+enum MobileProcessPortProtocol { tcp, udp }
+
+enum MobileProcessStream { stdout, stderr }
+
+enum MobileCapabilityState { available, degraded, unavailable, stale }
+
 class MobileProcessPort {
   const MobileProcessPort({required this.port, required this.protocol});
 
   final int port;
-  final String protocol;
+  final MobileProcessPortProtocol protocol;
 }
 
 class MobileProcessTruncation {
@@ -40,7 +48,7 @@ class MobileProcessOutput {
   final String sessionId;
   final String processId;
   final String revision;
-  final String stream;
+  final MobileProcessStream stream;
   final String content;
   final MobileProcessTruncation truncation;
   final String? cursor;
@@ -56,11 +64,23 @@ class MobileCapabilityStatus {
     this.revision,
   });
 
-  final String state;
+  final MobileCapabilityState state;
   final String? reason;
   final String? remediation;
   final String? source;
   final String? revision;
+}
+
+class MobileProcessError {
+  const MobileProcessError({
+    required this.code,
+    required this.message,
+    required this.retryable,
+  });
+
+  final String code;
+  final String message;
+  final bool retryable;
 }
 
 class MobileProcess {
@@ -86,12 +106,13 @@ class MobileProcess {
     this.stdout,
     this.stderr,
     this.unavailableStatus,
+    this.error,
   });
 
   final String sessionId;
   final String processId;
   final String revision;
-  final String status;
+  final MobileProcessStatus status;
   final String command;
   final DateTime startedAt;
   final String capability;
@@ -109,6 +130,7 @@ class MobileProcess {
   final MobileProcessOutput? stdout;
   final MobileProcessOutput? stderr;
   final MobileCapabilityStatus? unavailableStatus;
+  final MobileProcessError? error;
 
   bool get available => unavailableStatus == null;
 
@@ -117,7 +139,7 @@ class MobileProcess {
 
   MobileProcess copyWith({
     String? revision,
-    String? status,
+    MobileProcessStatus? status,
     String? command,
     DateTime? startedAt,
     String? capability,
@@ -135,6 +157,7 @@ class MobileProcess {
     Object? stdout = _sentinel,
     Object? stderr = _sentinel,
     Object? unavailableStatus = _sentinel,
+    Object? error = _sentinel,
   }) => MobileProcess(
     sessionId: sessionId,
     processId: processId,
@@ -157,9 +180,7 @@ class MobileProcess {
     durationMs: identical(durationMs, _sentinel)
         ? this.durationMs
         : durationMs as int?,
-    exitCode: identical(exitCode, _sentinel)
-        ? this.exitCode
-        : exitCode as int?,
+    exitCode: identical(exitCode, _sentinel) ? this.exitCode : exitCode as int?,
     signal: identical(signal, _sentinel) ? this.signal : signal as String?,
     ports: ports ?? this.ports,
     stdout: identical(stdout, _sentinel)
@@ -171,6 +192,9 @@ class MobileProcess {
     unavailableStatus: identical(unavailableStatus, _sentinel)
         ? this.unavailableStatus
         : unavailableStatus as MobileCapabilityStatus?,
+    error: identical(error, _sentinel)
+        ? this.error
+        : error as MobileProcessError?,
   );
 }
 
@@ -186,7 +210,11 @@ class ProcessDomainState {
   bool get unavailable => unavailableBySession.isNotEmpty;
 }
 
-ProcessDomainState reduceProcess(ProcessDomainState state, Map<String, Object?> envelope) {
+ProcessDomainState reduceProcess(
+  ProcessDomainState state,
+  Map<String, Object?> envelope, {
+  String? requestedSessionId,
+}) {
   final type = envelope['type'];
   final payload = _asJson(envelope['payload']);
   if (type is! String || payload == null) return state;
@@ -196,17 +224,23 @@ ProcessDomainState reduceProcess(ProcessDomainState state, Map<String, Object?> 
       final snapshot = _parseSnapshot(payload);
       return snapshot == null ? state : _upsertSnapshot(state, snapshot);
     case 'process.snapshot.result':
-      final rawItems = payload['items'];
-      if (rawItems is! List) return state;
-      final snapshots = rawItems.map(_asJson).whereType<_Json>().map(_parseSnapshot).whereType<MobileProcess>().toList(growable: false);
-      return snapshots.isEmpty ? state : _replaceSessions(state, snapshots);
+      if (requestedSessionId == null) return state;
+      final parsed = _parseSnapshotResult(payload, requestedSessionId);
+      return parsed == null
+          ? state
+          : _replaceSession(state, requestedSessionId, parsed.items);
     case 'process.output':
     case 'process.output.page.result':
       final output = _parseOutput(payload);
       return output == null ? state : _applyOutput(state, output);
     case 'process.unavailable':
       final parsed = _parseUnavailable(payload);
-      return parsed == null ? state : _applyUnavailable(state, parsed.sessionId, parsed.status);
+      return parsed == null
+          ? state
+          : _applyUnavailable(state, parsed.sessionId, parsed.status);
+    case 'process.error':
+      final parsed = _parseErrorPayload(payload);
+      return parsed == null ? state : _applyError(state, parsed);
     default:
       return state;
   }
@@ -219,18 +253,46 @@ class _UnavailablePayload {
   final MobileCapabilityStatus status;
 }
 
-ProcessDomainState _upsertSnapshot(ProcessDomainState state, MobileProcess snapshot) {
-  final unavailableBySession = Map<String, MobileCapabilityStatus>.from(state.unavailableBySession)
-    ..remove(snapshot.sessionId);
+class _SnapshotResultPayload {
+  const _SnapshotResultPayload({required this.items});
+
+  final List<MobileProcess> items;
+}
+
+class _ProcessErrorPayload {
+  const _ProcessErrorPayload({
+    required this.sessionId,
+    required this.processId,
+    required this.revision,
+    required this.error,
+  });
+
+  final String sessionId;
+  final String processId;
+  final String revision;
+  final MobileProcessError error;
+}
+
+ProcessDomainState _upsertSnapshot(
+  ProcessDomainState state,
+  MobileProcess snapshot,
+) {
+  final unavailableBySession = Map<String, MobileCapabilityStatus>.from(
+    state.unavailableBySession,
+  )..remove(snapshot.sessionId);
   final next = <MobileProcess>[];
   var replaced = false;
   for (final item in state.items) {
-    if (item.sessionId == snapshot.sessionId && item.processId == snapshot.processId) {
-      final keepOutput = item.revision == snapshot.revision;
-      next.add(snapshot.copyWith(
-        stdout: keepOutput ? item.stdout : null,
-        stderr: keepOutput ? item.stderr : null,
-      ));
+    if (item.sessionId == snapshot.sessionId &&
+        item.processId == snapshot.processId) {
+      final keepRevisionState = item.revision == snapshot.revision;
+      next.add(
+        snapshot.copyWith(
+          stdout: keepRevisionState ? item.stdout : null,
+          stderr: keepRevisionState ? item.stderr : null,
+          error: keepRevisionState ? item.error : null,
+        ),
+      );
       replaced = true;
     } else {
       next.add(item);
@@ -245,26 +307,36 @@ ProcessDomainState _upsertSnapshot(ProcessDomainState state, MobileProcess snaps
   );
 }
 
-ProcessDomainState _replaceSessions(
+ProcessDomainState _replaceSession(
   ProcessDomainState state,
+  String sessionId,
   List<MobileProcess> snapshots,
 ) {
-  final sessionIds = snapshots.map((item) => item.sessionId).toSet();
   final retained = state.items
-      .where((item) => !sessionIds.contains(item.sessionId))
+      .where((item) => item.sessionId != sessionId)
       .toList(growable: true);
   final unavailableBySession = Map<String, MobileCapabilityStatus>.from(
     state.unavailableBySession,
-  )..removeWhere((key, _) => sessionIds.contains(key));
+  )..remove(sessionId);
+  final deduped = <String, MobileProcess>{};
   for (final snapshot in snapshots) {
-    final existing = state.items.where(
+    deduped['${snapshot.sessionId}:${snapshot.processId}'] = snapshot;
+  }
+  for (final snapshot in deduped.values) {
+    final current = state.items.where(
       (item) =>
           item.sessionId == snapshot.sessionId &&
           item.processId == snapshot.processId &&
           item.revision == snapshot.revision,
     );
-    final current = existing.isEmpty ? null : existing.first;
-    retained.add(snapshot.copyWith(stdout: current?.stdout, stderr: current?.stderr));
+    final existing = current.isEmpty ? null : current.first;
+    retained.add(
+      snapshot.copyWith(
+        stdout: existing?.stdout,
+        stderr: existing?.stderr,
+        error: existing?.error,
+      ),
+    );
   }
   return ProcessDomainState(
     items: List<MobileProcess>.unmodifiable(retained),
@@ -278,16 +350,18 @@ ProcessDomainState _applyOutput(
   ProcessDomainState state,
   MobileProcessOutput output,
 ) {
-  final next = state.items.map((item) {
-    if (item.sessionId != output.sessionId ||
-        item.processId != output.processId ||
-        item.revision != output.revision) {
-      return item;
-    }
-    return output.stream == 'stdout'
-        ? item.copyWith(stdout: output)
-        : item.copyWith(stderr: output);
-  }).toList(growable: false);
+  final next = state.items
+      .map((item) {
+        if (item.sessionId != output.sessionId ||
+            item.processId != output.processId ||
+            item.revision != output.revision) {
+          return item;
+        }
+        return output.stream == MobileProcessStream.stdout
+            ? item.copyWith(stdout: output)
+            : item.copyWith(stderr: output);
+      })
+      .toList(growable: false);
   return ProcessDomainState(
     items: List<MobileProcess>.unmodifiable(next),
     unavailableBySession: state.unavailableBySession,
@@ -299,13 +373,15 @@ ProcessDomainState _applyUnavailable(
   String sessionId,
   MobileCapabilityStatus status,
 ) {
-  final next = state.items.map((item) {
-    if (item.sessionId != sessionId) return item;
-    return item.copyWith(
-      supportedActions: const <MobileProcessAction>[],
-      unavailableStatus: status,
-    );
-  }).toList(growable: false);
+  final next = state.items
+      .map((item) {
+        if (item.sessionId != sessionId) return item;
+        return item.copyWith(
+          supportedActions: const <MobileProcessAction>[],
+          unavailableStatus: status,
+        );
+      })
+      .toList(growable: false);
   final unavailableBySession = Map<String, MobileCapabilityStatus>.from(
     state.unavailableBySession,
   )..[sessionId] = status;
@@ -317,25 +393,56 @@ ProcessDomainState _applyUnavailable(
   );
 }
 
+ProcessDomainState _applyError(
+  ProcessDomainState state,
+  _ProcessErrorPayload payload,
+) {
+  final next = state.items
+      .map((item) {
+        if (item.sessionId != payload.sessionId ||
+            item.processId != payload.processId ||
+            item.revision != payload.revision) {
+          return item;
+        }
+        return item.copyWith(error: payload.error);
+      })
+      .toList(growable: false);
+  return ProcessDomainState(
+    items: List<MobileProcess>.unmodifiable(next),
+    unavailableBySession: state.unavailableBySession,
+  );
+}
+
 MobileProcess? _parseSnapshot(_Json payload) {
   final sessionId = _string(payload['sessionId']);
   final processId = _string(payload['processId']);
   final revision = _string(payload['revision']);
-  final status = _string(payload['status']);
+  final status = _parseProcessStatus(payload['status']);
   final command = _string(payload['command']);
   final startedAt = _dateTime(payload['startedAt']);
   final capability = _string(payload['capability']);
   final stale = payload['stale'];
+  final actions = _parseActions(payload['supportedActions']);
+  final ports = _parsePorts(payload['ports']);
   if (sessionId == null ||
       processId == null ||
       revision == null ||
       status == null ||
       command == null ||
+      command.isEmpty ||
       startedAt == null ||
       capability != 'runtime.processes.v1' ||
-      stale is! bool) {
+      stale is! bool ||
+      actions == null ||
+      ports == null) {
     return null;
   }
+  final pid = payload['pid'];
+  final durationMs = payload['durationMs'];
+  final exitCode = payload['exitCode'];
+  if (pid != null && (pid is! int || pid < 1)) return null;
+  if (durationMs != null && (durationMs is! int || durationMs < 0)) return null;
+  if (exitCode != null && exitCode is! int) return null;
   return MobileProcess(
     sessionId: sessionId,
     processId: processId,
@@ -345,45 +452,71 @@ MobileProcess? _parseSnapshot(_Json payload) {
     startedAt: startedAt,
     capability: capability!,
     stale: stale,
-    supportedActions: _parseActions(payload['supportedActions']),
-    turnId: _string(payload['turnId']),
-    toolCallId: _string(payload['toolCallId']),
-    pid: payload['pid'] is int ? payload['pid'] as int : null,
-    cwd: _string(payload['cwd']),
-    finishedAt: _dateTime(payload['finishedAt']),
-    durationMs: payload['durationMs'] is int ? payload['durationMs'] as int : null,
-    exitCode: payload['exitCode'] is int ? payload['exitCode'] as int : null,
-    signal: _string(payload['signal']),
-    ports: _parsePorts(payload['ports']),
+    supportedActions: actions,
+    turnId: _nonEmptyString(payload['turnId']),
+    toolCallId: _nonEmptyString(payload['toolCallId']),
+    pid: pid as int?,
+    cwd: _nonEmptyString(payload['cwd']),
+    finishedAt: _optionalDateTime(payload['finishedAt']),
+    durationMs: durationMs as int?,
+    exitCode: exitCode as int?,
+    signal: _nonEmptyString(payload['signal']),
+    ports: ports,
   );
+}
+
+_SnapshotResultPayload? _parseSnapshotResult(
+  _Json payload,
+  String requestedSessionId,
+) {
+  if (payload.keys.any((key) => key != 'items')) return null;
+  final rawItems = payload['items'];
+  if (rawItems is! List) return null;
+  final items = <MobileProcess>[];
+  for (final raw in rawItems) {
+    final item = _asJson(raw);
+    final parsed = item == null ? null : _parseSnapshot(item);
+    if (parsed == null || parsed.sessionId != requestedSessionId) return null;
+    items.add(parsed);
+  }
+  return _SnapshotResultPayload(items: items);
 }
 
 MobileProcessOutput? _parseOutput(_Json payload) {
   final sessionId = _string(payload['sessionId']);
   final processId = _string(payload['processId']);
   final revision = _string(payload['revision']);
-  final stream = _string(payload['stream']);
+  final stream = _parseStream(payload['stream']);
   final content = _string(payload['content']);
   final truncation = _asJson(payload['truncation']);
   if (sessionId == null ||
       processId == null ||
       revision == null ||
-      (stream != 'stdout' && stream != 'stderr') ||
+      stream == null ||
       content == null ||
+      content.length > 262144 ||
       truncation == null) {
     return null;
   }
   final parsedTruncation = _parseTruncation(truncation);
+  final cursor = payload.containsKey('cursor')
+      ? _nonEmptyString(payload['cursor'])
+      : _string(payload['cursor']);
+  final pageToken = payload.containsKey('pageToken')
+      ? _nonEmptyString(payload['pageToken'])
+      : _string(payload['pageToken']);
   if (parsedTruncation == null) return null;
+  if (payload.containsKey('cursor') && cursor == null) return null;
+  if (payload.containsKey('pageToken') && pageToken == null) return null;
   return MobileProcessOutput(
     sessionId: sessionId,
     processId: processId,
     revision: revision,
-    stream: stream!,
+    stream: stream,
     content: content,
     truncation: parsedTruncation,
-    cursor: _string(payload['cursor']),
-    pageToken: _string(payload['pageToken']),
+    cursor: cursor,
+    pageToken: pageToken,
   );
 }
 
@@ -391,7 +524,9 @@ _UnavailablePayload? _parseUnavailable(_Json payload) {
   final sessionId = _string(payload['sessionId']);
   final capability = _string(payload['capability']);
   final status = _asJson(payload['status']);
-  if (sessionId == null || capability != 'runtime.processes.v1' || status == null) {
+  if (sessionId == null ||
+      capability != 'runtime.processes.v1' ||
+      status == null) {
     return null;
   }
   final parsedStatus = _parseStatus(status);
@@ -399,73 +534,182 @@ _UnavailablePayload? _parseUnavailable(_Json payload) {
   return _UnavailablePayload(sessionId: sessionId, status: parsedStatus);
 }
 
+_ProcessErrorPayload? _parseErrorPayload(_Json payload) {
+  final sessionId = _string(payload['sessionId']);
+  final processId = _string(payload['processId']);
+  final revision = _string(payload['revision']);
+  final error = _asJson(payload['error']);
+  if (sessionId == null ||
+      processId == null ||
+      revision == null ||
+      error == null) {
+    return null;
+  }
+  final parsedError = _parseError(error);
+  if (parsedError == null) return null;
+  return _ProcessErrorPayload(
+    sessionId: sessionId,
+    processId: processId,
+    revision: revision,
+    error: parsedError,
+  );
+}
+
 MobileCapabilityStatus? _parseStatus(_Json payload) {
-  final state = _string(payload['state']);
+  final state = _parseCapabilityState(payload['state']);
   if (state == null) return null;
+  final reason = _string(payload['reason']);
+  final remediation = _string(payload['remediation']);
+  if (state != MobileCapabilityState.available &&
+      (reason == null ||
+          reason.isEmpty ||
+          remediation == null ||
+          remediation.isEmpty)) {
+    return null;
+  }
   return MobileCapabilityStatus(
     state: state,
-    reason: _string(payload['reason']),
-    remediation: _string(payload['remediation']),
-    source: _string(payload['source']),
-    revision: _string(payload['revision']),
+    reason: reason,
+    remediation: remediation,
+    source: _nonEmptyString(payload['source']),
+    revision: _nonEmptyString(payload['revision']),
   );
+}
+
+MobileProcessError? _parseError(_Json payload) {
+  final code = _string(payload['code']);
+  final message = _string(payload['message']);
+  final retryable = payload['retryable'];
+  if (code == null ||
+      message == null ||
+      message.isEmpty ||
+      retryable is! bool) {
+    return null;
+  }
+  switch (code) {
+    case 'process_unavailable':
+    case 'process_not_found':
+    case 'process_stale':
+    case 'process_failed':
+      return MobileProcessError(
+        code: code,
+        message: message,
+        retryable: retryable,
+      );
+    default:
+      return null;
+  }
 }
 
 MobileProcessTruncation? _parseTruncation(_Json payload) {
   final retainedBytes = payload['retainedBytes'];
   final totalBytes = payload['totalBytes'];
   final isTruncated = payload['isTruncated'];
-  if (retainedBytes is! int || totalBytes is! int || isTruncated is! bool) {
+  final digest = payload['digest'];
+  if (retainedBytes is! int ||
+      totalBytes is! int ||
+      retainedBytes < 0 ||
+      totalBytes < 0 ||
+      retainedBytes > totalBytes ||
+      isTruncated is! bool ||
+      (digest != null && digest is! String)) {
     return null;
   }
   return MobileProcessTruncation(
     retainedBytes: retainedBytes,
     totalBytes: totalBytes,
     isTruncated: isTruncated,
-    digest: _string(payload['digest']),
+    digest: digest as String?,
   );
 }
 
-List<MobileProcessPort> _parsePorts(Object? raw) {
+List<MobileProcessPort>? _parsePorts(Object? raw) {
   if (raw is! List) return const <MobileProcessPort>[];
-  return raw
-      .map(_asJson)
-      .whereType<_Json>()
-      .map((payload) {
-        final port = payload['port'];
-        final protocol = _string(payload['protocol']);
-        if (port is! int || protocol == null) return null;
-        return MobileProcessPort(port: port, protocol: protocol);
-      })
-      .whereType<MobileProcessPort>()
-      .toList(growable: false);
+  final ports = <MobileProcessPort>[];
+  if (raw.length > 32) return null;
+  for (final item in raw) {
+    final payload = _asJson(item);
+    final protocol = payload == null
+        ? null
+        : _parsePortProtocol(payload['protocol']);
+    final port = payload?['port'];
+    if (payload == null ||
+        protocol == null ||
+        port is! int ||
+        port < 1 ||
+        port > 65535) {
+      return null;
+    }
+    ports.add(MobileProcessPort(port: port, protocol: protocol));
+  }
+  return List<MobileProcessPort>.unmodifiable(ports);
 }
 
-List<MobileProcessAction> _parseActions(Object? raw) {
+List<MobileProcessAction>? _parseActions(Object? raw) {
   if (raw is! List) return const <MobileProcessAction>[];
+  if (raw.length > 3) return null;
   final result = <MobileProcessAction>[];
+  final seen = <MobileProcessAction>{};
   for (final item in raw) {
-    if (item == 'stop') result.add(MobileProcessAction.stop);
-    if (item == 'restart') result.add(MobileProcessAction.restart);
-    if (item == 'rerun') result.add(MobileProcessAction.rerun);
+    final action = switch (item) {
+      'stop' => MobileProcessAction.stop,
+      'restart' => MobileProcessAction.restart,
+      'rerun' => MobileProcessAction.rerun,
+      _ => null,
+    };
+    if (action == null || !seen.add(action)) return null;
+    result.add(action);
   }
   return List<MobileProcessAction>.unmodifiable(result);
 }
 
+MobileProcessStatus? _parseProcessStatus(Object? raw) => switch (raw) {
+  'running' => MobileProcessStatus.running,
+  'completed' => MobileProcessStatus.completed,
+  'failed' => MobileProcessStatus.failed,
+  'stopped' => MobileProcessStatus.stopped,
+  _ => null,
+};
+
+MobileProcessStream? _parseStream(Object? raw) => switch (raw) {
+  'stdout' => MobileProcessStream.stdout,
+  'stderr' => MobileProcessStream.stderr,
+  _ => null,
+};
+
+MobileProcessPortProtocol? _parsePortProtocol(Object? raw) => switch (raw) {
+  'tcp' => MobileProcessPortProtocol.tcp,
+  'udp' => MobileProcessPortProtocol.udp,
+  _ => null,
+};
+
+MobileCapabilityState? _parseCapabilityState(Object? raw) => switch (raw) {
+  'available' => MobileCapabilityState.available,
+  'degraded' => MobileCapabilityState.degraded,
+  'unavailable' => MobileCapabilityState.unavailable,
+  'stale' => MobileCapabilityState.stale,
+  _ => null,
+};
+
 String? _string(Object? value) => value is String ? value : null;
+String? _nonEmptyString(Object? value) =>
+    value is String && value.isNotEmpty ? value : null;
 
 DateTime? _dateTime(Object? value) {
-  final text = _string(value);
+  final text = _nonEmptyString(value);
   if (text == null) return null;
   return DateTime.tryParse(text)?.toUtc();
+}
+
+DateTime? _optionalDateTime(Object? value) {
+  if (value == null) return null;
+  return _dateTime(value);
 }
 
 _Json? _asJson(Object? value) {
   if (value is Map<String, Object?>) return value;
   if (value is Map) {
-    return value.map(
-      (key, item) => MapEntry(key.toString(), item),
-    );
+    return value.map((key, item) => MapEntry(key.toString(), item));
   }
   return null;
 }
@@ -527,9 +771,10 @@ class ProcessSheet extends StatelessWidget {
 }
 
 String _subtitle(MobileProcess process) {
-  final parts = <String>[process.status];
+  final parts = <String>[process.status.name];
   if (process.pid != null) parts.add('PID ${process.pid}');
   if (process.stale) parts.add('stale');
   if (!process.available) parts.add('actions unavailable');
+  if (process.error != null) parts.add(process.error!.code);
   return parts.join(' · ');
 }

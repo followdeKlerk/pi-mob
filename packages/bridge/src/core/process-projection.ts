@@ -4,6 +4,7 @@ export type ProcessStatus = "running" | "completed" | "failed" | "stopped";
 export type ProcessAction = "stop" | "restart" | "rerun";
 export type ProcessStream = "stdout" | "stderr";
 export type CapabilityState = "available" | "degraded" | "unavailable" | "stale";
+export type ProcessErrorCode = "process_unavailable" | "process_not_found" | "process_stale" | "process_failed";
 
 export interface ProcessPort {
   readonly port: number;
@@ -46,6 +47,19 @@ export interface ProcessSnapshot {
   readonly ports?: readonly ProcessPort[];
 }
 
+export interface ProcessErrorInfo {
+  readonly code: ProcessErrorCode;
+  readonly message: string;
+  readonly retryable: boolean;
+}
+
+export interface ProcessErrorEvent {
+  readonly sessionId: string;
+  readonly processId: string;
+  readonly revision: string;
+  readonly error: ProcessErrorInfo;
+}
+
 export interface ProcessSnapshotResult {
   readonly items: readonly ProcessSnapshot[];
 }
@@ -80,13 +94,15 @@ export interface ProcessProjection extends ProcessSnapshot {
   readonly stdout?: ProcessOutput;
   readonly stderr?: ProcessOutput;
   readonly unavailableStatus?: CapabilityStatus;
+  readonly error?: ProcessErrorInfo;
 }
 
 export interface ProcessProjectionRegistry {
   applySnapshot(snapshot: ProcessSnapshot): void;
-  applySnapshotResult(result: ProcessSnapshotResult): void;
+  applySnapshotResult(sessionId: string, result: ProcessSnapshotResult): void;
   applyOutput(output: ProcessOutput): void;
   applyUnavailable(unavailable: ProcessUnavailable): void;
+  applyError(event: ProcessErrorEvent): void;
   snapshot(): readonly ProcessProjection[];
   snapshotResult(sessionId: string): ProcessSnapshotResult;
   outputPage(request: ProcessOutputPageRequest): ProcessOutput | undefined;
@@ -97,6 +113,7 @@ interface ProcessEntry {
   snapshot: ProcessSnapshot;
   stdout?: ProcessOutput;
   stderr?: ProcessOutput;
+  error?: ProcessErrorInfo;
 }
 
 const PROCESS_CAPABILITY = "runtime.processes.v1" as const;
@@ -118,25 +135,24 @@ export class AuthoritativeProcessRegistry implements ProcessProjectionRegistry {
         : {
             ...(previous?.stdout ? { stdout: previous.stdout } : {}),
             ...(previous?.stderr ? { stderr: previous.stderr } : {}),
+            ...(previous?.error ? { error: previous.error } : {}),
           }),
     });
     this.index(key, normalized.sessionId);
     this.unavailableBySession.delete(normalized.sessionId);
   }
 
-  applySnapshotResult(result: ProcessSnapshotResult): void {
-    const snapshots = result.items.map(normalizeSnapshot);
-    const grouped = new Map<string, ProcessSnapshot[]>();
-    for (const snapshot of snapshots) {
-      const list = grouped.get(snapshot.sessionId);
-      if (list) list.push(snapshot);
-      else grouped.set(snapshot.sessionId, [snapshot]);
+  applySnapshotResult(sessionId: string, result: ProcessSnapshotResult): void {
+    const deduped = new Map<string, ProcessSnapshot>();
+    for (const snapshot of result.items.map(normalizeSnapshot)) {
+      if (snapshot.sessionId !== sessionId) {
+        throw new TypeError(`process snapshot result item session mismatch: expected ${sessionId}, got ${snapshot.sessionId}`);
+      }
+      deduped.set(keyOf(snapshot.sessionId, snapshot.processId), snapshot);
     }
-    for (const [sessionId, items] of grouped) {
-      this.clearSession(sessionId);
-      this.unavailableBySession.delete(sessionId);
-      for (const snapshot of items) this.applySnapshot(snapshot);
-    }
+    this.clearSession(sessionId);
+    this.unavailableBySession.delete(sessionId);
+    for (const snapshot of deduped.values()) this.applySnapshot(snapshot);
   }
 
   applyOutput(output: ProcessOutput): void {
@@ -164,6 +180,17 @@ export class AuthoritativeProcessRegistry implements ProcessProjectionRegistry {
         },
       });
     }
+  }
+
+  applyError(event: ProcessErrorEvent): void {
+    const normalized = normalizeError(event);
+    const key = keyOf(normalized.sessionId, normalized.processId);
+    const entry = this.records.get(key);
+    if (!entry || entry.snapshot.revision !== normalized.revision) return;
+    this.records.set(key, {
+      ...entry,
+      error: normalized.error,
+    });
   }
 
   snapshot(): readonly ProcessProjection[] {
@@ -212,6 +239,7 @@ function projectEntry(entry: ProcessEntry, unavailable?: ProcessUnavailable): Pr
     ...cloneSnapshot(entry.snapshot),
     ...(entry.stdout ? { stdout: cloneOutput(entry.stdout) } : {}),
     ...(entry.stderr ? { stderr: cloneOutput(entry.stderr) } : {}),
+    ...(entry.error ? { error: cloneError(entry.error) } : {}),
     ...(unavailable ? { unavailableStatus: cloneStatus(unavailable.status), supportedActions: [] } : {}),
   };
 }
@@ -301,6 +329,23 @@ function cloneStatus(status: CapabilityStatus): CapabilityStatus {
     ...(status.remediation === undefined ? {} : { remediation: status.remediation }),
     ...(status.source === undefined ? {} : { source: status.source }),
     ...(status.revision === undefined ? {} : { revision: status.revision }),
+  };
+}
+
+function normalizeError(event: ProcessErrorEvent): ProcessErrorEvent {
+  return {
+    sessionId: event.sessionId,
+    processId: event.processId,
+    revision: event.revision,
+    error: cloneError(event.error),
+  };
+}
+
+function cloneError(error: ProcessErrorInfo): ProcessErrorInfo {
+  return {
+    code: error.code,
+    message: error.message,
+    retryable: error.retryable,
   };
 }
 
