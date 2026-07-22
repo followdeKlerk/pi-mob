@@ -10,9 +10,9 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 
 - Repository: `/Users/nathandekleerk/github/pi-mob`
 - Branch: `main`
-- HEAD: `c2be64d docs: update active integration handoff`
-- Working tree: NOT clean at handoff — mobile R6 coordinator wiring is staged
-  for commit; this file is intentionally untracked.
+- HEAD: `338ed1a feat(mobile): wire R2 plan summary request and stream events into coordinator`
+- Working tree: clean at handoff; this file is intentionally untracked until
+  the docs commit lands.
 
 ## Integrated in this continuation
 
@@ -84,7 +84,44 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
   - `cwd unknown` does NOT emit `git.unavailable`
 - Frozen schemas and D-039 response shape unchanged.
 
-### WIP (mobile R6 coordinator wiring — staged for commit)
+### R2 mobile plan summary wiring (now committed)
+
+- `apps/mobile/lib/src/plans/plan_domain.dart` adds the closed
+  `PlanState` projection with `PlanStepData`, `PlanSnapshotData`,
+  `PlanUnavailableData`, and a `reducePlan` reducer mirroring
+  `reduceGit`.
+- `ConnectionCoordinator` now exposes `PlanState get plans` plus
+  `requestPlanSummary(sessionId, turnId)` and
+  `cancelPlanSummary(requestId)`; tracks
+  `Map<String, _PlanSummaryRequest>` keyed by requestId and
+  connection epoch so stale `plan.snapshot.result` from a prior
+  reconnect is dropped.
+- Response router handles `plan.snapshot.result`; event router
+  handles the host-stream `plan.unavailable` and the session-stream
+  `plan.snapshot` BEFORE the cursor advance notifies subscribers
+  (same pattern R6 used for `git.summary`/`git.unavailable`).
+- Lifecycle clears at reconnect, dispose, and socket-end reset the
+  in-flight plan summary registry alongside the existing git one.
+- Five new coordinator tests:
+  - request correlates `plan.snapshot.result` to the session
+  - `plan.unavailable` host-stream event marks the session
+    unavailable and clears the snapshot
+  - `cancelPlanSummary` sends `plan.summary.cancel` with the
+    tracked requestId
+  - `cancelPlanSummary` is a no-op when no in-flight request exists
+  - stale `plan.snapshot.result` from a prior connection epoch is
+    dropped
+- `plan.unavailable` and `recipe.unavailable` are host-owned
+  capability-state envelopes (no `sessionId`); the Dart
+  `protocol_fixture.dart` was updated to mark them as such, and the
+  shared corpus fixtures (`event-plan-unavailable-valid`,
+  `event-recipe-unavailable-valid`, `plan-unavailable-stale-valid`,
+  `recipe-unavailable-valid`) moved from `session:` to `host:`
+  streamId to match. Without that fix, the second host-stream
+  event threw `ProtocolValidationException(streamId: expected
+  session: stream, got host:...)` during the R2 unavailable test.
+
+### Mobile R6 coordinator wiring (committed earlier as `a430c42`)
 
 - `ConnectionCoordinator` now imports `GitState` and `reduceGit` and tracks a
   `Map<String, _GitSummaryRequest>` keyed by requestId for in-flight
@@ -102,13 +139,7 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 - Lifecycle clears (`_gitSummaryRequests.clear()`, `refreshing: false`)
   added to reconnect, dispose, and socket-end paths alongside the existing
   process snapshot clears.
-- Five new coordinator tests:
-  - request correlates `git.summary.result` to the workspace
-  - `git.unavailable` host-stream event marks the workspace unavailable
-    (summary cleared, message/workspaceId preserved)
-  - `cancelGitSummary` sends `git.summary.cancel` with the tracked requestId
-  - `cancelGitSummary` is a no-op when no in-flight request exists
-  - stale `git.summary.result` from a prior connection epoch is dropped
+- Five new coordinator tests (all passing):
 
 ## Verification completed
 
