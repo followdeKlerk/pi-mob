@@ -36,6 +36,19 @@ export const LIMITS = {
   maxRecipeArgumentsLength: 240,
   maxRecipeOutputLength: 240,
   maxPlanBlockerLength: 240,
+  // F0 — conservative caps for the closed shared envelopes. `reason` and
+  // `remediation` are the long-form incident narrative on a
+  // CapabilityStatus, so they get the larger 512-code-unit bound (the same
+  // 512 code units the FIELD_GUIDE reserves for human-readable incident
+  // text). `source` is the short identifier of the surface that produced a
+  // status (host-bridge, session-bridge, pi runtime, …), so it shares the
+  // 128-code-unit identifier bound used by activityId/turnId/planId/etc.
+  // `errorMessage` is the human-readable incident text on ErrorInfoSchema
+  // and shares the 512-code-unit narrative bound.
+  maxReasonLength: 512,
+  maxRemediationLength: 512,
+  maxCapabilitySourceLength: 128,
+  maxErrorMessageLength: 512,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -161,33 +174,33 @@ export const CAPABILITY_STATES = ["available", "degraded", "unavailable", "stale
 export const CapabilityStatusSchema = Type.Union([
   Type.Object({
     state: Type.Literal("available"),
-    reason: Type.Optional(Type.String({ minLength: 1 })),
-    remediation: Type.Optional(Type.String({ minLength: 1 })),
-    source: Type.Optional(Type.String({ minLength: 1 })),
+    reason: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxReasonLength })),
+    remediation: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxRemediationLength })),
+    source: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCapabilitySourceLength })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
   }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#available" }),
   Type.Object({
     state: Type.Literal("degraded"),
-    reason: Type.String({ minLength: 1 }),
-    remediation: Type.String({ minLength: 1 }),
-    source: Type.Optional(Type.String({ minLength: 1 })),
+    reason: Type.String({ minLength: 1, maxLength: LIMITS.maxReasonLength }),
+    remediation: Type.String({ minLength: 1, maxLength: LIMITS.maxRemediationLength }),
+    source: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCapabilitySourceLength })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
   }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#degraded" }),
   Type.Object({
     state: Type.Literal("unavailable"),
-    reason: Type.String({ minLength: 1 }),
-    remediation: Type.String({ minLength: 1 }),
-    source: Type.Optional(Type.String({ minLength: 1 })),
+    reason: Type.String({ minLength: 1, maxLength: LIMITS.maxReasonLength }),
+    remediation: Type.String({ minLength: 1, maxLength: LIMITS.maxRemediationLength }),
+    source: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCapabilitySourceLength })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
   }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#unavailable" }),
   Type.Object({
     state: Type.Literal("stale"),
-    reason: Type.String({ minLength: 1 }),
-    remediation: Type.String({ minLength: 1 }),
-    source: Type.Optional(Type.String({ minLength: 1 })),
+    reason: Type.String({ minLength: 1, maxLength: LIMITS.maxReasonLength }),
+    remediation: Type.String({ minLength: 1, maxLength: LIMITS.maxRemediationLength }),
+    source: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCapabilitySourceLength })),
     revision: Type.Optional(RevisionTokenSchema),
     lastRefreshedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
   }, { additionalProperties: false, $id: "pi-mob/protocol/capability-status#stale" }),
@@ -262,7 +275,7 @@ export const TimingSchema = Type.Object({
 // session secrets) alongside the declared error fields.
 export const ErrorInfoSchema = Type.Object({
   code: Type.Union(ERROR_CODES.map((value) => Type.Literal(value))),
-  message: Type.String({ minLength: 1 }),
+  message: Type.String({ minLength: 1, maxLength: LIMITS.maxErrorMessageLength }),
   retryable: Type.Boolean(),
   recommendedDelayMs: Type.Optional(Type.Union([Type.Integer({ minimum: 0 }), Type.Null()])),
 }, { additionalProperties: false, $id: "pi-mob/protocol/error-info" });
@@ -391,9 +404,21 @@ export const PlanStepSchema = Type.Object({
 // `planId` and the required `revision` pinpoint the snapshot; `steps` is a
 // closed array bounded by `LIMITS.maxPlanSteps` (64). Anything bigger is
 // rejected by the schema; the bridge never silently truncates.
+// The required identity / status envelope lets a mobile client attribute a
+// snapshot to its owning session and turn, identify the producing surface
+// (`source`, bounded by `maxCapabilitySourceLength`), know whether the
+// snapshot is itself stale (the boolean `stale`), and (via the closed
+// `capability` CapabilityStatus) recover the same R2 capability posture
+// the unavailable surface would carry. Every field is required so a
+// downstream cache can replay / dedupe / correlate without re-fetching.
 export const PlanSnapshotSchema = Type.Object({
   planId: Type.String({ minLength: 1, maxLength: LIMITS.maxPlanIdLength }),
   revision: RevisionTokenSchema,
+  sessionId: Uuid,
+  turnId: Type.String({ minLength: 1, maxLength: LIMITS.maxTurnIdLength }),
+  source: Type.String({ minLength: 1, maxLength: LIMITS.maxCapabilitySourceLength }),
+  stale: Type.Boolean(),
+  capability: CapabilityStatusSchema,
   steps: Type.Array(PlanStepSchema, { maxItems: LIMITS.maxPlanSteps }),
 }, { additionalProperties: false, $id: "pi-mob/protocol/plan-snapshot" });
 

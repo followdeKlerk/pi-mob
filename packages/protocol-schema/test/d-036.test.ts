@@ -1,7 +1,9 @@
 import { expect, test } from "bun:test";
 import { TypeCompiler } from "@sinclair/typebox/compiler";
 import {
+  CapabilityStatusSchema,
   CommandSchema,
+  ErrorInfoSchema,
   EVENT_STREAM_OWNERSHIP,
   EventSchema,
   LIMITS,
@@ -42,6 +44,10 @@ test("D-036 LIMITS expose the bounded F0 identifier and payload surfaces", () =>
   expect(LIMITS.maxRecipeArgumentsLength).toBe(240);
   expect(LIMITS.maxRecipeOutputLength).toBe(240);
   expect(LIMITS.maxPlanBlockerLength).toBe(240);
+  expect(LIMITS.maxReasonLength).toBe(512);
+  expect(LIMITS.maxRemediationLength).toBe(512);
+  expect(LIMITS.maxCapabilitySourceLength).toBe(128);
+  expect(LIMITS.maxErrorMessageLength).toBe(512);
 });
 
 test("D-036 RecipeActivity thinking arm permits only title, optional providerSummary, optional truncation", () => {
@@ -230,11 +236,15 @@ test("D-036 PlanStep is bounded; blocker and timing are optional", () => {
   // Minimal pending step (no blocker / timing) is valid.
   expect(plan.Check({
     planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" },
     steps: [{ stepId: "s1", title: "Step 1", status: "pending" }],
   })).toBe(true);
   // Blocked step with bounded blocker and timing is valid.
   expect(plan.Check({
     planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" },
     steps: [{
       stepId: "s2",
       title: "Step 2",
@@ -246,14 +256,20 @@ test("D-036 PlanStep is bounded; blocker and timing are optional", () => {
   // Oversized stepId/title/blocker are rejected.
   expect(plan.Check({
     planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" },
     steps: [{ stepId: "s".repeat(LIMITS.maxStepIdLength + 1), title: "Step 1", status: "pending" }],
   })).toBe(false);
   expect(plan.Check({
     planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" },
     steps: [{ stepId: "s1", title: "T".repeat(LIMITS.maxRecipeTitleLength + 1), status: "pending" }],
   })).toBe(false);
   expect(plan.Check({
     planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" },
     steps: [{
       stepId: "s1",
       title: "Step 1",
@@ -264,10 +280,14 @@ test("D-036 PlanStep is bounded; blocker and timing are optional", () => {
   // Recipe-only statuses must NOT be valid plan-step statuses.
   expect(plan.Check({
     planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" },
     steps: [{ stepId: "s1", title: "Step 1", status: "cancelled" as unknown as "pending" }],
   })).toBe(false);
   expect(plan.Check({
     planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" },
     steps: [{ stepId: "s1", title: "Step 1", status: "failed" as unknown as "pending" }],
   })).toBe(false);
 });
@@ -275,14 +295,15 @@ test("D-036 PlanStep is bounded; blocker and timing are optional", () => {
 test("D-036 PlanSnapshot retains 64 / rejects 65 steps and the five plan-step statuses", () => {
   const plan = TypeCompiler.Compile(PlanSnapshotSchema);
   const step = (i: number) => ({ stepId: `s${i}`, title: `Step ${i}`, status: "pending" as const });
+  const identity = { sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false, capability: { state: "available" as const } };
   expect(LIMITS.maxPlanSteps).toBe(64);
-  expect(plan.Check({ planId: "p1", revision: "r1", steps: Array.from({ length: 64 }, (_, i) => step(i)) })).toBe(true);
-  expect(plan.Check({ planId: "p1", revision: "r1", steps: Array.from({ length: 65 }, (_, i) => step(i)) })).toBe(false);
+  expect(plan.Check({ planId: "p1", revision: "r1", ...identity, steps: Array.from({ length: 64 }, (_, i) => step(i)) })).toBe(true);
+  expect(plan.Check({ planId: "p1", revision: "r1", ...identity, steps: Array.from({ length: 65 }, (_, i) => step(i)) })).toBe(false);
   // The plan-step state set is the five distinct values: pending / running /
   // completed / blocked / skipped. Recipe states are not valid here.
   for (const status of ["pending", "running", "completed", "blocked", "skipped"] as const) {
     expect(plan.Check({
-      planId: "p1", revision: "r1",
+      planId: "p1", revision: "r1", ...identity,
       steps: [{ stepId: "s1", title: "Step 1", status }],
     })).toBe(true);
   }
@@ -347,7 +368,11 @@ test("D-036 event payloads are registered with session ownership", () => {
     capability: RECIPE_CAPABILITY,
     status: { state: "unavailable", reason: "off", remediation: "enable" },
   } })).toBe(true);
-  expect(events.Check({ ...envelope, type: "plan.snapshot", payload: { planId: "p1", revision: "r1", steps: [] } })).toBe(true);
+  expect(events.Check({ ...envelope, type: "plan.snapshot", payload: {
+    planId: "p1", revision: "r1", sessionId: uuid, turnId: "turn-1",
+    source: "session-bridge", stale: false, capability: { state: "available" },
+    steps: [],
+  } })).toBe(true);
   expect(events.Check({ ...envelope, type: "plan.unavailable", payload: {
     capability: PLAN_CAPABILITY,
     status: { state: "stale", reason: "old", remediation: "refresh" },
@@ -456,4 +481,105 @@ test("D-036 RecipeActivity timing and errorInfo nested objects are closed (no pr
     output: "ok",
     errorInfo: { code: "internal_error", message: "boom", retryable: false, debug: { trace: "x" } },
   })).toBe(false);
+});
+
+test("D-036 CapabilityStatus caps reason/remediation at 512 and source at 128 in every variant", () => {
+  const check = TypeCompiler.Compile(CapabilityStatusSchema);
+  // Inclusive upper bound on reason/remediation (512) and source (128) is
+  // valid for every state. The available variant only has source optional,
+  // so we still pin the upper bound via the closed envelope.
+  for (const state of ["available", "degraded", "unavailable", "stale"] as const) {
+    const base: Record<string, unknown> = { state };
+    if (state !== "available") {
+      base.reason = "r".repeat(LIMITS.maxReasonLength);
+      base.remediation = "f".repeat(LIMITS.maxRemediationLength);
+    }
+    base.source = "s".repeat(LIMITS.maxCapabilitySourceLength);
+    expect(check.Check(base)).toBe(true);
+  }
+  // Oversized reason (513) is invalid for every non-available state.
+  for (const state of ["degraded", "unavailable", "stale"] as const) {
+    expect(check.Check({
+      state,
+      reason: "r".repeat(LIMITS.maxReasonLength + 1),
+      remediation: "fix it",
+    })).toBe(false);
+    // Oversized remediation (513) is invalid for every non-available state.
+    expect(check.Check({
+      state,
+      reason: "broken",
+      remediation: "f".repeat(LIMITS.maxRemediationLength + 1),
+    })).toBe(false);
+  }
+  // Oversized source (129) is invalid on every variant — available carries
+  // source as optional, so the cap is still enforced when present.
+  for (const state of ["available", "degraded", "unavailable", "stale"] as const) {
+    const base: Record<string, unknown> = { state };
+    if (state !== "available") {
+      base.reason = "broken";
+      base.remediation = "fix it";
+    }
+    base.source = "s".repeat(LIMITS.maxCapabilitySourceLength + 1);
+    expect(check.Check(base)).toBe(false);
+  }
+});
+
+test("D-036 ErrorInfoSchema caps message at 512 UTF-16 code units", () => {
+  const error = TypeCompiler.Compile(ErrorInfoSchema);
+  // Exactly 512 code units is the inclusive upper bound and is valid.
+  expect(error.Check({
+    code: "internal_error",
+    message: "m".repeat(LIMITS.maxErrorMessageLength),
+    retryable: false,
+  })).toBe(true);
+  // 513 code units exceeds the cap and is invalid.
+  expect(error.Check({
+    code: "internal_error",
+    message: "m".repeat(LIMITS.maxErrorMessageLength + 1),
+    retryable: false,
+  })).toBe(false);
+  // Empty string still violates the existing minLength 1 invariant.
+  expect(error.Check({ code: "internal_error", message: "", retryable: false })).toBe(false);
+});
+
+test("D-036 PlanSnapshot requires sessionId, turnId, source, stale, capability alongside planId/revision/steps", () => {
+  const plan = TypeCompiler.Compile(PlanSnapshotSchema);
+  // Baseline valid snapshot carries every required field.
+  const valid = {
+    planId: "p1", revision: "r1",
+    sessionId: uuid, turnId: "turn-1", source: "session-bridge", stale: false,
+    capability: { state: "available" as const },
+    steps: [{ stepId: "s1", title: "Step 1", status: "pending" as const }],
+  };
+  expect(plan.Check(valid)).toBe(true);
+  // Every additional required field, dropped one at a time, is invalid.
+  for (const missing of ["sessionId", "turnId", "source", "stale", "capability"] as const) {
+    const next = { ...valid } as Record<string, unknown>;
+    delete next[missing];
+    expect(plan.Check(next)).toBe(false);
+  }
+  // sessionId is a UUID — non-UUID strings are rejected.
+  expect(plan.Check({ ...valid, sessionId: "not-a-uuid" })).toBe(false);
+  // turnId is bounded by the canonical 128-code-unit identifier cap.
+  expect(plan.Check({ ...valid, turnId: "t".repeat(LIMITS.maxTurnIdLength + 1) })).toBe(false);
+  expect(plan.Check({ ...valid, turnId: "" })).toBe(false);
+  expect(plan.Check({ ...valid, turnId: "t".repeat(LIMITS.maxTurnIdLength) })).toBe(true);
+  // source is bounded by the 128-code-unit capability-source cap and must be nonempty.
+  expect(plan.Check({ ...valid, source: "" })).toBe(false);
+  expect(plan.Check({ ...valid, source: "s".repeat(LIMITS.maxCapabilitySourceLength + 1) })).toBe(false);
+  expect(plan.Check({ ...valid, source: "s".repeat(LIMITS.maxCapabilitySourceLength) })).toBe(true);
+  // stale is a boolean — non-boolean values are rejected.
+  expect(plan.Check({ ...valid, stale: "yes" as unknown as boolean })).toBe(false);
+  expect(plan.Check({ ...valid, stale: 0 as unknown as boolean })).toBe(false);
+  expect(plan.Check({ ...valid, stale: null as unknown as boolean })).toBe(false);
+  expect(plan.Check({ ...valid, stale: true })).toBe(true);
+  // capability must be a closed CapabilityStatus — missing `state` literal is rejected.
+  expect(plan.Check({ ...valid, capability: {} })).toBe(false);
+  expect(plan.Check({ ...valid, capability: { reason: "broken", remediation: "fix it" } })).toBe(false);
+  // capability carries the same closed-shape guarantees as the unavailable
+  // surface — private siblings nested inside the status are rejected.
+  expect(plan.Check({ ...valid, capability: { state: "unavailable", reason: "x", remediation: "y", private: "leak" } })).toBe(false);
+  // Closed top-level shape — unknown siblings are rejected.
+  expect(plan.Check({ ...valid, private: "leak" })).toBe(false);
+  expect(plan.Check({ ...valid, debug: { trace: "x" } })).toBe(false);
 });
