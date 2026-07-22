@@ -164,7 +164,7 @@ function eventPayload(type: string): Record<string, unknown> {
   return { sessionId: ids.sessionId };
 }
 function responsePayload(type: string): Record<string, unknown> {
-  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["runtime.processes.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
+  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
   if (type === "subscription.accepted") return { streams: [{ streamId: `host:${ids.sessionId}`, mode: "replay" }] };
   if (type === "stream.sync.complete") return { streamId: `session:${ids.sessionId}`, currentCursor: "1", mode: "replay" };
   if (type === "stream.snapshot.begin") return { snapshotId: ids.sessionId, streamId: `session:${ids.sessionId}`, baselineCursor: "1" };

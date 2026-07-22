@@ -296,9 +296,24 @@ function validateProcessSemantics(message: Record<string, unknown>, authority: P
 
 test("R5 semantic-invalid process actions are schema-valid, hard-coded, and repaired one field at a time", () => {
   const cases = [
-    { file: "semantic-invalid-process-stop-unsupported.json", expected: "invalid_state" as const, authority: { revision: "process-r1", status: "completed", supportedActions: ["restart", "rerun"] } },
-    { file: "semantic-invalid-process-stale-revision.json", expected: "process_stale" as const, authority: { revision: "process-r2", status: "running", supportedActions: ["stop"] } },
-    { file: "semantic-invalid-process-joint-action-state.json", expected: "invalid_state" as const, authority: { revision: "process-r1", status: "running", supportedActions: ["stop", "restart"] } },
+    {
+      file: "semantic-invalid-process-stop-unsupported.json",
+      expected: "invalid_state" as const,
+      authority: { revision: "process-r1", status: "completed", supportedActions: ["restart", "rerun"] },
+      metadata: { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["restart", "rerun"] },
+    },
+    {
+      file: "semantic-invalid-process-stale-revision.json",
+      expected: "process_stale" as const,
+      authority: { revision: "process-r2", status: "running", supportedActions: ["stop"] },
+      metadata: { outcome: "rejected", errorCode: "process_stale", currentRevision: "process-r2" },
+    },
+    {
+      file: "semantic-invalid-process-joint-action-state.json",
+      expected: "invalid_state" as const,
+      authority: { revision: "process-r1", status: "running", supportedActions: ["stop", "restart"] },
+      metadata: { outcome: "rejected", errorCode: "invalid_state", status: "running", supportedActions: ["stop", "restart"] },
+    },
   ] as const;
   for (const item of cases) {
     const fixture = JSON.parse(readFileSync(join(corpus, item.file), "utf8")) as FixtureRecord;
@@ -307,7 +322,7 @@ test("R5 semantic-invalid process actions are schema-valid, hard-coded, and repa
     expect(validateFixture(fixture), item.file).toBe(true);
     // This expected code is selected by the test case, never by fixture metadata.
     expect(validateProcessSemantics(fixture.message, item.authority), item.file).toBe(item.expected);
-    expect(fixture.semanticExpectation?.errorCode).toBe(item.expected);
+    expect(fixture.semanticExpectation).toEqual(item.metadata);
 
     const repairedMessage = clone(fixture.message);
     if (item.file === "semantic-invalid-process-stop-unsupported.json") {
