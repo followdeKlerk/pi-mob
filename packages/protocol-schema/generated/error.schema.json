@@ -224,6 +224,22 @@
             {
               "const": "context_unavailable",
               "type": "string"
+            },
+            {
+              "const": "process_unavailable",
+              "type": "string"
+            },
+            {
+              "const": "process_not_found",
+              "type": "string"
+            },
+            {
+              "const": "process_stale",
+              "type": "string"
+            },
+            {
+              "const": "process_failed",
+              "type": "string"
             }
           ]
         },
