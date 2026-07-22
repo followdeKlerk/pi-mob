@@ -72,6 +72,11 @@ interface LoadedFile {
   readonly languageHint?: string;
 }
 const TOKEN_TTL_MS = 60_000;
+const MAX_PAGE_TOKENS = 256;
+const MAX_TRAVERSAL_ENTRIES = 10_000;
+const MAX_CONTENT_SEARCH_SCAN_FILES = 512;
+const MAX_CONTENT_SEARCH_SCAN_BYTES = 8 * 1024 * 1024;
+const MAX_CONTENT_SEARCH_ELAPSED_MS = 1_500;
 const decoder = new TextDecoder("utf-8", { fatal: true });
 const language: Record<string, string> = { ".ts": "typescript", ".tsx": "typescript", ".js": "javascript", ".dart": "dart", ".json": "json", ".md": "markdown", ".py": "python", ".rs": "rust", ".go": "go", ".sh": "shell", ".yaml": "yaml", ".yml": "yaml" };
 
@@ -109,12 +114,23 @@ function splitLines(text: string): string[] {
 }
 function clipLineText(line: string, matchAt: number, matchLength: number): { lineText: string; matchStart: number } {
   const matchEnd = Math.min(line.length, matchAt + matchLength);
-  let start = 0;
-  while (Buffer.byteLength(line.slice(start, matchEnd)) > 4096 && start < matchAt) start += 1;
-  let end = matchEnd;
-  while (end < line.length && Buffer.byteLength(line.slice(start, end + 1)) <= 4096) end += 1;
-  const lineText = line.slice(start, end);
-  return { lineText, matchStart: byteIndex(line.slice(start, matchAt), line.slice(start, matchAt).length) };
+  let low = 0;
+  let high = matchAt;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if (Buffer.byteLength(line.slice(middle, matchEnd)) <= 4096) high = middle;
+    else low = middle + 1;
+  }
+  const start = low;
+  low = matchEnd;
+  high = line.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (Buffer.byteLength(line.slice(start, middle)) <= 4096) low = middle;
+    else high = middle - 1;
+  }
+  const lineText = line.slice(start, low);
+  return { lineText, matchStart: Buffer.byteLength(line.slice(start, matchAt)) };
 }
 
 /**
@@ -226,11 +242,29 @@ export class WorkspaceFileService {
     return this.#loadFileAbsolute(resolved.root, path, resolved.absolute);
   }
 
+  #evictExpiredTokens(): void {
+    const now = this.now();
+    for (const [token, value] of this.#tokens) {
+      if (value.expiresAt < now) this.#tokens.delete(token);
+    }
+  }
+
+  #storeToken(token: string, value: Token): void {
+    this.#evictExpiredTokens();
+    this.#tokens.set(token, value);
+    while (this.#tokens.size > MAX_PAGE_TOKENS) {
+      const oldest = this.#tokens.keys().next().value;
+      if (oldest == null) break;
+      this.#tokens.delete(oldest);
+    }
+  }
+
   #entries(workspaceId: string, under?: string): Entry[] {
     const start = this.#resolveDirectory(workspaceId, under);
     const baseDepth = under == null ? 0 : under.split("/").length;
     const output: Entry[] = [];
     const walk = (absolute: string, depth: number) => {
+      if (output.length >= MAX_TRAVERSAL_ENTRIES) throw new WorkspaceFileError("path_oversize", "Workspace traversal exceeded the bounded limit");
       if (depth > LIMITS.maxTreeDepth) return;
       let names: string[];
       try { names = readdirSync(absolute).sort((a, b) => a.localeCompare(b)); } catch { throw new WorkspaceFileError("path_denied", "Directory cannot be read"); }
@@ -243,6 +277,7 @@ export class WorkspaceFileService {
         const childDepth = rel.split("/").length - baseDepth;
         if (stat.isDirectory()) { output.push({ path: rel, absolute: child, kind: "directory", depth: childDepth }); walk(child, depth + 1); }
         else if (stat.isFile()) output.push({ path: rel, absolute: child, kind: "file", depth: childDepth });
+        if (output.length >= MAX_TRAVERSAL_ENTRIES) throw new WorkspaceFileError("path_oversize", "Workspace traversal exceeded the bounded limit");
       }
     };
     if (!statSync(start.absolute).isDirectory()) throw new WorkspaceFileError("path_invalid", "Tree path must be a directory");
@@ -251,6 +286,7 @@ export class WorkspaceFileService {
   }
 
   #page<T>(workspaceId: string, key: string, revisionValue: string, all: readonly T[], size: number, token?: string | null): Page<T> {
+    this.#evictExpiredTokens();
     let offset = 0;
     if (token) {
       const value = this.#tokens.get(token);
@@ -265,7 +301,7 @@ export class WorkspaceFileService {
     let nextPageToken: string | undefined;
     if (offset + items.length < all.length) {
       nextPageToken = randomBytes(24).toString("base64url");
-      this.#tokens.set(nextPageToken, { key, revision: revisionValue, offset: offset + items.length, expiresAt: this.now() + TOKEN_TTL_MS });
+      this.#storeToken(nextPageToken, { key, revision: revisionValue, offset: offset + items.length, expiresAt: this.now() + TOKEN_TTL_MS });
     }
     return { workspaceId, rootRevision: revisionValue, items, ...(nextPageToken ? { nextPageToken } : {}) };
   }
@@ -317,10 +353,15 @@ export class WorkspaceFileService {
     const entries = this.#entries(input.workspaceId, input.path);
     const rootRevision = treeRevision(entries);
     const matches: ContentMatch[] = [];
-    let bytes = 0; let truncated = false;
+    let bytes = 0; let truncated = false; let scannedFiles = 0; let scannedBytes = 0;
+    const startedAt = this.now();
     outer: for (const entry of entries) {
       if (entry.kind !== "file") continue;
+      if (scannedFiles >= MAX_CONTENT_SEARCH_SCAN_FILES || this.now() - startedAt > MAX_CONTENT_SEARCH_ELAPSED_MS) { truncated = true; break; }
       const s = statSync(entry.absolute); if (s.size > LIMITS.maxFileSize) continue;
+      if (scannedBytes + s.size > MAX_CONTENT_SEARCH_SCAN_BYTES) { truncated = true; break; }
+      scannedFiles += 1;
+      scannedBytes += s.size;
       const loaded = this.#loadFileAbsolute(this.#root(input.workspaceId), entry.path, entry.absolute);
       if (loaded.isBinary) continue;
       const text = toText(loaded.raw);

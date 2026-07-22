@@ -60,6 +60,38 @@ describe("bounded workspace file service", () => {
     const content = service.contentSearch({ workspaceId: id, query: "needle" }); expect(content.items.map((x) => [x.path, x.line])).toEqual([["README.md", 1], ["src/alpha.ts", 3], ["src/long.txt", 1]]); expect(content.items[2]!.lineText).toContain("needle"); expect(content.items[2]!.matchStart + content.items[2]!.matchLength).toBeLessThanOrEqual(Buffer.byteLength(content.items[2]!.lineText)); expect(content.isTruncated).toBe(false);
   });
 
+  test("bounds huge traversal before building an unbounded response", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-r3-huge-")); roots.push(root);
+    for (let i = 0; i <= 10_000; i++) writeFileSync(join(root, `file-${i.toString().padStart(5, '0')}.txt`), "x\n");
+    const service = new WorkspaceFileService([{ workspaceId: id, canonicalPath: realpathSync(root) }], () => 1_700_000_000_000);
+    code(() => service.treePage({ workspaceId: id, pageSize: 1, pageToken: null }), "path_oversize");
+  });
+
+  test("evicts expired and oldest page tokens from the bounded token map", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-r3-tokens-")); roots.push(root);
+    for (let i = 0; i < 3; i++) writeFileSync(join(root, `file-${i.toString().padStart(4, '0')}.txt`), "x\n");
+    let now = 1_700_000_000_000;
+    const service = new WorkspaceFileService([{ workspaceId: id, canonicalPath: realpathSync(root) }], () => now);
+    const first = service.treePage({ workspaceId: id, pageSize: 1, pageToken: null });
+    const firstToken = first.nextPageToken!;
+    for (let i = 0; i < 260; i++) service.treePage({ workspaceId: id, pageSize: 1, pageToken: null });
+    code(() => service.treePage({ workspaceId: id, pageSize: 1, pageToken: firstToken }), "page_invalid");
+    const expiring = service.treePage({ workspaceId: id, pageSize: 1, pageToken: null }).nextPageToken!;
+    now += 60_001;
+    code(() => service.treePage({ workspaceId: id, pageSize: 1, pageToken: expiring }), "page_invalid");
+  });
+
+  test("content search truncates when scan budget or elapsed time is exhausted", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-r3-search-")); roots.push(root);
+    for (let i = 0; i < 4; i++) writeFileSync(join(root, `match-${i}.txt`), `${"a".repeat(100_000)} needle ${i}\n`);
+    let now = 1_700_000_000_000;
+    const service = new WorkspaceFileService([{ workspaceId: id, canonicalPath: realpathSync(root) }], () => now, () => { now += 800; });
+    const result = service.contentSearch({ workspaceId: id, query: "needle" });
+    expect(result.isTruncated).toBe(true);
+    expect(result.items.length).toBeGreaterThan(0);
+    expect(result.items.length).toBeLessThan(4);
+  });
+
   test("rejects inode swaps that occur after open but before canonical verification", () => {
     const root = mkdtempSync(join(tmpdir(), "pi-r3-swap-")); roots.push(root);
     writeFileSync(join(root, "safe.txt"), "safe\n");
