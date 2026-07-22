@@ -480,11 +480,18 @@ The client MUST NOT clear an unsent prompt draft until it receives an accepted/c
 ```json
 {
   "sessionId": "uuid",
-  "deliveryMode": "immediate",
+  "deliveryMode": "steer",
   "message": "Implement the parser",
-  "attachmentIds": ["uuid"]
+  "attachmentIds": ["uuid"],
+  "planTarget": {
+    "planId": "plan-opaque-id",
+    "stepId": "step-opaque-id",
+    "revision": "r2"
+  }
 }
 ```
+
+`planTarget` is optional; omitting it preserves the existing payload and all three delivery modes. When present it is closed and all of `planId`, `stepId`, and `revision` are required. Plan and step IDs are opaque nonempty strings of at most 128 UTF-16 code units. `revision` is a `RevisionToken`: 1–128 UTF-16 code units, begins with an ASCII letter, thereafter contains only ASCII letters, digits, `_`, `.`, `:`, or `-`, and is deliberately not a decimal stream cursor.
 
 `deliveryMode` values:
 
@@ -495,6 +502,10 @@ The client MUST NOT clear an unsent prompt draft until it receives an accepted/c
 Rules:
 
 - While a turn is running the mobile client MUST explicitly choose `steer` or `follow_up`.
+- A `planTarget` is valid only with `deliveryMode: steer`; a target on `immediate` or `follow_up` is rejected before dispatch with `invalid_state`.
+- Untargeted legacy `steer` remains valid. When targeting, clients MUST send all three target fields.
+- Before Pi dispatch, the bridge alone MUST resolve the authoritative session plan and verify the exact `planId`, existing `stepId`, and current `revision`. Unknown, replaced, or stale targets reject with `stale_plan_target`; neither mobile nor Pi-adapter code may waive or perform this authoritative check.
+- `planTarget` is included in the durable semantic payload hash. A duplicate command ID cannot be retried against another target or revision.
 - Disconnected mobile drafts are never submitted automatically after reconnect.
 - Queue capacity is ten accepted follow-ups per session.
 - Queue order is bridge-authoritative FIFO unless a later implemented reorder command is advertised.
@@ -661,6 +672,10 @@ extension.status
 extension.widget
 extension.title
 extension.editor_prefill
+recipe.activity
+recipe.unavailable
+plan.snapshot
+plan.unavailable
 command.state
 error.event
 ```
@@ -675,6 +690,32 @@ Rules:
 - A receiver MUST reject an event that declares an unsupported required capability.
 
 ## 15. Event payload requirements
+
+### Recipe activity (R1)
+
+Per [D-036](DECISIONS.md#d-036--f0-recipe-plan-and-targeted-steering-contract), `recipe.activity` is a session event and its payload is a closed discriminated union:
+
+- Shared required fields are `kind`, session UUID `sessionId`, opaque `turnId` and `activityId`, non-negative integer `ordinal`, `status`, required `timing`, and bounded display `title`.
+- `kind: thinking` may additionally contain only optional `providerSummary` and optional `truncation`.
+- `kind: tool` additionally requires `toolName`, `arguments`, and `output`, and may contain `errorInfo` and `truncation`; it MUST reject `providerSummary`.
+- Recipe statuses are exactly `pending`, `running`, `completed`, `failed`, and `cancelled`.
+- `turnId`, `activityId`, `title`, and `toolName` are 1–128 UTF-16 code units; `arguments` and `output` are 1–240. `timing.startedAt` is required; `updatedAt`, `finishedAt`, and non-negative integer `durationMs` are optional.
+- `ProviderSummary` is closed, tagged `kind: provider_summary`, and contains provider (1–128), optional model (1–128), summary (1–1024 UTF-16 code units), and optional truncation. The bridge MUST additionally enforce a 4096-byte UTF-8 summary ceiling.
+- A provider summary is provider-supplied displayable text only. Raw thinking, reasoning deltas or steps, hidden/provider metadata, and bridge/mobile synthesized summaries MUST NOT enter recipe payloads. Missing summary means no displayable summary is available.
+- `errorInfo` is closed and contains stable `code`, a 1–512-unit safe message, `retryable`, and optional non-negative or null `recommendedDelayMs`. Truncation is closed and carries non-negative `retainedBytes`/`totalBytes`, optional lowercase SHA-256 digest, and `isTruncated`; the bridge verifies byte relationships and digest correctness.
+
+`recipe.unavailable` is emitted rather than inventing or silently omitting activity. Its closed payload is `{ capability: "recipes.v1", status }`.
+
+### Structured plan (R2)
+
+`plan.snapshot` is a session event containing the complete authoritative plan: opaque `planId`, required `revision`, session UUID `sessionId`, opaque `turnId`, bounded `source`, boolean `stale`, closed `capability`, and ordered closed `steps`. It MUST NOT be inferred from Markdown, checklist prose, reasoning, or arbitrary tool output.
+
+- A snapshot has at most 64 steps; 65 is invalid and MUST NOT be silently truncated.
+- Each step requires opaque `stepId`, bounded `title`, and status exactly `pending`, `running`, `completed`, `blocked`, or `skipped`. Optional fields are a 1–240-unit `blocker` and closed `timing`.
+- Plan/step/turn IDs, title, and source are 1–128 UTF-16 code units. Revision uses the `RevisionToken` contract in §12.
+- `stale` describes the snapshot; `capability` reports the producing surface. A new authoritative snapshot supersedes the prior revision atomically.
+
+`plan.unavailable` is the truthful no-plan surface and has the closed payload `{ capability: "plans.v1", status }`. Recipe and plan capability status states are exactly `available`, `degraded`, `unavailable`, and `stale`. Every non-available state requires nonempty `reason` and `remediation` (each at most 512 UTF-16 code units); `source` (at most 128), revision, and `lastRefreshedAt` are optional. Available status may omit reason/remediation. Unknown/private/debug fields are rejected in these closed payloads.
 
 ### Command state
 
@@ -964,6 +1005,9 @@ queue_item_not_found
 invalid_state
 attachment_unavailable
 export_unavailable
+recipe_unavailable
+plan_unavailable
+stale_plan_target
 payload_too_large
 rate_limited
 slow_consumer
