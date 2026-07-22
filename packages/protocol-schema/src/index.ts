@@ -141,6 +141,8 @@ export const LIMITS = {
   maxFailedChecks: 20,
   maxCheckNameLength: 128,
   maxCheckSummaryLength: 512,
+  maxLogSummaryLength: 4096,
+  maxGitCount: 1_000_000,
   maxExternalUrlLength: 1024,
   maxCommitShaLength: 64,
   maxCommitMessageLength: 240,
@@ -1131,7 +1133,7 @@ export const GIT_CI_CAPABILITY = "git-ci.v1" as const;
 // `LIMITS.maxExternalUrlLength` (1024 UTF-16 code units). The bridge MUST
 // additionally verify the URL is reachable from the mobile client before
 // publishing; the schema can only enforce the static shape.
-export const EXTERNAL_URL_PATTERN = "^https://[^\\s\\x00-\\x1F]{1,1024}$";
+export const EXTERNAL_URL_PATTERN = "^https://(?!(?:[^/?#]*@))(?=[^/?#]{1,253}(?:[/?#]|$))[A-Za-z0-9](?:[A-Za-z0-9.-]*[A-Za-z0-9])?(?::[0-9]{1,5})?(?:[/?#][^\\s\\x00-\\x1F\\x7F]*)?$";
 export const ExternalUrlSchema = Type.String({
   pattern: EXTERNAL_URL_PATTERN,
   maxLength: LIMITS.maxExternalUrlLength,
@@ -1209,6 +1211,7 @@ export const GitCheckRunSchema = Type.Object({
   name: Type.String({ minLength: 1, maxLength: LIMITS.maxCheckNameLength }),
   status: Type.Union(GIT_CI_STATES.map((value) => Type.Literal(value))),
   summary: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCheckSummaryLength })),
+  logSummary: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxLogSummaryLength })),
   url: Type.Optional(ExternalUrlSchema),
 }, { additionalProperties: false, $id: "pi-mob/protocol/git-check-run" });
 
@@ -1230,7 +1233,7 @@ export const GitFailedChecksSchema = Type.Object({
 // so the bridge cannot smuggle a PR body or review-comment blob alongside
 // the declared PR fields.
 export const GitPullRequestSchema = Type.Object({
-  number: Type.Integer({ minimum: 1 }),
+  number: Type.Integer({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
   title: Type.String({ minLength: 1, maxLength: LIMITS.maxGitPullRequestTitleLength }),
   url: ExternalUrlSchema,
 }, { additionalProperties: false, $id: "pi-mob/protocol/git-pull-request" });
@@ -1247,6 +1250,7 @@ export const GitLatestCommitSchema = Type.Object({
   message: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCommitMessageLength })),
   author: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxCommitAuthorLength })),
   authoredAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+  url: ExternalUrlSchema,
 }, { additionalProperties: false, $id: "pi-mob/protocol/git-latest-commit" });
 
 // F0 R6 — GitSummarySchema. The closed, bounded authoritative summary the
@@ -1289,16 +1293,17 @@ export const GitLatestCommitSchema = Type.Object({
 export const GitSummarySchema = Type.Object({
   workspaceId: Uuid,
   revision: RevisionTokenSchema,
+  repositoryUrl: ExternalUrlSchema,
   repository: GitRepositoryLabelSchema,
   branch: GitBranchSchema,
   workingTreeState: GitWorkingTreeStateSchema,
-  changedCount: Type.Integer({ minimum: 0 }),
-  ahead: Type.Integer({ minimum: 0 }),
-  behind: Type.Integer({ minimum: 0 }),
+  changedCount: Type.Integer({ minimum: 0, maximum: LIMITS.maxGitCount }),
+  ahead: Type.Integer({ minimum: 0, maximum: LIMITS.maxGitCount }),
+  behind: Type.Integer({ minimum: 0, maximum: LIMITS.maxGitCount }),
   latestCommit: GitLatestCommitSchema,
   pullRequest: Type.Optional(GitPullRequestSchema),
-  ciStatus: Type.Optional(GitCiStatusSchema),
-  failedChecks: Type.Optional(GitFailedChecksSchema),
+  ciStatus: GitCiStatusSchema,
+  failedChecks: Type.Array(GitCheckRunSchema, { maxItems: LIMITS.maxFailedChecks }),
   supportedActions: Type.Array(
     Type.Union(GIT_ACTIONS.map((value) => Type.Literal(value))),
     { maxItems: GIT_ACTIONS.length, uniqueItems: true },
@@ -1357,6 +1362,7 @@ export const GitConfirmationSchema = Type.Object({
 // carries ONLY the workspace identity, the anti-stale revision, and the
 // confirmation metadata.
 const GitCommandFields = {
+  sessionId: SessionId,
   workspaceId: Uuid,
   expectedRevision: RevisionTokenSchema,
   confirmation: GitConfirmationSchema,

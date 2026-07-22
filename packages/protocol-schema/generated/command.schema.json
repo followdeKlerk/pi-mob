@@ -3933,6 +3933,11 @@
               "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
               "type": "string"
             },
+            "sessionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
             "summaryHint": {
               "maxLength": 240,
               "minLength": 1,
@@ -3945,6 +3950,7 @@
             }
           },
           "required": [
+            "sessionId",
             "workspaceId",
             "expectedRevision",
             "confirmation"
@@ -4050,6 +4056,11 @@
               "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
               "type": "string"
             },
+            "sessionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
             "summaryHint": {
               "maxLength": 240,
               "minLength": 1,
@@ -4062,6 +4073,7 @@
             }
           },
           "required": [
+            "sessionId",
             "workspaceId",
             "expectedRevision",
             "confirmation"
