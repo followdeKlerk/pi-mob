@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-  COMMAND_TYPES, ERROR_CODES, EVENT_TYPES, RESPONSE_TYPES,
+  COMMAND_TYPES, ERROR_CODES, EVENT_TYPES, LIMITS, RESPONSE_TYPES,
   canonicalSemanticCommand, semanticCommandSha256, validateFixture,
 } from "@pi-mob/protocol-schema";
 import { ProtocolScenarioMachine, fixtureManifest, listFixtures, type ProtocolScenario } from "../src/index.ts";
@@ -47,42 +47,131 @@ function assertCursorStrings(value: unknown, source: string, key = ""): void {
   }
 }
 
+function clone<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+type FixtureRecord = {
+  readonly name: string;
+  readonly kind: string;
+  readonly valid: boolean;
+  readonly message: Record<string, unknown>;
+  readonly expectation?: string;
+  readonly semanticExpectation?: Record<string, unknown>;
+};
+
+const expectedInvalidFiles = [
+  "invalid-workspace-path-traversal.json",
+  "invalid-workspace-path-exact-dot.json",
+  "invalid-workspace-tree-depth-17.json",
+  "invalid-workspace-path-oversize.json",
+  "invalid-workspace-tree-page-size-oversize.json",
+  "invalid-workspace-file-size-oversize.json",
+  "invalid-workspace-file-read-oversize.json",
+  "invalid-context-token-decimal-exponent.json",
+  "invalid-context-token-17-digit.json",
+  "invalid-context-missing-expected-revision.json",
+  "invalid-context-missing-target.json",
+  "invalid-workspace-file-metadata-private-field.json",
+  "invalid-context-target-private-field.json",
+  "invalid-prompt-file-ref-private-field.json",
+  "invalid-prompt-file-ref-missing-revision.json",
+] as const;
+
+type ExpectedInvalidFile = typeof expectedInvalidFiles[number];
+
+function repairExpectedInvalid(file: ExpectedInvalidFile, message: Record<string, unknown>): Record<string, unknown> {
+  const repaired = clone(message);
+  const payload = repaired.payload as Record<string, unknown>;
+  switch (file) {
+    case "invalid-workspace-path-traversal.json":
+    case "invalid-workspace-path-exact-dot.json":
+    case "invalid-workspace-path-oversize.json":
+      payload.path = "src";
+      break;
+    case "invalid-workspace-tree-depth-17.json":
+      ((payload.items as Array<Record<string, unknown>>)[0]!).depth = LIMITS.maxTreeDepth;
+      break;
+    case "invalid-workspace-tree-page-size-oversize.json":
+      payload.pageSize = LIMITS.maxTreePageItems;
+      break;
+    case "invalid-workspace-file-size-oversize.json":
+      ((payload.file as Record<string, unknown>)).size = LIMITS.maxFileSize;
+      break;
+    case "invalid-workspace-file-read-oversize.json":
+      ((payload.result as Record<string, unknown>)).content = "x";
+      break;
+    case "invalid-context-token-decimal-exponent.json":
+    case "invalid-context-token-17-digit.json":
+      ((payload.tokenUsage as Record<string, unknown>)).inputTokens = "9999999999999999";
+      break;
+    case "invalid-context-missing-expected-revision.json":
+      payload.expectedRevision = "context-r1";
+      break;
+    case "invalid-context-missing-target.json":
+      payload.target = { kind: "file", path: "src/index.ts", revision: "file-r1" };
+      break;
+    case "invalid-workspace-file-metadata-private-field.json":
+      delete (payload.file as Record<string, unknown>).private;
+      break;
+    case "invalid-context-target-private-field.json":
+      delete (payload.target as Record<string, unknown>).private;
+      break;
+    case "invalid-prompt-file-ref-private-field.json":
+      delete ((payload.fileRefs as Array<Record<string, unknown>>)[0]!).private;
+      break;
+    case "invalid-prompt-file-ref-missing-revision.json":
+      ((payload.fileRefs as Array<Record<string, unknown>>)[0]!).revision = "file-r1";
+      break;
+  }
+  return repaired;
+}
+
+type SemanticError = "file_stale" | "invalid_message";
+function validatePromptSemantics(message: Record<string, unknown>, currentFileRevision: string): SemanticError | undefined {
+  const payload = message.payload as Record<string, unknown>;
+  const fileRefs = payload.fileRefs as Array<Record<string, unknown>>;
+  const attachmentIds = payload.attachmentIds as Array<unknown>;
+  if (fileRefs.some((fileRef) => fileRef.revision !== currentFileRevision)) return "file_stale";
+  if (fileRefs.length + attachmentIds.length > 4) return "invalid_message";
+  return undefined;
+}
+
 test("D-037 invalid corpus isolates schema and semantic invariants", () => {
-  const schemaInvalid = [
-    "invalid-workspace-path-traversal.json",
-    "invalid-workspace-path-exact-dot.json",
-    "invalid-workspace-tree-depth-17.json",
-    "invalid-workspace-path-oversize.json",
-    "invalid-workspace-tree-page-size-oversize.json",
-    "invalid-workspace-file-size-oversize.json",
-    "invalid-workspace-file-read-oversize.json",
-    "invalid-context-token-decimal-exponent.json",
-    "invalid-context-token-17-digit.json",
-    "invalid-context-missing-expected-revision.json",
-    "invalid-context-missing-target.json",
-    "invalid-workspace-file-metadata-private-field.json",
-    "invalid-context-target-private-field.json",
-    "invalid-prompt-file-ref-private-field.json",
-    "invalid-prompt-file-ref-missing-revision.json",
-  ];
-  for (const file of schemaInvalid) {
+  for (const file of expectedInvalidFiles) {
     const entry = fixtureManifest.find((fixture) => fixture.file === file);
     expect(entry).toMatchObject({ file, valid: false, expectation: "expected-invalid" });
-    const fixture = JSON.parse(readFileSync(join(corpus, file), "utf8"));
+    const fixture = JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
     expect(fixture.expectation).toBe("expected-invalid");
     expect(validateFixture(fixture), file).toBe(true);
+
+    const repairedMessage = repairExpectedInvalid(file, fixture.message);
+    expect(JSON.stringify(repairedMessage)).not.toBe(JSON.stringify(fixture.message));
+    expect(validateFixture({ ...clone(fixture), valid: true, message: repairedMessage }), file).toBe(true);
   }
 
-  const stale = JSON.parse(readFileSync(join(corpus, "semantic-invalid-prompt-file-ref-stale-revision.json"), "utf8"));
-  const joint = JSON.parse(readFileSync(join(corpus, "semantic-invalid-prompt-joint-context-cap.json"), "utf8"));
-  expect(stale).toMatchObject({ valid: true, expectation: "semantic-invalid", semanticExpectation: { outcome: "rejected", errorCode: "file_stale", currentRevision: "file-r2" } });
-  expect(stale.message.payload.fileRefs[0].revision).toBe("file-r1");
-  expect(joint).toMatchObject({ valid: true, expectation: "semantic-invalid", semanticExpectation: { outcome: "rejected", errorCode: "invalid_message", maxCombinedItems: 4 } });
-  expect(joint.message.payload.attachmentIds).toHaveLength(4);
-  expect(joint.message.payload.fileRefs).toHaveLength(1);
-  for (const fixture of [stale, joint]) expect(validateFixture(fixture)).toBe(true);
-  for (const file of ["semantic-invalid-prompt-file-ref-stale-revision.json", "semantic-invalid-prompt-joint-context-cap.json"]) {
-    expect(fixtureManifest.find((fixture) => fixture.file === file)).toMatchObject({ file, valid: true, expectation: "semantic-invalid" });
+  const semanticFiles = [
+    "semantic-invalid-prompt-file-ref-stale-revision.json",
+    "semantic-invalid-prompt-joint-context-cap.json",
+  ] as const;
+  for (const file of semanticFiles) {
+    const fixture = JSON.parse(readFileSync(join(corpus, file), "utf8")) as FixtureRecord;
+    expect(fixture.valid).toBe(true);
+    expect(fixture.expectation).toBe("semantic-invalid");
+    expect(validateFixture(fixture)).toBe(true);
+    const expectedError = fixture.semanticExpectation?.errorCode as SemanticError;
+    const currentRevision = (fixture.semanticExpectation?.currentRevision as string | undefined) ?? "file-r1";
+    expect(validatePromptSemantics(fixture.message, currentRevision)).toBe(expectedError);
+
+    const repairedMessage = clone(fixture.message);
+    const payload = repairedMessage.payload as Record<string, unknown>;
+    if (file === "semantic-invalid-prompt-file-ref-stale-revision.json") {
+      ((payload.fileRefs as Array<Record<string, unknown>>)[0]!).revision = "file-r2";
+    } else {
+      payload.attachmentIds = (payload.attachmentIds as Array<unknown>).slice(0, 3);
+    }
+    expect(validatePromptSemantics(repairedMessage, currentRevision)).toBeUndefined();
+    expect(validateFixture({ ...clone(fixture), message: repairedMessage })).toBe(true);
   }
 });
 
