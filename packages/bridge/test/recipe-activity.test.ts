@@ -28,21 +28,53 @@ describe("recipe activity projector", () => {
     expect(result[1]!.timing.durationMs).toBe(2000);
   });
 
-  test("dedupes replay, preserves first kind, and bounds tool fields", () => {
-    const started = event("tool.started", { turnId: "t", toolCallId: "a", toolName: "bash", arguments: "x".repeat(400) }, "2026-01-01T00:00:00.000Z");
-    const replay = projectRecipeActivities([started, started, event("reasoning.started", { turnId: "t", contentBlockId: "a" }, "2026-01-01T00:00:01.000Z")]);
-    expect(replay).toHaveLength(1);
-    expect(replay[0]!.kind).toBe("tool");
-    expect(replay[0]!.arguments).toHaveLength(240);
-    expect(replay[0]!.truncation?.isTruncated).toBe(true);
-    expect(Object.isFrozen(replay[0])).toBe(true);
+  test("rejects oversized ids before identity and preserves the first kind on collisions", () => {
+    const oversized = "x".repeat(129);
+    const result = projectRecipeActivities([
+      event("tool.started", { turnId: "t", toolCallId: oversized, toolName: "bash" }, "2026-01-01T00:00:00.000Z"),
+      event("tool.started", { turnId: "t", toolCallId: "a", toolName: "bash" }, "2026-01-01T00:00:01.000Z"),
+      event("reasoning.started", { turnId: "t", contentBlockId: "a" }, "2026-01-01T00:00:02.000Z"),
+    ]);
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ kind: "tool", activityId: "a" });
   });
 
-  test("failed tools carry safe error and truncation metadata", () => {
+  test("does not fabricate tool fields for malformed or absent values", () => {
+    const circular: Record<string, unknown> = {};
+    circular.self = circular;
     const result = projectRecipeActivities([
-      event("tool.started", { turnId: "t", toolCallId: "a", toolName: "bash", arguments: {} }, "2026-01-01T00:00:00.000Z"),
-      event("tool.failed", { turnId: "t", toolCallId: "a", isError: true, output: "failure", retainedBytes: 3, totalBytes: 7, isTruncated: true }, "2026-01-01T00:00:01.000Z"),
+      event("tool.started", { turnId: "t", toolCallId: "a" }, "2026-01-01T00:00:00.000Z"),
+      event("tool.started", { turnId: "t", toolCallId: "b", toolName: "bash", arguments: circular }, "2026-01-01T00:00:01.000Z"),
+      event("tool.completed", { turnId: "t", toolCallId: "b" }, "2026-01-01T00:00:02.000Z"),
     ]);
-    expect(result[0]).toMatchObject({ status: "failed", errorInfo: { code: "internal_error", retryable: false }, truncation: { retainedBytes: 3, totalBytes: 7, isTruncated: true } });
+    expect(result).toHaveLength(1);
+    expect(result[0]).toMatchObject({ activityId: "b", toolName: "bash" });
+    expect(result[0]).not.toHaveProperty("arguments");
+    expect(result[0]).not.toHaveProperty("output");
+    expect(result[0]).not.toHaveProperty("truncation");
+  });
+
+  test("only includes truncation when source metadata exists", () => {
+    const result = projectRecipeActivities([
+      event("tool.started", { turnId: "t", toolCallId: "a", toolName: "bash", arguments: "x".repeat(400) }, "2026-01-01T00:00:00.000Z"),
+      event("tool.completed", { turnId: "t", toolCallId: "a", result: "y".repeat(400) }, "2026-01-01T00:00:01.000Z"),
+    ]);
+    expect(result[0]!.arguments).toHaveLength(240);
+    expect(result[0]!.output).toHaveLength(240);
+    expect(result[0]).not.toHaveProperty("truncation");
+  });
+
+  test("tracks failed and cancelled terminal states", () => {
+    const failed = projectRecipeActivities([
+      event("tool.started", { turnId: "t", toolCallId: "a", toolName: "bash" }, "2026-01-01T00:00:00.000Z"),
+      event("tool.failed", { turnId: "t", toolCallId: "a", output: "failure", errorInfo: { code: "internal_error", message: "failure", retryable: false }, retainedBytes: 3, totalBytes: 7, isTruncated: true }, "2026-01-01T00:00:01.000Z"),
+    ]);
+    expect(failed[0]).toMatchObject({ status: "failed", errorInfo: { code: "internal_error", retryable: false }, truncation: { retainedBytes: 3, totalBytes: 7, isTruncated: true } });
+
+    const cancelled = projectRecipeActivities([
+      event("tool.started", { turnId: "t", toolCallId: "b", toolName: "bash" }, "2026-01-01T00:00:00.000Z"),
+      event("tool.cancelled", { turnId: "t", toolCallId: "b" }, "2026-01-01T00:00:01.000Z"),
+    ]);
+    expect(cancelled[0]).toMatchObject({ status: "cancelled" });
   });
 });

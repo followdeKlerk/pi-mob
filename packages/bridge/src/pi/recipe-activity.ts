@@ -50,7 +50,6 @@ export interface RecipeProjectorOptions {
 
 const MAX_TEXT = 240;
 const MAX_ID = 128;
-const encoder = new TextEncoder();
 const TERMINAL = new Set<RecipeStatus>(["completed", "failed", "cancelled"]);
 
 /**
@@ -77,28 +76,27 @@ export class RecipeActivityProjector {
 
   apply(event: ProjectableEvent): RecipeActivityProjector {
     const payload = event.payload as Record<string, unknown>;
-    if (event.type === "turn.started" && stringValue(payload.turnId)) {
-      this.activeTurnId = boundedId(stringValue(payload.turnId)!, "turn");
+    if (event.type === "turn.started") {
+      const turnId = opaqueIdValue(payload.turnId);
+      if (turnId) this.activeTurnId = turnId;
       return this;
     }
     if (!event.type.startsWith("tool.") && !event.type.startsWith("reasoning.")) return this;
 
-    const sessionId = stringValue(payload.sessionId) ?? this.fallbackSessionId;
-    const turnId = stringValue(payload.turnId) ?? this.activeTurnId ?? this.fallbackTurnId;
-    const activityId = stringValue(payload.toolCallId) ?? stringValue(payload.contentBlockId);
+    const sessionId = opaqueIdValue(payload.sessionId) ?? opaqueIdValue(this.fallbackSessionId);
+    const turnId = opaqueIdValue(payload.turnId) ?? this.activeTurnId ?? opaqueIdValue(this.fallbackTurnId);
+    const activityId = opaqueIdValue(payload.toolCallId) ?? opaqueIdValue(payload.contentBlockId);
     if (!sessionId || !turnId || !activityId) return this;
     const kind = event.type.startsWith("tool.") ? "tool" : "thinking";
-    const safeSession = boundedId(sessionId, "session");
-    const safeTurn = boundedId(turnId, "turn");
-    const safeActivity = boundedId(activityId, "activity");
-    const identity = `${safeSession}\u0000${safeTurn}\u0000${safeActivity}`;
+    const identity = `${sessionId}\u0000${turnId}\u0000${activityId}`;
     const at = eventTime(event, payload);
+    if (!at) return this;
     const previous = this.activities.get(identity);
     if (previous && previous.kind !== kind) return this;
 
     const next = previous
       ? this.merge(previous, event.type, payload, at)
-      : this.create(kind, safeSession, safeTurn, safeActivity, event.type, payload, at);
+      : this.create(kind, sessionId, turnId, activityId, event.type, payload, at);
     if (next) this.activities.set(identity, next);
     return this;
   }
@@ -121,15 +119,25 @@ export class RecipeActivityProjector {
     if (!isStart(type)) return undefined;
     const ordinal = this.ordinals.get(turnId) ?? 0;
     this.ordinals.set(turnId, ordinal + 1);
-    const base = {
+    if (kind === "thinking") {
+      return {
+        kind, sessionId, turnId, activityId, ordinal,
+        status: statusFor(type), timing: { startedAt: at } as RecipeTiming,
+        title: "Thinking",
+      } as RecipeActivity;
+    }
+    const toolName = boundedText(stringValue(payload.toolName), 128);
+    if (!toolName) return undefined;
+    const args = payload.arguments === undefined ? undefined : boundedText(stringify(payload.arguments), MAX_TEXT);
+    const truncation = truncationFrom(payload);
+    return {
       kind, sessionId, turnId, activityId, ordinal,
       status: statusFor(type), timing: { startedAt: at } as RecipeTiming,
-      title: kind === "tool" ? boundedText(stringValue(payload.toolName) ?? "Tool", 128).value : "Thinking",
-    };
-    if (kind === "thinking") return base as RecipeActivity;
-    const args = boundedText(stringify(payload.arguments, "{}"), MAX_TEXT);
-    const output = boundedText("-", MAX_TEXT);
-    return { ...base, toolName: boundedText(stringValue(payload.toolName) ?? "tool", 128).value, arguments: args.value, output: output.value, ...(args.truncation ? { truncation: args.truncation } : {}) } as RecipeActivity;
+      title: toolName,
+      toolName,
+      ...(args !== undefined ? { arguments: args } : {}),
+      ...(truncation ? { truncation } : {}),
+    } as RecipeActivity;
   }
 
   private merge(previous: RecipeActivity, type: string, payload: Record<string, unknown>, at: string): RecipeActivity {
@@ -148,12 +156,20 @@ export class RecipeActivityProjector {
     }
     next = { ...next, status: terminal === "running" ? previous.status : terminal, timing };
     if (previous.kind === "tool") {
-      const args = payload.arguments === undefined ? undefined : boundedText(stringify(payload.arguments, "{}"), MAX_TEXT);
+      const args = payload.arguments === undefined ? undefined : boundedText(stringify(payload.arguments), MAX_TEXT);
       const rawOutput = payload.output ?? payload.result;
-      const output = rawOutput === undefined ? undefined : boundedText(stringify(rawOutput, "-"), MAX_TEXT);
-      const truncation = mergeTruncation(previous.truncation, args?.truncation, output?.truncation, payload);
-      next = { ...next, ...(args ? { arguments: args.value } : {}), ...(output ? { output: output.value } : {}), ...(truncation ? { truncation } : {}) };
-      if (type === "tool.failed") next = { ...next, errorInfo: errorInfo(payload) };
+      const output = rawOutput === undefined ? undefined : boundedText(stringify(rawOutput), MAX_TEXT);
+      const truncation = mergeTruncation(previous.truncation, truncationFrom(payload));
+      next = {
+        ...next,
+        ...(args !== undefined ? { arguments: args } : {}),
+        ...(output !== undefined ? { output } : {}),
+        ...(truncation ? { truncation } : {}),
+      };
+      if (type === "tool.failed") {
+        const error = errorInfo(payload);
+        if (error) next = { ...next, errorInfo: error };
+      }
     }
     return next;
   }
@@ -179,15 +195,28 @@ function statusFor(type: string): RecipeStatus {
   return "running";
 }
 function stringValue(value: unknown): string | undefined { return typeof value === "string" && value.length > 0 ? value : undefined; }
-function boundedId(value: string, fallback: string): string { return boundedText(value || fallback, MAX_ID).value || fallback; }
-function stringify(value: unknown, fallback: string): string {
-  if (typeof value === "string") return value || fallback;
-  try { const json = JSON.stringify(value); return json && json !== "undefined" ? json : fallback; } catch { return fallback; }
+function opaqueIdValue(value: unknown): string | undefined {
+  return typeof value === "string" && value.length > 0 && value.length <= MAX_ID ? value : undefined;
 }
-function boundedText(value: string, maximum: number): { value: string; truncation?: RecipeTruncation } {
-  if (value.length <= maximum) return { value: value || "-" };
-  const retained = value.slice(0, maximum);
-  return { value: retained || "-", truncation: { retainedBytes: encoder.encode(retained).byteLength, totalBytes: encoder.encode(value).byteLength, isTruncated: true } };
+function stringify(value: unknown): string | undefined {
+  if (typeof value === "string") return value;
+  try {
+    const json = JSON.stringify(value);
+    return json && json !== "undefined" ? json : undefined;
+  } catch {
+    return undefined;
+  }
+}
+function boundedText(value: string | undefined, maximum: number): string | undefined {
+  if (value === undefined) return undefined;
+  return value.length <= maximum ? value : value.slice(0, maximum);
+}
+function truncationFrom(payload: Record<string, unknown>): RecipeTruncation | undefined {
+  const hasMetadata = payload.retainedBytes !== undefined
+    || payload.totalBytes !== undefined
+    || payload.isTruncated !== undefined
+    || payload.digest !== undefined;
+  return hasMetadata ? mergeTruncation(payload) : undefined;
 }
 function mergeTruncation(...values: Array<RecipeTruncation | undefined | Record<string, unknown>>): RecipeTruncation | undefined {
   const found = values.filter((value): value is RecipeTruncation | Record<string, unknown> => !!value);
@@ -202,15 +231,21 @@ function mergeTruncation(...values: Array<RecipeTruncation | undefined | Record<
   }
   return { retainedBytes: retained, totalBytes: total, ...(digest ? { digest } : {}), isTruncated: truncated };
 }
-function errorInfo(payload: Record<string, unknown>): RecipeErrorInfo {
-  const raw = payload.errorInfo && typeof payload.errorInfo === "object" ? payload.errorInfo as Record<string, unknown> : {};
-  const message = boundedText(stringValue(raw.message) ?? (payload.isError === true ? "Tool execution failed" : "Tool execution failed"), 512).value;
-  return { code: stringValue(raw.code) ?? "internal_error", message, retryable: raw.retryable === true, ...(typeof raw.recommendedDelayMs === "number" || raw.recommendedDelayMs === null ? { recommendedDelayMs: raw.recommendedDelayMs } : {}) };
+function errorInfo(payload: Record<string, unknown>): RecipeErrorInfo | undefined {
+  if (!payload.errorInfo || typeof payload.errorInfo !== "object") return undefined;
+  const raw = payload.errorInfo as Record<string, unknown>;
+  const code = stringValue(raw.code);
+  const message = boundedText(stringValue(raw.message), 512);
+  if (!code || !message || typeof raw.retryable !== "boolean") return undefined;
+  const delay = raw.recommendedDelayMs;
+  if (delay !== undefined && delay !== null && (!Number.isSafeInteger(delay) || (delay as number) < 0)) return undefined;
+  return { code, message, retryable: raw.retryable, ...(delay === null || typeof delay === "number" ? { recommendedDelayMs: delay } : {}) };
 }
-function eventTime(event: ProjectableEvent, payload: Record<string, unknown>): string {
+function eventTime(event: ProjectableEvent, payload: Record<string, unknown>): string | undefined {
   const raw = event.occurredAt ?? payload.timestamp ?? payload.startedAt;
-  const date = raw instanceof Date ? raw : new Date(raw as string | number);
-  return Number.isFinite(date.getTime()) ? date.toISOString() : "1970-01-01T00:00:00.000Z";
+  if (!(raw instanceof Date) && typeof raw !== "string" && typeof raw !== "number") return undefined;
+  const date = raw instanceof Date ? raw : new Date(raw);
+  return Number.isFinite(date.getTime()) ? date.toISOString() : undefined;
 }
 function freezeActivity(activity: RecipeActivity): RecipeActivity {
   const timing = Object.freeze({ ...activity.timing });

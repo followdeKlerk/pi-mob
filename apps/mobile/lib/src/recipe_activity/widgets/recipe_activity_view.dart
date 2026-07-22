@@ -33,7 +33,10 @@ class _RecipeActivityViewState extends State<RecipeActivityView> {
       container: true,
       label: label,
       child: Card(
-        margin: const EdgeInsets.symmetric(horizontal: PiSpacing.lg, vertical: PiSpacing.xs),
+        margin: const EdgeInsets.symmetric(
+          horizontal: PiSpacing.lg,
+          vertical: PiSpacing.xs,
+        ),
         elevation: 0,
         color: scheme.surfaceContainerLow,
         child: Column(
@@ -42,15 +45,31 @@ class _RecipeActivityViewState extends State<RecipeActivityView> {
             InkWell(
               onTap: () => setState(() => _expanded = !_expanded),
               child: Padding(
-                padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md, vertical: PiSpacing.sm),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: PiSpacing.md,
+                  vertical: PiSpacing.sm,
+                ),
                 child: Row(
                   children: [
-                    Icon(_statusIcon(activity.status), size: 17, color: _statusColor(scheme, activity.status)),
+                    Icon(
+                      _statusIcon(activity.status),
+                      size: 17,
+                      color: _statusColor(scheme, activity.status),
+                    ),
                     const SizedBox(width: PiSpacing.sm),
-                    Expanded(child: Text(activity.title, maxLines: 1, overflow: TextOverflow.ellipsis)),
+                    Expanded(
+                      child: Text(
+                        activity.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
                     Text(status, style: Theme.of(context).textTheme.labelSmall),
                     const SizedBox(width: PiSpacing.xs),
-                    Icon(_expanded ? Icons.expand_less : Icons.expand_more, size: 18),
+                    Icon(
+                      _expanded ? Icons.expand_less : Icons.expand_more,
+                      size: 18,
+                    ),
                   ],
                 ),
               ),
@@ -65,16 +84,26 @@ class _RecipeActivityViewState extends State<RecipeActivityView> {
   Widget _details(BuildContext context) {
     final text = Theme.of(context).textTheme.bodySmall;
     final lines = <String>[
-      if (activity.kind == RecipeActivityKind.tool) 'Arguments: ${activity.arguments ?? '-'}',
-      if (activity.kind == RecipeActivityKind.tool) 'Output: ${activity.output ?? '-'}',
+      if (activity.kind == RecipeActivityKind.tool)
+        'Arguments: ${activity.arguments ?? '-'}',
+      if (activity.kind == RecipeActivityKind.tool)
+        'Output: ${activity.output ?? '-'}',
       if (activity.errorInfo != null) 'Error: ${activity.errorInfo!.message}',
       if (activity.truncation?.isTruncated == true)
         'Output truncated: ${activity.truncation!.retainedBytes} of ${activity.truncation!.totalBytes} bytes',
     ];
     if (lines.isEmpty) lines.add('No additional details available.');
     return Padding(
-      padding: const EdgeInsets.fromLTRB(PiSpacing.md, 0, PiSpacing.md, PiSpacing.md),
-      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [for (final line in lines) Text(line, style: text)]),
+      padding: const EdgeInsets.fromLTRB(
+        PiSpacing.md,
+        0,
+        PiSpacing.md,
+        PiSpacing.md,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [for (final line in lines) Text(line, style: text)],
+      ),
     );
   }
 }
@@ -93,10 +122,11 @@ IconData _statusIcon(RecipeActivityStatus status) => switch (status) {
   RecipeActivityStatus.failed => Icons.error_outline,
   RecipeActivityStatus.cancelled => Icons.cancel_outlined,
 };
-Color _statusColor(ColorScheme scheme, RecipeActivityStatus status) => switch (status) {
-  RecipeActivityStatus.pending => scheme.onSurfaceVariant,
-  RecipeActivityStatus.running => scheme.primary,
-  RecipeActivityStatus.completed => scheme.tertiary,
-  RecipeActivityStatus.failed => scheme.error,
-  RecipeActivityStatus.cancelled => scheme.onSurfaceVariant,
-};
+Color _statusColor(ColorScheme scheme, RecipeActivityStatus status) =>
+    switch (status) {
+      RecipeActivityStatus.pending => scheme.onSurfaceVariant,
+      RecipeActivityStatus.running => scheme.primary,
+      RecipeActivityStatus.completed => scheme.tertiary,
+      RecipeActivityStatus.failed => scheme.error,
+      RecipeActivityStatus.cancelled => scheme.onSurfaceVariant,
+    };
