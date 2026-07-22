@@ -253,10 +253,12 @@ export const CONTROL_TYPES = [
   // repeatable snapshot read; context mutations are durable commands above.
   "workspace.tree.page", "workspace.file.search", "workspace.file.content.search", "workspace.file.metadata", "workspace.file.read",
   "context.snapshot.request", "process.snapshot.request", "process.output.page",
-  // F0 R6 — repeatable, nonjournaled Git/CI summary read. The control carries
-  // `workspaceId` so the bridge can resolve the per-workspace summary; the
-  // durable commit/push commands are listed in COMMAND_TYPES above.
-  "git.summary.request",
+  // F0 R6 — repeatable, nonjournaled Git/CI summary read and cancellation.
+  // The request carries `workspaceId` so the bridge can resolve the per-
+  // workspace summary. Cancellation targets the UUID `requestId` of an
+  // in-flight summary request; durable commit/push commands are listed in
+  // COMMAND_TYPES above.
+  "git.summary.request", "git.summary.cancel",
 ] as const;
 
 export const ERROR_CODES = [
@@ -1261,7 +1263,9 @@ export const GitLatestCommitSchema = Type.Object({
 //     the durable commit/push commands carry `expectedRevision` so the bridge
 //     can reject a stale target with `git_stale` BEFORE Pi dispatch.
 //   - `repository` (bounded label): the opaque `owner/repo` label.
-//   - `branch` (bounded opaque): the active branch.
+//   - `detached` / `branch` (discriminated pair): attached summaries carry
+//     `detached: false` and a bounded Git branch; detached summaries carry
+//     `detached: true` and `branch: null`.
 //   - `workingTreeState` (closed literal): clean / dirty / unknown.
 //   - `changedCount`, `ahead`, `behind` (non-negative integers).
 //   - `latestCommit` (GitLatestCommitSchema): bounded latest-commit card.
@@ -1290,12 +1294,11 @@ export const GitLatestCommitSchema = Type.Object({
 //   - the validity of `latestCommit.sha` against the live repository
 //   - the validity of `ahead` / `behind` against the live remote
 //   - any cross-payload dedupe or ordering
-export const GitSummarySchema = Type.Object({
+const GitSummaryFields = {
   workspaceId: Uuid,
   revision: RevisionTokenSchema,
   repositoryUrl: ExternalUrlSchema,
   repository: GitRepositoryLabelSchema,
-  branch: GitBranchSchema,
   workingTreeState: GitWorkingTreeStateSchema,
   changedCount: Type.Integer({ minimum: 0, maximum: LIMITS.maxGitCount }),
   ahead: Type.Integer({ minimum: 0, maximum: LIMITS.maxGitCount }),
@@ -1310,7 +1313,19 @@ export const GitSummarySchema = Type.Object({
   ),
   capability: Type.Literal(GIT_CI_CAPABILITY),
   lastRefreshedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
-}, { additionalProperties: false, $id: "pi-mob/protocol/git-summary" });
+};
+export const GitSummarySchema = Type.Union([
+  Type.Object({
+    ...GitSummaryFields,
+    detached: Type.Literal(true),
+    branch: Type.Null(),
+  }, { additionalProperties: false }),
+  Type.Object({
+    ...GitSummaryFields,
+    detached: Type.Literal(false),
+    branch: GitBranchSchema,
+  }, { additionalProperties: false }),
+], { $id: "pi-mob/protocol/git-summary" });
 
 // F0 R6 — GitUnavailableEventSchema. Truthful no-Git/CI-surface envelope.
 // Mirrors the R3/R4 unavailable pattern: closed object, capability
@@ -1485,6 +1500,7 @@ const ControlPayloads = {
   "process.snapshot.request": Type.Object({ sessionId: SessionId }, { additionalProperties: false }),
   "process.output.page": Type.Object({ sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]), cursor: Type.Optional(DecimalCursorSchema), pageToken: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) }, { additionalProperties: false }),
   "git.summary.request": Type.Object({ workspaceId: Uuid }, { additionalProperties: false }),
+  "git.summary.cancel": Type.Object({ targetRequestId: Uuid }, { additionalProperties: false }),
 } as const;
 export const SubscriptionSchema = ControlPayloads["subscription.set"];
 const ResponsePayloads = {
