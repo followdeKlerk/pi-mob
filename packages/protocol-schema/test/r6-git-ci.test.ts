@@ -45,6 +45,7 @@ function gitSummary(overrides: Record<string, unknown> = {}) {
   return {
     workspaceId,
     revision,
+    repositoryUrl: "https://example.test/pi-mob",
     repository: "pi-mob/pi-mob",
     branch: "feature/git-ci",
     workingTreeState: "dirty",
@@ -56,6 +57,7 @@ function gitSummary(overrides: Record<string, unknown> = {}) {
       message: "Add Git/CI attention protocol",
       author: "Pi Mobile",
       authoredAt: timestamp,
+      url: "https://example.test/pi-mob/commit/aaa",
     },
     pullRequest: {
       number: 42,
@@ -63,15 +65,12 @@ function gitSummary(overrides: Record<string, unknown> = {}) {
       url: "https://example.test/pi-mob/pull/42",
     },
     ciStatus: { state: "failure" },
-    failedChecks: {
-      totalCount: 1,
-      items: [{
+    failedChecks: [{
         name: "protocol-schema",
         status: "failure",
         summary: "schema check failed",
         url: "https://example.test/pi-mob/checks/1",
       }],
-    },
     supportedActions: [...GIT_ACTIONS],
     capability: GIT_CI_CAPABILITY,
     lastRefreshedAt: timestamp,
@@ -81,6 +80,7 @@ function gitSummary(overrides: Record<string, unknown> = {}) {
 
 function gitCommandPayload(overrides: Record<string, unknown> = {}) {
   return {
+    sessionId: uuid,
     workspaceId,
     expectedRevision: revision,
     confirmation: {
@@ -122,20 +122,20 @@ test("R6 Git summaries cover the full bounded status card and optional groups", 
     changedCount: 0,
     ahead: 0,
     pullRequest: undefined,
-    ciStatus: undefined,
-    failedChecks: undefined,
+    ciStatus: { state: "unknown" },
+    failedChecks: [],
     supportedActions: [],
   }))).toBe(true);
   expect(summaries.Check(gitSummary({
     workingTreeState: "unknown",
     ciStatus: { state: "unknown" },
-    failedChecks: { totalCount: 3, items: [] },
+    failedChecks: [],
   }))).toBe(true);
 
   for (const state of ["success", "failure", "pending", "unknown"] as const) {
     expect(summaries.Check(gitSummary({ ciStatus: { state } }))).toBe(true);
     expect(summaries.Check(gitSummary({
-      failedChecks: { totalCount: 1, items: [{ name: "check", status: state }] },
+      failedChecks: [{ name: "check", status: state }],
     }))).toBe(true);
   }
 });
@@ -148,6 +148,11 @@ test("R6 Git summaries close fields and enforce identifiers, counts, URLs, check
   }));
   const invalid: unknown[] = [
     gitSummary({ private: "leak" }),
+    gitSummary({ repositoryUrl: undefined }),
+    gitSummary({ repositoryUrl: "https:///hostless" }),
+    gitSummary({ repositoryUrl: "https://user:pass@example.test/repo" }),
+    gitSummary({ repositoryUrl: "https://example.test/white space" }),
+    gitSummary({ repositoryUrl: "https://example.test/del\x7f" }),
     gitSummary({ repository: "owner/repo with spaces" }),
     gitSummary({ repository: "r".repeat(LIMITS.maxRepositoryLabelLength + 1) }),
     gitSummary({ branch: "../secret" }),
@@ -157,10 +162,18 @@ test("R6 Git summaries close fields and enforce identifiers, counts, URLs, check
     gitSummary({ changedCount: -1 }),
     gitSummary({ ahead: -1 }),
     gitSummary({ behind: -1 }),
+    gitSummary({ changedCount: LIMITS.maxGitCount + 1 }),
+    gitSummary({ ahead: LIMITS.maxGitCount + 1 }),
+    gitSummary({ behind: LIMITS.maxGitCount + 1 }),
     gitSummary({ latestCommit: { ...gitSummary().latestCommit, sha: "not-a-sha" } }),
+    gitSummary({ latestCommit: { ...gitSummary().latestCommit, url: undefined } }),
     gitSummary({ latestCommit: { ...gitSummary().latestCommit, private: "leak" } }),
     gitSummary({ pullRequest: { number: 42, title: "PR", url: "http://example.test/42" } }),
     gitSummary({ pullRequest: { number: 42, title: "PR", url: `https://example.test/${"x".repeat(LIMITS.maxExternalUrlLength)}` } }),
+    gitSummary({ pullRequest: { number: Number.MAX_SAFE_INTEGER + 1, title: "PR", url: "https://example.test/42" } }),
+    gitSummary({ ciStatus: undefined }),
+    gitSummary({ failedChecks: undefined }),
+    gitSummary({ failedChecks: [{ name: "check", status: "failure", logSummary: "x".repeat(LIMITS.maxLogSummaryLength + 1) }] }),
     gitSummary({ ciStatus: { state: "cancelled" } }),
     gitSummary({ ciStatus: { state: "failure", private: "leak" } }),
     gitSummary({ failedChecks: { totalCount: LIMITS.maxFailedChecks + 1, items: [] } }),
@@ -250,6 +263,8 @@ test("R6 Git actions are durable session commands with lease, revision, confirma
     const message = { ...commandEnvelope, type, payload: gitCommandPayload() };
     expect(commands.Check(message)).toBe(true);
     expect(commands.Check({ ...message, leaseId: undefined })).toBe(false);
+    expect(commands.Check({ ...message, payload: gitCommandPayload({ sessionId: undefined }) })).toBe(false);
+    expect(commands.Check({ ...message, payload: gitCommandPayload({ sessionId: "not-a-uuid" }) })).toBe(false);
     expect(commands.Check({ ...message, payload: gitCommandPayload({ workspaceId: undefined }) })).toBe(false);
     expect(commands.Check({ ...message, payload: gitCommandPayload({ expectedRevision: undefined }) })).toBe(false);
     expect(commands.Check({ ...message, payload: gitCommandPayload({ confirmation: undefined }) })).toBe(false);
