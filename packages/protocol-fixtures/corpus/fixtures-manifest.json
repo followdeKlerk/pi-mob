@@ -915,6 +915,36 @@
     "kind": "event"
   },
   {
+    "file": "invalid-context-missing-expected-revision.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-context-missing-target.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-context-target-private-field.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-context-token-17-digit.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-context-token-decimal-exponent.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
     "file": "invalid-cursor-json-number.json",
     "valid": false,
     "kind": "event"
@@ -955,6 +985,18 @@
     "kind": "event"
   },
   {
+    "file": "invalid-prompt-file-ref-missing-revision.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-prompt-file-ref-private-field.json",
+    "valid": false,
+    "kind": "command",
+    "expectation": "expected-invalid"
+  },
+  {
     "file": "invalid-prompt-plan-target-missing-revision.json",
     "valid": false,
     "kind": "command"
@@ -993,6 +1035,54 @@
     "file": "invalid-uppercase-uuid.json",
     "valid": false,
     "kind": "command"
+  },
+  {
+    "file": "invalid-workspace-file-metadata-private-field.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-workspace-file-read-oversize.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-workspace-file-size-oversize.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-workspace-path-exact-dot.json",
+    "valid": false,
+    "kind": "control",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-workspace-path-oversize.json",
+    "valid": false,
+    "kind": "control",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-workspace-path-traversal.json",
+    "valid": false,
+    "kind": "control",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-workspace-tree-depth-17.json",
+    "valid": false,
+    "kind": "response",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-workspace-tree-page-size-oversize.json",
+    "valid": false,
+    "kind": "control",
+    "expectation": "expected-invalid"
   },
   {
     "file": "lease-takeover.json",
@@ -1448,6 +1538,18 @@
     "file": "scenario-stream-gap.json",
     "valid": true,
     "kind": "event"
+  },
+  {
+    "file": "semantic-invalid-prompt-file-ref-stale-revision.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
+  },
+  {
+    "file": "semantic-invalid-prompt-joint-context-cap.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
   },
   {
     "file": "snapshot-failure.json",

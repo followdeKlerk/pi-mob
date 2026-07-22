@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { COMMAND_TYPES, CONTROL_TYPES, ERROR_CODES, EVENT_TYPES, RESPONSE_TYPES } from "@pi-mob/protocol-schema";
+import { COMMAND_TYPES, CONTROL_TYPES, ERROR_CODES, EVENT_TYPES, LIMITS, RESPONSE_TYPES } from "@pi-mob/protocol-schema";
 
 const corpus = resolve(process.env.PROTOCOL_FIXTURES_OUT_DIR ?? new URL("../corpus", import.meta.url).pathname);
 const FILE_CONTENT = 'const fixture = true;\n';
@@ -17,12 +17,19 @@ const uuid = (digit: string): string => `${digit.repeat(8)}-${digit.repeat(4)}-4
 const ids = { messageId: uuid("1"), requestId: uuid("2"), commandId: uuid("3"), eventId: uuid("4"), installationId: uuid("5"), sessionId: uuid("6"), leaseId: uuid("7"), workspaceId: uuid("8") };
 const base = { protocol: { major: 1, minor: 0 }, messageId: ids.messageId, sentAt: "2026-07-12T00:00:00.000Z", payload: {} };
 type Kind = "hello" | "command" | "control" | "event" | "response" | "error" | "pairing" | "attachment" | "export";
-interface Entry { readonly file: string; readonly valid: boolean; readonly kind: Kind; }
+type FixtureExpectation = "expected-invalid" | "semantic-invalid";
+interface Entry { readonly file: string; readonly valid: boolean; readonly kind: Kind; readonly expectation?: FixtureExpectation; }
 const entries: Entry[] = [];
-function emit(name: string, kind: Kind, valid: boolean, message: unknown): void {
+function emit(name: string, kind: Kind, valid: boolean, message: unknown, expectation?: FixtureExpectation, semanticExpectation?: Record<string, unknown>): void {
   const file = `${name}.json`;
-  writeFileSync(resolve(corpus, file), `${JSON.stringify({ name, kind, valid, message }, null, 2)}\n`);
-  entries.push({ file, valid, kind });
+  writeFileSync(resolve(corpus, file), `${JSON.stringify({ name, kind, valid, message, ...(expectation === undefined ? {} : { expectation }), ...(semanticExpectation === undefined ? {} : { semanticExpectation }) }, null, 2)}\n`);
+  entries.push({ file, valid, kind, ...(expectation === undefined ? {} : { expectation }) });
+}
+function commandEnvelope(type: string, payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload };
+}
+function fileReference(revision = "file-r1"): Record<string, unknown> {
+  return { workspaceId: ids.workspaceId, path: "src/index.ts", digest: FILE_SHA256, revision };
 }
 function fileName(prefix: string, type: string): string { return `${prefix}-${type.replaceAll(".", "-")}-valid`; }
 function commandPayload(type: string): Record<string, unknown> {
@@ -186,6 +193,24 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-plan-missing-turn-source", "event", eventEnvelope("plan.snapshot", (() => { const { turnId: _turnId, source: _source, ...missing } = planSnapshot(); return missing; })())],
   ["invalid-prompt-plan-target-missing-revision", "command", { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: { ...commandPayload("prompt.submit"), deliveryMode: "steer", planTarget: { planId: "plan-fixture", stepId: "step-1" } } }],
 
+  // D-037 focused schema-invalid evidence. Each message is otherwise a
+  // complete valid envelope so the labelled invariant is the sole failure.
+  ["invalid-workspace-path-traversal", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "workspace.tree.page", payload: { ...controlPayload("workspace.tree.page"), path: "src/../private" } }],
+  ["invalid-workspace-path-exact-dot", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "workspace.tree.page", payload: { ...controlPayload("workspace.tree.page"), path: "." } }],
+  ["invalid-workspace-tree-depth-17", "response", { ...base, requestId: ids.requestId, type: "workspace.tree.page.result", payload: { ...responsePayload("workspace.tree.page.result"), items: [{ path: "src/index.ts", kind: "file", depth: LIMITS.maxTreeDepth + 1 }] } }],
+  ["invalid-workspace-path-oversize", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "workspace.tree.page", payload: { ...controlPayload("workspace.tree.page"), path: "p".repeat(LIMITS.maxWorkspacePathLength + 1) } }],
+  ["invalid-workspace-tree-page-size-oversize", "control", { ...base, requestId: ids.requestId, connectionId: ids.installationId, type: "workspace.tree.page", payload: { ...controlPayload("workspace.tree.page"), pageSize: LIMITS.maxTreePageItems + 1 } }],
+  ["invalid-workspace-file-size-oversize", "response", { ...base, requestId: ids.requestId, type: "workspace.file.metadata.result", payload: { workspaceId: ids.workspaceId, file: { ...fileMetadata(), size: LIMITS.maxFileSize + 1 } } }],
+  ["invalid-workspace-file-read-oversize", "response", { ...base, requestId: ids.requestId, type: "workspace.file.read.result", payload: { workspaceId: ids.workspaceId, result: { ...fileReadResult(), content: "x".repeat(LIMITS.maxFileReadBytes + 1) } } }],
+  ["invalid-context-token-decimal-exponent", "event", eventEnvelope("context.snapshot", { ...contextSnapshot(), tokenUsage: { inputTokens: "1e6", outputTokens: "32" } })],
+  ["invalid-context-token-17-digit", "event", eventEnvelope("context.snapshot", { ...contextSnapshot(), tokenUsage: { inputTokens: "99999999999999999", outputTokens: "32" } })],
+  ["invalid-context-missing-expected-revision", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, target: { kind: "file", path: "src/index.ts", revision: "file-r1" } })],
+  ["invalid-context-missing-target", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, expectedRevision: "context-r1" })],
+  ["invalid-workspace-file-metadata-private-field", "response", { ...base, requestId: ids.requestId, type: "workspace.file.metadata.result", payload: { workspaceId: ids.workspaceId, file: { ...fileMetadata(), private: "leak" } } }],
+  ["invalid-context-target-private-field", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1", private: "leak" } })],
+  ["invalid-prompt-file-ref-private-field", "command", commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), fileRefs: [{ ...fileReference(), private: "leak" }] })],
+  ["invalid-prompt-file-ref-missing-revision", "command", commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), fileRefs: [(() => { const { revision: _revision, ...missing } = fileReference(); return missing; })()] })],
+
   ["invalid-optional-event-type", "event", { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "1", type: "futureNotice", payload: { optional: true } }],
   ["invalid-uppercase-uuid", "command", { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", leaseId: ids.leaseId, type: "session.rename", payload: { sessionId: ids.sessionId, name: "fixture" } }],
   ["invalid-missing-payload", "response", { protocol: base.protocol, messageId: ids.messageId, sentAt: base.sentAt, requestId: ids.requestId, type: "hello.accepted" }],
@@ -199,7 +224,22 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-attachment-oversized", "attachment", { attachmentId: ids.messageId, sha256: "a".repeat(64), mimeType: "image/png", bytes: 10485761, expiresAt: "2026-07-13T00:00:00.000Z" }],
   ["invalid-malformed-envelope", "event", { cursor: "1" }],
 ];
-for (const [name, kind, message] of invalid) emit(name, kind, false, message);
+for (const [name, kind, message] of invalid) {
+  const expectation = name.startsWith("invalid-workspace-") || name.startsWith("invalid-context-") || name.startsWith("invalid-prompt-file-ref-")
+    ? "expected-invalid"
+    : undefined;
+  emit(name, kind, false, message, expectation);
+}
+
+// These two D-037 messages intentionally pass the raw command schema. Their
+// invalidity depends on authoritative bridge state or a sibling-array sum,
+// so record semantic-invalid expectations rather than lying with `valid:false`.
+emit("semantic-invalid-prompt-file-ref-stale-revision", "command", true,
+  commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), fileRefs: [fileReference("file-r1")] }),
+  "semantic-invalid", { outcome: "rejected", errorCode: "file_stale", currentRevision: "file-r2" });
+emit("semantic-invalid-prompt-joint-context-cap", "command", true,
+  commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), attachmentIds: [uuid("a"), uuid("b"), uuid("c"), uuid("d")], fileRefs: [fileReference()] }),
+  "semantic-invalid", { outcome: "rejected", errorCode: "invalid_message", maxCombinedItems: LIMITS.maxAttachmentsPerPrompt });
 emit("future-optional-event", "event", true, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, summary: "safe" } });
 emit("future-required-event", "event", false, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: false } });
 emit("future-required-capability-event", "event", false, { ...base, eventId: ids.eventId, streamId: `host:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, requiredCapabilities: ["unsupported.v1"] } });

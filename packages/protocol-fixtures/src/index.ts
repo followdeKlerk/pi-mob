@@ -2,7 +2,7 @@ import manifest from "../corpus/fixtures-manifest.json" with { type: "json" };
 import { compareDecimalCursors } from "@pi-mob/protocol-schema";
 
 export const PROTOCOL_FIXTURES_VERSION = "1.0" as const;
-export interface FixtureEntry { readonly file: string; readonly valid: boolean; readonly kind: "hello" | "command" | "control" | "event" | "response" | "error" | "pairing" | "attachment" | "export"; }
+export interface FixtureEntry { readonly file: string; readonly valid: boolean; readonly kind: "hello" | "command" | "control" | "event" | "response" | "error" | "pairing" | "attachment" | "export"; readonly expectation?: "expected-invalid" | "semantic-invalid"; }
 export const fixtureManifest: readonly FixtureEntry[] = manifest as readonly FixtureEntry[];
 export function listFixtures(): readonly string[] { return fixtureManifest.map((fixture) => fixture.file).sort(); }
 

@@ -1,0 +1,71 @@
+{
+  "name": "invalid-context-token-17-digit",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "sessionId": "66666666-6666-4666-8666-666666666666",
+      "revision": "context-r1",
+      "source": "session-bridge",
+      "stale": false,
+      "capability": {
+        "state": "available",
+        "source": "session-bridge",
+        "revision": "context-r1",
+        "lastRefreshedAt": "2026-07-12T00:00:00.000Z"
+      },
+      "model": {
+        "provider": "fixture-provider",
+        "modelId": "fixture-model"
+      },
+      "thinkingLevel": "low",
+      "instructions": "Fixture workspace instructions.",
+      "pinnedFiles": [
+        {
+          "path": "src/index.ts",
+          "pinnedAt": "2026-07-12T00:00:00.000Z",
+          "ranges": [
+            {
+              "startLine": 1,
+              "endLine": 1
+            }
+          ],
+          "revision": "file-r1"
+        }
+      ],
+      "tokenUsage": {
+        "inputTokens": "99999999999999999",
+        "outputTokens": "32"
+      },
+      "compacted": false,
+      "sources": [
+        {
+          "sourceId": "source-fixture",
+          "sourceKind": "file",
+          "summary": "Pinned fixture file",
+          "stale": false,
+          "capability": {
+            "state": "available",
+            "source": "session-bridge",
+            "revision": "context-r1",
+            "lastRefreshedAt": "2026-07-12T00:00:00.000Z"
+          },
+          "revision": "file-r1",
+          "lastRefreshedAt": "2026-07-12T00:00:00.000Z"
+        }
+      ],
+      "lastRefreshedAt": "2026-07-12T00:00:00.000Z"
+    },
+    "eventId": "44444444-4444-4444-8444-444444444444",
+    "streamId": "session:66666666-6666-4666-8666-666666666666",
+    "cursor": "9007199254740992",
+    "type": "context.snapshot"
+  },
+  "expectation": "expected-invalid"
+}

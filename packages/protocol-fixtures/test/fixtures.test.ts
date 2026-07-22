@@ -47,6 +47,45 @@ function assertCursorStrings(value: unknown, source: string, key = ""): void {
   }
 }
 
+test("D-037 invalid corpus isolates schema and semantic invariants", () => {
+  const schemaInvalid = [
+    "invalid-workspace-path-traversal.json",
+    "invalid-workspace-path-exact-dot.json",
+    "invalid-workspace-tree-depth-17.json",
+    "invalid-workspace-path-oversize.json",
+    "invalid-workspace-tree-page-size-oversize.json",
+    "invalid-workspace-file-size-oversize.json",
+    "invalid-workspace-file-read-oversize.json",
+    "invalid-context-token-decimal-exponent.json",
+    "invalid-context-token-17-digit.json",
+    "invalid-context-missing-expected-revision.json",
+    "invalid-context-missing-target.json",
+    "invalid-workspace-file-metadata-private-field.json",
+    "invalid-context-target-private-field.json",
+    "invalid-prompt-file-ref-private-field.json",
+    "invalid-prompt-file-ref-missing-revision.json",
+  ];
+  for (const file of schemaInvalid) {
+    const entry = fixtureManifest.find((fixture) => fixture.file === file);
+    expect(entry).toMatchObject({ file, valid: false, expectation: "expected-invalid" });
+    const fixture = JSON.parse(readFileSync(join(corpus, file), "utf8"));
+    expect(fixture.expectation).toBe("expected-invalid");
+    expect(validateFixture(fixture), file).toBe(true);
+  }
+
+  const stale = JSON.parse(readFileSync(join(corpus, "semantic-invalid-prompt-file-ref-stale-revision.json"), "utf8"));
+  const joint = JSON.parse(readFileSync(join(corpus, "semantic-invalid-prompt-joint-context-cap.json"), "utf8"));
+  expect(stale).toMatchObject({ valid: true, expectation: "semantic-invalid", semanticExpectation: { outcome: "rejected", errorCode: "file_stale", currentRevision: "file-r2" } });
+  expect(stale.message.payload.fileRefs[0].revision).toBe("file-r1");
+  expect(joint).toMatchObject({ valid: true, expectation: "semantic-invalid", semanticExpectation: { outcome: "rejected", errorCode: "invalid_message", maxCombinedItems: 4 } });
+  expect(joint.message.payload.attachmentIds).toHaveLength(4);
+  expect(joint.message.payload.fileRefs).toHaveLength(1);
+  for (const fixture of [stale, joint]) expect(validateFixture(fixture)).toBe(true);
+  for (const file of ["semantic-invalid-prompt-file-ref-stale-revision.json", "semantic-invalid-prompt-joint-context-cap.json"]) {
+    expect(fixtureManifest.find((fixture) => fixture.file === file)).toMatchObject({ file, valid: true, expectation: "semantic-invalid" });
+  }
+});
+
 test("tool output boundary metadata remains exact and bounded", () => {
   const eventBoundary = JSON.parse(readFileSync(join(corpus, "tool-output-event-boundary.json"), "utf8"));
   const retainedBoundary = JSON.parse(readFileSync(join(corpus, "tool-output-retained-boundary.json"), "utf8"));
