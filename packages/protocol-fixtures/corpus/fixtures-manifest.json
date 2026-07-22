@@ -20,6 +20,26 @@
     "kind": "command"
   },
   {
+    "file": "command-context-exclude-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-context-pin-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-context-refresh-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-context-unpin-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
     "file": "command-controller-acquire-valid.json",
     "valid": true,
     "kind": "command"
@@ -190,6 +210,11 @@
     "kind": "control"
   },
   {
+    "file": "control-context-snapshot-request-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
     "file": "control-controller-renew-valid.json",
     "valid": true,
     "kind": "control"
@@ -230,12 +255,37 @@
     "kind": "control"
   },
   {
+    "file": "control-workspace-file-content-search-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-workspace-file-metadata-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-workspace-file-read-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-workspace-file-search-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
     "file": "control-workspace-list-valid.json",
     "valid": true,
     "kind": "control"
   },
   {
     "file": "control-workspace-search-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-workspace-tree-page-valid.json",
     "valid": true,
     "kind": "control"
   },
@@ -251,6 +301,16 @@
   },
   {
     "file": "error-command-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-context-pin-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-context-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -281,6 +341,16 @@
   },
   {
     "file": "error-export-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-file-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-file-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -326,6 +396,26 @@
   },
   {
     "file": "error-migration-required-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-path-binary-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-path-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-path-outside-workspace-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-path-oversize-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -490,7 +580,17 @@
     "kind": "event"
   },
   {
+    "file": "event-context-snapshot-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
     "file": "event-context-state-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-context-unavailable-valid.json",
     "valid": true,
     "kind": "event"
   },
@@ -730,7 +830,27 @@
     "kind": "event"
   },
   {
+    "file": "event-workspace-file-metadata-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-workspace-file-stale-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-workspace-file-unavailable-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
     "file": "event-workspace-summary-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-workspace-tree-snapshot-valid.json",
     "valid": true,
     "kind": "event"
   },
@@ -945,6 +1065,11 @@
     "kind": "response"
   },
   {
+    "file": "response-context-snapshot-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
     "file": "response-controller-renew-result-valid.json",
     "valid": true,
     "kind": "response"
@@ -995,12 +1120,37 @@
     "kind": "response"
   },
   {
+    "file": "response-workspace-file-content-search-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-workspace-file-metadata-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-workspace-file-read-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-workspace-file-search-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
     "file": "response-workspace-list-result-valid.json",
     "valid": true,
     "kind": "response"
   },
   {
     "file": "response-workspace-search-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-workspace-tree-page-result-valid.json",
     "valid": true,
     "kind": "response"
   },

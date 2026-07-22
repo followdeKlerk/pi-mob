@@ -4,7 +4,7 @@ import { COMMAND_TYPES, CONTROL_TYPES, ERROR_CODES, EVENT_TYPES, RESPONSE_TYPES 
 
 const corpus = resolve(process.env.PROTOCOL_FIXTURES_OUT_DIR ?? new URL("../corpus", import.meta.url).pathname);
 const uuid = (digit: string): string => `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
-const ids = { messageId: uuid("1"), requestId: uuid("2"), commandId: uuid("3"), eventId: uuid("4"), installationId: uuid("5"), sessionId: uuid("6"), leaseId: uuid("7") };
+const ids = { messageId: uuid("1"), requestId: uuid("2"), commandId: uuid("3"), eventId: uuid("4"), installationId: uuid("5"), sessionId: uuid("6"), leaseId: uuid("7"), workspaceId: uuid("8") };
 const base = { protocol: { major: 1, minor: 0 }, messageId: ids.messageId, sentAt: "2026-07-12T00:00:00.000Z", payload: {} };
 type Kind = "hello" | "command" | "control" | "event" | "response" | "error" | "pairing" | "attachment" | "export";
 interface Entry { readonly file: string; readonly valid: boolean; readonly kind: Kind; }
@@ -27,6 +27,10 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "session.fork") return { sessionId: ids.sessionId, entryId: "fixture-entry" };
   if (type === "session.export") return { sessionId: ids.sessionId, format: "html" };
   if (type === "prompt.submit") return { sessionId: ids.sessionId, deliveryMode: "immediate", message: "fixture", attachmentIds: [] };
+  if (type === "context.pin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", ranges: [{ startLine: 1, endLine: 1 }], revision: "file-r1" } };
+  if (type === "context.unpin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { path: "src/index.ts", revision: "file-r1" } };
+  if (type === "context.exclude") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "source", sourceId: "source-fixture", revision: "source-r1" } };
+  if (type === "context.refresh") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "all" } };
   if (type === "queue.remove") return { sessionId: ids.sessionId, queueItemId: ids.sessionId };
   if (["model.set"].includes(type)) return { sessionId: ids.sessionId, modelId: "fixture" };
   if (["thinking.set"].includes(type)) return { sessionId: ids.sessionId, level: "low" };
@@ -47,12 +51,42 @@ function capabilityStatus(state: "unavailable" | "stale"): Record<string, unknow
 function planSnapshot(): Record<string, unknown> {
   return { planId: "plan-fixture", revision: "r1", sessionId: ids.sessionId, turnId: "turn-fixture", source: "fixture", stale: false, capability: { state: "available", source: "fixture", revision: "r1" }, steps: ["pending", "running", "completed", "blocked", "skipped"].map((status, i) => ({ stepId: `step-${i}`, title: `Step ${i}`, status })) };
 }
+function fileMetadata(): Record<string, unknown> {
+  return { path: "src/index.ts", size: 12, sha256: "a".repeat(64), isBinary: false, modifiedAt: base.sentAt, revision: "file-r1", lastReadAt: base.sentAt, languageHint: "typescript" };
+}
+function fileReadResult(): Record<string, unknown> {
+  return { path: "src/index.ts", revision: "file-r1", rangeStart: 1, rangeEnd: 1, totalLines: 1, content: "fixture line", encoding: "utf-8", isTruncated: false, lastModifiedAt: base.sentAt };
+}
+function contextSnapshot(): Record<string, unknown> {
+  const available = { state: "available", source: "session-bridge", revision: "context-r1", lastRefreshedAt: base.sentAt };
+  return {
+    sessionId: ids.sessionId,
+    revision: "context-r1",
+    source: "session-bridge",
+    stale: false,
+    capability: available,
+    model: { provider: "fixture-provider", modelId: "fixture-model" },
+    thinkingLevel: "low",
+    instructions: "Fixture workspace instructions.",
+    pinnedFiles: [{ path: "src/index.ts", pinnedAt: base.sentAt, ranges: [{ startLine: 1, endLine: 1 }], revision: "file-r1" }],
+    tokenUsage: { inputTokens: "128", outputTokens: "32", cacheReadTokens: "16", cacheWriteTokens: "0", contextWindowTokens: "8192", usagePercent: 0.02 },
+    compacted: false,
+    sources: [{ sourceId: "source-fixture", sourceKind: "file", summary: "Pinned fixture file", stale: false, capability: available, revision: "file-r1", lastRefreshedAt: base.sentAt }],
+    lastRefreshedAt: base.sentAt,
+  };
+}
 
 function eventPayload(type: string): Record<string, unknown> {
   if (type === "session.summary") return { sessionId: ids.sessionId, runtimeState: "idle", queueCount: 0 };
   if (type === "recipe.unavailable") return { capability: "recipes.v1", status: capabilityStatus("unavailable") };
   if (type === "plan.snapshot") return planSnapshot();
   if (type === "plan.unavailable") return { capability: "plans.v1", status: capabilityStatus("stale") };
+  if (type === "workspace.tree.snapshot") return { workspaceId: ids.workspaceId, rootRevision: "tree-r2", changeSet: ["src/index.ts"], capability: "files.v1", status: { state: "available", source: "workspace-index", revision: "tree-r2", lastRefreshedAt: base.sentAt } };
+  if (type === "workspace.file.metadata") return { workspaceId: ids.workspaceId, file: fileMetadata(), previousRevision: "file-r0", capability: "files.v1" };
+  if (type === "workspace.file.stale") return { workspaceId: ids.workspaceId, path: "src/index.ts", previousRevision: "file-r1", currentRevision: "file-r2", modifiedAt: base.sentAt, capability: "files.v1" };
+  if (type === "workspace.file.unavailable") return { workspaceId: ids.workspaceId, capability: "files.v1", status: capabilityStatus("unavailable") };
+  if (type === "context.snapshot") return contextSnapshot();
+  if (type === "context.unavailable") return { sessionId: ids.sessionId, capability: "contexts.v1", status: capabilityStatus("unavailable") };
 
   if (type === "controller.state") return { scope: "session", sessionId: ids.sessionId, mode: "controller", leaseId: ids.leaseId, installationId: ids.installationId, expiresAt: "2026-07-12T00:00:45.000Z", reclaimableUntil: "2026-07-12T00:01:00.000Z" };
   if (type === "command.state") return { commandId: ids.commandId, commandType: "prompt.submit", state: "accepted", errorCode: null };
@@ -72,6 +106,12 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "command.current.result") return { commandId: ids.commandId, state: "accepted" };
   if (type === "controller.renew.result") return { leaseId: ids.leaseId, expiresAt: 1784089300000 };
   if (type === "session.list.result" || type === "session.history.page.result") return { items: [], snapshotRevision: "1" };
+  if (type === "workspace.tree.page.result") return { workspaceId: ids.workspaceId, rootRevision: "tree-r1", path: "src", items: [{ path: "src/index.ts", kind: "file", depth: 0, size: 12, modifiedAt: base.sentAt, sha256: "a".repeat(64), isBinary: false, languageHint: "typescript" }] };
+  if (type === "workspace.file.search.result") return { workspaceId: ids.workspaceId, rootRevision: "tree-r1", items: [{ path: "src/index.ts", matchStart: 4, matchLength: 5 }] };
+  if (type === "workspace.file.content.search.result") return { workspaceId: ids.workspaceId, rootRevision: "tree-r1", items: [{ path: "src/index.ts", line: 1, column: 7, matchStart: 6, matchLength: 7, lineText: "const fixture = true;" }], isTruncated: false };
+  if (type === "workspace.file.metadata.result") return { workspaceId: ids.workspaceId, file: fileMetadata() };
+  if (type === "workspace.file.read.result") return { workspaceId: ids.workspaceId, result: fileReadResult() };
+  if (type === "context.snapshot.result") return contextSnapshot();
   return { items: [] };
 }
 function controlPayload(type: string): Record<string, unknown> {
@@ -82,11 +122,21 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "session.list") return { query: null, sort: "attention_then_activity", pageSize: 100, pageToken: null };
   if (type === "session.history.page") return { sessionId: ids.sessionId, pageSize: 100, pageToken: null };
   if (type === "workspace.search") return { query: "fixture" };
+  if (type === "workspace.tree.page") return { workspaceId: ids.workspaceId, path: "src", rootRevision: "tree-r1", pageSize: 1, pageToken: null };
+  if (type === "workspace.file.search") return { workspaceId: ids.workspaceId, query: "index", path: "src", pageSize: 1, pageToken: null };
+  if (type === "workspace.file.content.search") return { workspaceId: ids.workspaceId, query: "fixture", path: "src", pageSize: 1, pageToken: null };
+  if (type === "workspace.file.metadata") return { workspaceId: ids.workspaceId, path: "src/index.ts", expectedRevision: "file-r1" };
+  if (type === "workspace.file.read") return { workspaceId: ids.workspaceId, path: "src/index.ts", rangeStart: 1, rangeEnd: 1, expectedRevision: "file-r1" };
+  if (type === "context.snapshot.request") return { sessionId: ids.sessionId };
   if (type === "model.list") return { sessionId: ids.sessionId };
   if (type === "command.current") return { commandId: ids.commandId };
   return {};
 }
-const hostEvents = new Set(["host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility", "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability"]);
+const hostEvents = new Set([
+  "host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility",
+  "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
+  "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
+]);
 
 rmSync(corpus, { recursive: true, force: true });
 mkdirSync(corpus, { recursive: true });
