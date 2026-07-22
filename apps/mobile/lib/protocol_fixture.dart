@@ -1185,8 +1185,9 @@ void _validateContextMutationPayload(Map<String, Object?> payload) {
   _uuidString(payload, 'sessionId');
   _revisionTokenString(payload, 'expectedRevision');
   final target = _object(payload, 'target');
-  if (!target.containsKey('kind'))
+  if (!target.containsKey('kind')) {
     throw ProtocolValidationException('payload.target.kind', 'required', null);
+  }
   switch (target['kind']) {
     case 'all':
       _closedObject(target, 'payload.target', const {'kind'});
@@ -1198,8 +1199,9 @@ void _validateContextMutationPayload(Map<String, Object?> payload) {
         'revision',
       });
       _boundedRequiredString(target, 'sourceId', 128);
-      if (target.containsKey('revision'))
+      if (target.containsKey('revision')) {
         _revisionTokenString(target, 'revision');
+      }
       return;
     case 'file':
       _closedObject(target, 'payload.target', const {
@@ -1209,20 +1211,22 @@ void _validateContextMutationPayload(Map<String, Object?> payload) {
         'revision',
       });
       final path = _string(target, 'path');
-      if (!_isWorkspacePath(path))
+      if (!_isWorkspacePath(path)) {
         throw ProtocolValidationException(
           'payload.target.path',
           'workspace-relative path',
           path,
         );
+      }
       if (target.containsKey('ranges')) {
         final ranges = _list(target, 'ranges');
-        if (ranges.length > 16)
+        if (ranges.length > 16) {
           throw ProtocolValidationException(
             'payload.target.ranges',
             '<= 16 items',
             ranges.length,
           );
+        }
         for (final item in ranges) {
           final range = _objectFrom(item, 'payload.target.ranges');
           _closedObject(range, 'payload.target.ranges', const {
@@ -1232,19 +1236,21 @@ void _validateContextMutationPayload(Map<String, Object?> payload) {
           });
           final start = _positiveInteger(range, 'startLine');
           final end = _positiveInteger(range, 'endLine');
-          if (end < start)
+          if (end < start) {
             throw ProtocolValidationException(
               'payload.target.ranges',
               'endLine >= startLine',
               range,
             );
+          }
           if (range.containsKey('label')) {
             _boundedRequiredString(range, 'label', 64);
           }
         }
       }
-      if (target.containsKey('revision'))
+      if (target.containsKey('revision')) {
         _revisionTokenString(target, 'revision');
+      }
       return;
     default:
       throw ProtocolValidationException(
