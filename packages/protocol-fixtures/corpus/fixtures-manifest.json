@@ -350,6 +350,11 @@
     "kind": "error"
   },
   {
+    "file": "error-plan-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
     "file": "error-provider-interrupted-valid.json",
     "valid": true,
     "kind": "error"
@@ -366,6 +371,11 @@
   },
   {
     "file": "error-rate-limited-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-recipe-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -406,6 +416,11 @@
   },
   {
     "file": "error-stale-controller-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-stale-plan-target-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -560,6 +575,16 @@
     "kind": "event"
   },
   {
+    "file": "event-plan-snapshot-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-plan-unavailable-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
     "file": "event-queue-snapshot-valid.json",
     "valid": true,
     "kind": "event"
@@ -576,6 +601,16 @@
   },
   {
     "file": "event-reasoning-started-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-recipe-activity-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-recipe-unavailable-valid.json",
     "valid": true,
     "kind": "event"
   },
@@ -790,7 +825,37 @@
     "kind": "control"
   },
   {
+    "file": "invalid-plan-65-steps.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-plan-missing-turn-source.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-prompt-plan-target-missing-revision.json",
+    "valid": false,
+    "kind": "command"
+  },
+  {
     "file": "invalid-queue-overflow.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-recipe-oversize.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-recipe-private-field.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-recipe-tool-provider-summary.json",
     "valid": false,
     "kind": "event"
   },
@@ -830,7 +895,42 @@
     "kind": "pairing"
   },
   {
+    "file": "plan-snapshot-all-statuses-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "plan-unavailable-stale-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "prompt-legacy-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "prompt-steer-plan-target-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
     "file": "queue-restart.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "recipe-thinking-tool-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "recipe-tool-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "recipe-unavailable-valid.json",
     "valid": true,
     "kind": "event"
   },

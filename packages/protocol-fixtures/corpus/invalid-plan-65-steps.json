@@ -1,0 +1,357 @@
+{
+  "name": "invalid-plan-65-steps",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "planId": "plan-fixture",
+      "revision": "r1",
+      "sessionId": "66666666-6666-4666-8666-666666666666",
+      "turnId": "turn-fixture",
+      "source": "fixture",
+      "stale": false,
+      "capability": {
+        "state": "available",
+        "source": "fixture",
+        "revision": "r1"
+      },
+      "steps": [
+        {
+          "stepId": "step-0",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-1",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-2",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-3",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-4",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-5",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-6",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-7",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-8",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-9",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-10",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-11",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-12",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-13",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-14",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-15",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-16",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-17",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-18",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-19",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-20",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-21",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-22",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-23",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-24",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-25",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-26",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-27",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-28",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-29",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-30",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-31",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-32",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-33",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-34",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-35",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-36",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-37",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-38",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-39",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-40",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-41",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-42",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-43",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-44",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-45",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-46",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-47",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-48",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-49",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-50",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-51",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-52",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-53",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-54",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-55",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-56",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-57",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-58",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-59",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-60",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-61",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-62",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-63",
+          "title": "Step",
+          "status": "pending"
+        },
+        {
+          "stepId": "step-64",
+          "title": "Step",
+          "status": "pending"
+        }
+      ]
+    },
+    "eventId": "44444444-4444-4444-8444-444444444444",
+    "streamId": "session:66666666-6666-4666-8666-666666666666",
+    "cursor": "9007199254740992",
+    "type": "plan.snapshot"
+  }
+}
