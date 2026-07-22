@@ -431,6 +431,8 @@ test("R6 valid fixtures cover Git/CI commands, controls, events, responses, and 
     expect(find(`error-${code.replaceAll("_", "-")}-valid.json`).valid).toBe(true);
   }
   const summary = find("event-git-summary-valid.json").message.payload as Record<string, unknown>;
+  const detached = find("git-summary-detached-valid.json").message.payload as Record<string, unknown>;
+  expect(detached).toMatchObject({ detached: true, branch: null, capability: "git-ci.v1" });
   expect(summary).toMatchObject({
     workspaceId: "88888888-8888-4888-8888-888888888888",
     revision: "git-r1",

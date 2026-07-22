@@ -8334,6 +8334,7 @@
                   "type": "boolean"
                 },
                 "failedChecks": {
+                  "$id": "pi-mob/protocol/git-failed-checks",
                   "items": {
                     "$id": "pi-mob/protocol/git-check-run",
                     "additionalProperties": false,
@@ -8606,6 +8607,7 @@
                   "type": "boolean"
                 },
                 "failedChecks": {
+                  "$id": "pi-mob/protocol/git-failed-checks",
                   "items": {
                     "$id": "pi-mob/protocol/git-check-run",
                     "additionalProperties": false,

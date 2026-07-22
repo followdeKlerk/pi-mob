@@ -297,6 +297,10 @@ emit("process-snapshot-completed-valid", "event", true, eventEnvelope("process.s
 emit("process-output-stderr-valid", "event", true, eventEnvelope("process.output", processOutput("stderr")));
 emit("process-unavailable-valid", "event", true, eventEnvelope("process.unavailable", processUnavailablePayload()));
 emit("process-error-valid", "event", true, eventEnvelope("process.error", processErrorPayload()));
+emit("git-summary-detached-valid", "event", true, {
+  ...eventEnvelope("git.summary", gitSummary({ detached: true, branch: null })),
+  streamId: `host:${ids.sessionId}`,
+});
 emit("prompt-legacy-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: commandPayload("prompt.submit") });
 emit("prompt-steer-plan-target-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: { ...commandPayload("prompt.submit"), deliveryMode: "steer", planTarget: { planId: "plan-fixture", stepId: "step-1", revision: "r1" } } });
 

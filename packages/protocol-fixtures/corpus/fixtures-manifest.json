@@ -1010,6 +1010,11 @@
     "kind": "event"
   },
   {
+    "file": "git-summary-detached-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
     "file": "hello-host-mismatch.json",
     "valid": true,
     "kind": "hello"
