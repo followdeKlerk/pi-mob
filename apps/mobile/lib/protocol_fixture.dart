@@ -1202,7 +1202,7 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
       'failed',
       'cancelled',
     });
-    _object(payload, 'timing');
+    _validateTiming(_object(payload, 'timing'), 'payload.timing');
     final allowed = <String>{
       'kind',
       'sessionId',
@@ -1229,9 +1229,32 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
         payload[unexpected.first],
       );
     }
+    if (kind == 'thinking') {
+      if (payload.containsKey('providerSummary')) {
+        _validateProviderSummary(
+          _object(payload, 'providerSummary'),
+          'payload.providerSummary',
+        );
+      }
+      if (payload.containsKey('truncation')) {
+        _validateTruncation(
+          _object(payload, 'truncation'),
+          'payload.truncation',
+        );
+      }
+    }
     if (kind == 'tool') {
       for (final field in const <String>['toolName', 'arguments', 'output']) {
         _boundedString(payload, field, field == 'toolName' ? 128 : 240);
+      }
+      if (payload.containsKey('errorInfo')) {
+        _validateErrorInfo(_object(payload, 'errorInfo'), 'payload.errorInfo');
+      }
+      if (payload.containsKey('truncation')) {
+        _validateTruncation(
+          _object(payload, 'truncation'),
+          'payload.truncation',
+        );
       }
       if (payload.containsKey('providerSummary')) {
         throw ProtocolValidationException(
@@ -1241,6 +1264,18 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
         );
       }
     }
+  }
+  if (type == 'recipe.unavailable') {
+    _closedObject(payload, 'payload', const <String>{'capability', 'status'});
+    final capability = _string(payload, 'capability');
+    if (capability != 'recipes.v1') {
+      throw ProtocolValidationException(
+        'payload.capability',
+        'recipes.v1 literal',
+        capability,
+      );
+    }
+    _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
   }
   if (type == 'plan.snapshot') {
     for (final field in const <String>[

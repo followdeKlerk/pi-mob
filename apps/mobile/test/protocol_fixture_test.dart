@@ -23,6 +23,34 @@ Map<String, Object?> _promptSubmitWithPlanTarget(
   },
 };
 
+Map<String, Object?> _recipeEvent(String type, Map<String, Object?> payload) =>
+    <String, Object?>{
+      'protocol': const <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'eventId': '22222222-2222-4222-8222-222222222222',
+      'streamId': 'session:33333333-3333-4333-8333-333333333333',
+      'cursor': '1',
+      'type': type,
+      'sentAt': '2026-07-15T04:20:00.000Z',
+      'payload': payload,
+    };
+
+Map<String, Object?> _recipeActivity(String kind) => <String, Object?>{
+  'kind': kind,
+  'sessionId': '33333333-3333-4333-8333-333333333333',
+  'turnId': 'turn-1',
+  'activityId': 'activity-1',
+  'ordinal': 0,
+  'status': 'running',
+  'timing': <String, Object?>{'startedAt': '2026-07-15T04:20:00.000Z'},
+  'title': 'Working',
+  if (kind == 'tool') ...<String, Object?>{
+    'toolName': 'read',
+    'arguments': '{}',
+    'output': 'ok',
+  },
+};
+
 void main() {
   test('shared corpus fixture labels match Dart validation', () async {
     final manifestRaw = await TestAssetLoader.loadString(
@@ -163,6 +191,145 @@ void main() {
         ),
         throwsA(isA<ProtocolValidationException>()),
         reason: invalid.key,
+      );
+    }
+  });
+
+  test('recipe thinking activity accepts validated nested envelopes', () {
+    final payload = _recipeActivity('thinking')
+      ..['providerSummary'] = <String, Object?>{
+        'kind': 'provider_summary',
+        'provider': 'anthropic',
+        'model': 'claude',
+        'summary': 'Checked the requested files.',
+        'truncation': <String, Object?>{
+          'retainedBytes': 28,
+          'totalBytes': 28,
+          'isTruncated': false,
+        },
+      }
+      ..['truncation'] = <String, Object?>{
+        'retainedBytes': 28,
+        'totalBytes': 40,
+        'isTruncated': true,
+        'digest': List<String>.filled(64, 'a').join(),
+      };
+
+    expect(
+      validateProtocolFixture(
+        'event',
+        _recipeEvent('recipe.activity', payload),
+      ),
+      isA<ProtocolEvent>(),
+    );
+  });
+
+  test('recipe activity validates its closed timing envelope', () {
+    final payload = _recipeActivity('thinking')
+      ..['timing'] = <String, Object?>{
+        'startedAt': '2026-07-15T04:20:00.000Z',
+        'private': true,
+      };
+
+    expect(
+      () => validateProtocolFixture(
+        'event',
+        _recipeEvent('recipe.activity', payload),
+      ),
+      throwsA(isA<ProtocolValidationException>()),
+    );
+  });
+
+  test('recipe thinking activity validates summary and truncation', () {
+    final invalidNestedValues = <String, Object?>{
+      'providerSummary': <String, Object?>{
+        'kind': 'raw_thinking',
+        'provider': 'anthropic',
+        'summary': 'private',
+      },
+      'truncation': <String, Object?>{
+        'retainedBytes': -1,
+        'totalBytes': 1,
+        'isTruncated': true,
+      },
+    };
+    for (final invalid in invalidNestedValues.entries) {
+      final payload = _recipeActivity('thinking')
+        ..[invalid.key] = invalid.value;
+      expect(
+        () => validateProtocolFixture(
+          'event',
+          _recipeEvent('recipe.activity', payload),
+        ),
+        throwsA(isA<ProtocolValidationException>()),
+        reason: invalid.key,
+      );
+    }
+  });
+
+  test('recipe tool activity validates error, truncation, and arm closure', () {
+    final invalidNestedValues = <String, Object?>{
+      'errorInfo': <String, Object?>{
+        'code': 'private_error',
+        'message': 'failed',
+        'retryable': false,
+      },
+      'truncation': <String, Object?>{
+        'retainedBytes': 1,
+        'totalBytes': 1,
+        'isTruncated': false,
+        'digest': List<String>.filled(64, 'A').join(),
+      },
+      'providerSummary': <String, Object?>{
+        'kind': 'provider_summary',
+        'provider': 'anthropic',
+        'summary': 'not valid on tools',
+      },
+    };
+    for (final invalid in invalidNestedValues.entries) {
+      final payload = _recipeActivity('tool')..[invalid.key] = invalid.value;
+      expect(
+        () => validateProtocolFixture(
+          'event',
+          _recipeEvent('recipe.activity', payload),
+        ),
+        throwsA(isA<ProtocolValidationException>()),
+        reason: invalid.key,
+      );
+    }
+  });
+
+  test('recipe unavailable requires its capability and closed status', () {
+    final valid = <String, Object?>{
+      'capability': 'recipes.v1',
+      'status': <String, Object?>{
+        'state': 'unavailable',
+        'reason': 'disabled',
+        'remediation': 'enable recipes',
+      },
+    };
+    expect(
+      validateProtocolFixture(
+        'event',
+        _recipeEvent('recipe.unavailable', valid),
+      ),
+      isA<ProtocolEvent>(),
+    );
+
+    for (final invalid in <Map<String, Object?>>[
+      <String, Object?>{...valid, 'capability': 'plans.v1'},
+      <String, Object?>{
+        ...valid,
+        'status': <String, Object?>{'state': 'unavailable'},
+      },
+      <String, Object?>{...valid, 'private': true},
+    ]) {
+      expect(
+        () => validateProtocolFixture(
+          'event',
+          _recipeEvent('recipe.unavailable', invalid),
+        ),
+        throwsA(isA<ProtocolValidationException>()),
       );
     }
   });
