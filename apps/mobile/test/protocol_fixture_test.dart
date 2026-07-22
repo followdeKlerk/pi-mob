@@ -41,6 +41,26 @@ void main() {
     }
   });
 
+  test('shared type dispatch follows envelope identity', () async {
+    for (final fixtureName in const <String>[
+      'control-workspace-file-metadata-valid.json',
+      'event-workspace-file-metadata-valid.json',
+    ]) {
+      final raw = await TestAssetLoader.loadString(
+        'packages/protocol-fixtures/corpus/$fixtureName',
+      );
+      final fixture = Map<String, Object?>.from(jsonDecode(raw) as Map);
+      final message = Map<String, Object?>.from(fixture['message'] as Map);
+      final decoded = ProtocolEnvelope.fromJson(message);
+      expect(
+        decoded,
+        fixtureName.startsWith('control-')
+            ? isA<ProtocolControl>()
+            : isA<ProtocolEvent>(),
+      );
+    }
+  });
+
   test('controller lease renew responses are recognized', () {
     final decoded = validateProtocolFixture('response', <String, Object?>{
       'protocol': const {'major': 1, 'minor': 0},

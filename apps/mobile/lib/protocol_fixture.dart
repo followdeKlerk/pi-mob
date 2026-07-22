@@ -51,6 +51,17 @@ sealed class ProtocolEnvelope {
     final type = _string(json, 'type');
     if (type == 'hello') return ProtocolHello._fromEnvelope(json);
     if (type == 'error') return ProtocolError._fromEnvelope(json);
+    // Envelope identity is authoritative when a type is shared by families
+    // (for example workspace.file.metadata). Resolve it before consulting the
+    // type registries so an event cannot be mistaken for a control request.
+    if (json.containsKey('eventId') ||
+        json.containsKey('streamId') ||
+        json.containsKey('cursor')) {
+      return ProtocolEvent._fromEnvelope(json);
+    }
+    if (json.containsKey('commandId') && _commandTypes.contains(type)) {
+      return ProtocolCommand._fromEnvelope(json);
+    }
     if (_controlTypes.contains(type)) {
       return ProtocolControl._fromEnvelope(json);
     }
@@ -60,7 +71,6 @@ sealed class ProtocolEnvelope {
     if (json.containsKey('commandId')) {
       return ProtocolCommand._fromEnvelope(json);
     }
-    if (json.containsKey('eventId')) return ProtocolEvent._fromEnvelope(json);
     return ProtocolResponse._fromEnvelope(json);
   }
 }
@@ -1070,6 +1080,12 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
         );
       }
     }
+    if (payload['planTarget'] != null) {
+      final target = _object(payload, 'planTarget');
+      for (final field in const <String>['planId', 'stepId', 'revision']) {
+        _boundedString(target, field, 128);
+      }
+    }
   }
   if (type == 'queue.remove') _uuidString(payload, 'queueItemId');
   if (type == 'model.set') _string(payload, 'modelId');
@@ -1167,6 +1183,107 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
       );
     }
   }
+  if (type == 'recipe.activity') {
+    final kind = _oneOf(payload, 'kind', const <String>{'thinking', 'tool'});
+    _uuidString(payload, 'sessionId');
+    for (final field in const <String>['turnId', 'activityId', 'title']) {
+      _boundedString(payload, field, 128);
+    }
+    _nonNegativeInteger(payload, 'ordinal');
+    _oneOf(payload, 'status', const <String>{
+      'pending',
+      'running',
+      'completed',
+      'failed',
+      'cancelled',
+    });
+    _object(payload, 'timing');
+    final allowed = <String>{
+      'kind',
+      'sessionId',
+      'turnId',
+      'activityId',
+      'ordinal',
+      'status',
+      'timing',
+      'title',
+      'truncation',
+      if (kind == 'thinking') 'providerSummary',
+      if (kind == 'tool') ...<String>{
+        'toolName',
+        'arguments',
+        'output',
+        'errorInfo',
+      },
+    };
+    final unexpected = payload.keys.where((key) => !allowed.contains(key));
+    if (unexpected.isNotEmpty) {
+      throw ProtocolValidationException(
+        'payload.${unexpected.first}',
+        'declared recipe activity field',
+        payload[unexpected.first],
+      );
+    }
+    if (kind == 'tool') {
+      for (final field in const <String>['toolName', 'arguments', 'output']) {
+        _boundedString(payload, field, field == 'toolName' ? 128 : 240);
+      }
+      if (payload.containsKey('providerSummary')) {
+        throw ProtocolValidationException(
+          'payload.providerSummary',
+          'absent for tool activity',
+          payload['providerSummary'],
+        );
+      }
+    }
+  }
+  if (type == 'plan.snapshot') {
+    for (final field in const <String>[
+      'planId',
+      'revision',
+      'turnId',
+      'source',
+    ]) {
+      _boundedString(payload, field, 128);
+    }
+    _uuidString(payload, 'sessionId');
+    _boolean(payload, 'stale');
+    _object(payload, 'capability');
+    final steps = _list(payload, 'steps');
+    if (steps.length > 64) {
+      throw ProtocolValidationException(
+        'payload.steps',
+        '<= 64 items',
+        steps.length,
+      );
+    }
+    for (final item in steps) {
+      if (item is! Map) {
+        throw ProtocolValidationException(
+          'payload.steps',
+          'step objects',
+          item,
+        );
+      }
+      final step = Map<String, Object?>.from(item);
+      _boundedString(step, 'stepId', 128);
+      _boundedString(step, 'title', 128);
+      _oneOf(step, 'status', const <String>{
+        'pending',
+        'running',
+        'completed',
+        'blocked',
+        'skipped',
+      });
+    }
+  }
+  if (type == 'workspace.file.metadata') {
+    _uuidString(payload, 'workspaceId');
+    _object(payload, 'file');
+  }
+  if (type == 'context.snapshot') {
+    _uuidString(payload, 'sessionId');
+  }
 }
 
 void _validateResponsePayload(String type, Map<String, Object?> payload) {
@@ -1262,6 +1379,13 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
       }.contains(type) &&
       payload['nextPageToken'] != null) {
     _string(payload, 'nextPageToken');
+  }
+}
+
+void _boundedString(Map<String, Object?> object, String key, int maximum) {
+  final value = _string(object, key);
+  if (value.length > maximum) {
+    throw ProtocolValidationException(key, '<= $maximum characters', value);
   }
 }
 
