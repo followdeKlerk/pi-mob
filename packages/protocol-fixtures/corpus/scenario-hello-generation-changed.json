@@ -17,7 +17,11 @@
       "bridgeVersion": "1",
       "piVersion": "1",
       "serverTime": "2026-07-12T00:00:00.000Z",
-      "capabilities": [],
+      "capabilities": [
+        "streams.v1",
+        "commands.v1",
+        "runtime.processes.v1"
+      ],
       "limits": {
         "maxJsonBytes": 1048576,
         "maxAttachmentBytes": 10485760,

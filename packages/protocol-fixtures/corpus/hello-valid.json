@@ -18,6 +18,7 @@
         "commands.v1"
       ],
       "optionalCapabilities": [
+        "runtime.processes.v1",
         "future.optional"
       ]
     },

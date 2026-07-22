@@ -15,6 +15,17 @@ const FILE_MATCH = "fixture";
 const FILE_MATCH_START = FILE_LINE_TEXT.indexOf(FILE_MATCH);
 const uuid = (digit: string): string => `${digit.repeat(8)}-${digit.repeat(4)}-4${digit.repeat(3)}-8${digit.repeat(3)}-${digit.repeat(12)}`;
 const ids = { messageId: uuid("1"), requestId: uuid("2"), commandId: uuid("3"), eventId: uuid("4"), installationId: uuid("5"), sessionId: uuid("6"), leaseId: uuid("7"), workspaceId: uuid("8") };
+const processFixture = {
+  processId: "process-fixture",
+  revision: "process-r1",
+  command: "bun test packages/protocol-fixtures",
+  startedAt: "2026-07-12T00:00:01.000Z",
+  turnId: "turn-fixture",
+  toolCallId: "tool-fixture",
+  pid: 4123,
+  cwd: "packages/protocol-fixtures",
+  ports: [{ port: 4173, protocol: "tcp" }, { port: 5353, protocol: "udp" }],
+};
 const base = { protocol: { major: 1, minor: 0 }, messageId: ids.messageId, sentAt: "2026-07-12T00:00:00.000Z", payload: {} };
 type Kind = "hello" | "command" | "control" | "event" | "response" | "error" | "pairing" | "attachment" | "export";
 type FixtureExpectation = "expected-invalid" | "semantic-invalid";
@@ -32,6 +43,41 @@ function fileReference(revision = "file-r1"): Record<string, unknown> {
   return { workspaceId: ids.workspaceId, path: "src/index.ts", digest: FILE_SHA256, revision };
 }
 function fileName(prefix: string, type: string): string { return `${prefix}-${type.replaceAll(".", "-")}-valid`; }
+function processSnapshot(status: "running" | "completed" | "failed" | "stopped" = "running", overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  return {
+    sessionId: ids.sessionId,
+    ...processFixture,
+    status,
+    capability: "runtime.processes.v1",
+    stale: false,
+    supportedActions: status === "running" ? ["stop"] : ["restart", "rerun"],
+    ...(status === "running" ? {} : { finishedAt: "2026-07-12T00:00:03.000Z", durationMs: 2000, exitCode: status === "failed" ? 1 : 0 }),
+    ...overrides,
+  };
+}
+function processOutput(stream: "stdout" | "stderr" = "stdout", overrides: Record<string, unknown> = {}): Record<string, unknown> {
+  const content = stream === "stdout" ? "ok: process completed\n" : "warning: fixture stderr\n";
+  return {
+    sessionId: ids.sessionId,
+    processId: processFixture.processId,
+    revision: processFixture.revision,
+    stream,
+    content,
+    truncation: { retainedBytes: Buffer.byteLength(content, "utf8"), totalBytes: Buffer.byteLength(content, "utf8"), isTruncated: false },
+    cursor: "9007199254740992",
+    pageToken: "page-2",
+    ...overrides,
+  };
+}
+function processCommandPayload(): Record<string, unknown> {
+  return { sessionId: ids.sessionId, processId: processFixture.processId, expectedRevision: processFixture.revision, lease: "session" };
+}
+function processUnavailablePayload(): Record<string, unknown> {
+  return { sessionId: ids.sessionId, capability: "runtime.processes.v1", status: { state: "unavailable", reason: "Process supervision is not advertised by this host.", remediation: "Upgrade the host bridge or refresh capabilities.", source: "runtime-bridge", revision: "process-r1" } };
+}
+function processErrorPayload(): Record<string, unknown> {
+  return { sessionId: ids.sessionId, processId: processFixture.processId, revision: processFixture.revision, error: { code: "process_failed", message: "The supervised process exited unsuccessfully.", retryable: false, recommendedDelayMs: null } };
+}
 function commandPayload(type: string): Record<string, unknown> {
   if (type === "controller.acquire" || type === "controller.takeover" || type === "controller.release") return { scope: "session", sessionId: ids.sessionId };
   if (type === "host.display_name.set") return { displayName: "fixture host" };
@@ -44,6 +90,7 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "session.fork") return { sessionId: ids.sessionId, entryId: "fixture-entry" };
   if (type === "session.export") return { sessionId: ids.sessionId, format: "html" };
   if (type === "prompt.submit") return { sessionId: ids.sessionId, deliveryMode: "immediate", message: "fixture", attachmentIds: [] };
+  if (["process.stop", "process.restart", "process.rerun"].includes(type)) return processCommandPayload();
   if (type === "context.pin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", ranges: [FILE_RANGE], revision: "file-r1" } };
   if (type === "context.unpin") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1" } };
   if (type === "context.exclude") return { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "source", sourceId: "source-fixture", revision: "file-r1" } };
@@ -104,6 +151,10 @@ function eventPayload(type: string): Record<string, unknown> {
   if (type === "workspace.file.unavailable") return { workspaceId: ids.workspaceId, capability: "files.v1", status: capabilityStatus("unavailable") };
   if (type === "context.snapshot") return contextSnapshot();
   if (type === "context.unavailable") return { sessionId: ids.sessionId, capability: "contexts.v1", status: capabilityStatus("unavailable") };
+  if (type === "process.snapshot") return processSnapshot();
+  if (type === "process.output") return processOutput();
+  if (type === "process.unavailable") return processUnavailablePayload();
+  if (type === "process.error") return processErrorPayload();
 
   if (type === "controller.state") return { scope: "session", sessionId: ids.sessionId, mode: "controller", leaseId: ids.leaseId, installationId: ids.installationId, expiresAt: "2026-07-12T00:00:45.000Z", reclaimableUntil: "2026-07-12T00:01:00.000Z" };
   if (type === "command.state") return { commandId: ids.commandId, commandType: "prompt.submit", state: "accepted", errorCode: null };
@@ -113,7 +164,7 @@ function eventPayload(type: string): Record<string, unknown> {
   return { sessionId: ids.sessionId };
 }
 function responsePayload(type: string): Record<string, unknown> {
-  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: [], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
+  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
   if (type === "subscription.accepted") return { streams: [{ streamId: `host:${ids.sessionId}`, mode: "replay" }] };
   if (type === "stream.sync.complete") return { streamId: `session:${ids.sessionId}`, currentCursor: "1", mode: "replay" };
   if (type === "stream.snapshot.begin") return { snapshotId: ids.sessionId, streamId: `session:${ids.sessionId}`, baselineCursor: "1" };
@@ -129,6 +180,8 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "workspace.file.metadata.result") return { workspaceId: ids.workspaceId, file: fileMetadata() };
   if (type === "workspace.file.read.result") return { workspaceId: ids.workspaceId, result: fileReadResult() };
   if (type === "context.snapshot.result") return contextSnapshot();
+  if (type === "process.snapshot.result") return { items: [processSnapshot()] };
+  if (type === "process.output.page.result") return processOutput();
   return { items: [] };
 }
 function controlPayload(type: string): Record<string, unknown> {
@@ -145,6 +198,8 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "workspace.file.metadata") return { workspaceId: ids.workspaceId, path: "src/index.ts", expectedRevision: "file-r1" };
   if (type === "workspace.file.read") return { workspaceId: ids.workspaceId, path: "src/index.ts", rangeStart: FILE_RANGE.startLine, rangeEnd: FILE_RANGE.endLine, expectedRevision: "file-r1" };
   if (type === "context.snapshot.request") return { sessionId: ids.sessionId };
+  if (type === "process.snapshot.request") return { sessionId: ids.sessionId };
+  if (type === "process.output.page") return { sessionId: ids.sessionId, processId: processFixture.processId, revision: processFixture.revision, stream: "stdout", cursor: "9007199254740992", pageToken: "page-2" };
   if (type === "model.list") return { sessionId: ids.sessionId };
   if (type === "command.current") return { commandId: ids.commandId };
   return {};
@@ -157,7 +212,7 @@ const hostEvents = new Set([
 
 rmSync(corpus, { recursive: true, force: true });
 mkdirSync(corpus, { recursive: true });
-emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["future.optional"] } });
+emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "future.optional"] } });
 for (const type of COMMAND_TYPES) emit(fileName("command", type), "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload: commandPayload(type) });
 for (const type of CONTROL_TYPES) emit(fileName("control", type), "control", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, type, payload: controlPayload(type) });
 for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: type === "recipe.activity" ? recipeActivity("thinking") : type === "recipe.unavailable" ? { capability: "recipes.v1", status: capabilityStatus("unavailable") } : type === "plan.snapshot" ? planSnapshot() : type === "plan.unavailable" ? { capability: "plans.v1", status: capabilityStatus("stale") } : eventPayload(type) });
@@ -169,6 +224,10 @@ emit("recipe-tool-valid", "event", true, eventEnvelope("recipe.activity", recipe
 emit("recipe-unavailable-valid", "event", true, eventEnvelope("recipe.unavailable", { capability: "recipes.v1", status: capabilityStatus("unavailable") }));
 emit("plan-snapshot-all-statuses-valid", "event", true, eventEnvelope("plan.snapshot", planSnapshot()));
 emit("plan-unavailable-stale-valid", "event", true, eventEnvelope("plan.unavailable", { capability: "plans.v1", status: capabilityStatus("stale") }));
+emit("process-snapshot-completed-valid", "event", true, eventEnvelope("process.snapshot", processSnapshot("completed")));
+emit("process-output-stderr-valid", "event", true, eventEnvelope("process.output", processOutput("stderr")));
+emit("process-unavailable-valid", "event", true, eventEnvelope("process.unavailable", processUnavailablePayload()));
+emit("process-error-valid", "event", true, eventEnvelope("process.error", processErrorPayload()));
 emit("prompt-legacy-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: commandPayload("prompt.submit") });
 emit("prompt-steer-plan-target-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: { ...commandPayload("prompt.submit"), deliveryMode: "steer", planTarget: { planId: "plan-fixture", stepId: "step-1", revision: "r1" } } });
 
@@ -192,6 +251,21 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-plan-65-steps", "event", eventEnvelope("plan.snapshot", { ...planSnapshot(), steps: Array.from({ length: 65 }, (_, i) => ({ stepId: `step-${i}`, title: "Step", status: "pending" })) })],
   ["invalid-plan-missing-turn-source", "event", eventEnvelope("plan.snapshot", (() => { const { turnId: _turnId, source: _source, ...missing } = planSnapshot(); return missing; })())],
   ["invalid-prompt-plan-target-missing-revision", "command", { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: { ...commandPayload("prompt.submit"), deliveryMode: "steer", planTarget: { planId: "plan-fixture", stepId: "step-1" } } }],
+
+  // R5 focused schema-invalid evidence. Each fixture changes exactly one
+  // process invariant while retaining a complete, otherwise-valid payload.
+  ["invalid-process-private-field", "event", eventEnvelope("process.snapshot", { ...processSnapshot(), private: "leak" })],
+  ["invalid-process-stdout-oversize", "event", eventEnvelope("process.output", processOutput("stdout", { content: "x".repeat(LIMITS.maxProcessOutputLength + 1) }))],
+  ["invalid-process-stderr-oversize", "event", eventEnvelope("process.output", processOutput("stderr", { content: "x".repeat(LIMITS.maxProcessOutputLength + 1) }))],
+  ["invalid-process-ports-33", "event", eventEnvelope("process.snapshot", processSnapshot("running", { ports: Array.from({ length: LIMITS.maxProcessPorts + 1 }, (_, index) => ({ port: 4000 + index, protocol: "tcp" })) }))],
+  ["invalid-process-missing-session", "event", eventEnvelope("process.output", (() => { const { sessionId: _sessionId, ...missing } = processOutput(); return missing; })())],
+  ["invalid-process-missing-process", "event", eventEnvelope("process.output", (() => { const { processId: _processId, ...missing } = processOutput(); return missing; })())],
+  ["invalid-process-missing-revision", "event", eventEnvelope("process.output", (() => { const { revision: _revision, ...missing } = processOutput(); return missing; })())],
+  ["invalid-process-pid", "event", eventEnvelope("process.snapshot", { ...processSnapshot(), pid: 0 })],
+  ["invalid-process-status", "event", eventEnvelope("process.snapshot", { ...processSnapshot(), status: "paused" })],
+  ["invalid-process-action", "event", eventEnvelope("process.snapshot", { ...processSnapshot(), supportedActions: ["kill"] })],
+  ["invalid-process-stream", "event", eventEnvelope("process.output", { ...processOutput(), stream: "combined" })],
+  ["invalid-process-host-stream", "event", { ...eventEnvelope("process.snapshot", processSnapshot()), streamId: `host:${ids.sessionId}` }],
 
   // D-037 focused schema-invalid evidence. Each message is otherwise a
   // complete valid envelope so the labelled invariant is the sole failure.
@@ -226,7 +300,7 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-malformed-envelope", "event", { cursor: "1" }],
 ];
 for (const [name, kind, message] of invalid) {
-  const expectation = name.startsWith("invalid-workspace-") || name.startsWith("invalid-context-") || name.startsWith("invalid-prompt-file-ref-")
+  const expectation = name.startsWith("invalid-workspace-") || name.startsWith("invalid-context-") || name.startsWith("invalid-prompt-file-ref-") || name.startsWith("invalid-process-")
     ? "expected-invalid"
     : undefined;
   emit(name, kind, false, message, expectation);
@@ -241,6 +315,15 @@ emit("semantic-invalid-prompt-file-ref-stale-revision", "command", true,
 emit("semantic-invalid-prompt-joint-context-cap", "command", true,
   commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), attachmentIds: [uuid("a"), uuid("b"), uuid("c"), uuid("d")], fileRefs: [fileReference()] }),
   "semantic-invalid", { outcome: "rejected", errorCode: "invalid_message", maxCombinedItems: LIMITS.maxAttachmentsPerPrompt });
+emit("semantic-invalid-process-stop-unsupported", "command", true,
+  commandEnvelope("process.stop", processCommandPayload()),
+  "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", supportedActions: ["restart", "rerun"] });
+emit("semantic-invalid-process-stale-revision", "command", true,
+  commandEnvelope("process.stop", { ...processCommandPayload(), expectedRevision: "process-r1" }),
+  "semantic-invalid", { outcome: "rejected", errorCode: "process_stale", currentRevision: "process-r2" });
+emit("semantic-invalid-process-joint-action-state", "command", true,
+  commandEnvelope("process.restart", processCommandPayload()),
+  "semantic-invalid", { outcome: "rejected", errorCode: "invalid_state", status: "running", supportedActions: ["stop", "restart"] });
 emit("future-optional-event", "event", true, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, summary: "safe" } });
 emit("future-required-event", "event", false, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: false } });
 emit("future-required-capability-event", "event", false, { ...base, eventId: ids.eventId, streamId: `host:${ids.sessionId}`, cursor: "9007199254740992", type: "future.event", payload: { optional: true, requiredCapabilities: ["unsupported.v1"] } });

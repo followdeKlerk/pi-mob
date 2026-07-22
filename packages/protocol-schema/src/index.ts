@@ -102,6 +102,13 @@ export const LIMITS = {
   maxContextSourceKindLength: 32,
   maxContextSourceIdLength: 128,
   maxContextTokenUsageDigits: 16,
+  // R5 — supervised process/runtime supervision bounds.
+  maxProcessIdLength: 128,
+  maxProcessCommandLength: 1024,
+  maxProcessCwdLength: 1024,
+  maxProcessOutputLength: 262144,
+  maxProcessPorts: 32,
+  maxProcessSnapshotItems: 100,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -115,6 +122,8 @@ export const COMMAND_TYPES = [
   // F0 — additive context-inspector (R4) mutations. These are durable,
   // session-scoped commands; they are intentionally not controls/results.
   "context.pin", "context.unpin", "context.exclude", "context.refresh",
+  // R5 — durable, revision-bound process actions.
+  "process.stop", "process.restart", "process.rerun",
 ] as const;
 
 export const EVENT_TYPES = [
@@ -138,6 +147,7 @@ export const EVENT_TYPES = [
   // event is a closed, bounded payload; the unavailable surface carries
   // the standard CapabilityStatus envelope.
   "context.snapshot", "context.unavailable",
+  "process.snapshot", "process.output", "process.unavailable", "process.error",
 ] as const;
 
 export const RESPONSE_TYPES = [
@@ -153,6 +163,7 @@ export const RESPONSE_TYPES = [
   // is the only read response; durable mutations report through command
   // receipts/state and the resulting context.snapshot event.
   "context.snapshot.result",
+  "process.snapshot.result", "process.output.page.result",
 ] as const;
 export const SUPPORTED_CAPABILITIES = [
   "streams.v1", "commands.v1", "controller_leases.v1", "attachments.v1", "extension_dialogs.v1", "notifications.v1",
@@ -162,7 +173,7 @@ export const SUPPORTED_CAPABILITIES = [
   // mobile clients map `unavailable` directly to a truthful "Files
   // unavailable" / "Context inspector unavailable" state, never to an
   // empty/fabricated tree/snapshot.
-  "files.v1", "contexts.v1",
+  "files.v1", "contexts.v1", "runtime.processes.v1",
 ] as const;
 export const CONTROL_TYPES = [
   "subscription.set", "cursor.ack", "controller.renew", "host.snapshot.request", "session.snapshot.request",
@@ -170,7 +181,7 @@ export const CONTROL_TYPES = [
   // R3 controls are repeatable, nonjournaled reads. R4 exposes only the
   // repeatable snapshot read; context mutations are durable commands above.
   "workspace.tree.page", "workspace.file.search", "workspace.file.content.search", "workspace.file.metadata", "workspace.file.read",
-  "context.snapshot.request",
+  "context.snapshot.request", "process.snapshot.request", "process.output.page",
 ] as const;
 
 export const ERROR_CODES = [
@@ -198,6 +209,7 @@ export const ERROR_CODES = [
   "path_not_found", "path_outside_workspace", "path_binary", "path_oversize",
   "file_stale", "file_unavailable",
   "context_pin_failed", "context_unavailable",
+  "process_unavailable", "process_not_found", "process_stale", "process_failed",
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -209,7 +221,7 @@ export interface CommandMetadata {
   readonly type: CommandType;
   readonly scope: "host" | "session" | "host-or-session";
   readonly requiresLeaseId: boolean;
-  readonly requiredCapability: "commands.v1";
+  readonly requiredCapability: "commands.v1" | "runtime.processes.v1";
   readonly acceptedStates: readonly string[];
   readonly semanticHashFields: readonly ["type", "payload"];
   readonly idempotency: "command-id-semantic-payload-sha256";
@@ -228,18 +240,27 @@ const leaseFreeCommands = new Set<CommandType>([
   "notification.device.register",
   "notification.device.unregister",
 ]);
+// R5 — process.* commands are gated on `runtime.processes.v1` (the bridge
+// advertises the surface only when the host genuinely implements the
+// bounded process supervision; absence maps to the truthful
+// `process_unavailable` posture). The stableErrors list is the additive
+// process-specific subset of ERROR_CODES so clients can render a typed
+// failure with the same vocabulary the `process.error` event uses.
+const processCommands = new Set<CommandType>(["process.stop", "process.restart", "process.rerun"]);
+const processStableErrors = ["process_unavailable", "process_not_found", "process_stale", "process_failed"] as const;
+const baseStableErrors = ["invalid_message", "unsupported_capability", "invalid_state", "idempotency_conflict"] as const;
 
 export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map((type) => ({
   type,
   scope: controllerCommands.has(type) ? "host-or-session" : hostCommands.has(type) ? "host" : "session",
   requiresLeaseId: !leaseFreeCommands.has(type),
-  requiredCapability: "commands.v1",
+  requiredCapability: processCommands.has(type) ? "runtime.processes.v1" : "commands.v1",
   acceptedStates: ["protocol-valid", "capability-supported", "state-eligible"],
   semanticHashFields: ["type", "payload"],
   idempotency: "command-id-semantic-payload-sha256",
   recovery: "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
   journaledEffects: ["command.state"],
-  stableErrors: ["invalid_message", "unsupported_capability", "invalid_state", "idempotency_conflict"],
+  stableErrors: processCommands.has(type) ? [...baseStableErrors, ...processStableErrors] : [...baseStableErrors],
 }));
 
 const hostEventTypes = new Set<EventType>([
@@ -951,6 +972,41 @@ export const StreamSchema = Type.Object({
 const WithOptionalRequest = { ...EnvelopeFields, requestId: Type.Optional(Uuid), connectionId: Type.Optional(Uuid) };
 const ClientEnvelope = { ...EnvelopeFields, requestId: Uuid, connectionId: Uuid };
 const SessionId = Uuid;
+const R5ProcessId = Type.String({ minLength: 1, maxLength: LIMITS.maxProcessIdLength });
+const R5ProcessStatus = Type.Union([Type.Literal("running"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("stopped")]);
+const R5ProcessPort = Type.Object({ port: Type.Integer({ minimum: 1, maximum: 65535 }), protocol: Type.Union([Type.Literal("tcp"), Type.Literal("udp")]) }, { additionalProperties: false });
+const R5SupportedActions = Type.Array(Type.Union([Type.Literal("stop"), Type.Literal("restart"), Type.Literal("rerun")]), { maxItems: 3, uniqueItems: true });
+// R5 — `cwd` reuses the canonical R3 `WorkspacePathSchema` (root-relative,
+// no `..`/`.` segments, no backslashes, no double slashes, no leading slash,
+// bounded 1024 UTF-16 code units). The 1024 cap is identical to
+// `LIMITS.maxProcessCwdLength`, so the existing bound stays canonical while
+// the precise segment check (`foo/.` and `foo/..` and `foo/./bar` rejected)
+// is enforced everywhere — replacing the broken custom regex that allowed
+// `foo/./bar` and `foo//bar` to slip through.
+export const ProcessSnapshotSchema = Type.Object({
+  sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, status: R5ProcessStatus,
+  command: Type.String({ minLength: 1, maxLength: LIMITS.maxProcessCommandLength }), startedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+  capability: Type.Literal("runtime.processes.v1"), stale: Type.Boolean(),
+  turnId: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxTurnIdLength })), toolCallId: Type.Optional(Type.String({ minLength: 1, maxLength: LIMITS.maxTurnIdLength })),
+  pid: Type.Optional(Type.Integer({ minimum: 1 })), cwd: Type.Optional(WorkspacePathSchema), finishedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+  durationMs: Type.Optional(Type.Integer({ minimum: 0 })), exitCode: Type.Optional(Type.Integer()), signal: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  ports: Type.Optional(Type.Array(R5ProcessPort, { maxItems: LIMITS.maxProcessPorts })), supportedActions: R5SupportedActions,
+}, { additionalProperties: false, $id: "pi-mob/protocol/process-snapshot" });
+// R5 — `ProcessOutputSchema` is bounded, revision-bound, paged, and closed
+// for both `stdout` and `stderr`. `sessionId` is REQUIRED so every output
+// record is attributable to the owning session the same way the snapshot
+// event is — the bridge MUST thread the snapshot's sessionId into every
+// paged output record.
+const R5OutputFields = { sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]), content: Type.String({ maxLength: LIMITS.maxProcessOutputLength }), truncation: TruncationSchema, cursor: Type.Optional(DecimalCursorSchema), pageToken: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) };
+export const ProcessOutputSchema = Type.Object(R5OutputFields, { additionalProperties: false, $id: "pi-mob/protocol/process-output" });
+const R5ProcessCommand = Type.Object({ sessionId: SessionId, processId: R5ProcessId, expectedRevision: RevisionTokenSchema }, { additionalProperties: false });
+const R5ProcessMetadata = Type.Object({ lease: Type.Literal("session") }, { additionalProperties: false });
+// R5 process actions share the session/process/revision triple plus the
+// session-lease metadata. TypeBox intersects closed objects at the payload
+// level by reporting per-side "additional property" errors, so we model the
+// union explicitly here. `additionalProperties: false` keeps the payload a
+// closed privacy boundary.
+const R5ProcessPayload = Type.Object({ ...R5ProcessCommand.properties, ...R5ProcessMetadata.properties }, { additionalProperties: false });
 const ControllerScope = Type.Union([
   Type.Object({ scope: Type.Literal("host") }, { additionalProperties: true }),
   Type.Object({ scope: Type.Literal("session"), sessionId: SessionId }, { additionalProperties: true }),
@@ -986,6 +1042,9 @@ const CommandPayloads = {
   "context.unpin": ContextMutationPayloadSchema,
   "context.exclude": ContextMutationPayloadSchema,
   "context.refresh": ContextMutationPayloadSchema,
+  "process.stop": R5ProcessPayload,
+  "process.restart": R5ProcessPayload,
+  "process.rerun": R5ProcessPayload,
   "turn.abort": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "queue.remove": Type.Object({ sessionId: SessionId, queueItemId: Uuid }, { additionalProperties: true }),
   "queue.clear": Type.Object({ sessionId: SessionId }, { additionalProperties: true }), "model.set": Type.Object({ sessionId: SessionId, modelId: Type.String({ minLength: 1 }), provider: Type.Optional(Type.String({ minLength: 1 })) }, { additionalProperties: true }),
   "thinking.set": Type.Object({ sessionId: SessionId, level: Type.String({ minLength: 1 }) }, { additionalProperties: true }), "steering_mode.set": Type.Object({ sessionId: SessionId, enabled: Type.Boolean() }, { additionalProperties: true }),
@@ -1021,6 +1080,10 @@ const EventPayloads = {
   "workspace.file.unavailable": WorkspaceFileUnavailableEventSchema,
   "context.snapshot": ContextSnapshotSchema,
   "context.unavailable": ContextUnavailableEventSchema,
+  "process.snapshot": ProcessSnapshotSchema,
+  "process.output": ProcessOutputSchema,
+  "process.unavailable": Type.Object({ sessionId: SessionId, capability: Type.Literal("runtime.processes.v1"), status: CapabilityStatusSchema }, { additionalProperties: false }),
+  "process.error": Type.Object({ sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, error: ErrorInfoSchema }, { additionalProperties: false }),
 } as const;
 const genericEventPayload = Type.Object({ sessionId: Type.Optional(SessionId) }, { additionalProperties: true });
 const ControlPayloads = {
@@ -1039,6 +1102,8 @@ const ControlPayloads = {
   "workspace.file.metadata": WorkspaceFileMetadataPayloadSchema,
   "workspace.file.read": WorkspaceFileReadPayloadSchema,
   "context.snapshot.request": ContextSnapshotRequestPayloadSchema,
+  "process.snapshot.request": Type.Object({ sessionId: SessionId }, { additionalProperties: false }),
+  "process.output.page": Type.Object({ sessionId: SessionId, processId: R5ProcessId, revision: RevisionTokenSchema, stream: Type.Union([Type.Literal("stdout"), Type.Literal("stderr")]), cursor: Type.Optional(DecimalCursorSchema), pageToken: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })) }, { additionalProperties: false }),
 } as const;
 export const SubscriptionSchema = ControlPayloads["subscription.set"];
 const ResponsePayloads = {
@@ -1060,6 +1125,8 @@ const ResponsePayloads = {
   "workspace.file.metadata.result": R3MetadataResponseSchema,
   "workspace.file.read.result": R3ReadResponseSchema,
   "context.snapshot.result": ContextSnapshotSchema,
+  "process.snapshot.result": Type.Object({ items: Type.Array(ProcessSnapshotSchema, { maxItems: LIMITS.maxProcessSnapshotItems }) }, { additionalProperties: false }),
+  "process.output.page.result": ProcessOutputSchema,
 } as const;
 
 export const SnapshotSchema = Type.Union([

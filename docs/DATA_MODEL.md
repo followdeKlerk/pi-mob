@@ -25,7 +25,7 @@ This document defines durable entities, identifiers, relationships, retention, m
 | `workspaceId` | bridge | host | No | No |
 | `sessionId` | bridge | host | No | No |
 | `turnId` | bridge | session | No | No |
-| `processId` | authoritative process registrar | session | No | No |
+| `processId` | bridge/authoritative runtime producer | session | No | No |
 | `recipeActivityId` | bridge/normalizer | turn + recipe family | No | No |
 | `planId` | authoritative plan producer | session/turn plan | No | No |
 | `planStepId` | authoritative plan producer | plan | No | No |
@@ -186,62 +186,78 @@ stderr_ring_metadata_json nullable
 
 PIDs are diagnostics only and are never assumed valid after bridge restart without OS verification.
 
-### 3.6a `registered_processes` and output
+### 3.6a Supervised process projections (R5)
 
-These conceptual rows define the optional R5 persistence contract; they do not
-claim an implemented bridge registrar or mobile surface. They are distinct from
-`session_processes`, which describes the Pi RPC subprocess itself.
+These conceptual rows describe persistence permitted by the
+`runtime.processes.v1` wire contract; they do not claim that a bridge or mobile
+runtime surface is implemented. They are distinct from `session_processes`,
+which describes the Pi RPC subprocess itself.
 
 ```text
-registered_processes:
+supervised_processes (current individual projection):
   session_id FK
   process_id
   revision
-  source_registration_id
-  tool_call_id nullable
+  status                 running | completed | failed | stopped
   command_bounded
-  working_directory_display
-  status                 running | completed | failed | cancelled | stopped
-  pid_observed nullable
-  pid_verified_at nullable
   started_at
+  capability             runtime.processes.v1
+  stale
+  supported_actions_json unique subset of stop | restart | rerun
+  turn_id nullable
+  tool_call_id nullable
+  pid_observed nullable
+  cwd nullable
   finished_at nullable
   duration_ms nullable
   exit_code nullable
   signal nullable
-  listening_ports_json nullable
-  capability_status_json
-  actions_json
+  ports_json nullable
   source_stream_cursor
   PRIMARY KEY (session_id, process_id)
 
-registered_process_output:
+supervised_process_output (event/page projection):
+  output_record_id PK
   session_id FK
   process_id FK
+  process_revision
   stream                 stdout | stderr
-  output_revision
-  retained_bytes
-  total_bytes
-  bounded_utf8_text nullable
-  sha256 nullable
-  truncated
-  availability_status_json
-  PRIMARY KEY (session_id, process_id, stream)
+  content_bounded
+  truncation_json
+  output_cursor_decimal nullable
+  page_token nullable
+  source_stream_cursor nullable
+
+supervised_process_capability:
+  session_id PK/FK
+  capability             runtime.processes.v1
+  capability_status_json
+  source_stream_cursor
 ```
 
-Only an explicit authoritative adapter/extension registration creates a row.
-Bash history, process-table scans, parsed output, and client-provided PIDs never
-do. `processId` is permanent for one registered instance; restart/rerun creates
-a new process ID and preserves the old terminal row. PID is observation-only,
-never an identifier or action target. Snapshot replacement and delta application
-are transactional by revision; output revisions prevent mixed pages. Separate
-stdout/stderr are stored only when the source guarantees separation.
+Each `process.snapshot` event upserts one individual process. A
+`process.snapshot.result` response supplies at most 100 of the same individual
+shape in `{ items }`. `process.output` and
+`process.output.page.result` use the same closed output shape: content,
+truncation, and optional cursor/page token are retained without inventing an
+output revision distinct from the process `revision`. Content is capped at
+262144 UTF-16 code units by schema.
 
-Stop/restart/rerun commands use the normal `commands` row. Their semantic hash
-includes command type, session ID, process ID, and expected process revision.
-Lease IDs remain audit metadata, not semantic identity. Accepted-but-unfinished
-actions survive restart; a dispatched action whose external effect cannot be
-proved becomes terminal `indeterminate` and is never automatically retried.
+The wire schema guarantees closed fields, scalar/list bounds, enum membership,
+and unique `supportedActions`; it does not prove source authority or relational
+correctness. Bridge semantic checks must establish session/process ownership,
+current revision, status/action compatibility, canonical `cwd`, trustworthy PID
+association, truncation byte relationships, digest correctness, and output page
+continuity before committing projections. The schema does not itself require or
+forbid finish/exit fields for any status. PID is observation-only and never the
+command target.
+
+Stop/restart/rerun use normal `commands` rows. Their closed semantic payload is
+`sessionId`, `processId`, `expectedRevision`, and `lease: "session"`; command
+type plus that payload is hashed, while envelope `leaseId` remains metadata.
+Accepted-but-unfinished commands survive restart. A dispatched command whose
+external effect cannot be proved becomes terminal `indeterminate` and is never
+automatically retried.
 
 ### 3.7 `turns`
 
@@ -659,65 +675,72 @@ Drafts never auto-submit after reconnect.
 
 Theme, reduced animation preference, transcript expansion preference, notification preview mode, and diagnostic options.
 
-### Reconstructible registered-process cache (R5)
+### Reconstructible supervised-process cache (R5)
 
-These permitted cache rows do not claim mobile or bridge implementation.
+These permitted cache rows mirror the current `runtime.processes.v1` shapes and
+do not claim mobile or bridge implementation.
 
 ```text
-process_snapshots:
-  host_id
-  session_id
-  revision
-  capability_status_json
-  last_refreshed_at
-  source_stream_cursor nullable
-  PRIMARY KEY (host_id, session_id)
-
 process_records:
   host_id
   session_id
   process_id
-  process_revision
+  revision
+  status                 running | completed | failed | stopped
   command_bounded
-  working_directory_display
-  status
-  pid_observed nullable
-  timing_json
-  termination_json nullable
-  listening_ports_json nullable
-  actions_json
-  capability_status_json
+  started_at
+  capability             runtime.processes.v1
+  stale
+  supported_actions_json unique subset of stop | restart | rerun
+  turn_id nullable
   tool_call_id nullable
+  pid_observed nullable
+  cwd nullable
+  finished_at nullable
+  duration_ms nullable
+  exit_code nullable
+  signal nullable
+  ports_json nullable
+  source_stream_cursor nullable
   PRIMARY KEY (host_id, session_id, process_id)
 
 process_output_cache:
   host_id
   session_id
   process_id
-  stream
-  output_revision
-  retained_bytes
-  total_bytes
-  bounded_utf8_text nullable
-  sha256 nullable
-  truncated
-  availability_status_json
-  PRIMARY KEY (host_id, session_id, process_id, stream)
+  process_revision
+  stream                 stdout | stderr
+  content_bounded
+  truncation_json
+  output_cursor_decimal nullable
+  page_token nullable
+  source_stream_cursor nullable
+
+process_capability_cache:
+  host_id
+  session_id
+  capability             runtime.processes.v1
+  capability_status_json
+  source_stream_cursor
+  PRIMARY KEY (host_id, session_id)
 ```
 
-The session stream owns process snapshots/deltas and their cursor. Cache apply is
-last-writer-by-cursor with an exact base revision; duplicate events are ignored,
-and a gap/base mismatch discards that session's process projection and requests
-a full snapshot. Historical tool/recipe rows are not part of this projection and
-are never deleted or rewritten during repair. Capability withdrawal stores
-explicit unavailable status rather than an empty snapshot. Host-generation
-change discards all process cache rows.
+Each `process.snapshot` session event applies one record by stream cursor;
+`process.snapshot.result.items` reconciles up to 100 records of that same shape.
+Duplicate session events are ignored by the normal stream cursor rules.
+`process.output` and
+`process.output.page.result` retain their process revision, stream, bounded
+content, truncation, and optional cursor/page token; output from different
+process revisions is never combined. `process.unavailable` stores explicit
+capability status rather than fabricating process records, and `process.error`
+can be retained as bounded diagnostic state.
 
-Output text is reconstructible and participates in the global LRU; terminal
-metadata may remain while text is evicted. Mobile never persists an arbitrary
-PID target, action preview, or inferred port. Drafts and local composer prefill
-remain outside the process cache and cannot execute without a new durable
-command.
+Output content and process projections are reconstructible and participate in
+the global LRU; terminal metadata may remain while output pages are evicted. A
+host-generation change discards these cache rows. Mobile never persists an
+arbitrary PID as a command target or infers a process/action not represented by
+an authoritative payload. Drafts and local composer prefill remain outside the
+process cache and cannot execute without a new durable command.
 
 ### Reconstructible files/context cache (R3/R4)
 
@@ -827,7 +850,7 @@ A host snapshot contains:
 - session summaries,
 - workspace summary data needed by the current screen,
 - active-process capacity,
-- no R5 process list (registered-process state is session-owned),
+- no R5 process list (supervised-process events are session-owned),
 - controller-lease summaries for the requesting installation,
 - new host stream baseline.
 
@@ -855,7 +878,7 @@ Snapshots replace client cache for that stream atomically. The client must not m
 | Bridge event journal | 30 days, 100 MB per session stream |
 | Host stream journal | 30 days, 100 MB total |
 | Command IDs/state | Session lifetime plus deletion retention; at least latest 10,000 per session |
-| Mobile normalized cache | 30 days, 250 MB global LRU cap; process output/projections, viewed-file recents, metadata/pages, attachment references, and context projections are reconstructible and may be evicted earlier |
+| Mobile normalized cache | 30 days, 250 MB global LRU cap; supervised-process output/projections, viewed-file recents, metadata/pages, attachment references, and context projections are reconstructible and may be evicted earlier |
 | Unreferenced attachments | 24 hours |
 | Referenced prompt attachments | Until ingestion is complete, then cleanup; metadata retained with turn |
 | Exports | 24 hours |

@@ -298,5 +298,25 @@
     "class": "event",
     "stream": "session",
     "type": "context.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "process.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "process.output"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "process.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "process.error"
   }
 ]

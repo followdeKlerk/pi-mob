@@ -3579,6 +3579,306 @@
         "leaseId"
       ],
       "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "commandId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "leaseId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "expectedRevision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "lease": {
+              "const": "session",
+              "type": "string"
+            },
+            "processId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "sessionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "processId",
+            "expectedRevision",
+            "lease"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "process.stop",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId",
+        "connectionId",
+        "commandId",
+        "leaseId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "commandId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "leaseId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "expectedRevision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "lease": {
+              "const": "session",
+              "type": "string"
+            },
+            "processId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "sessionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "processId",
+            "expectedRevision",
+            "lease"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "process.restart",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId",
+        "connectionId",
+        "commandId",
+        "leaseId"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "commandId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "connectionId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "leaseId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "additionalProperties": false,
+          "properties": {
+            "expectedRevision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "lease": {
+              "const": "session",
+              "type": "string"
+            },
+            "processId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            },
+            "sessionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "sessionId",
+            "processId",
+            "expectedRevision",
+            "lease"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "requestId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "type": {
+          "const": "process.rerun",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "requestId",
+        "connectionId",
+        "commandId",
+        "leaseId"
+      ],
+      "type": "object"
     }
   ]
 }

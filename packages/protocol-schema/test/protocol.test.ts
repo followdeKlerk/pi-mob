@@ -116,8 +116,9 @@ test("accepts only explicitly optional additive unknown events", () => {
 
 test("declares mutation recovery/idempotency and exact event stream ownership", () => {
   expect(COMMAND_METADATA.map(({ type }) => type)).toEqual([...COMMAND_TYPES]);
+  const processCommands = new Set(["process.stop", "process.restart", "process.rerun"]);
   for (const command of COMMAND_METADATA) {
-    expect(command.requiredCapability).toBe("commands.v1");
+    expect(command.requiredCapability).toBe(processCommands.has(command.type) ? "runtime.processes.v1" : "commands.v1");
     expect(command.acceptedStates.length).toBeGreaterThan(0);
     expect(command.semanticHashFields).toEqual(["type", "payload"]);
     expect(command.idempotency).toBe("command-id-semantic-payload-sha256");

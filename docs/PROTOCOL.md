@@ -90,7 +90,7 @@ Immediately after WebSocket establishment, the client sends `hello` before any o
     "platform": "ios",
     "installationId": "919cd681-bd37-4451-9475-baf53ed29184",
     "requiredCapabilities": ["streams.v1", "commands.v1"],
-    "optionalCapabilities": ["attachments.v1", "extension_dialogs.v1", "notifications.v1", "files.v1", "contexts.v1", "processes.v1"]
+    "optionalCapabilities": ["attachments.v1", "extension_dialogs.v1", "notifications.v1", "files.v1", "contexts.v1", "runtime.processes.v1"]
   }
 }
 ```
@@ -121,7 +121,8 @@ Bridge response:
       "attachments.v1",
       "extension_dialogs.v1",
       "files.v1",
-      "contexts.v1"
+      "contexts.v1",
+      "runtime.processes.v1"
     ],
     "limits": {
       "maxJsonBytes": 1048576,
@@ -143,16 +144,16 @@ Handshake rules:
 - An unknown required capability is fatal with `unsupported_capability`.
 - Unknown optional capabilities are ignored.
 - `files.v1` (R3 file browser), `contexts.v1` (R4 context inspector), and
-  `processes.v1` (R5 registered-process runtime) are
+  `runtime.processes.v1` (R5 supervised-process runtime) are
   independent, additive, **optional** capabilities. A bridge advertises one
   only when it implements the corresponding bounded surface. The v1 mobile
   client lists each in `optionalCapabilities`, never `requiredCapabilities`.
   Missing advertisement MUST surface explicit unavailable UI; it MUST NOT
-  produce speculative requests or a fabricated empty tree/snapshot. A future
-  client that explicitly makes either capability required fails the handshake
-  with `unsupported_capability` when the host lacks it. Advertised capability
-  does not promise every workspace or session is usable; scoped unavailable
-  or stale state still carries its reason and remediation.
+  produce speculative requests or fabricated state. A future client that
+  explicitly makes any capability required fails the handshake with
+  `unsupported_capability` when the host lacks it. Advertised capability does
+  not promise every workspace or session is usable; scoped unavailable or
+  stale state still carries its reason and remediation.
 - `expectedHostId` mismatch is fatal with `host_identity_mismatch`.
 - `hostGeneration` is a decimal string incremented when restored/replaced state can invalidate all known cursors.
 - A client observing a changed `hostGeneration` MUST discard cached stream events/cursors for that host and request snapshots.
@@ -255,16 +256,19 @@ Carries:
 - extension UI,
 - R4 context-inspector snapshots and the truthful no-context surface
   (`context.snapshot`, `context.unavailable`); both remain session-scoped,
+- R5 supervised-process snapshots, output, unavailability, and errors
+  (`process.snapshot`, `process.output`, `process.unavailable`,
+  `process.error`),
 - session-scoped command transitions.
 
 Each stream has an independent monotonic cursor. Cursor values increase by exactly one, are never reused within a host generation, and are committed with the event.
 
 Lazy page/read/search responses for R3 (tree, filename search, content search,
-metadata, range read) and the read-only `context.snapshot.request` remain
-nonjournaled controls — they MUST NOT generate stream events of their own.
-Only durable R4 mutations (`context.pin`, `context.unpin`, `context.exclude`,
-`context.refresh`) produce session-stream `context.snapshot` events, and only
-after the underlying state transition has committed.
+metadata, range read), `context.snapshot.request`, `process.snapshot.request`,
+and `process.output.page` remain nonjournaled controls — they MUST NOT generate
+stream events of their own. Durable R4/R5 commands report through normal command
+state and the resulting session-stream events after the underlying state
+transition has committed.
 
 ## 8. Subscriptions
 
@@ -599,9 +603,11 @@ workspace.file.content.search
 workspace.file.metadata
 workspace.file.read
 context.snapshot.request
+process.snapshot.request
+process.output.page
 ```
 
-These requests are repeatable reads/control messages and use `requestId` where a response is expected. R3 controls and `context.snapshot.request` are repeatable, nonjournaled reads; they MUST NOT mutate durable host or session state. `context.snapshot.request` returns the direct `context.snapshot.result` response. R3 invalidations and snapshot-confirmed outcomes from durable R4 mutations travel on journaled streams (§14, §15), never as a side effect of a read control.
+These requests are repeatable reads/control messages and use `requestId` where a response is expected. R3 controls, `context.snapshot.request`, `process.snapshot.request`, and `process.output.page` are repeatable, nonjournaled reads; they MUST NOT mutate durable host or session state. The three snapshot/output controls return `context.snapshot.result`, `process.snapshot.result`, and `process.output.page.result`, respectively. R3 invalidations and snapshot-confirmed outcomes from durable R4/R5 mutations travel on journaled streams (§14, §15), never as a side effect of a read control.
 
 ### Controller commands
 
@@ -669,25 +675,35 @@ context.refresh
 
 `context.pin`, `context.unpin`, `context.exclude`, and `context.refresh` are session-scoped durable commands. Each carries a client-generated `commandId`, requires the active session controller lease, includes an `expectedRevision` that pins the mutation against the authoritative `context.snapshot` revision, and accepts a closed `target` (file path/range or source id, or `kind: "all"` for a session-wide refresh). They participate in semantic hashing, idempotency, and journaled `command.state` exactly like other session mutations; the read-only `context.snapshot.request` remains a repeatable control.
 
-### Registered-process contract catalogue (R5; documentation-only)
+### Supervised-process commands (R5)
 
-The accepted R5 contract has advertised limits `maxProcessesPerSnapshot: 64` and
-`maxProcessOutputBytesPerStream: 262144`, and reserves the repeatable controls
-`process.snapshot.request` and `process.output.read`, durable commands
-`process.stop`, `process.restart`, and `process.rerun`, session events
-`process.snapshot`, `process.delta`, and `process.unavailable`, and stable errors
-`process_unavailable`, `process_not_found`, `process_revision_stale`, and
-`process_action_unavailable`. These names are not added to the current canonical
-schema-generated catalogues by this documentation-only leaf and MUST NOT be
-advertised until a later schema/bridge implementation adds and validates them.
+```text
+process.stop
+process.restart
+process.rerun
+```
 
-These are session-scoped durable commands under `processes.v1`. Each carries an
-opaque `processId`, `expectedRevision`, `commandId`, and active controller
-`leaseId`. `process.stop` is accepted only for a currently running registered
-process owned by that session. Restart/rerun are accepted only when the
-authoritative process record advertises that exact action. The bridge never
-accepts a PID as a target. There is no `process.preview` command; rerun never
-means preview or composer prefill.
+The canonical R5 capability is `runtime.processes.v1`. Its read controls are
+`process.snapshot.request` and `process.output.page`; their direct responses are
+`process.snapshot.result` and `process.output.page.result`. Its session events
+are exactly `process.snapshot`, `process.output`, `process.unavailable`, and
+`process.error`. Its process-specific stable errors are exactly
+`process_stale`, `process_failed`, `process_not_found`, and
+`process_unavailable`.
+
+Each R5 command is session-scoped, durable, and gated on
+`runtime.processes.v1`. In addition to the normal envelope `commandId` and
+`leaseId`, its closed payload contains `sessionId`, opaque `processId`,
+`expectedRevision`, and `lease: "session"`. PID is not a command target.
+Command metadata uses the normal semantic hash of command type plus payload and
+adds the four process errors above to the common command errors.
+
+The JSON schema validates that command shape. The bridge separately enforces
+authoritative session/process ownership, equality with the current revision,
+and compatibility between requested action, current status, and the snapshot's
+`supportedActions`. Those relational checks cannot be expressed by the command
+schema: a stale expected revision returns `process_stale`, while an unsupported
+or state-incompatible action returns `invalid_state`.
 
 ### Extension command
 
@@ -776,6 +792,10 @@ plan.snapshot
 plan.unavailable
 context.snapshot
 context.unavailable
+process.snapshot
+process.output
+process.unavailable
+process.error
 command.state
 error.event
 ```
@@ -835,75 +855,89 @@ R3 payloads use `workspaceId` plus normalized workspace-root-relative paths only
 - Snapshot/source `stale` and non-available capability states MUST remain visible. `context.unavailable` is emitted instead of an empty snapshot and includes safe reason/remediation through capability status.
 - `context.snapshot.request` is a repeatable read and has no implicit mutation. Pin, unpin, exclude, and refresh occur only through the durable lease- and `expectedRevision`-checked commands in §14; UI state changes only after their committed session-stream snapshot. A stale revision is rejected rather than merged.
 
-### Registered process runtime (R5)
+### Supervised process runtime (R5)
 
-`processes.v1` is an optional, explicit registered-process contract. Absence of
-the capability or authoritative registration returns `process.unavailable`; a
-bridge MUST NOT infer live processes from arbitrary Bash cards, operating-system
-process lists, output text, or a PID supplied by mobile. This section specifies
-the accepted contract only; it does not claim bridge or mobile implementation.
+`runtime.processes.v1` is the optional capability for this closed, bounded
+surface. All four R5 events belong to the session stream.
 
-`process.snapshot` is a complete session projection with `sessionId`, opaque
-`revision`, capability status, `lastRefreshedAt`, and `processes` (maximum 64).
-`process.delta` carries `sessionId`, `baseRevision`, `revision`, and exactly one
-complete changed process or a removed `{ processId }`. A base-revision mismatch
-requires `process.snapshot.request`; deltas are never patched speculatively.
-The read control is nonjournaled and returns `process.snapshot.result` with the
-same payload.
+#### Snapshots and snapshot reads
 
-A process record is closed and has:
+`process.snapshot` carries one individual closed `ProcessSnapshot` payload; it
+is not a list or a session-wide aggregate. `process.snapshot.request` has the
+closed payload `{ sessionId }`, and `process.snapshot.result` has the closed
+payload `{ items }`, where `items` is an array of at most 100 individual process
+snapshots. An empty result is schema-valid.
 
-- required `processId` (opaque, 1–128 UTF-16 code units), `sessionId`, `revision`,
-  `command` (1–1024), `workingDirectory` (root-relative display path, 1–1024),
-  `status`, `startedAt`, `stdout`, `stderr`, `actions`, and `capability`;
-- optional authoritative `pid` (integer 1 through 2147483647), `finishedAt`,
-  non-negative `durationMs`, `exitCode` (signed 32-bit), `signal` (1–32 safe
-  characters), and up to 32 `listeningPorts` (integer 1 through 65535);
-- status exactly `running`, `completed`, `failed`, `cancelled`, or `stopped`.
-  Running forbids finish/exit/signal; terminal status requires `finishedAt` and
-  duration. `completed` requires exit code 0 when an exit code is available;
-  `failed` must not be inferred merely because an exit code is unavailable.
+Each process snapshot requires:
 
-`stdout` and `stderr` are distinct closed output descriptors. Each has an
-opaque `outputRevision`, `retainedBytes`, `totalBytes`, `truncated`, and bounded
-UTF-8 `text`; optional lowercase SHA-256 identifies all bytes when known. Each
-stream retains at most 256 KiB inline per process and each read page is at most
-64 KiB. `process.output.read` requires process ID, stream (`stdout` or `stderr`),
-output revision, and opaque page token; it is repeatable and nonmutating. A
-revision change returns `process_revision_stale`, never mixed output. No merged
-output is split heuristically. Output unavailable from Pi stays unavailable.
+- session UUID `sessionId`, opaque `processId` (1–128 UTF-16 code units), and a
+  §12 `revision` token;
+- `status`, exactly `running`, `completed`, `failed`, or `stopped`;
+- `command` (1–1024 code units), ISO-UTC `startedAt`,
+  `capability: "runtime.processes.v1"`, boolean `stale`, and
+  `supportedActions`;
+- `supportedActions` as a required unique array with at most three entries,
+  each exactly `stop`, `restart`, or `rerun`. It may be empty.
 
-`actions` is a closed map for `stop`, `restart`, and `rerun`; each value is a
-capability status plus `supported: boolean`. Non-supported/non-available actions
-require bounded safe reason and remediation. Action availability is state- and
-revision-specific. Pi 0.80.6 guarantees only tool events/combined output and
-`abort_bash`; therefore PID, cwd, separate streams, ports, restart, and rerun
-remain unavailable unless an explicit authoritative bridge/extension contract
-supplies them. `abort_bash` may back `stop` only for the exact registered active
-tool call. Rerun is execution of the recorded registered command after durable
-acceptance; it is never automatic and has no preview. A UI wanting editable
-text may offer a clearly labelled local composer prefill outside this protocol,
-but that is not `process.rerun`.
+Optional snapshot fields are `turnId` and `toolCallId` (each 1–128 code units),
+`pid` (integer at least 1), root-relative `cwd` (the closed R3 workspace-path
+shape, at most 1024 code units), ISO-UTC `finishedAt`, non-negative integer
+`durationMs`, integer `exitCode`, `signal` (1–64 code units), and up to 32
+closed `ports`. Each port is `{ port, protocol }`, with `port` from 1 through
+65535 and `protocol` exactly `tcp` or `udp`. `pid` is an integer with minimum 1
+and no schema maximum; `exitCode` is an integer with no schema minimum or
+maximum.
 
-Process revisions use §12 `RevisionToken`. A command validates capability,
-session ownership, current process instance/revision, accepted status, and
-lease before durable acceptance. Same command ID and semantic payload returns
-the stored outcome; another payload is `idempotency_conflict`. A crash after
-dispatch that leaves the action outcome unknowable is `indeterminate`; reconnect
-uses `command.current` and stream replay and MUST NOT repeat the action. PID is
-display-only and PID reuse never transfers ownership or target identity.
+The schema guarantees the field types, enums, scalar/list bounds, unique action
+entries, static root-relative `cwd` shape, and closed payloads. It does **not**
+require or forbid optional finish/exit fields based on status, compare
+timestamps, prove PID ownership, resolve `cwd` canonically through symlinks, or
+validate action availability for a status. Any policy relating those fields is
+a bridge semantic invariant rather than a schema guarantee. Bridge integration
+must at least resolve `cwd` within the workspace and validate authoritative
+process ownership, current revision, and action/status compatibility before
+publication or command acceptance; mobile MUST NOT turn a displayed PID into an
+action target.
 
-Live registered processes and historical transcript tools are separate: normal
-`tool.*`/`recipe.activity` events create immutable historical Bash cards, while
-only `process.snapshot`/`process.delta` update live runtime cards. Process
-completion does not rewrite or delete the historical tool card; replay may show
-both linked by an optional opaque `toolCallId`, but neither substitutes for the
-other.
+#### Output events and pages
 
-`process.unavailable` is the truthful no-runtime surface with the closed payload
-`{ capability: "processes.v1", status }`. It is not an empty process list.
-Capability states and reason/remediation rules match the closed R1–R4 capability
-status contract.
+`process.output` and `process.output.page.result` carry the same closed
+`ProcessOutput` payload. Required fields are session UUID `sessionId`,
+`processId`, process `revision`, `stream` exactly `stdout` or `stderr`, `content`
+(a string of at most 262144 UTF-16 code units), and closed `truncation` metadata.
+`truncation` requires non-negative integer `retainedBytes` and `totalBytes`,
+boolean `isTruncated`, and permits an optional lowercase SHA-256 `digest`.
+Optional output fields are canonical decimal-string `cursor` and opaque
+`pageToken` (1–128 code units).
+
+`process.output.page` is the repeatable nonjournaled control. Its closed payload
+requires `sessionId`, `processId`, `revision`, and `stream`, and permits the same
+optional `cursor` and `pageToken`. Output is always revision-bound and each
+output payload uses the same 262144-code-unit content cap.
+
+The output schema validates only shape and the 262144-code-unit `content` cap.
+The bridge separately enforces semantic truncation invariants such as
+`retainedBytes <= totalBytes`, consistency between those counts and
+`isTruncated`, UTF-8 byte measurement, digest correctness, cursor/page-token
+continuity, and revision freshness. A stale process/output revision uses
+`process_stale`; pages from different revisions MUST NOT be combined.
+
+#### Unavailable and error events
+
+`process.unavailable` has the closed payload `{ sessionId, capability, status }`,
+where `capability` is exactly `runtime.processes.v1` and `status` is the shared
+closed capability-status shape. `process.error` has the closed payload
+`{ sessionId, processId, revision, error }`, where `error` is the shared closed
+`ErrorInfo` shape. The process-specific stable protocol errors are
+`process_stale`, `process_failed`, `process_not_found`, and
+`process_unavailable`.
+
+Live process records and historical transcript tools remain separate:
+`tool.*`/`recipe.activity` events create historical cards, while individual
+`process.snapshot`, `process.output`, `process.unavailable`, and `process.error`
+events update the supervised runtime projection. A process event does not
+rewrite or delete the historical tool card; optional `toolCallId` and `turnId`
+only permit correlation.
 
 ### Command state
 
@@ -1216,6 +1250,10 @@ file_stale
 file_unavailable
 context_pin_failed
 context_unavailable
+process_stale
+process_failed
+process_not_found
+process_unavailable
 ```
 
 Rules:
@@ -1239,6 +1277,8 @@ Defaults:
 - Maximum queued outbound WebSocket data: 8 MiB per connection.
 - Maximum accepted control requests: 10 per second per connection, burst 20.
 - Maximum session page: 100.
+- Maximum `process.snapshot.result` items: 100.
+- Maximum R5 process-output `content`: 262144 UTF-16 code units.
 - Maximum queued follow-ups: 10 per session.
 - Maximum background summary subscriptions: 5 plus one full session.
 - Maximum interactive extension dialog: 5 minutes.

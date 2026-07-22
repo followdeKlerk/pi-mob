@@ -100,6 +100,21 @@
     "kind": "command"
   },
   {
+    "file": "command-process-rerun-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-process-restart-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-process-stop-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
     "file": "command-prompt-submit-valid.json",
     "valid": true,
     "kind": "command"
@@ -231,6 +246,16 @@
   },
   {
     "file": "control-model-list-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-process-output-page-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-process-snapshot-request-valid.json",
     "valid": true,
     "kind": "control"
   },
@@ -441,6 +466,26 @@
   },
   {
     "file": "error-plan-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-process-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-process-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-process-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-process-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -681,6 +726,26 @@
   },
   {
     "file": "event-plan-unavailable-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-process-error-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-process-output-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-process-snapshot-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-process-unavailable-valid.json",
     "valid": true,
     "kind": "event"
   },
@@ -991,6 +1056,78 @@
     "kind": "event"
   },
   {
+    "file": "invalid-process-action.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-host-stream.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-missing-process.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-missing-revision.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-missing-session.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-pid.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-ports-33.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-private-field.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-status.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-stderr-oversize.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-stdout-oversize.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
+    "file": "invalid-process-stream.json",
+    "valid": false,
+    "kind": "event",
+    "expectation": "expected-invalid"
+  },
+  {
     "file": "invalid-prompt-file-ref-missing-revision.json",
     "valid": false,
     "kind": "command",
@@ -1121,6 +1258,26 @@
     "kind": "event"
   },
   {
+    "file": "process-error-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "process-output-stderr-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "process-snapshot-completed-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "process-unavailable-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
     "file": "prompt-legacy-valid.json",
     "valid": true,
     "kind": "command"
@@ -1177,6 +1334,16 @@
   },
   {
     "file": "response-model-list-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-process-output-page-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-process-snapshot-result-valid.json",
     "valid": true,
     "kind": "response"
   },
@@ -1544,6 +1711,24 @@
     "file": "scenario-stream-gap.json",
     "valid": true,
     "kind": "event"
+  },
+  {
+    "file": "semantic-invalid-process-joint-action-state.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
+  },
+  {
+    "file": "semantic-invalid-process-stale-revision.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
+  },
+  {
+    "file": "semantic-invalid-process-stop-unsupported.json",
+    "valid": true,
+    "kind": "command",
+    "expectation": "semantic-invalid"
   },
   {
     "file": "semantic-invalid-prompt-file-ref-stale-revision.json",
