@@ -601,6 +601,104 @@ Drafts never auto-submit after reconnect.
 
 Theme, reduced animation preference, transcript expansion preference, notification preview mode, and diagnostic options.
 
+### Reconstructible files/context cache (R3/R4)
+
+These entities describe permitted mobile cache records; they do not claim that a particular client or bridge implementation already persists them.
+
+```text
+viewed_file_recents:
+  host_id
+  workspace_id
+  root_relative_path
+  last_viewed_at
+  last_known_revision nullable
+  PRIMARY KEY (host_id, workspace_id, root_relative_path)
+
+file_metadata_cache:
+  host_id
+  workspace_id
+  root_relative_path
+  revision
+  root_revision nullable
+  size_bytes
+  modified_at
+  sha256 nullable
+  is_binary
+  language_hint nullable
+  freshness_state
+  unavailable_status_json nullable
+  PRIMARY KEY (host_id, workspace_id, root_relative_path)
+
+file_page_cache:
+  host_id
+  workspace_id
+  root_relative_path
+  file_revision
+  range_start
+  range_end
+  total_lines
+  utf8_content
+  is_truncated
+  fetched_at
+  PRIMARY KEY (host_id, workspace_id, root_relative_path, file_revision, range_start, range_end)
+
+file_attachment_refs:
+  host_id
+  session_id nullable
+  workspace_id
+  root_relative_path
+  ranges_json nullable
+  digest
+  revision
+  local_state
+  last_validated_at nullable
+
+context_snapshots:
+  host_id
+  session_id
+  revision
+  source
+  stale
+  capability_status_json
+  model_json nullable
+  thinking_level nullable
+  instructions nullable
+  token_usage_decimal_json nullable
+  compaction_json nullable
+  last_refreshed_at
+  source_stream_cursor nullable
+  PRIMARY KEY (host_id, session_id)
+
+context_pins:
+  host_id
+  session_id
+  snapshot_revision
+  root_relative_path
+  ranges_json nullable
+  file_revision
+  pinned_at
+  PRIMARY KEY (host_id, session_id, root_relative_path, file_revision)
+
+context_sources:
+  host_id
+  session_id
+  snapshot_revision
+  source_id
+  source_kind
+  summary
+  stale
+  capability_status_json
+  source_revision nullable
+  last_refreshed_at nullable
+  PRIMARY KEY (host_id, session_id, source_id)
+```
+
+All paths are normalized workspace-root-relative values, including valid dotfile paths; absolute host paths are forbidden. File pages, metadata, attachment references, context pins/sources, and snapshot children retain the revision/digest/freshness fields needed to render stale or unavailable state and to revalidate before use. Token counts remain protocol decimal strings, not floating-point values.
+
+The host is authoritative for file bytes/metadata/revisions, attachment validity, context composition/pins/exclusions, token usage, and source freshness. Recency ordering is the only mobile-local projection. Cache reads MUST NOT imply a host mutation; context changes appear only after durable command state and an authoritative snapshot.
+
+These rows are reconstructible and may be bounded by the global mobile-cache LRU or removed on host-generation change, capability withdrawal, clear-cache, or retention pressure. Repair discards the affected host/workspace/session projection, refetches controls or snapshots, and preserves paired hosts, drafts, preferences, and unsent local attachments. Missing, stale, denied, or unavailable host data is retained as explicit status rather than repaired into empty/current data.
+
 Small sensitive platform values may use Keychain/Keystore-backed secure storage. Provider credentials are never mobile values.
 
 ## 5. Snapshot model
@@ -622,6 +720,7 @@ A session snapshot contains:
 - current pending extension dialog,
 - current recipe activities keyed by `(sessionId, turnId, activityId)` with chronological ordinal and terminal timing/error/truncation metadata,
 - current authoritative plan revision and its complete ordered (maximum 64) steps, or explicit recipe/plan unavailable capability state,
+- current authoritative R4 context snapshot with pins, sources, decimal-string token usage, revision/freshness/status, or explicit `context.unavailable`,
 - canonical normalized transcript rebuilt from Pi entries/messages,
 - active/last turn state,
 - new session stream baseline.
@@ -637,7 +736,7 @@ Snapshots replace client cache for that stream atomically. The client must not m
 | Bridge event journal | 30 days, 100 MB per session stream |
 | Host stream journal | 30 days, 100 MB total |
 | Command IDs/state | Session lifetime plus deletion retention; at least latest 10,000 per session |
-| Mobile normalized cache | 30 days, 250 MB global LRU cap |
+| Mobile normalized cache | 30 days, 250 MB global LRU cap; viewed-file recents, metadata/pages, attachment references, and context projections are reconstructible and may be evicted earlier |
 | Unreferenced attachments | 24 hours |
 | Referenced prompt attachments | Until ingestion is complete, then cleanup; metadata retained with turn |
 | Exports | 24 hours |

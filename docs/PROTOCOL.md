@@ -90,7 +90,7 @@ Immediately after WebSocket establishment, the client sends `hello` before any o
     "platform": "ios",
     "installationId": "919cd681-bd37-4451-9475-baf53ed29184",
     "requiredCapabilities": ["streams.v1", "commands.v1"],
-    "optionalCapabilities": ["attachments.v1", "extension_dialogs.v1", "notifications.v1"]
+    "optionalCapabilities": ["attachments.v1", "extension_dialogs.v1", "notifications.v1", "files.v1", "contexts.v1"]
   }
 }
 ```
@@ -119,7 +119,9 @@ Bridge response:
       "commands.v1",
       "controller_leases.v1",
       "attachments.v1",
-      "extension_dialogs.v1"
+      "extension_dialogs.v1",
+      "files.v1",
+      "contexts.v1"
     ],
     "limits": {
       "maxJsonBytes": 1048576,
@@ -140,6 +142,16 @@ Handshake rules:
 - Minor versions are additive.
 - An unknown required capability is fatal with `unsupported_capability`.
 - Unknown optional capabilities are ignored.
+- `files.v1` (R3 file browser) and `contexts.v1` (R4 context inspector) are
+  independent, additive, **optional** capabilities. A bridge advertises one
+  only when it implements the corresponding bounded surface. The v1 mobile
+  client lists each in `optionalCapabilities`, never `requiredCapabilities`.
+  Missing advertisement MUST surface explicit unavailable UI; it MUST NOT
+  produce speculative requests or a fabricated empty tree/snapshot. A future
+  client that explicitly makes either capability required fails the handshake
+  with `unsupported_capability` when the host lacks it. Advertised capability
+  does not promise every workspace or session is usable; scoped unavailable
+  or stale state still carries its reason and remediation.
 - `expectedHostId` mismatch is fatal with `host_identity_mismatch`.
 - `hostGeneration` is a decimal string incremented when restored/replaced state can invalidate all known cursors.
 - A client observing a changed `hostGeneration` MUST discard cached stream events/cursors for that host and request snapshots.
@@ -216,6 +228,13 @@ Mandatory after handshake. Carries:
 - workspace/trust summary changes,
 - active-process capacity,
 - notification capability state,
+- R3 file-browser invalidations (`workspace.tree.snapshot`,
+  `workspace.file.metadata`, `workspace.file.stale`,
+  `workspace.file.unavailable`) — every R3 invalidation event is owned by
+  the mandatory host stream and carries its `workspaceId`. Protocol v1 has
+  no `workspace:<workspaceId>` stream class; subscribers scope projections
+  by `workspaceId` from the single host stream rather than maintaining an
+  additional subscription/cursor/snapshot lifecycle.
 - host-scoped command transitions.
 
 ### Session stream
@@ -233,9 +252,18 @@ Carries:
 - queue state,
 - model/context/retry/compaction state,
 - extension UI,
+- R4 context-inspector snapshots and the truthful no-context surface
+  (`context.snapshot`, `context.unavailable`); both remain session-scoped,
 - session-scoped command transitions.
 
 Each stream has an independent monotonic cursor. Cursor values increase by exactly one, are never reused within a host generation, and are committed with the event.
+
+Lazy page/read/search responses for R3 (tree, filename search, content search,
+metadata, range read) and the read-only `context.snapshot.request` remain
+nonjournaled controls — they MUST NOT generate stream events of their own.
+Only durable R4 mutations (`context.pin`, `context.unpin`, `context.exclude`,
+`context.refresh`) produce session-stream `context.snapshot` events, and only
+after the underlying state transition has committed.
 
 ## 8. Subscriptions
 
@@ -483,6 +511,15 @@ The client MUST NOT clear an unsent prompt draft until it receives an accepted/c
   "deliveryMode": "steer",
   "message": "Implement the parser",
   "attachmentIds": ["uuid"],
+  "fileRefs": [
+    {
+      "workspaceId": "uuid",
+      "path": "src/parser.ts",
+      "ranges": [{ "startLine": 1, "endLine": 40 }],
+      "digest": "hex",
+      "revision": "file-r3"
+    }
+  ],
   "planTarget": {
     "planId": "plan-opaque-id",
     "stepId": "step-opaque-id",
@@ -501,6 +538,25 @@ The client MUST NOT clear an unsent prompt draft until it receives an accepted/c
 
 Rules:
 
+- `attachmentIds` and `fileRefs` are independent optional arrays. Each is
+  bounded individually to `LIMITS.maxAttachmentsPerPrompt` (four in v1) by
+  the schema. They additionally share **one** prompt-context cardinality
+  budget: the bridge MUST enforce
+  `attachmentIds.length + fileRefs.length <= LIMITS.maxAttachmentsPerPrompt`
+  before accepting the command. A combined fifth item fails semantic
+  validation with `invalid_message`; the schema permits the underlying
+  shape because each array is independently within its own bound, and the
+  relational invariant is a bridge semantic.
+- Both arrays are part of the durable semantic payload/hash. Queued work
+  persists both and revalidates file references at dispatch. A stale
+  reference fails visibly with `file_stale`; the bridge MUST NOT silently
+  substitute current file content for an attached revision.
+- Each `fileRefs` entry is revision-bound and carries a `workspaceId`,
+  root-relative `path`, optional `ranges` (closed `LineRange` shapes),
+  SHA-256 `digest`, and opaque `revision`. The bridge rejects a `fileRefs`
+  entry whose `revision` no longer matches the current file revision with
+  `file_stale`, and rejects a `fileRefs` entry whose path traverses,
+  escapes, or otherwise fails canonicalization with `path_outside_workspace`.
 - While a turn is running the mobile client MUST explicitly choose `steer` or `follow_up`.
 - A `planTarget` is valid only with `deliveryMode: steer`; a target on `immediate` or `follow_up` is rejected before dispatch with `invalid_state`.
 - Untargeted legacy `steer` remains valid. When targeting, clients MUST send all three target fields.
@@ -536,9 +592,15 @@ workspace.list
 workspace.search
 model.list
 command.current
+workspace.tree.page
+workspace.file.search
+workspace.file.content.search
+workspace.file.metadata
+workspace.file.read
+context.snapshot.request
 ```
 
-These requests are repeatable reads/control messages and use `requestId` where a response is expected.
+These requests are repeatable reads/control messages and use `requestId` where a response is expected. R3 controls and `context.snapshot.request` are repeatable, nonjournaled reads; they MUST NOT mutate durable host or session state. R3 invalidation and R4 snapshot outcomes travel on journaled streams or via durable commands (§14, §15), never as a side effect of a control.
 
 ### Controller commands
 
@@ -595,6 +657,17 @@ retry.auto.set
 retry.abort
 ```
 
+### Context mutation commands (R4)
+
+```text
+context.pin
+context.unpin
+context.exclude
+context.refresh
+```
+
+`context.pin`, `context.unpin`, `context.exclude`, and `context.refresh` are session-scoped durable commands. Each carries a client-generated `commandId`, requires the active session controller lease, includes an `expectedRevision` that pins the mutation against the authoritative `context.snapshot` revision, and accepts a closed `target` (file path/range or source id, or `kind: "all"` for a session-wide refresh). They participate in semantic hashing, idempotency, and journaled `command.state` exactly like other session mutations; the read-only `context.snapshot.request` remains a repeatable control.
+
 ### Extension command
 
 ```text
@@ -628,6 +701,10 @@ session.removed
 workspace.summary
 workspace.trust_state
 notification.capability
+workspace.tree.snapshot
+workspace.file.metadata
+workspace.file.stale
+workspace.file.unavailable
 command.state
 error.event
 ```
@@ -676,6 +753,8 @@ recipe.activity
 recipe.unavailable
 plan.snapshot
 plan.unavailable
+context.snapshot
+context.unavailable
 command.state
 error.event
 ```
@@ -716,6 +795,24 @@ Per [D-036](DECISIONS.md#d-036--f0-recipe-plan-and-targeted-steering-contract), 
 - `stale` describes the snapshot; `capability` reports the producing surface. A new authoritative snapshot supersedes the prior revision atomically.
 
 `plan.unavailable` is the truthful no-plan surface and has the closed payload `{ capability: "plans.v1", status }`. Recipe and plan capability status states are exactly `available`, `degraded`, `unavailable`, and `stale`. Every non-available state requires nonempty `reason` and `remediation` (each at most 512 UTF-16 code units); `source` (at most 128), revision, and `lastRefreshedAt` are optional. Available status may omit reason/remediation. Unknown/private/debug fields are rejected in these closed payloads.
+
+### Files and file references (R3)
+
+R3 payloads use `workspaceId` plus normalized workspace-root-relative paths only. Paths use `/`, have no leading slash, drive prefix, NUL, empty/`.`/`..` segment, or canonical/symlink escape; dotfiles such as `.gitignore` and `.github/workflows/ci.yml` are valid. Absolute host paths never cross the protocol.
+
+- Tree, filename-search, and content-search controls return bounded pages with opaque `rootRevision` and optional `nextPageToken`. Tokens are at most 256 characters, short-lived, and bound to workspace, query/path, and revision; clients restart pagination when the revision changes. Limits are 200 tree items at depth 16, 100 filename matches, and 200 content-match lines/256 KiB. See `packages/protocol-fixtures/corpus` for valid, boundary, and invalid traversal/page fixtures.
+- Metadata identifies path, byte size (maximum 25 MiB), binary state, file revision, modification time, and optional SHA-256/language hint. UTF-8 reads use 1-based inclusive `rangeStart`/`rangeEnd`, at most 2,000 lines and 512 KiB, and report revision, returned range, `totalLines`, truncation, and modification time. Binary, oversized, denied, deleted, stale-revision, and otherwise unavailable reads fail explicitly; they are not returned as empty content.
+- `workspace.tree.snapshot`, metadata, stale, and unavailable events always include `workspaceId`; unavailable/stale payloads retain safe reason/remediation or old/current revisions as defined by their closed schemas.
+- `prompt.submit.fileRefs` carries `workspaceId`, root-relative path, optional 1-based inclusive ranges (at most 16), lowercase SHA-256 digest, and file revision. References and binary `attachmentIds` share the four-item prompt-context limit. The bridge revalidates workspace, path/range, digest, and revision before dispatch; stale/unavailable references fail visibly and are never replaced with newer bytes.
+- All R3 controls are read-only and nonjournaled. Browsing, reading, searching, copying, or attaching a reference MUST NOT pin, exclude, refresh, edit, or otherwise mutate file/context state.
+
+### Context inspector (R4)
+
+`context.snapshot` and `context.snapshot.result` carry the same closed, reconstructible session payload: `sessionId`, opaque `revision`, bounded producer `source`, snapshot `stale`, capability status, and `lastRefreshedAt`; optional fields are model/provider, thinking level, bounded instructions, up to 64 pinned files (each with root-relative path, revision, timestamp, and up to 16 inclusive ranges), token usage, compaction state/revision/time, and up to 64 bounded sources with source ID/kind, summary, freshness, capability status, optional revision, and refresh time.
+
+- Token counts are canonical non-negative decimal strings of at most 16 digits: `0` or a nonzero digit followed by digits. Signs, leading zeroes, fractions, and exponent notation are invalid. Missing usage is unavailable/unknown, never inferred as zero; optional `usagePercent` is only a derived number from 0 through 1.
+- Snapshot/source `stale` and non-available capability states MUST remain visible. `context.unavailable` is emitted instead of an empty snapshot and includes safe reason/remediation through capability status.
+- `context.snapshot.request` is a repeatable read and has no implicit mutation. Pin, unpin, exclude, and refresh occur only through the durable lease- and `expectedRevision`-checked commands in §14; UI state changes only after their committed session-stream snapshot. A stale revision is rejected rather than merged.
 
 ### Command state
 
@@ -1020,6 +1117,14 @@ database_unavailable
 storage_full
 migration_required
 internal_error
+path_not_found
+path_outside_workspace
+path_binary
+path_oversize
+file_stale
+file_unavailable
+context_pin_failed
+context_unavailable
 ```
 
 Rules:
