@@ -17,6 +17,7 @@ import '../domain/prompt_send_lifecycle.dart';
 import '../domain/process_domain.dart';
 import '../git/git_domain.dart' show GitState, reduceGit;
 import '../plans/plan_domain.dart' show PlanState, reducePlan;
+import '../context/context_domain.dart' show ContextState, reduceContext, ContextMutationTarget;
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
@@ -151,6 +152,19 @@ class _PlanSummaryRequest {
   final int epoch;
 }
 
+/// R4 — Tracks an in-flight `context.snapshot.request` so the response can
+/// be correlated by request ID and connection epoch. Mirrors the
+/// `_PlanSummaryRequest` pattern from R2.
+class _ContextSnapshotRequest {
+  const _ContextSnapshotRequest({
+    required this.sessionId,
+    required this.epoch,
+  });
+
+  final String sessionId;
+  final int epoch;
+}
+
 class _PendingPrompt {
   _PendingPrompt({
     required this.sessionId,
@@ -251,6 +265,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   GitState _git = const GitState();
   final Map<String, _PlanSummaryRequest> _planSummaryRequests = {};
   PlanState _plans = const PlanState();
+  // R4 — Tracks in-flight `context.snapshot.request` by request ID so the
+  // matching `context.snapshot.result` (or the host-stream `context.snapshot`
+  // and `context.unavailable` events) can be correlated. Mirrors the
+  // process/git/plan correlation pattern (D-039).
+  final Map<String, _ContextSnapshotRequest> _contextSnapshotRequests = {};
+  ContextState _context = const ContextState();
   final List<String> _historySyncQueue = [];
   final Map<String, String?> _historySyncLocalRevisions = {};
   String? _historySyncCurrentSessionId;
@@ -650,6 +670,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   ProcessDomainState get processes => _processes;
   GitState get git => _git;
   PlanState get plans => _plans;
+  /// R4 — The closed context-inspector projection. Exactly one of
+  /// `snapshot` / `unavailable` is non-null at a time. `refreshing` is
+  /// true while a `context.snapshot.request` is in flight.
+  ContextState get contextState => _context;
 
   /// Sends a bounded `git.summary.request` for [workspaceId] and tracks the
   /// request ID so the matching `git.summary.result` (or stream `git.summary`)
@@ -731,6 +755,112 @@ final class ConnectionCoordinator extends ChangeNotifier
     } catch (_) { /* socket may be closed; nothing to do */ }
     _plans = _plans.copyWith(refreshing: false);
     notifyListeners();
+  }
+
+  /// R4 — Sends a bounded `context.snapshot.request` for [sessionId] and
+  /// tracks the request ID so the matching `context.snapshot.result` (or
+  /// host-stream `context.snapshot` / `context.unavailable` events) can be
+  /// correlated. When the host advertised `contexts.v1`, this is the only
+  /// path to the inspector surface. When the service truthfully reports
+  /// `context.unavailable`, the host emits the stream event directly and
+  /// the response throws `unsupported_capability`; this method surfaces
+  /// that as a thrown error.
+  Future<void> requestContextSnapshot(String sessionId) async {
+    final epoch = _connectionEpoch;
+    final requestId = _id();
+    _contextSnapshotRequests[requestId] = _ContextSnapshotRequest(
+      sessionId: sessionId,
+      epoch: epoch,
+    );
+    _context = _context.copyWith(refreshing: true);
+    notifyListeners();
+    try {
+      await _sendControl('context.snapshot.request', <String, Object?>{
+        'sessionId': sessionId,
+        'requestId': requestId,
+      }, requestId: requestId);
+    } catch (_) {
+      _contextSnapshotRequests.remove(requestId);
+      _context = _context.copyWith(refreshing: false);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// R4 — Cancels the in-flight `context.snapshot.request` identified by
+  /// [requestId]. No-op when no matching in-flight request exists. The
+  /// bridge pattern keeps the response correlated by requestId; the host
+  /// can simply ignore a late result, mirroring git/plan cancellation.
+  Future<void> cancelContextSnapshot(String requestId) async {
+    if (_contextSnapshotRequests.remove(requestId) != null) {
+      _context = _context.copyWith(refreshing: false);
+      notifyListeners();
+    }
+  }
+
+  /// R4 — Sends `context.pin` for a file/range target. The host returns
+  /// the new revision (or `unsupported_capability` if `expectedRevision`
+  /// is stale). The local snapshot is left intact until the next
+  /// authoritative snapshot or `context.unavailable` event arrives.
+  Future<void> pinContext({
+    required String sessionId,
+    required String expectedRevision,
+    required ContextMutationTarget target,
+  }) async {
+    await _sendContextMutation('context.pin', sessionId, expectedRevision, target);
+  }
+
+  /// R4 — Sends `context.unpin`. Mirrors `pinContext`.
+  Future<void> unpinContext({
+    required String sessionId,
+    required String expectedRevision,
+    required ContextMutationTarget target,
+  }) async {
+    await _sendContextMutation('context.unpin', sessionId, expectedRevision, target);
+  }
+
+  /// R4 — Sends `context.exclude`. Mirrors `pinContext`.
+  Future<void> excludeContext({
+    required String sessionId,
+    required String expectedRevision,
+    required ContextMutationTarget target,
+  }) async {
+    await _sendContextMutation('context.exclude', sessionId, expectedRevision, target);
+  }
+
+  /// R4 — Sends `context.refresh` for the whole session. The target is
+  /// `all`; the host may accept a wildcard regardless of revision.
+  Future<void> refreshContext({
+    required String sessionId,
+    required String expectedRevision,
+  }) async {
+    await _sendContextMutation(
+      'context.refresh',
+      sessionId,
+      expectedRevision,
+      const ContextMutationTarget.all(),
+    );
+  }
+
+  Future<void> _sendContextMutation(
+    String type,
+    String sessionId,
+    String expectedRevision,
+    ContextMutationTarget target,
+  ) async {
+    _context = _context.copyWith(refreshing: true);
+    notifyListeners();
+    try {
+      await _sendControl(type, <String, Object?>{
+        'sessionId': sessionId,
+        'expectedRevision': expectedRevision,
+        'target': target.toJson(),
+      }, requestId: _id());
+    } catch (_) {
+      _context = _context.copyWith(refreshing: false);
+      notifyListeners();
+      rethrow;
+    }
   }
 
   /// Cancels the in-flight `git.summary.request` for [workspaceId] by sending
@@ -1136,6 +1266,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
     _planSummaryRequests.clear();
+    _contextSnapshotRequests.clear();
     _plans = _plans.copyWith(refreshing: false);
     _pendingCurrentRequestCommand.clear();
     if (!_historyGateComplete) {
@@ -1326,6 +1457,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
     _planSummaryRequests.clear();
+    _contextSnapshotRequests.clear();
     _plans = _plans.copyWith(refreshing: false);
     _historyGateComplete = false;
     _historySyncCurrentSessionId = null;
@@ -2461,6 +2593,14 @@ final class ConnectionCoordinator extends ChangeNotifier
       if (type == 'plan.unavailable' || type == 'plan.snapshot') {
         _applyPlanStreamEvent(type, payload);
       }
+      // R4 — both context.unavailable (host stream capability envelope)
+      // and context.snapshot (session stream authoritative projection)
+      // must apply before the cursor advance notifies subscribers so the
+      // UI sees an ordered context projection rather than out-of-order
+      // transitions. Same discipline as R2 plans and R6 git.
+      if (type == 'context.unavailable' || type == 'context.snapshot') {
+        _applyContextStreamEvent(type, payload);
+      }
       _notify();
       return;
     }
@@ -2492,6 +2632,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         _gitSummaryResult(message, payload);
       case 'plan.snapshot.result':
         _planSnapshotResult(message, payload);
+      case 'context.snapshot.result':
+        _contextSnapshotResult(message, payload);
       case 'workspace.trust_state':
         _workspaceTrustStateEvent(payload);
       case 'command.current.result':
@@ -3017,6 +3159,8 @@ final class ConnectionCoordinator extends ChangeNotifier
       _applyGitStreamEvent(type, payload);
     } else if (type == 'plan.snapshot' || type == 'plan.unavailable') {
       _applyPlanStreamEvent(type, payload);
+    } else if (type == 'context.snapshot' || type == 'context.unavailable') {
+      _applyContextStreamEvent(type, payload);
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final eventSessionId = payload['sessionId'];
       final eventCommandId = payload['commandId'];
@@ -3357,6 +3501,32 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// coordinator reconciles them without requiring a new request tap.
   void _applyPlanStreamEvent(String type, Map<String, Object?> payload) {
     _plans = reducePlan(_plans, type, payload);
+    notifyListeners();
+  }
+
+  /// R4 — Correlates `context.snapshot.result` by request ID and applies
+  /// the closed ContextSnapshot payload through `reduceContext`. Stale
+  /// results from a prior connection epoch are dropped so a delayed
+  /// response cannot surface a stale snapshot after reconnect. Mirrors
+  /// the R2 `_planSnapshotResult` discipline.
+  void _contextSnapshotResult(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) {
+    final requestId = message['requestId'];
+    if (requestId is! String) return;
+    final request = _contextSnapshotRequests.remove(requestId);
+    if (request == null || request.epoch != _connectionEpoch) return;
+    _context = reduceContext(_context, 'context.snapshot.result', payload);
+    notifyListeners();
+  }
+
+  /// R4 — Applies the host-stream `context.snapshot` (session stream) and
+  /// `context.unavailable` (host stream) events to the context projection.
+  /// The host emits these whenever the per-session context surface changes;
+  /// the coordinator reconciles them without requiring a new request tap.
+  void _applyContextStreamEvent(String type, Map<String, Object?> payload) {
+    _context = reduceContext(_context, type, payload);
     notifyListeners();
   }
 
@@ -4397,6 +4567,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
     _planSummaryRequests.clear();
+    _contextSnapshotRequests.clear();
     _plans = _plans.copyWith(refreshing: false);
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
@@ -4535,6 +4706,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _gitSummaryRequests.clear();
     _git = _git.copyWith(refreshing: false);
     _planSummaryRequests.clear();
+    _contextSnapshotRequests.clear();
     _plans = _plans.copyWith(refreshing: false);
     _cancelReconnect();
     _ackTimer?.cancel();

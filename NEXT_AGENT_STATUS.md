@@ -10,9 +10,10 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
 
 - Repository: `/Users/nathandekleerk/github/pi-mob`
 - Branch: `main`
-- HEAD: R4 bridge slice (commit pending in this turn)
-- Working tree: clean at handoff; this file is intentionally untracked until
-  the docs commit lands (R4 work committed in this turn).
+- HEAD: R4 mobile slice (commit pending in this turn)
+- Working tree: DIRTY at handoff — R4 mobile slice is staged for commit
+  but TWO R4 tests are failing (see "Known failures" below). The next
+  agent must investigate and fix them BEFORE pushing.
 
 ## Integrated in this continuation
 
@@ -83,6 +84,80 @@ chat-first and preserves all exclusions in `FIELD_GUIDE.md`.
   - success path does NOT emit `git.unavailable`
   - `cwd unknown` does NOT emit `git.unavailable`
 - Frozen schemas and D-039 response shape unchanged.
+
+### R4 mobile context-inspector wiring (staged for commit — KNOWN FAILURES)
+
+- `apps/mobile/lib/src/context/context_domain.dart` adds the closed
+  R4 projection: `ContextSnapshotData.tryParse`,
+  `ContextUnavailableData.tryParse`, `ContextState`
+  (`snapshot`/`unavailable`/`refreshing`/`lastRequestRevision`),
+  `ContextMutationTarget` union (file/source/all), and `reduceContext`
+  mirroring `reducePlan` / `reduceGit`.
+- `ConnectionCoordinator` exposes `ContextState get contextState`
+  plus `requestContextSnapshot(sessionId)` /
+  `cancelContextSnapshot(requestId)` and the four D-037 durable
+  mutation controls: `pinContext` / `unpinContext` / `excludeContext`
+  / `refreshContext`. Tracks
+  `Map<String, _ContextSnapshotRequest>` keyed by requestId and
+  connection epoch so stale `context.snapshot.result` from a prior
+  reconnect is dropped.
+- Response router handles `context.snapshot.result`; event router
+  handles host-stream `context.unavailable` and session-stream
+  `context.snapshot` BEFORE the cursor advance notifies subscribers
+  (same pattern R2/R6 used).
+- Lifecycle clears at reconnect, dispose, and socket-end reset the
+  in-flight context registry alongside the existing plan/git ones.
+- `apps/mobile/lib/protocol_fixture.dart` updated: `context.unavailable`
+  is host-stream-owned (capability envelope, no sessionId);
+  `context.snapshot` stays session-stream-owned (carries sessionId).
+  Mirrors the shared TypeScript `EVENT_STREAM_OWNERSHIP` map.
+- Corpus fixture `event-context-unavailable-valid.json` moved from
+  `session:` to `host:` streamId to match.
+- Test helper `_contextUnavailableEvent` switched from `_recipeEvent`
+  (session) to `_hostEvent` (host) — `context.unavailable` is host-owned.
+- Seven new coordinator tests (5 passing, 2 KNOWN FAILURES):
+  - request correlates `context.snapshot.result` to the session
+    **<-- FAILS**: `eventually(() => coordinator.contextState.snapshot
+    != null)` times out at line 2714. Likely cause: response is
+    reaching the socket but `_contextSnapshotResult` is dropping it
+    due to epoch mismatch OR `ContextSnapshotData.tryParse` is
+    rejecting the payload. Next agent MUST diagnose via tracing
+    print (NOT keep) in the coordinator receive path, then remove
+    after fix.
+  - `context.unavailable` host-stream event marks the session
+    unavailable **<-- FAILS**: same line 2714 eventually timeout.
+    The test sends `context.snapshot` first on `session:$sessionId`,
+    then `context.unavailable` on `host:$hostId`. The latter may not
+    reach `_receive` if the prior event triggered a journal failure
+    that closed the socket (same class of bug as the R2 fix earlier).
+    Next agent should follow the R2 debug pattern that worked.
+  - `cancelContextSnapshot` clears refreshing when no in-flight
+    request exists (passing)
+  - `cancelContextSnapshot` clears the tracked request and refreshing
+    flag (passing)
+  - `pinContext` sends `context.pin` with the closed target and
+    `expectedRevision` (passing)
+  - `unpin`/`exclude`/`refresh` all send the matching control with
+    the closed target (passing)
+  - stale `context.snapshot.result` from a prior connection epoch
+    is dropped (passing)
+
+**KNOWN FAILURES — next agent MUST fix before declaring R4 done:**
+  1. `R4 context snapshot request correlates context.snapshot.result
+     to the session` (connection_coordinator_test.dart ~line 2310)
+  2. `R4 context.unavailable host-stream event marks the session
+     unavailable` (connection_coordinator_test.dart ~line 2321)
+
+Both look like they share a root cause: the `context.snapshot.result`
+response / `context.unavailable` host-stream event never reaches
+`_contextSnapshotResult` / `_applyContextStreamEvent`. Hypothesis:
+the journal-dispatch branch in `_receive` is firing `_applyContextStreamEvent`
+BEFORE the snapshot test's `eventually` runs, but the response test
+needs the SAME event-type-via-result to update `snapshot`. Add a
+single `print('DBG context-snapshot-result reached _contextSnapshotResult')`
+inside that method (with `// ignore: avoid_print`) and re-run to see
+whether it's a wiring issue or a parse issue. Clean up the print
+before commit.
 
 ### R4 bridge context-inspector wiring (now committed)
 

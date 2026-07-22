@@ -994,6 +994,10 @@ const _hostEventTypes = <String>{
   // Capability-state envelopes (no sessionId) ride the host stream.
   'recipe.unavailable',
   'plan.unavailable',
+  // R4 — context.unavailable is the contexts.v1 capability-state
+  // envelope (no sessionId). `context.snapshot` carries a sessionId
+  // and stays on the per-session stream.
+  'context.unavailable',
 };
 const _dualStreamEventTypes = <String>{'command.state', 'error.event'};
 const _errorCodes = <String>{

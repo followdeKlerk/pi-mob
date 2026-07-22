@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
+import 'package:pi_mob/src/context/context_domain.dart';
 import 'package:pi_mob/src/data/app_database.dart';
 import 'package:pi_mob/src/domain/attachments.dart';
 import 'package:pi_mob/src/domain/mobile_state.dart';
@@ -2271,6 +2272,188 @@ void main() {
     ));
     socket.server(response('plan.snapshot.result', validPlanSnapshotPayload(), requestId: requestId));
     await eventually(() => coordinator.plans.snapshot == null);
+    pending.ignore();
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // R4 — Context inspector
+  // ────────────────────────────────────────────────────────────────────────
+
+  Map<String, Object?> validContextSnapshotPayload() => <String, Object?>{
+    'sessionId': sessionId,
+    'revision': 'context-r1',
+    'source': 'session-bridge',
+    'stale': false,
+    'capability': {'state': 'available'},
+    'model': {'provider': 'anthropic', 'modelId': 'claude-3'},
+    'thinkingLevel': 'low',
+    'instructions': 'Be terse.',
+    'pinnedFiles': [
+      {
+        'path': 'README.md',
+        'pinnedAt': '2026-07-12T00:00:00.000Z',
+        'revision': 'file-r1',
+      },
+    ],
+    'tokenUsage': {'inputTokens': '100', 'outputTokens': '42'},
+    'compacted': false,
+    'lastRefreshedAt': '2026-07-12T00:00:00.000Z',
+  };
+
+  test('R4 context snapshot request correlates context.snapshot.result to the session', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final future = coordinator.requestContextSnapshot(sessionId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'context.snapshot.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'context.snapshot.request')['requestId'] as String;
+    expect(
+      socket.sent.lastWhere((message) => message['type'] == 'context.snapshot.request')['payload'],
+      equals(<String, Object?>{'sessionId': sessionId, 'requestId': requestId}),
+    );
+    socket.server(response('context.snapshot.result', validContextSnapshotPayload(), requestId: requestId));
+    await future;
+    await eventually(() => coordinator.contextState.snapshot != null);
+    expect(coordinator.contextState.snapshot!.revision, 'context-r1');
+    expect(coordinator.contextState.snapshot!.model?.provider, 'anthropic');
+    expect(coordinator.contextState.refreshing, isFalse);
+  });
+
+  test('R4 context.unavailable host-stream event marks the session unavailable', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    socket.server(
+      event(
+        type: 'context.snapshot',
+        streamId: 'session:$sessionId',
+        cursor: '1',
+        eventId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+        payload: validContextSnapshotPayload(),
+      ),
+    );
+    socket.server(
+      event(
+        type: 'context.unavailable',
+        streamId: 'host:$hostId',
+        cursor: '2',
+        eventId: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+        payload: <String, Object?>{
+          'sessionId': sessionId,
+          'capability': 'contexts.v1',
+          'status': <String, Object?>{
+            'state': 'unavailable',
+            'reason': 'No vetted context authority installed',
+            'remediation': 'Install a vetted Pi authority that emits context.snapshot events.',
+          },
+        },
+      ),
+    );
+    await eventually(() => coordinator.contextState.unavailable != null);
+    await eventually(() => coordinator.contextState.snapshot == null);
+    expect(coordinator.contextState.unavailable!.reason, 'unavailable');
+    expect(coordinator.contextState.unavailable!.message, contains('No vetted context authority'));
+  });
+
+  test('R4 cancelContextSnapshot clears refreshing when no in-flight request exists', () async {
+    await makeReady(coordinator, transport);
+    await coordinator.cancelContextSnapshot('nonexistent');
+    expect(coordinator.contextState.refreshing, isFalse);
+  });
+
+  test('R4 cancelContextSnapshot clears the tracked request and refreshing flag', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final pending = coordinator.requestContextSnapshot(sessionId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'context.snapshot.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'context.snapshot.request')['requestId'] as String;
+    await coordinator.cancelContextSnapshot(requestId);
+    expect(coordinator.contextState.refreshing, isFalse);
+    pending.ignore();
+  });
+
+  test('R4 pinContext sends context.pin with the closed target and expectedRevision', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    await coordinator.pinContext(
+      sessionId: sessionId,
+      expectedRevision: 'context-r1',
+      target: ContextMutationTarget.file(path: 'src/main.dart', revision: 'src-r1'),
+    );
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'context.pin'),
+    );
+    final payload = socket.sent.lastWhere((message) => message['type'] == 'context.pin')['payload']
+        as Map<String, Object?>;
+    expect(payload['sessionId'], sessionId);
+    expect(payload['expectedRevision'], 'context-r1');
+    expect(payload['target'], isA<Map<String, Object?>>());
+    final target = payload['target'] as Map<String, Object?>;
+    expect(target['kind'], 'file');
+    expect(target['path'], 'src/main.dart');
+  });
+
+  test('R4 unpin/exclude/refresh all send the matching control with the closed target', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    await coordinator.unpinContext(
+      sessionId: sessionId,
+      expectedRevision: 'context-r1',
+      target: ContextMutationTarget.source(sourceId: 'cmd-out-7'),
+    );
+    await coordinator.excludeContext(
+      sessionId: sessionId,
+      expectedRevision: 'context-r1',
+      target: ContextMutationTarget.source(sourceId: 'cmd-out-7'),
+    );
+    await coordinator.refreshContext(
+      sessionId: sessionId,
+      expectedRevision: 'context-r1',
+    );
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'context.refresh'),
+    );
+    expect(
+      socket.sent.any((message) => message['type'] == 'context.unpin'),
+      isTrue,
+    );
+    expect(
+      socket.sent.any((message) => message['type'] == 'context.exclude'),
+      isTrue,
+    );
+    final refreshPayload = socket.sent.lastWhere((message) => message['type'] == 'context.refresh')['payload']
+        as Map<String, Object?>;
+    final target = refreshPayload['target'] as Map<String, Object?>;
+    expect(target['kind'], 'all');
+  });
+
+  test('R4 stale context.snapshot.result from a prior connection epoch is dropped', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final pending = coordinator.requestContextSnapshot(sessionId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'context.snapshot.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'context.snapshot.request')['requestId'] as String;
+    await coordinator.connect('https://fixture.test');
+    final newSocket = transport.sockets.last;
+    newSocket.server(helloAccepted());
+    await eventually(
+      () => newSocket.sent.any((message) => message['type'] == 'subscription.set'),
+    );
+    newSocket.server(response(
+      'subscription.accepted',
+      {'streams': <Object?>[]},
+      requestId: newSocket.sent
+          .firstWhere((message) => message['type'] == 'subscription.set')['requestId'] as String,
+    ));
+    socket.server(response('context.snapshot.result', validContextSnapshotPayload(), requestId: requestId));
+    await eventually(() => coordinator.contextState.snapshot == null);
     pending.ignore();
   });
 }

@@ -152,7 +152,7 @@ Map<String, Object?> _contextSnapshotResult(Map<String, Object?> payload) =>
     };
 
 Map<String, Object?> _contextUnavailableEvent(Map<String, Object?> payload) =>
-    _recipeEvent('context.unavailable', payload);
+    _hostEvent('context.unavailable', payload);
 
 Map<String, Object?> _recipeActivity(String kind) => <String, Object?>{
   'kind': kind,
