@@ -318,5 +318,15 @@
     "class": "event",
     "stream": "session",
     "type": "process.error"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "git.summary"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "git.unavailable"
   }
 ]

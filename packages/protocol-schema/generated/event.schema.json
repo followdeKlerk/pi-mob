@@ -988,6 +988,14 @@
                 {
                   "const": "process.rerun",
                   "type": "string"
+                },
+                {
+                  "const": "git.commit.request",
+                  "type": "string"
+                },
+                {
+                  "const": "git.push.request",
+                  "type": "string"
                 }
               ]
             },
@@ -1217,6 +1225,30 @@
                     },
                     {
                       "const": "process_failed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_remote_missing",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_provider_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_auth_missing",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_action_failed",
                       "type": "string"
                     }
                   ]
@@ -4588,6 +4620,30 @@
                         },
                         {
                           "const": "process_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "git_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "git_remote_missing",
+                          "type": "string"
+                        },
+                        {
+                          "const": "git_provider_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "git_auth_missing",
+                          "type": "string"
+                        },
+                        {
+                          "const": "git_stale",
+                          "type": "string"
+                        },
+                        {
+                          "const": "git_action_failed",
                           "type": "string"
                         }
                       ]
@@ -8076,6 +8132,30 @@
                     {
                       "const": "process_failed",
                       "type": "string"
+                    },
+                    {
+                      "const": "git_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_remote_missing",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_provider_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_auth_missing",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "git_action_failed",
+                      "type": "string"
                     }
                   ]
                 },
@@ -8192,6 +8272,571 @@
           "type": "string"
         },
         "payload": {
+          "$id": "pi-mob/protocol/git-summary",
+          "additionalProperties": false,
+          "properties": {
+            "ahead": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "behind": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "branch": {
+              "$id": "pi-mob/protocol/git-branch",
+              "maxLength": 128,
+              "pattern": "^(?![/.])(?!.*(?:\\.\\.|@{))(?!.*//)[A-Za-z0-9._/\\-]{1,128}(?<!\\.lock)$",
+              "type": "string"
+            },
+            "capability": {
+              "const": "git-ci.v1",
+              "type": "string"
+            },
+            "changedCount": {
+              "minimum": 0,
+              "type": "integer"
+            },
+            "ciStatus": {
+              "$id": "pi-mob/protocol/git-ci-status",
+              "additionalProperties": false,
+              "properties": {
+                "state": {
+                  "anyOf": [
+                    {
+                      "const": "success",
+                      "type": "string"
+                    },
+                    {
+                      "const": "failure",
+                      "type": "string"
+                    },
+                    {
+                      "const": "pending",
+                      "type": "string"
+                    },
+                    {
+                      "const": "unknown",
+                      "type": "string"
+                    }
+                  ]
+                }
+              },
+              "required": [
+                "state"
+              ],
+              "type": "object"
+            },
+            "failedChecks": {
+              "$id": "pi-mob/protocol/git-failed-checks",
+              "additionalProperties": false,
+              "properties": {
+                "items": {
+                  "items": {
+                    "$id": "pi-mob/protocol/git-check-run",
+                    "additionalProperties": false,
+                    "properties": {
+                      "name": {
+                        "maxLength": 128,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "status": {
+                        "anyOf": [
+                          {
+                            "const": "success",
+                            "type": "string"
+                          },
+                          {
+                            "const": "failure",
+                            "type": "string"
+                          },
+                          {
+                            "const": "pending",
+                            "type": "string"
+                          },
+                          {
+                            "const": "unknown",
+                            "type": "string"
+                          }
+                        ]
+                      },
+                      "summary": {
+                        "maxLength": 512,
+                        "minLength": 1,
+                        "type": "string"
+                      },
+                      "url": {
+                        "$id": "pi-mob/protocol/external-url",
+                        "maxLength": 1024,
+                        "pattern": "^https://[^\\s\\x00-\\x1F]{1,1024}$",
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "name",
+                      "status"
+                    ],
+                    "type": "object"
+                  },
+                  "maxItems": 20,
+                  "type": "array"
+                },
+                "totalCount": {
+                  "maximum": 20,
+                  "minimum": 0,
+                  "type": "integer"
+                }
+              },
+              "required": [
+                "totalCount",
+                "items"
+              ],
+              "type": "object"
+            },
+            "lastRefreshedAt": {
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+              "type": "string"
+            },
+            "latestCommit": {
+              "$id": "pi-mob/protocol/git-latest-commit",
+              "additionalProperties": false,
+              "properties": {
+                "author": {
+                  "maxLength": 128,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "authoredAt": {
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                  "type": "string"
+                },
+                "message": {
+                  "maxLength": 240,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "sha": {
+                  "maxLength": 64,
+                  "pattern": "^[0-9a-f]{7,64}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "sha",
+                "authoredAt"
+              ],
+              "type": "object"
+            },
+            "pullRequest": {
+              "$id": "pi-mob/protocol/git-pull-request",
+              "additionalProperties": false,
+              "properties": {
+                "number": {
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                "title": {
+                  "maxLength": 240,
+                  "minLength": 1,
+                  "type": "string"
+                },
+                "url": {
+                  "$id": "pi-mob/protocol/external-url",
+                  "maxLength": 1024,
+                  "pattern": "^https://[^\\s\\x00-\\x1F]{1,1024}$",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "number",
+                "title",
+                "url"
+              ],
+              "type": "object"
+            },
+            "repository": {
+              "$id": "pi-mob/protocol/git-repository-label",
+              "maxLength": 128,
+              "pattern": "^(?!/)[A-Za-z0-9._:/\\-]{1,128}$",
+              "type": "string"
+            },
+            "revision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "supportedActions": {
+              "items": {
+                "anyOf": [
+                  {
+                    "const": "refresh",
+                    "type": "string"
+                  },
+                  {
+                    "const": "commit_through_pi",
+                    "type": "string"
+                  },
+                  {
+                    "const": "push_through_pi",
+                    "type": "string"
+                  },
+                  {
+                    "const": "open_external",
+                    "type": "string"
+                  }
+                ]
+              },
+              "maxItems": 4,
+              "type": "array",
+              "uniqueItems": true
+            },
+            "workingTreeState": {
+              "$id": "pi-mob/protocol/git-working-tree-state",
+              "anyOf": [
+                {
+                  "const": "clean",
+                  "type": "string"
+                },
+                {
+                  "const": "dirty",
+                  "type": "string"
+                },
+                {
+                  "const": "unknown",
+                  "type": "string"
+                }
+              ]
+            },
+            "workspaceId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "revision",
+            "repository",
+            "branch",
+            "workingTreeState",
+            "changedCount",
+            "ahead",
+            "behind",
+            "latestCommit",
+            "supportedActions",
+            "capability",
+            "lastRefreshedAt"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^host:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "git.summary",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "eventId",
+        "streamId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "cursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "eventId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "$id": "pi-mob/protocol/git-unavailable",
+          "additionalProperties": false,
+          "properties": {
+            "capability": {
+              "const": "git-ci.v1",
+              "type": "string"
+            },
+            "status": {
+              "$id": "pi-mob/protocol/capability-status",
+              "anyOf": [
+                {
+                  "$id": "pi-mob/protocol/capability-status#available",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "available",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#degraded",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "degraded",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#unavailable",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#stale",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "stale",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            },
+            "workspaceId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "workspaceId",
+            "capability",
+            "status"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^host:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "git.unavailable",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "eventId",
+        "streamId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "cursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "eventId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
           "additionalProperties": true,
           "properties": {
             "optional": {
@@ -8236,6 +8881,10 @@
                   },
                   {
                     "const": "runtime.processes.v1",
+                    "type": "string"
+                  },
+                  {
+                    "const": "git-ci.v1",
                     "type": "string"
                   }
                 ]
@@ -8538,6 +9187,14 @@
                   },
                   {
                     "const": "process.error",
+                    "type": "string"
+                  },
+                  {
+                    "const": "git.summary",
+                    "type": "string"
+                  },
+                  {
+                    "const": "git.unavailable",
                     "type": "string"
                   }
                 ]
