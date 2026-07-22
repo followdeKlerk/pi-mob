@@ -19,8 +19,6 @@ import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
 import '../controls/control_view_data.dart';
 import '../domain/session_tree.dart';
-import '../search/global_search_controller.dart';
-import '../search/search_indexer.dart';
 import '../sync/event_reducer.dart';
 import 'bridge_transport.dart';
 
@@ -259,18 +257,6 @@ final class ConnectionCoordinator extends ChangeNotifier
   String? latestExportState;
   int? latestExportBytes;
   final SessionTreeProjection _sessionTree = SessionTreeProjection();
-
-  // M16 bounded global search. The coordinator owns both the indexer (which
-  // mirrors durable journal events into the search table) and the
-  // controller (which exposes a debounced, cancellable query API to the
-  // global search sheet). Both are created eagerly in `initialize` so the
-  // sheet can subscribe immediately.
-  late final SearchIndexer _searchIndexer = SearchIndexer(
-    database: _database,
-    coordinator: this,
-  );
-  late final GlobalSearchController _globalSearchController =
-      GlobalSearchController(coordinator: this, database: _database);
 
   BridgeSocket? _socket;
   StreamSubscription<String>? _socketSubscription;
@@ -599,17 +585,6 @@ final class ConnectionCoordinator extends ChangeNotifier
             SessionControlState.empty(selectedSessionId!));
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
   Map<String, StreamViewState> get streams => Map.unmodifiable(_streams);
-
-  /// Shared global-search controller. Owned by the coordinator so the
-  /// latest query state survives sheet open / close cycles and so the
-  /// database can be queried with the same host id the rest of the
-  /// coordinator uses.
-  GlobalSearchController get globalSearchController => _globalSearchController;
-
-  /// Read-only access to the bounded search indexer. The indexer is the
-  /// only writer of [AppDatabase.search_entries]; tests reach for it to
-  /// drive an offline rebuild.
-  SearchIndexer get searchIndexer => _searchIndexer;
 
   SessionHistoryState historyFor(String sessionId) =>
       _history[sessionId] ?? SessionHistoryState.empty(sessionId);
@@ -947,9 +922,6 @@ final class ConnectionCoordinator extends ChangeNotifier
 
     if (hostId != null) await _loadCachedStreams(hostId!);
     _notify();
-    if (hostId != null) {
-      unawaited(_searchIndexer.rebuildHost(hostId!));
-    }
     if (autoConnect && endpoint != null && _foreground) {
       unawaited(connect(endpoint.toString()));
     }
@@ -1294,7 +1266,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     final removedDeferred = _deferredAutoSelectSessionId == sessionId;
     if (removedSelection) _clearSelectedChatProjection();
     if (removedDeferred) _deferredAutoSelectSessionId = null;
-    await _searchIndexer.removeSession(sessionId);
 
     final removedQueued = _historySyncQueue
         .where((id) => id == sessionId)
@@ -2611,7 +2582,6 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _database.persistEvent(event);
         _streams[streamId] = reduction.state;
         _handleEventPayload(type, payload);
-        _scheduleSearchIndex(event.streamId);
         _eventsSinceAck += 1;
         if (_eventsSinceAck >= 20) await _ackCursors();
       case EventDisposition.duplicate:
@@ -2938,7 +2908,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
     _sessions[id] = state;
     unawaited(_database.upsertSessionState(state));
-    unawaited(_searchIndexer.indexSessionMeta(state));
   }
 
   void _failModelListRequest(String message) {
@@ -2946,19 +2915,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (completer != null && !completer.isCompleted) {
       completer.completeError(StateError(message));
     }
-  }
-
-  /// Indexes a single stream into the bounded search table. Coalesced per
-  /// frame via a microtask so a fast burst of journal events never queues
-  /// one database write per event.
-  void _scheduleSearchIndex(String streamId) {
-    if (_disposed) return;
-    if (!streamId.startsWith('session:')) return;
-    final sessionId = streamId.substring('session:'.length);
-    scheduleMicrotask(() {
-      if (_disposed) return;
-      unawaited(_searchIndexer.indexSession(sessionId));
-    });
   }
 
   void _modelListResult(
