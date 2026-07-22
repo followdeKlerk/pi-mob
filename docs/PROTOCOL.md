@@ -600,7 +600,7 @@ workspace.file.read
 context.snapshot.request
 ```
 
-These requests are repeatable reads/control messages and use `requestId` where a response is expected. R3 controls and `context.snapshot.request` are repeatable, nonjournaled reads; they MUST NOT mutate durable host or session state. R3 invalidation and R4 snapshot outcomes travel on journaled streams or via durable commands (§14, §15), never as a side effect of a control.
+These requests are repeatable reads/control messages and use `requestId` where a response is expected. R3 controls and `context.snapshot.request` are repeatable, nonjournaled reads; they MUST NOT mutate durable host or session state. `context.snapshot.request` returns the direct `context.snapshot.result` response. R3 invalidations and snapshot-confirmed outcomes from durable R4 mutations travel on journaled streams (§14, §15), never as a side effect of a read control.
 
 ### Controller commands
 
