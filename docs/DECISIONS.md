@@ -507,3 +507,110 @@ submission; and requiring a target for legacy steering.
 **Review when:** A demonstrated mobile/replay limit requires a different plan
 bound, Pi supplies an explicit additional recipe activity family, or a new
 provider-safe reasoning-summary contract is versioned with fixtures.
+
+## D-037 — F0 files and context protocol topology
+
+**Decision:** Accept the following R3/R4 F0 contract.
+
+1. `prompt.submit.fileRefs` is an optional array of revision-bound,
+   root-confined file/range references. `attachmentIds` remains the existing
+   binary-attachment array. They share **one** prompt-context cardinality
+   budget: `attachmentIds.length + fileRefs.length <=
+   LIMITS.maxAttachmentsPerPrompt` (four in v1). Each array may retain an
+   individual schema maximum of four, but the bridge MUST enforce the joint
+   relational limit before accepting the command. Both arrays are part of the
+   durable semantic payload/hash; queued work persists both and revalidates
+   file references at dispatch. A stale reference fails visibly and is never
+   silently substituted with current file content.
+2. Protocol v1 continues to have exactly the mandatory `host:<hostId>` stream
+   and subscribed `session:<sessionId>` streams (D-009). R3 workspace tree,
+   file-metadata, and file-staleness events belong to the **host stream**,
+   not a new `workspace:<workspaceId>` stream class. Every such event MUST
+   carry its `workspaceId`; the host stream is already mandatory and can
+   invalidate a shared workspace without multiplying subscriptions/cursors.
+   Lazy page/read/search responses remain nonjournaled controls. R4 context
+   snapshots and outcomes remain session-scoped and use the corresponding
+   session stream.
+3. `files.v1` and `contexts.v1` are independent, additive, **optional hello
+   capabilities**. A bridge advertises each in `hello.accepted.capabilities`
+   only when it implements that bounded surface; the current mobile client
+   lists each in `optionalCapabilities`, never `requiredCapabilities`. Missing
+   advertisement produces explicit unavailable UI and no speculative request
+   or fabricated empty state. The general hello rule is unchanged: a future
+   client that explicitly makes either capability required fails the handshake
+   with `unsupported_capability` when the host lacks it. Advertised capability
+   does not promise every workspace/session is usable; scoped unavailable or
+   stale state still carries its reason and remediation.
+4. `context.pin`, `context.unpin`, `context.exclude`, and `context.refresh`
+   are session-scoped durable **commands**, not controls. They therefore carry
+   a client-generated `commandId`, require the applicable controller lease and
+   current/revision-safe state, participate in semantic hashing/idempotency,
+   persist before acknowledgement, and publish `command.state` plus an
+   authoritative `context.snapshot` only after the state transition. The
+   read-only `context.snapshot.request` remains a repeatable control. A lost
+   response, duplicate command, stale revision, refused mutation, and
+   crash-running command follow the normal accepted/failed/rejected/
+   indeterminate command contract; refresh is not an exception merely because
+   it obtains new source data.
+
+**Why:** The product has one bounded prompt-context budget, not two ways to
+bypass it. A workspace is shared host state, while D-009 deliberately limits
+replay/cursor topology to host and session streams. Optional capability
+negotiation preserves compatibility with older bridges and makes absence
+truthful. Finally, pinning, exclusion, and refresh change durable context that
+must survive reconnect/restart; routing them through controls would bypass
+D-011 command IDs, D-012 recovery classification, and D-013 lease protection.
+
+**Rejected alternatives:** Independent four-item `attachmentIds` and
+`fileRefs` limits (which permit eight prompt-context inputs); a third
+`workspace:<workspaceId>` stream (extra subscription, cursor, snapshot, and
+recovery lifecycle for state already owned by the mandatory host stream);
+making either new capability required for the current v1 mobile hello (which
+breaks older hosts); unconditional advertisement because a schema knows the
+literal; and request/response `context.*` mutation controls without command
+IDs, leases, durable idempotency, or replayable outcomes.
+
+**Affected work and repair consequences:**
+
+- **F0 protocol owner / `feat/f0-protocol-rest`:** discard the uncommitted
+  control-based R4 mutation design and do not introduce a workspace stream
+  class. Re-plan the schema/catalogue, generated schemas, fixture generator,
+  protocol catalogue, and tests around this decision. Add `fileRefs` to
+  `prompt.submit`; bound each list and test that the combined fifth item is
+  rejected by bridge semantic validation. Add `workspaceId` to every R3 host
+  event and assert `EVENT_STREAM_OWNERSHIP` is `host`; no
+  `workspace:<id>` subscription/cursor fixture may be added. Keep file reads,
+  searches, metadata lookups, tree pages, and `context.snapshot.request` as
+  repeatable controls. Add the four context mutations to `COMMAND_TYPES` and
+  metadata as session-scoped lease-required commands; remove their bespoke
+  result responses/control types. Fixtures must cover accepted/duplicate
+  same-payload, same-ID/different-payload conflict, lease rejection, stale
+  revision, terminal failure, and crash indeterminate, followed by the
+  session-stream snapshot.
+- **Bridge central-integration owner:** advertise `files.v1` and `contexts.v1`
+  independently and only after the actual handler/source is available; enforce
+  the hello required/optional rule above. Persist, hash, and replay `fileRefs`
+  through immediate, steer, and follow-up paths; revalidate workspace, path,
+  range, digest, and revision before Pi dispatch. Persist context mutations
+  transactionally with command and event state, apply lease and expected
+  revision checks, and journal host/session events on the decided streams.
+- **R3 file-browser owner:** subscribe only to the mandatory host stream for
+  R3 invalidation, scope every projection by `workspaceId`, and retain lazy
+  controls. Composer attachment UI must consume the shared four-item budget,
+  preserve rejected/stale file references for explicit repair, and never turn
+  browsing into a context pin.
+- **R4 context owner:** treat context state as session-scoped; send durable
+  commands with command IDs, lease IDs, and snapshot revision, then render
+  only command/state-confirmed changes. Do not optimistically persist a pin,
+  exclusion, or refresh result from a direct control response. It may open R3
+  only when `files.v1` is advertised; otherwise it remains an independent
+  truthful inspector.
+- **Mobile coordinator/database owner:** store the four mutation command
+  lifecycle states and reconcile the resulting session snapshot; persist host
+  stream file invalidations separately by host/workspace/revision. Missing
+  capability is unavailable, not an empty browser or zero context usage.
+
+**Review when:** Measured recovery pressure proves host-stream workspace
+invalidations insufficient, a versioned aggregate prompt-context resource
+model replaces the four-item limit, or a new protocol major explicitly changes
+command/lease/idempotency semantics.
