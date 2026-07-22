@@ -68,13 +68,12 @@ class SearchIndexer {
         queueCount: 0,
       ),
     );
-    final updatedAt = _now().toUtc();
     final indexed = _extractAll(hostId, session, events);
     for (final extracted in indexed) {
       await _database.upsertSearchEntry(
         hostId: extracted.hostId,
         sessionId: extracted.sessionId,
-        eventId: extracted.eventId,
+        eventId: extracted.sourceKey,
         cursor: extracted.cursor,
         source: searchSourceWire(extracted.source),
         summary: extracted.summary,
@@ -190,139 +189,153 @@ class SearchIndexer {
   ) {
     final output = <_Extracted>[];
     final assistant = <String, StringBuffer>{};
-    final reasoning = <String, StringBuffer>{};
-    final tools = <String, Map<String, String>>{};
-    for (final event in events) {
+    final tools = <String, Map<String, dynamic>>{};
+    String? turn;
+    for (final event
+        in [...events]..sort(
+          (a, b) => BigInt.parse(
+            a.cursor.value,
+          ).compareTo(BigInt.parse(b.cursor.value)),
+        )) {
       final p = event.payload;
-      if (event.type == 'assistant.delta' || event.type == 'reasoning.delta') {
-        final text = _text(p['text'] ?? p['delta'] ?? p['content']);
-        if (text != null)
-          (event.type.startsWith('assistant') ? assistant : reasoning)
-              .putIfAbsent(event.eventId, StringBuffer.new)
-              .write(text);
-        continue;
-      }
-      if (event.type == 'tool.started') {
-        tools[event.eventId] = <String, String>{
-          'name': (p['toolName'] ?? p['name'] ?? '').toString(),
-          'arguments': _print(p['arguments'] ?? p['input']),
-        };
-        continue;
-      }
-      final extracted = _extract(hostId, session, event);
-      if (extracted != null) output.add(extracted);
-      if (event.type == 'assistant.completed' ||
-          event.type == 'reasoning.completed') {
-        final buf = event.type.startsWith('assistant')
-            ? assistant[event.eventId]
-            : reasoning[event.eventId];
-        if (buf != null && buf.isNotEmpty)
+      if (event.type == 'turn.started') {
+        turn = p['turnId']?.toString();
+        final message = _text(p['message']);
+        if (message != null) {
           output.add(
-            _Extracted.from(
-              event,
+            _simple(
               hostId,
               session,
-              event.type.startsWith('assistant')
-                  ? SearchSource.assistant
-                  : SearchSource.reasoning,
-              buf.toString(),
+              event,
+              SearchSource.userPrompt,
+              message,
+              event.eventId,
             ),
           );
+        }
+        continue;
+      }
+      final explicit = p['turnId']?.toString();
+      final scoped = explicit ?? turn;
+      if (event.type == 'assistant.delta') {
+        final id = p['contentBlockId']?.toString();
+        final text = _text(p['text']);
+        if (scoped != null && id != null && text != null) {
+          assistant.putIfAbsent('$scoped|$id', StringBuffer.new).write(text);
+        }
+      } else if (event.type == 'assistant.completed') {
+        final id = p['contentBlockId']?.toString();
+        final key = scoped == null || id == null ? null : '$scoped|$id';
+        final b = key == null ? null : assistant[key];
+        if (b != null && b.isNotEmpty) {
+          output.add(
+            _simple(
+              hostId,
+              session,
+              event,
+              SearchSource.assistant,
+              b.toString(),
+              'assistant:$scoped:$id',
+            ),
+          );
+        }
+      } else if (event.type == 'reasoning.completed') {
+        final id = p['contentBlockId']?.toString();
+        final summary = _text(p['summary']);
+        if (scoped != null && id != null && summary != null) {
+          output.add(
+            _simple(
+              hostId,
+              session,
+              event,
+              SearchSource.reasoning,
+              summary,
+              'reasoning:$scoped:$id',
+            ),
+          );
+        }
+      } else if (event.type.startsWith('tool.')) {
+        final id = p['toolCallId']?.toString();
+        if (id == null) continue;
+        final t = tools.putIfAbsent(
+          id,
+          () => <String, dynamic>{
+            'turn': scoped,
+            'name': '',
+            'args': '',
+            'output': StringBuffer.new,
+            'terminal': false,
+          },
+        );
+        if (t['turn'] == null) t['turn'] = scoped;
+        if (p['toolName'] != null && (t['name'] as String).isEmpty) {
+          t['name'] = p['toolName'].toString();
+        }
+        if (event.type == 'tool.started') t['args'] = _print(p['arguments']);
+        if (event.type == 'tool.output' && _text(p['output']) != null) {
+          (t['output'] as StringBuffer).write(p['output']);
+        }
+        if (event.type == 'tool.completed' ||
+            event.type == 'tool.failed' ||
+            event.type == 'tool.cancelled') {
+          t['terminal'] = true;
+          final text = <String>[
+            if ((t['name'] as String).isNotEmpty) t['name'],
+            if ((t['args'] as String).isNotEmpty) t['args'],
+            if ((t['output'] as StringBuffer).isNotEmpty)
+              (t['output'] as StringBuffer).toString(),
+            if (event.type == 'tool.completed' &&
+                (t['output'] as StringBuffer).isEmpty)
+              _print(p['result']),
+            if (event.type == 'tool.failed')
+              _text(
+                    p['errorMessage'] ??
+                        (p['error'] is Map
+                            ? (p['error'] as Map)['message']
+                            : null),
+                  ) ??
+                  '',
+          ].where((x) => x.isNotEmpty).toList();
+          if (text.isNotEmpty) {
+            output.add(
+              _simple(
+                hostId,
+                session,
+                event,
+                SearchSource.tool,
+                text.join(' • '),
+                'tool:$id',
+              ),
+            );
+          }
+        }
       }
     }
     return output;
   }
 
+  _Extracted _simple(
+    String hostId,
+    SessionState session,
+    StreamEventState event,
+    SearchSource source,
+    String raw,
+    String key,
+  ) => _Extracted(
+    hostId: hostId,
+    sessionId: session.sessionId,
+    sourceKey: key,
+    cursor: event.cursor.value,
+    source: source,
+    summary: _cap(raw),
+    tokens: _tokenize(_cap(raw)),
+    occurredAt: event.occurredAt,
+  );
+
   static String? _text(Object? value) =>
       value is String && value.trim().isNotEmpty ? value : null;
   static String _print(Object? value) =>
       value is String ? value : (value == null ? '' : _encodeJson(value));
-
-  _Extracted? _extract(
-    String hostId,
-    SessionState session,
-    StreamEventState event,
-  ) {
-    final type = event.type;
-    final family = type.split('.').first;
-    SearchSource? source;
-    String? raw;
-    if (type == 'turn.started') {
-      final message = event.payload['message'];
-      if (message is! String || message.trim().isEmpty) return null;
-      source = SearchSource.userPrompt;
-      raw = message;
-    } else if (type == 'assistant.completed') {
-      final markdown = event.payload['markdown'] ?? event.payload['text'];
-      if (markdown is! String || markdown.trim().isEmpty) return null;
-      source = SearchSource.assistant;
-      raw = markdown;
-    } else if (type == 'reasoning.completed') {
-      final summary = event.payload['summary'];
-      if (summary is! String || summary.trim().isEmpty) return null;
-      source = SearchSource.reasoning;
-      raw = summary;
-    } else if (type == 'tool.completed') {
-      final toolName = (event.payload['toolName'] ?? '').toString();
-      final arguments = event.payload['arguments'];
-      final output = event.payload['output'];
-      final result = event.payload['output'] ?? event.payload['result'];
-      final error = event.payload['error'];
-      final parts = <String>[
-        if (toolName.isNotEmpty) toolName,
-        if (arguments != null) _print(arguments),
-        if (result != null) _print(result),
-        if (error is Map) _print(error['message'] ?? error['code']),
-      ];
-      if (parts.isEmpty) return null;
-      source = SearchSource.tool;
-      raw = parts.join(' • ');
-    } else if (type == 'tool.failed') {
-      final toolName = (event.payload['toolName'] ?? '').toString();
-      final message = event.payload['errorMessage'] ?? event.payload['message'];
-      if ((toolName.isEmpty) && (message is! String || message.isEmpty)) {
-        return null;
-      }
-      source = SearchSource.tool;
-      raw = [
-        toolName,
-        if (message is String) message,
-      ].where((part) => part.isNotEmpty).join(' • ');
-    } else if (family == 'assistant') {
-      // Skip raw `assistant.delta` events: they are subsumed by the
-      // bounded `assistant.completed` summary on the terminal event.
-      return null;
-    } else {
-      return null;
-    }
-    final summary = _cap(raw);
-    return _Extracted(
-      hostId: hostId,
-      sessionId: session.sessionId,
-      eventId: event.eventId,
-      cursor: event.cursor.value,
-      source: source,
-      summary: summary,
-      tokens: _tokenize(summary),
-      occurredAt: event.occurredAt,
-    );
-  }
-}
-
-extension on _Extracted {
-  static _Extracted from(
-    StreamEventState event,
-    String hostId,
-    SessionState session,
-    SearchSource source,
-    String raw,
-  ) => _Extracted(
-    hostId: hostId,
-    sessionId: session.sessionId,
-    eventId: event.eventId,
-    cursor: event.cursor.value,
-    occurredAt: event.occurredAt,
-  );
 }
 
 /// Stable identifier used for the synthetic per-chat summary row. Lets a
@@ -335,7 +348,7 @@ class _Extracted {
   const _Extracted({
     required this.hostId,
     required this.sessionId,
-    required this.eventId,
+    required this.sourceKey,
     required this.cursor,
     required this.source,
     required this.summary,
@@ -345,7 +358,7 @@ class _Extracted {
 
   final String hostId;
   final String sessionId;
-  final String eventId;
+  final String sourceKey;
   final String cursor;
   final SearchSource source;
   final String summary;
