@@ -1,0 +1,191 @@
+# pi-mob Field Guide
+
+Bounded operational invariants for any agent working on this repository. Not a
+transcript, task-progress log, or duplicate of the canonical plan — durable
+surprises and decisions only. If a rule here conflicts with the plan, the plan
+wins.
+
+## Canonical references (read in this order)
+
+1. [`NEXT_AGENT_STATUS.md`](NEXT_AGENT_STATUS.md) — current handoff, worktrees, blockers.
+2. [`WORKING.md`](WORKING.md) — active checkpoint and immediate next actions.
+3. [`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) — canonical plan for R1–R12 (authoritative for leaf specs, integration phases, gates).
+4. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, authority, state machines.
+5. [`docs/PRODUCT.md`](docs/PRODUCT.md) — product statement, journeys, non-goals.
+6. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decisions with review triggers.
+7. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) — version pins and host floors.
+
+## 1. Product invariants
+
+**Chat-first; not a mobile IDE.** Fluent Codex-style conversation. No terminal /
+editor parity, no new bottom-navigation tabs — use compact app-bar actions,
+drawers, sheets, and tablet secondary panes.
+
+**Exact exclusions — never build, not even as a sheet, link, or summary:**
+
+- in-app diff reviewer;
+- staging or hunk-level review UI;
+- application previews or embedded browsers;
+- new checkpoint or rollback system;
+- account, team, subscription, or cloud-sync features;
+- full mobile code editor.
+
+GitHub remains the detailed diff-review surface. Pi owns checkpoint/rollback and
+worktree isolation. No leaf may smuggle an excluded feature in through a sheet,
+link, or "summary."
+
+## 2. Authority and capability model
+
+- **Pi, host filesystem/processes, provider APIs, Git/CI providers, and the
+  bridge are authoritative** for their respective facts. Mobile Drift is a
+  reconstructible cache.
+- **Mobile-authoritative only** (never masquerade as host truth):
+  installation-local drafts, viewed-file recents, expansion preferences,
+  inbox read markers, per-chat scroll positions.
+- **Capability state is explicit:** `available` / `degraded` / `unavailable` /
+  `stale`, with reason, remediation text, source/revision, and last refresh
+  where relevant.
+- **Unsupported upstream capability → visible unavailable UX.** Never silently
+  omitted, zeroed, or fabricated. If a bridge contract is implementable,
+  extend the bridge before accepting unavailable UX.
+- **Never infer** plans, context membership, skills, MCP tools, processes,
+  agents, worktrees, Git state, or hidden reasoning from prose, tool labels,
+  terminal text, or UI strings.
+- **Thinking is provider-supplied summary only**; private chain-of-thought is
+  never requested, stored, or displayed.
+
+**Pinned Pi 0.80.6 has NO native contracts for:** structured plans, subagent
+RPC, MCP catalogue, Bash PID / listening ports / separate stdout-stderr,
+process restart / rerun. These are bridge/extension contracts or explicit
+blockers — never inference opportunities.
+
+## 3. Candidate branch/worktree preservation
+
+**Preserve every candidate until its reviewed replacement is integrated and
+verified.** Never reset, clean, delete, or overwrite a worktree to simplify a
+merge. Preserving a branch does not accept its current design. Commit/review
+on the existing branch first, freeze the relevant contract, then rebase and
+selectively merge.
+
+Canonical list, paths, branches, and current treatment:
+[`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) §4 (cross-checked
+against `NEXT_AGENT_STATUS.md`).
+
+**Known incidental noise to restore before any candidate commit:**
+`feat/agent-supervision` touches `bun.lock` only by removing semver carets on
+unrelated existing dependencies. Restore before committing:
+
+```bash
+git -C /private/tmp/pi-mob-agents restore bun.lock
+```
+
+## 4. Central-file exclusive ownership
+
+Central owners merge one shared-file change at a time, regenerate outputs, and
+run focused gates before the next leaf is wired. Feature owners do not
+independently change shared protocol, coordinator, database, or shell files.
+
+| Owner | Exclusive write locations |
+| --- | --- |
+| Protocol owner | `packages/protocol-schema/`, `packages/protocol-fixtures/`, protocol portions of `docs/` |
+| Bridge central-integration owner | `packages/bridge/src/core/runtime.ts`, `server.ts`, `store.ts`, `packages/bridge/src/pi/one-session-adapter.ts` |
+| Mobile coordinator / database / shell owner | `apps/mobile/lib/src/connection/connection_coordinator.dart`, `data/app_database.dart`, `ui/shell/app_shell.dart` |
+| Performance owner | Value-comparing projections/listenables, exact rebuild boundaries, transcript rendering, profile methodology |
+| Android evidence owner | Physical-device APK installation, notifications, background, keyboard, accessibility, scrolling, navigation, performance — evidence cannot redefine capability contracts |
+
+## 5. Integrator vs Reconciler boundary
+
+- **Integrator** resolves textual conflicts only.
+- **Semantic conflicts** stop integration and go to Reconciler for one recorded
+  decision.
+- **No worker silently chooses a sibling architecture.**
+
+## 6. Required runtime contracts (every mutation)
+
+- Opaque durable command ID.
+- Valid-state and controller-lease checks where applicable.
+- Replayable state.
+- Explicit outcome: `accepted`, `failed`, `rejected`, or `indeterminate`.
+
+Every paged/read result is bounded by item, byte, line, depth, and time limits
+and carries a revision or stale marker. Unknown optional events remain
+forward-compatible.
+
+Live events, history pages, reconnect snapshots, and local persistence use
+stable IDs and one deduplicating reducer; replay must be deterministic.
+
+## 7. Integration checkpoint lifecycle
+
+Phases: preserve/freeze → foundation/performance → runtime → plans/files/
+context → attention/agents → git/catalogue → search → polish/evidence
+(full dependency graph in `docs/REMAINING_UX_PLAN.md` §6).
+
+After every central integration commit:
+
+```bash
+bun run typecheck
+bun run schema:check
+bun run fixtures:check
+bun test
+cd apps/mobile && flutter analyze && flutter test
+git diff --check
+```
+
+Final gate: `bun run all` plus `cd apps/mobile && flutter build apk --debug`.
+Retain source commit, protocol/toolchain versions, APK checksum, and Android
+evidence. **Do not claim emulator results as physical-device evidence.**
+
+Every R1–R12 leaf is "done" only when its mobile, bridge, protocol, generated
+fixtures, and migration/reconnect paths agree — not when a sheet renders. Each
+leaf must provide: one authoritative source/contract, one persistence/replay
+test, one protocol/coordinator test per new event family, one primary widget
+flow, explicit bounds, and explicit unavailable/error/stale behavior.
+
+## 8. Recurring failure modes (do not relearn)
+
+- **Polling / timer-based UI delays are forbidden** (R11). Use protocol
+  backoff / lease / network timers only.
+- **Cancel auto-follow immediately** on user drag / wheel / keyboard until
+  latest / jump is chosen.
+- **Worktrees are Pi-owned.** Mobile never creates, merges, or modifies them.
+  Adopt / merge use explicit Pi contracts only.
+- **Restore incidental `bun.lock` edits** on candidates before any feature
+  commit.
+- **No fabricated MCP toggle, no plan inferred from prose, no agent lifecycle
+  read from tool labels.** If the host does not advertise the contract, show
+  `unavailable` with reason.
+- **Emulator ≠ physical Android.** Never claim TalkBack / 200% text /
+  reduced-motion / foreground-service / notification evidence from an
+  emulator.
+- **Textual conflict resolution ≠ silent architectural choice.** Stop
+  integration and escalate to Reconciler.
+- **Do not claim a destructive live Tailscale / launchctl clean-account test
+  unless it actually ran.** Describe deterministic production-driver
+  rehearsal instead (per M7/M8 release evidence).
+- **Search indexes are bounded projections, not authorities.** Build them from
+  authoritative persisted records transactionally or with recoverable replay;
+  use stable source identity plus host/stream scope to collapse live/history
+  overlap, isolate streams, and invalidate pending writers on deletion/reset.
+  Compare decimal cursors numerically (sort `ORDER BY LENGTH(cursor) ASC,
+  cursor ASC, updated_at ASC` so canonical numeric order beats lexicographic
+  order — `10` must rank after `2`), apply document/byte caps globally using
+  UTF-8 byte counts, and keep canonical cursor/transaction order rather than
+  timestamp order. Search results need typed destinations that open the exact
+  chat/turn/file/Git location and reconcile or report stale targets. Query-side
+  tokenization must mirror the indexer's per-character rules exactly
+  (lowercase + retained Unicode blocks + single-separator collapse); strip
+  `LIKE` wildcards (`%`, `_`) and the escape character (`\`) from query tokens
+  before they hit the clause, and always pair the clause with `ESCAPE '\\'` as
+  defense-in-depth for any bind parameter (summary/tokens columns) that still
+  carries those characters. Snippet rendering must defensively clamp every
+  invalid match range (oversized, negative, reversed, empty, end-only-oversize,
+  start-only-negative) before `replaceRange` — bounding the summary length is
+  not enough. Own controller/indexer lifetimes and dispose them on close,
+  deletion, or reset. For spinner-backed widget tests, wait for an explicit
+  terminal state instead of `pumpAndSettle`, which can hang on intentional
+  continuous motion. Wildcard / literal-match tests must include explicit
+  distractor rows that the buggy interpretation would have wrongly matched
+  (e.g. `1000 widgets` for a `100%` query, `axb` for an `a_b` query) and assert
+  exact returned id sets — hit-only assertions lock in false positives.
+- **Crash running a command → `indeterminate`.** Never automatic rerun; external side effects cannot be proven exactly once after a process crash.
+- **Transcript-search identity and inputs follow [`D-035`](docs/DECISIONS.md#d-035-r10-transcript-search-extraction-identity-and-privacy-boundary).** Logical search identity is `(hostId, sessionId, turnId, sourceKind, logicalId)` — never an event ID. Content-block IDs are turn-and-family scoped (`assistant` vs `reasoning` share a namespace with a family discriminator). Tools group by session-local `toolCallId`. Assistant text comes only from approved delta fragments; reasoning comes only from the provider-supplied `summary` (never deltas, steps, or relabeled thinking). Late or out-of-order lifecycle events feed the same row via bounded assemblers; a terminal event updates its row, never creates a second terminal row. Cursor order governs scope, append order, flush, dedupe, and eviction — timestamps are display only.

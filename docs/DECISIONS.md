@@ -275,3 +275,172 @@ This file records decisions that shape implementation. Each decision has a revie
 **Why:** Preserve research history without letting obsolete exploration govern implementation.
 
 **Review when:** Documentation is consolidated after implementation stabilizes.
+
+## D-035 — R10 transcript-search extraction identity and privacy boundary
+
+**Decision:** R10 indexes one mutable, bounded search document for each logical
+transcript item, not one document per transport event.  Its source identity is
+`(hostId, sessionId, turnId, sourceKind, logicalId)`, where `sourceKind` is
+`assistant`, `reasoning`, or `tool`.  The persisted search primary key must be
+this source identity (or an unambiguous encoded `sourceKey`), never an event ID.
+A terminal event updates that same row; it never creates a second terminal row.
+The row records the terminal cursor/event ID separately for ordering and
+navigation provenance.
+
+### Scope and identity
+
+- `turnId` carried by a lifecycle event is authoritative, including for a late
+  event for an older turn.  Otherwise, the extractor may use only the unique
+  open turn established by cursor-ordered `turn.started`/turn-terminal events.
+  It may also use an assistant-step-to-turn association that was established
+  earlier in that same ordered pass.  It must not infer scope from a timestamp,
+  text, event ID, or simply the newest turn.  An event with no unambiguous
+  scope is diagnostic/unindexed, not attached to a newer turn.
+- Assistant and reasoning block keys are respectively
+  `(turnId, "assistant", contentBlockId)` and
+  `(turnId, "reasoning", contentBlockId)`.  The family discriminator is
+  required as well as the turn: Pi may restart block indexes (including `0`)
+  for each prompt and the two block families need not have disjoint IDs.  This
+  is the same turn namespace required by the transcript reducer.
+- Tool state is grouped by `toolCallId` within `(hostId, sessionId)`, exactly
+  as the transcript reducer groups parallel calls.  The first resolvable tool
+  event binds its turn; a later event with an explicit turn must agree.  A
+  repeated `toolCallId` with a conflicting bound turn is a protocol diagnostic,
+  not a new or merged call.
+
+### Content admitted to search
+
+- **Assistant:** append only `assistant.delta.text` (the normalized append-only
+  fragment) into its scoped buffer.  `assistant.completed` seals/flushes that
+  buffer.  Its similarly named `markdown`, `text`, `content`, and `summary`
+  fields are not an alternative answer source: current terminal events do not
+  define an
+  authoritative final-text field.  If a future snapshot contract defines an
+  explicit canonical replacement field, it needs a new protocol revision and
+  fixtures before it can replace the delta buffer.
+- **Reasoning:** index only the non-empty provider-supplied `summary` on
+  `reasoning.completed`, under the scoped reasoning key.  Never concatenate or
+  index `reasoning.delta`, `steps`, raw `thinking`, or a synthesized summary.
+  Bridge/history normalization must therefore emit a `summary` only when the
+  provider supplied a displayable summary; it must not relabel private thinking
+  as a summary.
+- **Tools:** make one document whose searchable fields are assembled in this
+  exact way (all text is already source-bounded and is bounded again by the
+  search-document cap):
+
+  - `tool.started`: consume `toolCallId`, `turnId`, `assistantStepId`,
+    `toolName`, `arguments`, and `startedAt`; bind scope, set name and the
+    canonical argument summary, then create/update the running row.
+  - `tool.output`: consume `toolCallId`, optional
+    `turnId`/`assistantStepId`/`toolName`, `output`, `retainedBytes`,
+    `totalBytes`, `isTruncated`, and `digest`; append only `output` and retain
+    the latest truncation metadata. Metadata is not text.
+  - `tool.completed`: consume `toolCallId`, optional scope/name, `result`,
+    `finishedAt`, and truncation fields; seal the same row. Use `result` as
+    output text only when no `tool.output.output` was received, so history's
+    output/result pair is not indexed twice.
+  - `tool.failed`: consume `toolCallId`, optional scope/name, `result`,
+    `errorMessage` (or `error.message`), `finishedAt`, and truncation fields;
+    seal the same row, add the error text, and use `result` only as the
+    no-output fallback.
+  - `tool.cancelled`: consume `toolCallId`, optional scope/name, and
+    `finishedAt`; seal the same row without inventing output or an error.
+
+  Terminal `toolName` may fill a missing start name but may not overwrite a
+  known name; terminal scope may fill a missing scope but may not move a bound
+  call.  `delta`, `input`, `message`, arbitrary payload serialization, and
+  event IDs are not compatibility fallbacks for the fields above.
+
+### Flushes, bounds, and recovery
+
+- An assistant row is emitted only when it has accumulated non-empty delta
+  text.  On `assistant.completed` it becomes complete.  If a turn terminal
+  arrives first, flush its non-empty accumulated deltas as an *incomplete* row
+  at that turn-terminal cursor; do not manufacture a final answer from terminal
+  metadata.  A reasoning row is emitted only for its allowed completed summary.
+  A tool row is updated while running and sealed by its own terminal; a turn
+  terminal seals any remaining tool row as incomplete.
+- A missing start is not fatal when a later event supplies an unambiguous scope:
+  retain a provisional scoped assistant/tool buffer and merge a later start
+  into it without losing terminal status.  A terminal with no useful content
+  creates no anonymous assistant/reasoning row; a tool terminal may produce its
+  one tool row from its own allowed name/result/error fields.  After an item is
+  sealed, a duplicate is idempotent; a contradictory later lifecycle event is
+  diagnostic and must not reopen or cross-attach it.  Stream gaps/conflicts are
+  recovered by the existing snapshot/replay path, not guessed around.
+- Buffers are bounded in UTF-8 bytes: at most 256 KiB per assistant or tool
+  source and 4 KiB for the permitted reasoning summary; each persisted search
+  document is capped at 240 UTF-8 bytes.  Retain truncation metadata rather
+  than excess text.  Cap unresolved provisional items at the per-session
+  search-document limit, evicting the oldest by canonical cursor with a
+  diagnostic.  Remove transient buffers on sealing, session deletion, host
+  generation reset, and successful replay replacement; delete their persisted
+  rows on session deletion/reset.  Search rows remain subject to R10's
+  per-session and host document/byte caps.
+
+### Ordering and persistence
+
+Events are reduced in one stream's arbitrary-precision decimal cursor order.
+Cursor order decides scope, append order, flush cursor, duplicate handling, and
+per-session eviction; timestamps are display metadata only.  Do not compare
+session-stream timestamps to establish a global order.  For a host-wide cap,
+use the deterministic tuple `(numeric cursor, sessionId, sourceKey)` (and a
+transactional tie-breaker), never `occurredAt`/`updatedAt`.  Persist the source
+record/index update transactionally with its authoritative cached event, or
+make replay from that durable journal recover the same row; live/history
+transport event IDs can differ and collapse only through `sourceKey`.
+
+**Why:** This follows the mobile parser/reducer's cursor-ordered turn model,
+its turn-namespaced answer builders, and its `toolCallId` grouping for
+interleaved output.  It prevents the rejected search change from merging
+content-block `0` across turns or using unrelated event IDs, preserves a
+single deep-linkable terminal row, and enforces the product/security rule that
+private chain-of-thought is never stored or searched.  It also honors R10's
+bounded, replayable, all-source projection rather than treating timestamps or
+live event shape as authority.
+
+**Rejected alternatives:**
+
+1. Keying deltas/buffers by `eventId` or bare `contentBlockId` (the approach in
+   rejected `409a39a`) loses the lifecycle join and merges reused IDs across
+   turns.
+2. One row for every delta plus another for its terminal event duplicates
+   live/history results and cannot deep-link to one logical item.
+3. Reading assistant `markdown`/`text`/`content` from generic terminal payloads
+   is not a current protocol contract and can index normalization artifacts.
+4. Indexing reasoning deltas or history `thinking` makes private reasoning a
+   searchable mobile cache.
+5. Grouping tools by event ID, or serializing arbitrary payload fields and
+   aliases, breaks interleaved calls and makes privacy/bounds unreviewable.
+6. Timestamp ordering, newest-turn fallback, or silently healing a cursor gap
+   can attach stale events to the wrong turn.
+
+**Affected work and repair consequences:**
+
+- `feat/global-search` (`/private/tmp/pi-mob-search`) is blocked on this
+  decision and must not merge `409a39a`.  Its repair must replace event-ID maps
+  and the terminal-event upsert key with `sourceKey`, add the documented
+  scoped assemblers and cleanup, make the database migration preserve a typed
+  deep-link target plus terminal cursor/event provenance, use numeric-cursor
+  cap cleanup, and test reused assistant/reasoning block IDs, interleaved
+  tools, history/live duplicate collapse, missing/out-of-order lifecycle
+  events, byte caps, reset/deletion, and no reasoning-delta indexing.  It must
+  fix the commit's incomplete `_Extracted.from` construction rather than patch
+  around it.
+- `feat/recipe-durability` (R1) must make the transcript parser/reducer use
+  the same `(turnId, family, contentBlockId)` namespace for **both** assistant
+  and reasoning builders, preserve explicit old-turn association, and retain
+  provisional tool lifecycle state without moving a call to the latest turn.
+  Its replay tests are a prerequisite for R10 integration.
+- The F0 protocol owner and bridge central-integration owner must make
+  `turnId` and the listed lifecycle fields explicit/fixture-backed, propagate
+  them through live normalization and external history, add valid/invalid
+  reuse and ordering fixtures, and stop emitting raw thinking as
+  `reasoning.delta`/`summary`.  A future canonical assistant terminal-text
+  contract requires a separate additive protocol decision.
+- No other preserved candidate is replanned by this decision.  R10 remains
+  sequenced after R1, R3, R6, and R9 as recorded in `docs/REMAINING_UX_PLAN.md`.
+
+**Review when:** The protocol gains an explicit, provider-safe canonical final
+answer replacement field; Pi guarantees globally scoped content-block IDs; or
+the product deliberately changes its private-reasoning policy.
