@@ -1,12 +1,13 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { relative } from "node:path";
-import { COMMAND_METADATA, semanticCommandSha256 } from "@pi-mob/protocol-schema";
+import { COMMAND_METADATA, LIMITS, semanticCommandSha256 } from "@pi-mob/protocol-schema";
 import { ControllerLeaseService, DurableCommandService, StreamService, type AdapterPort } from "./domain";
 import type { BridgeRuntimePort, ConnectionContext, SubscriptionMessage, SubscriptionResult } from "./server";
-import { BridgeStore, StoreError, type LeaseMutation } from "./store";
+import { type BridgeStore, StoreError, type LeaseMutation } from "./store";
+import { WorkspaceFileError, type WorkspaceFileService, type FileReference } from "./workspace-files";
 import {
-  DurableTrustPolicyStore,
-  HostPolicyService,
+  type DurableTrustPolicyStore,
+  type HostPolicyService,
   type BoundedSearchFn,
   type HostPolicyMode,
   type WorkspaceRootId,
@@ -113,6 +114,8 @@ export interface DurableRuntimeOptions {
   readonly policy?: RuntimePolicyHandler;
   /** M8 — override the per-session default policy mode (used by one-session compat). */
   readonly defaultSessionPolicyMode?: HostPolicyMode;
+  /** R3 — optional bounded, read-only workspace-file authority. */
+  readonly workspaceFiles?: WorkspaceFileService;
 }
 
 export class DurableBridgeRuntime implements BridgeRuntimePort {
@@ -144,6 +147,9 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     const health = this.options.store.health(); return health.ready ? { ready: true } : { ready: false, reason: `durable store ${health.reason ?? "unavailable"}` };
   }
   setReadyForTest(ready: boolean): void { this.readyState = ready; }
+  optionalCapabilities(): readonly string[] {
+    return this.options.workspaceFiles ? ["files.v1"] : [];
+  }
 
   subscribe(_connection: ConnectionContext, payload: Record<string, unknown>): SubscriptionResult {
     const requested = Array.isArray(payload.streams) ? payload.streams.map((value) => value as Record<string, unknown>) : [];
@@ -218,12 +224,50 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
       return this.currentTrustState();
     }
+    if (type === "workspace.tree.page" || type === "workspace.file.search" || type === "workspace.file.content.search" || type === "workspace.file.metadata" || type === "workspace.file.read") {
+      return this.workspaceFileControl(type, payload);
+    }
     if (type === "policy.summary") {
       if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
       const eff = this.policy.hostPolicy.effective();
       return { mode: eff.mode, policyVersion: eff.rules.policyVersion, fingerprint: eff.rules.fingerprint };
     }
     return {};
+  }
+
+  /** Routes all R3 reads through the only filesystem authority. */
+  private workspaceFileControl(type: string, payload: Record<string, unknown>): Record<string, unknown> {
+    const files = this.options.workspaceFiles;
+    if (!files) throw new RuntimeProtocolError("unsupported_capability", "workspace file browsing is unavailable on this host");
+    try {
+      const workspaceId = String(payload.workspaceId ?? "");
+      if (type === "workspace.tree.page") return { ...files.treePage({
+        workspaceId,
+        ...(typeof payload.path === "string" ? { path: payload.path } : {}),
+        ...(typeof payload.rootRevision === "string" ? { rootRevision: payload.rootRevision } : {}),
+        pageSize: Number(payload.pageSize),
+        ...(typeof payload.pageToken === "string" || payload.pageToken === null ? { pageToken: payload.pageToken } : {}),
+      }) };
+      if (type === "workspace.file.search") return { ...files.filenameSearch({
+        workspaceId,
+        query: String(payload.query ?? ""),
+        ...(typeof payload.path === "string" ? { path: payload.path } : {}),
+        ...(typeof payload.pageSize === "number" ? { pageSize: payload.pageSize } : {}),
+        ...(typeof payload.pageToken === "string" || payload.pageToken === null ? { pageToken: payload.pageToken } : {}),
+      }) };
+      if (type === "workspace.file.content.search") return { ...files.contentSearch({
+        workspaceId,
+        query: String(payload.query ?? ""),
+        ...(typeof payload.path === "string" ? { path: payload.path } : {}),
+        ...(typeof payload.pageSize === "number" ? { pageSize: payload.pageSize } : {}),
+        ...(typeof payload.pageToken === "string" || payload.pageToken === null ? { pageToken: payload.pageToken } : {}),
+      }) };
+      if (type === "workspace.file.metadata") return files.metadata({ workspaceId, path: String(payload.path ?? ""), ...(typeof payload.expectedRevision === "string" ? { expectedRevision: payload.expectedRevision } : {}) });
+      return files.read({ workspaceId, path: String(payload.path ?? ""), rangeStart: Number(payload.rangeStart), rangeEnd: Number(payload.rangeEnd), ...(typeof payload.expectedRevision === "string" ? { expectedRevision: payload.expectedRevision } : {}) });
+    } catch (error) {
+      if (error instanceof WorkspaceFileError) throw new RuntimeProtocolError(error.code, error.message);
+      throw error;
+    }
   }
 
   private sessionList(payload: Record<string, unknown>): Record<string, unknown> {
@@ -648,7 +692,9 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       ? { action: "release", scopeKey, installationId: connection.installationId, connectionId: connection.connectionId }
       : undefined;
     if (!this.options.store.command(commandId)) {
-      try { this.options.adapter.validateCommand?.(type, payload); }
+      try {
+        if (type === "prompt.submit") this.validatePromptFileReferences(payload);
+        this.options.adapter.validateCommand?.(type, payload); }
       catch (error) {
         if ((error as Error).message === "attachment_unavailable") {
           throw new RuntimeProtocolError("attachment_unavailable", "one or more attachments are unavailable");
@@ -715,6 +761,28 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     void submission.completion;
     return { state: submission.receipt.state, duplicate: submission.receipt.duplicate };
   }
+  /** Enforces D-037's cross-list attachment budget and revalidates every file at send time. */
+  private validatePromptFileReferences(payload: Record<string, unknown>): void {
+    const attachmentIds = Array.isArray(payload.attachmentIds) ? payload.attachmentIds : [];
+    const fileRefs = Array.isArray(payload.fileRefs) ? payload.fileRefs : [];
+    if (attachmentIds.length + fileRefs.length > LIMITS.maxAttachmentsPerPrompt) {
+      throw new RuntimeProtocolError("invalid_state", "attachments and file references share a four-item limit");
+    }
+    if (fileRefs.length > 0 && !this.options.workspaceFiles) {
+      throw new RuntimeProtocolError("unsupported_capability", "workspace file references are unavailable on this host");
+    }
+    for (const reference of fileRefs) {
+      if (!reference || typeof reference !== "object" || Array.isArray(reference)) {
+        throw new RuntimeProtocolError("invalid_message", "file reference is invalid");
+      }
+      try { this.options.workspaceFiles!.validateReference(reference as FileReference); }
+      catch (error) {
+        if (error instanceof WorkspaceFileError) throw new RuntimeProtocolError(error.code, error.message);
+        throw error;
+      }
+    }
+  }
+
   disconnected(connection: ConnectionContext): void { this.options.store.disconnectConnection(connection.connectionId); }
   async recover(): Promise<{ resumed: number; indeterminate: number }> { return this.commands.recover(); }
 }
