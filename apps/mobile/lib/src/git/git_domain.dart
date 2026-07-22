@@ -302,7 +302,12 @@ GitState reduceGit(GitState state, String type, Map<String, Object?> payload) {
   }
   if (type == 'git.unavailable') {
     final unavailable = GitUnavailableData.tryParse(payload);
+    // `git.unavailable` is the truthful no-Git/CI-surface envelope. The
+    // bridge emits it alongside (not instead of) `git.summary.result`
+    // rejection so the UI surfaces explicit unavailable state and the old
+    // summary does not linger across workspace reconnects.
     return GitState(
+      summary: null,
       unavailable:
           unavailable ??
           const GitUnavailableData(

@@ -1998,6 +1998,146 @@ void main() {
       expect(deleted?.canRestore, isTrue);
     },
   );
+
+  Map<String, Object?> validGitSummaryPayload() => {
+    'workspaceId': workspaceId,
+    'revision': 'gitsummary-r1',
+    'repositoryUrl': 'https://github.com/acme/repo',
+    'repository': 'acme/repo',
+    'detached': false,
+    'branch': 'main',
+    'workingTreeState': 'clean',
+    'changedCount': 0,
+    'ahead': 0,
+    'behind': 0,
+    'latestCommit': {
+      'sha': 'abcdef1234567890abcdef1234567890abcdef12',
+      'authoredAt': '2026-01-01T00:00:00.000Z',
+      'url': 'https://github.com/acme/repo/commit/abcdef1234567890abcdef1234567890abcdef12',
+    },
+    'ciStatus': {'state': 'success'},
+    'failedChecks': <Object?>[],
+    'supportedActions': <String>['refresh', 'open_external'],
+    'capability': 'git-ci.v1',
+    'lastRefreshedAt': '2026-01-02T00:00:00.000Z',
+  };
+
+  test('R6 git summary request correlates git.summary.result to the workspace', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final future = coordinator.requestGitSummary(workspaceId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'git.summary.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'git.summary.request')['requestId'] as String;
+    expect(
+      socket.sent.lastWhere((message) => message['type'] == 'git.summary.request')['payload'],
+      equals({'workspaceId': workspaceId, 'requestId': requestId}),
+    );
+    socket.server(response('git.summary.result', validGitSummaryPayload(), requestId: requestId));
+    await future;
+    await eventually(() => coordinator.git.summary != null);
+    expect(coordinator.git.summary!.repository, 'acme/repo');
+    expect(coordinator.git.summary!.branch, 'main');
+    expect(coordinator.git.refreshing, isFalse);
+  });
+
+  test('R6 git.unavailable host-stream event marks the workspace unavailable', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    socket.server(
+      event(
+        type: 'git.summary',
+        streamId: 'host:$hostId',
+        cursor: '1',
+        eventId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+        payload: validGitSummaryPayload(),
+      ),
+    );
+    await eventually(() => coordinator.git.summary != null);
+    socket.server(
+      event(
+        type: 'git.unavailable',
+        streamId: 'host:$hostId',
+        cursor: '2',
+        eventId: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+        payload: {
+          'workspaceId': workspaceId,
+          'capability': 'git-ci.v1',
+          'status': {
+            'state': 'unavailable',
+            'reason': 'Repository has no origin remote',
+            'remediation': 'Configure an HTTPS-capable origin remote and refresh.',
+          },
+        },
+      ),
+    );
+    await eventually(() => coordinator.git.unavailable != null);
+    await eventually(() => coordinator.git.summary == null);
+    expect(coordinator.git.unavailable!.message, 'Repository has no origin remote');
+    expect(coordinator.git.unavailable!.workspaceId, workspaceId);
+    expect(coordinator.git.unavailable!.message, 'Repository has no origin remote');
+    expect(coordinator.git.unavailable!.workspaceId, workspaceId);
+  });
+
+  test('R6 cancelGitSummary sends git.summary.cancel with the tracked requestId', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final pending = coordinator.requestGitSummary(workspaceId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'git.summary.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'git.summary.request')['requestId'] as String;
+    await coordinator.cancelGitSummary(workspaceId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'git.summary.cancel'),
+    );
+    final cancel = socket.sent
+        .lastWhere((message) => message['type'] == 'git.summary.cancel')['payload'];
+    expect(cancel, equals({'targetRequestId': requestId}));
+    expect(coordinator.git.refreshing, isFalse);
+    socket.server(response('git.summary.result', validGitSummaryPayload(), requestId: requestId));
+    await pending;
+  });
+
+  test('R6 cancelGitSummary is a no-op when no in-flight request exists for the workspace', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final sentBefore = socket.sent.length;
+    await coordinator.cancelGitSummary(workspaceId);
+    expect(socket.sent.length, equals(sentBefore));
+    expect(coordinator.git.refreshing, isFalse);
+  });
+
+  test('R6 stale git.summary.result from a prior connection epoch is dropped', () async {
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+    final pending = coordinator.requestGitSummary(workspaceId);
+    await eventually(
+      () => socket.sent.any((message) => message['type'] == 'git.summary.request'),
+    );
+    final requestId = socket.sent
+        .lastWhere((message) => message['type'] == 'git.summary.request')['requestId'] as String;
+    // Force a reconnect which bumps the connection epoch.
+    await coordinator.connect('https://fixture.test');
+    final newSocket = transport.sockets.last;
+    newSocket.server(helloAccepted());
+    await eventually(
+      () => newSocket.sent.any((message) => message['type'] == 'subscription.set'),
+    );
+    newSocket.server(response(
+      'subscription.accepted',
+      {'streams': <Object?>[]},
+      requestId: newSocket.sent
+          .firstWhere((message) => message['type'] == 'subscription.set')['requestId'] as String,
+    ));
+    // The delayed result from the prior epoch must not apply.
+    socket.server(response('git.summary.result', validGitSummaryPayload(), requestId: requestId));
+    await eventually(() => coordinator.git.summary == null);
+    pending.ignore();
+  });
 }
 
 Future<void> makeReady(

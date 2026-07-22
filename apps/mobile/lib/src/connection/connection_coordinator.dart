@@ -15,6 +15,7 @@ import '../domain/interaction_state.dart';
 import '../domain/mobile_state.dart';
 import '../domain/prompt_send_lifecycle.dart';
 import '../domain/process_domain.dart';
+import '../git/git_domain.dart' show GitState, reduceGit;
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
@@ -120,6 +121,20 @@ class _ProcessSnapshotRequest {
   final int epoch;
 }
 
+/// Tracks an in-flight `git.summary.request` so the response can be
+/// correlated by request ID. Results are consumed once so a delayed
+/// duplicate cannot apply a stale Git/CI surface to a new connection
+/// epoch, mirroring the D-039 process snapshot correlation.
+class _GitSummaryRequest {
+  const _GitSummaryRequest({
+    required this.workspaceId,
+    required this.epoch,
+  });
+
+  final String workspaceId;
+  final int epoch;
+}
+
 class _PendingPrompt {
   _PendingPrompt({
     required this.sessionId,
@@ -216,6 +231,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, _HistoryRequest> _historyRequests = {};
   final Map<String, _ProcessSnapshotRequest> _processSnapshotRequests = {};
   ProcessDomainState _processes = const ProcessDomainState();
+  final Map<String, _GitSummaryRequest> _gitSummaryRequests = {};
+  GitState _git = const GitState();
   final List<String> _historySyncQueue = [];
   final Map<String, String?> _historySyncLocalRevisions = {};
   String? _historySyncCurrentSessionId;
@@ -613,6 +630,63 @@ final class ConnectionCoordinator extends ChangeNotifier
   int historyEventCount(String sessionId) => historyFor(sessionId).items.length;
 
   ProcessDomainState get processes => _processes;
+  GitState get git => _git;
+
+  /// Sends a bounded `git.summary.request` for [workspaceId] and tracks the
+  /// request ID so the matching `git.summary.result` (or stream `git.summary`)
+  /// can be correlated. When the host advertised `git.v1`, this is the only
+  /// path to a per-workspace Git/CI surface. When the service reports
+  /// `git.unavailable`, the host emits the stream event directly and the
+  /// response throws `unsupported_capability`; this method surfaces that as
+  /// a thrown error so the UI can distinguish "host has no Git" from
+  /// "workspace unreachable".
+  Future<void> requestGitSummary(String workspaceId) async {
+    final epoch = _connectionEpoch;
+    final requestId = _id();
+    _gitSummaryRequests[requestId] = _GitSummaryRequest(
+      workspaceId: workspaceId,
+      epoch: epoch,
+    );
+    _git = _git.copyWith(refreshing: true);
+    notifyListeners();
+    try {
+      await _sendControl('git.summary.request', <String, Object?>{
+        'workspaceId': workspaceId,
+        'requestId': requestId,
+      }, requestId: requestId);
+    } catch (_) {
+      _gitSummaryRequests.remove(requestId);
+      _git = _git.copyWith(refreshing: false);
+      notifyListeners();
+      rethrow;
+    }
+  }
+
+  /// Cancels the in-flight `git.summary.request` for [workspaceId] by sending
+  /// `git.summary.cancel` with the tracked `targetRequestId`. No-op when no
+  /// in-flight request exists for the workspace.
+  Future<void> cancelGitSummary(String workspaceId) async {
+    final entry = _gitSummaryRequests.entries
+        .where((e) => e.value.workspaceId == workspaceId && e.value.epoch == _connectionEpoch)
+        .toList();
+    for (final e in entry) {
+      _gitSummaryRequests.remove(e.key);
+    }
+    if (entry.isEmpty) {
+      _git = _git.copyWith(refreshing: false);
+      notifyListeners();
+      return;
+    }
+    for (final e in entry) {
+      try {
+        await _sendControl('git.summary.cancel', <String, Object?>{
+          'targetRequestId': e.key,
+        }, requestId: _id());
+      } catch (_) { /* socket may be closed; nothing to do */ }
+    }
+    _git = _git.copyWith(refreshing: false);
+    notifyListeners();
+  }
 
   Future<void> requestProcessSnapshot(String sessionId) async {
     final epoch = _connectionEpoch;
@@ -988,6 +1062,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     // latch or an HMAC page token across reconnects/bridge restarts.
     _historyRequests.clear();
     _processSnapshotRequests.clear();
+    _gitSummaryRequests.clear();
+    _git = _git.copyWith(refreshing: false);
     _pendingCurrentRequestCommand.clear();
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
@@ -1169,6 +1245,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     _history.clear();
     _historyRequests.clear();
     _processSnapshotRequests.clear();
+    _gitSummaryRequests.clear();
+    _git = _git.copyWith(refreshing: false);
     _historyGateComplete = false;
     _historySyncCurrentSessionId = null;
     _historySyncQueue.clear();
@@ -2290,6 +2368,12 @@ final class ConnectionCoordinator extends ChangeNotifier
         message['streamId'] is String &&
         message['cursor'] is String) {
       await _journalEvent(message, type, payload);
+      // The durable host-stream events for the Git/CI surface must apply
+      // their projection BEFORE the cursor advance notifies subscribers,
+      // otherwise the UI sees an out-of-order summary then unavailable.
+      if (type == 'git.summary' || type == 'git.unavailable') {
+        _applyGitStreamEvent(type, payload);
+      }
       _notify();
       return;
     }
@@ -2317,6 +2401,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _sessionHistoryPageResult(message, payload);
       case 'process.snapshot.result':
         _processSnapshotResult(message, payload);
+      case 'git.summary.result':
+        _gitSummaryResult(message, payload);
       case 'workspace.trust_state':
         _workspaceTrustStateEvent(payload);
       case 'command.current.result':
@@ -2838,6 +2924,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         'type': type,
         'payload': payload,
       });
+    } else if (type == 'git.summary' || type == 'git.unavailable') {
+      _applyGitStreamEvent(type, payload);
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final eventSessionId = payload['sessionId'];
       final eventCommandId = payload['commandId'];
@@ -3138,6 +3226,33 @@ final class ConnectionCoordinator extends ChangeNotifier
       'type': 'process.snapshot.result',
       'payload': payload,
     }, requestedSessionId: request.sessionId);
+  }
+
+  /// Correlates `git.summary.result` by `requestId` and applies the closed
+  /// GitSummary payload through `reduceGit`. Stale results from prior
+  /// connection epochs are dropped so a delayed response cannot surface a
+  /// stale Git/CI surface after reconnect.
+  void _gitSummaryResult(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) {
+    final requestId = message['requestId'];
+    if (requestId is! String) return;
+    final request = _gitSummaryRequests.remove(requestId);
+    if (request == null || request.epoch != _connectionEpoch) return;
+    _git = reduceGit(_git, 'git.summary.result', payload);
+    notifyListeners();
+  }
+
+  /// Applies the host-stream `git.summary` and `git.unavailable` events to
+  /// the Git projection. The host emits these whenever the per-workspace
+  /// Git/CI surface changes; mobile reconciles them without requiring a
+  /// new request tap.
+  void _applyGitStreamEvent(String type, Map<String, Object?> payload) {
+    final next = reduceGit(_git, type, payload);
+    if (identical(next, _git)) return;
+    _git = next;
+    notifyListeners();
   }
 
   void _workspaceList(Map<String, Object?> payload) {
@@ -4163,6 +4278,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     _failModelListRequest('The connection closed before agents were loaded.');
     ++_connectionEpoch;
     _processSnapshotRequests.clear();
+    _gitSummaryRequests.clear();
+    _git = _git.copyWith(refreshing: false);
     if (!_historyGateComplete) {
       _historySyncCurrentSessionId = null;
       _historySyncQueue.clear();
@@ -4297,6 +4414,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     _sessionCreationTimer?.cancel();
     ++_connectionEpoch;
     _processSnapshotRequests.clear();
+    _gitSummaryRequests.clear();
+    _git = _git.copyWith(refreshing: false);
     _cancelReconnect();
     _ackTimer?.cancel();
     _leaseTimer?.cancel();
