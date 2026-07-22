@@ -375,11 +375,10 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
             ),
             if (creation.isCreating)
               const Padding(
-                padding: EdgeInsets.fromLTRB(
-                  PiSpacing.md,
-                  PiSpacing.sm,
-                  PiSpacing.md,
-                  0,
+                padding: EdgeInsets.only(
+                  left: PiSpacing.md,
+                  top: PiSpacing.sm,
+                  right: PiSpacing.md,
                 ),
                 child: Row(
                   key: Key('creating-chat-indicator'),
@@ -401,11 +400,10 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
               )
             else if (creation.phase == SessionCreationPhase.failed)
               Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  PiSpacing.md,
-                  PiSpacing.sm,
-                  PiSpacing.md,
-                  0,
+                padding: const EdgeInsets.only(
+                  left: PiSpacing.md,
+                  top: PiSpacing.sm,
+                  right: PiSpacing.md,
                 ),
                 child: Text(
                   creation.error ?? 'Could not create chat.',
