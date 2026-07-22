@@ -152,6 +152,7 @@ class AppDatabase extends _$AppDatabase {
       await _ensureM11Schema();
       await _ensureM12Schema();
       await _ensureM13Schema();
+      await _ensureSearchIndexSchema();
       await _ensureHistorySyncSchema();
       if (details.wasCreated) {
         await batch((b) {
@@ -198,6 +199,7 @@ class AppDatabase extends _$AppDatabase {
       await resetM11Caches(hostId);
       await resetM12Caches(hostId);
       await resetM13Caches(hostId);
+      await resetSearchIndexCaches(hostId);
       await customStatement(
         'DELETE FROM session_history_sync WHERE host_id = ?',
         [hostId],
@@ -846,6 +848,225 @@ class AppDatabase extends _$AppDatabase {
     );
   }
 
+  // ---------------------------------------------------------------------
+  // M16 bounded global search index. The mobile UI ships a global search
+  // sheet that surfaces hits across every durable source the app already
+  // authoritatively holds: chat names, user prompts, assistant answers,
+  // reasoning summaries, and tool names / previews. The index is a
+  // bounded normalized table updated transactionally from persisted
+  // events so the sheet never needs to re-walk the full event journal
+  // and query latency stays bounded by the per-session cap.
+  //
+  // The schema is created lazily in `beforeOpen` to match the existing
+  // M11/M12/M13 pattern and keep the generated `.g.dart` file stable.
+  // ---------------------------------------------------------------------
+
+  static const String kCreateSearchEntries = '''
+    CREATE TABLE IF NOT EXISTS search_entries (
+      host_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      event_id TEXT NOT NULL,
+      cursor TEXT NOT NULL,
+      source TEXT NOT NULL,
+      summary TEXT NOT NULL,
+      tokens TEXT NOT NULL,
+      occurred_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (host_id, session_id, event_id)
+    )
+  ''';
+
+  static const String kCreateSearchSessionIndex = '''
+    CREATE INDEX IF NOT EXISTS search_entries_session_idx
+      ON search_entries(host_id, session_id)
+  ''';
+
+  Future<void> _ensureSearchIndexSchema() async {
+    await customStatement(kCreateSearchEntries);
+    await customStatement(kCreateSearchSessionIndex);
+  }
+
+  /// Upserts one bounded [SearchEntry] row. The summary is intentionally
+  /// truncated at write time so callers cannot accidentally grow past the
+  /// configured cap by passing a verbose payload. Duplicates collapse on
+  /// the `(host_id, session_id, event_id)` primary key so re-indexing the
+  /// same event after a reconnect or rename stays idempotent.
+  Future<void> upsertSearchEntry({
+    required String hostId,
+    required String sessionId,
+    required String eventId,
+    required String cursor,
+    required String source,
+    required String summary,
+    required String tokens,
+    required DateTime occurredAt,
+    required DateTime updatedAt,
+  }) async {
+    await _ensureSearchIndexSchema();
+    await customStatement(
+      'INSERT INTO search_entries '
+      '(host_id, session_id, event_id, cursor, source, summary, '
+      'tokens, occurred_at, updated_at) '
+      'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) '
+      'ON CONFLICT(host_id, session_id, event_id) DO UPDATE SET '
+      'cursor = excluded.cursor, '
+      'source = excluded.source, '
+      'summary = excluded.summary, '
+      'tokens = excluded.tokens, '
+      'occurred_at = excluded.occurred_at, '
+      'updated_at = excluded.updated_at',
+      <Object?>[
+        hostId,
+        sessionId,
+        eventId,
+        cursor,
+        source,
+        summary,
+        tokens,
+        occurredAt.toUtc().toIso8601String(),
+        updatedAt.toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  /// Bounded query: scans the persisted tokens column for any of the
+  /// normalized query tokens and returns up to [limit] hits, newest first.
+  /// The caller is responsible for tokenization and for keeping the
+  /// summary length within [kSearchSummaryCharCap] (defined in
+  /// `search_indexer.dart`).
+  Future<List<Map<String, Object?>>> querySearchEntries({
+    required String hostId,
+    required Iterable<String> queryTokens,
+    required int limit,
+    Set<String>? sourceFilter,
+  }) async {
+    await _ensureSearchIndexSchema();
+    final tokens = queryTokens
+        .expand((token) => _normalizeSearchToken(token).split(' '))
+        .where((token) => token.isNotEmpty)
+        .toSet()
+        .toList(growable: false);
+    if (tokens.isEmpty || limit <= 0) {
+      return const <Map<String, Object?>>[];
+    }
+    // Each persisted token lives in a single space-separated column so we
+    // wrap it with spaces and use a `LIKE '% token %'` pattern. The
+    // surrounding spaces prevent partial matches inside multi-word tokens
+    // like `squirrel` from accidentally matching `squirrels`.
+    final tokenClauses = List<String>.generate(
+      tokens.length,
+      (_) => "(' ' || tokens || ' ') LIKE ? ESCAPE '\\'",
+    ).join(' AND ');
+    final filterClause = sourceFilter == null || sourceFilter.isEmpty
+        ? ''
+        : ' AND source IN (${List<String>.generate(sourceFilter.length, (_) => '?').join(',')})';
+    final variables = <Variable<Object>>[
+      Variable<String>(hostId),
+      for (final token in tokens)
+        Variable<String>('% ${_escapeLikeLiteral(token)} %'),
+      if (sourceFilter != null)
+        for (final source in sourceFilter) Variable<String>(source),
+    ];
+    final rows = await customSelect(
+      'SELECT session_id, event_id, cursor, source, summary, '
+      'occurred_at, updated_at FROM search_entries '
+      'WHERE host_id = ? AND '
+      '$tokenClauses '
+      '$filterClause '
+      'ORDER BY updated_at DESC LIMIT ?',
+      variables: [...variables, Variable<int>(limit)],
+    ).get();
+    return rows
+        .map(
+          (row) => <String, Object?>{
+            'sessionId': row.read<String>('session_id'),
+            'eventId': row.read<String>('event_id'),
+            'cursor': row.read<String>('cursor'),
+            'source': row.read<String>('source'),
+            'summary': row.read<String>('summary'),
+            'occurredAt': row.read<String>('occurred_at'),
+            'updatedAt': row.read<String>('updated_at'),
+          },
+        )
+        .toList(growable: false);
+  }
+
+  /// Removes every search row for one (host, session). Called when the
+  /// chat is deleted or rebuilt from a fresh host generation so stale
+  /// summaries never bleed across the global sheet.
+  Future<void> removeSearchEntriesForSession({
+    required String hostId,
+    required String sessionId,
+  }) async {
+    await _ensureSearchIndexSchema();
+    await customStatement(
+      'DELETE FROM search_entries WHERE host_id = ? AND session_id = ?',
+      <Object?>[hostId, sessionId],
+    );
+  }
+
+  /// Removes every search row for the host. Called from
+  /// [resetHostCaches] so the next sync starts from a clean slate.
+  Future<void> resetSearchIndexCaches(String hostId) async {
+    await _ensureSearchIndexSchema();
+    await customStatement(
+      'DELETE FROM search_entries WHERE host_id = ?',
+      <Object?>[hostId],
+    );
+  }
+
+  /// Total search rows for one (host, session). Used by the indexer to
+  /// enforce the per-session cap without forcing a full table scan.
+  Future<int> searchEntryCountForSession({
+    required String hostId,
+    required String sessionId,
+  }) async {
+    await _ensureSearchIndexSchema();
+    final row = await customSelect(
+      'SELECT COUNT(*) AS total FROM search_entries '
+      'WHERE host_id = ? AND session_id = ?',
+      variables: [Variable.withString(hostId), Variable.withString(sessionId)],
+    ).getSingle();
+    return row.read<int>('total');
+  }
+
+  /// Returns the oldest rows in cursor order so the indexer can trim past
+  /// the per-session cap without scanning the table.
+  Future<List<Map<String, Object?>>> searchEntriesOldestForSession({
+    required String hostId,
+    required String sessionId,
+    required int limit,
+  }) async {
+    await _ensureSearchIndexSchema();
+    final rows = await customSelect(
+      'SELECT event_id, cursor FROM search_entries '
+      'WHERE host_id = ? AND session_id = ? '
+      'ORDER BY LENGTH(cursor) ASC, cursor ASC, updated_at ASC LIMIT ?',
+      variables: [
+        Variable.withString(hostId),
+        Variable.withString(sessionId),
+        Variable.withInt(limit),
+      ],
+    ).get();
+    return rows
+        .map(
+          (row) => <String, Object?>{
+            'eventId': row.read<String>('event_id'),
+            'cursor': row.read<String>('cursor'),
+          },
+        )
+        .toList(growable: false);
+  }
+
+  Future<int> searchEntryCountForHost(String hostId) async {
+    await _ensureSearchIndexSchema();
+    final row = await customSelect(
+      'SELECT COUNT(*) AS total FROM search_entries WHERE host_id = ?',
+      variables: [Variable.withString(hostId)],
+    ).getSingle();
+    return row.read<int>('total');
+  }
+
   /// Drops every M11 row for the host. Called from `resetHostCaches`.
   Future<void> resetM11Caches(String hostId) async {
     await customStatement(
@@ -864,6 +1085,57 @@ class AppDatabase extends _$AppDatabase {
 }
 
 String _bootstrapInstallationId() => const Uuid().v4().toLowerCase();
+
+/// Mirrors the per-character rules the indexer uses in
+/// `search_indexer.dart`'s private `_tokenize`: lowercase, keep only ASCII
+/// letters, ASCII digits, and the Latin Extended blocks the indexer
+/// retains, and collapse every other rune into a single separator. SQLite
+/// `LIKE` wildcards (`%`, `_`) and the escape character (`\`) are therefore
+/// stripped — they are not preserved as literals. This keeps the DB-level
+/// LIKE clause consistent with the persisted `tokens` column regardless of
+/// how the caller pre-tokenised the query.
+String _normalizeSearchToken(String value) {
+  if (value.isEmpty) return '';
+  final lowered = value.toLowerCase();
+  final buf = StringBuffer();
+  var pendingSpace = false;
+  for (final rune in lowered.runes) {
+    final code = rune;
+    final isLetterOrDigit =
+        (code >= 0x41 && code <= 0x5a) ||
+        (code >= 0x61 && code <= 0x7a) ||
+        (code >= 0x00c0 && code <= 0x024f) ||
+        (code >= 0x1e00 && code <= 0x1eff) ||
+        (code >= 0x30 && code <= 0x39);
+    if (isLetterOrDigit) {
+      if (pendingSpace) buf.write(' ');
+      buf.write(String.fromCharCode(code));
+      pendingSpace = false;
+    } else {
+      pendingSpace = true;
+    }
+  }
+  return buf.toString().trim();
+}
+
+/// Defensively escapes the SQLite `LIKE` wildcards (`%`, `_`) plus the
+/// escape character itself so any bind parameter that somehow retains those
+/// characters is matched literally rather than acting as a wildcard. The
+/// accompanying LIKE clause uses `ESCAPE '\'` for this to take effect.
+/// After [_normalizeSearchToken] these characters are already stripped from
+/// the query side, but the escape still pays off for `summary`/`tokens`
+/// columns that may contain user-authored punctuation.
+String _escapeLikeLiteral(String value) {
+  final buf = StringBuffer();
+  for (final rune in value.runes) {
+    final ch = String.fromCharCode(rune);
+    if (ch == r'\' || ch == '%' || ch == '_') {
+      buf.write(r'\');
+    }
+    buf.write(ch);
+  }
+  return buf.toString();
+}
 
 QueryExecutor _openConnection() {
   return driftDatabase(name: 'pi_mob');
