@@ -1,16 +1,16 @@
 # Working
 
-Status: M0–M15 done; M16 implementation complete locally; real-Android TalkBack checkpoint evidence blocked by device availability
+Status: R1/R3/R5/R6/R9 core slices integrated; central runtime/mobile integration active. M16 physical-Android TalkBack evidence remains pending.
 
 ## Current checkpoint
 
-**M16 — Mobile product UX, visual system, and workflow integration (active)**
+**Central R3/R5/R6 runtime and mobile integration (active)**
 
 The complete implementation plan is in [`BACKLOG.md`](BACKLOG.md). Normative documents under `docs/`, current `BACKLOG.md`, and this file override historical planning text.
 
 ## Current objective
 
-Complete the new mobile product experience without changing bridge authority or durable command semantics. All locally verifiable M16 implementation now includes light/dark token themes, semantic status colors, compact status grammar, discoverable commands and skills, shared reduced-motion primitives, visible focus treatment, a Sessions/Activity/Host product shell, progressive host diagnostics, and a calmer transcript hierarchy.
+Continue the additive R3/R5/R6 integration without changing bridge authority or durable command semantics. The latest integrated slices are `9604868` (bounded R3 workspace-file control routing, optional `files.v1` advertisement, and send-time file-reference admission) and `199b82e` (D-039 process snapshot request correlation on mobile).
 
 M16 builds the mobile product's original non-derivative identity on three proven grammars:
 
@@ -38,13 +38,13 @@ M16 is anchored by a normative design-token system and navigation contract docum
 
 ## Immediate next actions
 
-1. Connect the target Android phone and run the complete M16 checkpoint journey with TalkBack enabled, 200% text scale, and reduced motion.
-2. Retain the required Android screenshots, frame captures, TalkBack transcript, and reduced-motion captures; update M16-08 and exit criteria only after that evidence exists.
-3. Keep Firebase credentials local; Apple activation remains deferred.
+1. Wire `AuthoritativeProcessRegistry` and `GitSummaryService` into bridge runtime/server dispatch, including explicit unavailable state and cancellable Git summaries.
+2. Complete mobile durable projections and shell reachability for R1/R3/R5/R6/R9/agent supervision; file and palette insertion must never send automatically.
+3. Implement R2/R4, audit R7–R12, then run full repository checks, build an Android APK, and capture physical-device evidence.
 
 ## Do not start yet
 
-M17 hardening and M18 signed release remain blocked until M16 exits.
+M17 hardening and M18 signed release remain blocked until M16 physical-device evidence exits.
 
 ## Blockers
 
