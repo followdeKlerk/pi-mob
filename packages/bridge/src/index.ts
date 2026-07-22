@@ -42,7 +42,23 @@ export * from "./core/attachments";
 export * from "./core/binary-http";
 export * from "./core/domain";
 export * from "./core/runtime";
-export * from "./core/process-projection";
+export * from "./core/process-supervisor";
+export {
+  AuthoritativeProcessRegistry,
+  type CapabilityState,
+  type CapabilityStatus,
+  type ProcessAction,
+  type ProcessOutput,
+  type ProcessOutputPageRequest,
+  type ProcessProjection,
+  type ProcessProjectionRegistry,
+  type ProcessSnapshot,
+  type ProcessSnapshotResult,
+  type ProcessStatus,
+  type ProcessStream,
+  type ProcessTruncation,
+  type ProcessUnavailable,
+} from "./core/process-projection";
 export * from "./core/server";
 export * from "./core/workspace-policy";
 export * from "./notifications";
