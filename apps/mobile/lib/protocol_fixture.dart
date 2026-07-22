@@ -1103,10 +1103,110 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
   }.contains(type)) {
     _boolean(payload, 'enabled');
   }
+  if (const <String>{
+    'context.pin',
+    'context.unpin',
+    'context.exclude',
+    'context.refresh',
+  }.contains(type)) {
+    _validateContextMutationPayload(payload);
+    return;
+  }
   if (type == 'extension.respond') {
     _uuidString(payload, 'dialogId');
     _object(payload, 'response');
   }
+}
+
+void _validateContextMutationPayload(Map<String, Object?> payload) {
+  _uuidString(payload, 'sessionId');
+  _revisionTokenString(payload, 'expectedRevision');
+  final target = _object(payload, 'target');
+  final kind = target['kind'];
+  if (kind != null && kind != 'file' && kind != 'source' && kind != 'all') {
+    throw ProtocolValidationException(
+      'payload.target.kind',
+      'file, source, or all',
+      kind,
+    );
+  }
+  if (kind == 'all') {
+    _closedObject(target, 'payload.target', const {'kind'});
+    return;
+  }
+  if (kind == 'source' || target.containsKey('sourceId')) {
+    _closedObject(target, 'payload.target', const {
+      'kind',
+      'sourceId',
+      'revision',
+    });
+    _boundedRequiredString(target, 'sourceId', 128);
+    if (target.containsKey('revision')) {
+      _revisionTokenString(target, 'revision');
+    }
+    return;
+  }
+  _closedObject(target, 'payload.target', const {
+    'kind',
+    'path',
+    'ranges',
+    'revision',
+  });
+  final path = _string(target, 'path');
+  final pathPattern = RegExp(
+    r'^(?!/)(?!.*//)(?!.*\\)(?!.*(?:^|/)\.\.?(/|$))[^\x00-\x1F\x7F]{1,1024}$',
+  );
+  if (!pathPattern.hasMatch(path)) {
+    throw ProtocolValidationException(
+      'payload.target.path',
+      'workspace-relative path',
+      path,
+    );
+  }
+  if (target.containsKey('ranges')) {
+    final ranges = _list(target, 'ranges');
+    if (ranges.length > 16) {
+      throw ProtocolValidationException(
+        'payload.target.ranges',
+        '<= 16 items',
+        ranges.length,
+      );
+    }
+    for (final item in ranges) {
+      final range = _objectFrom(item, 'payload.target.ranges');
+      _closedObject(range, 'payload.target.ranges', const {
+        'startLine',
+        'endLine',
+        'label',
+      });
+      final start = _positiveInteger(range, 'startLine');
+      final end = _positiveInteger(range, 'endLine');
+      if (end < start) {
+        throw ProtocolValidationException(
+          'payload.target.ranges',
+          'endLine >= startLine',
+          range,
+        );
+      }
+      if (range.containsKey('label')) {
+        _boundedRequiredString(range, 'label', 64);
+      }
+    }
+  }
+  if (target.containsKey('revision')) _revisionTokenString(target, 'revision');
+}
+
+Map<String, Object?> _objectFrom(Object? value, String path) {
+  if (value is Map) return Map<String, Object?>.from(value);
+  throw ProtocolValidationException(path, 'object', value);
+}
+
+int _positiveInteger(Map<String, Object?> object, String key) {
+  final value = _nonNegativeInteger(object, key);
+  if (value < 1) {
+    throw ProtocolValidationException(key, 'positive integer', value);
+  }
+  return value;
 }
 
 void _validateEventPayload(String type, Map<String, Object?> payload) {
