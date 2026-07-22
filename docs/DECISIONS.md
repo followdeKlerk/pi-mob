@@ -678,3 +678,34 @@ can be reported to the caller.
 window for already-persisted kind-less commands, or a new target variant is
 versioned with an explicit literal, fixtures, generated schemas, and Dart
 parity proof.
+
+## D-039 — Correlate empty process snapshots by request ID
+
+**Decision:** Keep `process.snapshot.result` as the frozen closed
+`{ items: ProcessSnapshot[] }` response. The requester MUST record
+`requestId -> { requestedSessionId, connectionEpoch }` before sending
+`process.snapshot.request`. A matching current-epoch response applies to that
+recorded session; an empty `items` array clears only that session. Every
+non-empty item must carry the same `sessionId`, otherwise the entire response
+is rejected without changing projection state.
+
+**Why:** Individual snapshots identify their session, but an empty authoritative
+replacement cannot. The response envelope already provides exact request
+correlation, and the mobile coordinator uses this pattern for other paged
+controls. Correlation preserves the accepted wire schema while making empty
+replacement deterministic and safe across out-of-order responses.
+
+**Rejected alternatives:** Adding `sessionId` to the result wrapper is a
+non-additive wire change that conflicts with accepted docs and fixtures.
+Inferring from items fails for an empty result. Accepting both wrappers creates
+an undocumented compatibility fork. Clearing all sessions or treating empty as
+a no-op violates per-session authoritative replacement.
+
+**Implementation consequences:** Bridge and mobile process projection APIs take
+the resolved requested session separately from the bare result. Coordinator
+integration owns the request/epoch map, consumes entries once, drops them on
+error/reconnect/unpair/disposal, and rejects cross-session items. No protocol,
+database, fixture, or version migration is authorized.
+
+**Review when:** A future version intentionally batches multiple sessions in one
+snapshot request and versions a new additive response family.
