@@ -1,0 +1,45 @@
+{
+  "name": "invalid-process-host-stream",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "sessionId": "66666666-6666-4666-8666-666666666666",
+      "processId": "process-fixture",
+      "revision": "process-r1",
+      "command": "bun test packages/protocol-fixtures",
+      "startedAt": "2026-07-12T00:00:01.000Z",
+      "turnId": "turn-fixture",
+      "toolCallId": "tool-fixture",
+      "pid": 4123,
+      "cwd": "packages/protocol-fixtures",
+      "ports": [
+        {
+          "port": 4173,
+          "protocol": "tcp"
+        },
+        {
+          "port": 5353,
+          "protocol": "udp"
+        }
+      ],
+      "status": "running",
+      "capability": "runtime.processes.v1",
+      "stale": false,
+      "supportedActions": [
+        "stop"
+      ]
+    },
+    "eventId": "44444444-4444-4444-8444-444444444444",
+    "streamId": "host:66666666-6666-4666-8666-666666666666",
+    "cursor": "9007199254740992",
+    "type": "process.snapshot"
+  },
+  "expectation": "expected-invalid"
+}

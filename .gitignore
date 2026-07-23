@@ -1,0 +1,48 @@
+# macOS / Finder
+.DS_Store
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.iml
+.pi/
+
+# Local agent memory
+.neuralmemory/
+.omx/
+
+# Bun
+node_modules/
+.bun-install/
+
+# Build / generated artefacts
+build/
+dist/
+out/
+*.tsbuildinfo
+coverage/
+
+# Flutter / Dart
+**/.dart_tool/
+**/.flutter-plugins-dependencies
+**/.flutter-plugins
+**/.packages
+**/.pub-cache/
+**/.pub/
+**/build/
+**/ephemeral/
+**/Pods/
+**/Runner.xcworkspace/xcuserdata/
+**/Runner.xcodeproj/xcuserdata/
+**/local.properties
+**/Generated.xcconfig
+
+# Hostile / scratch test directories
+packages/bridge/dist/hostile-env-test/
+packages/bridge/dist/release/
+
+# OS scratch
+*.log
+*.tmp
+.tmp/

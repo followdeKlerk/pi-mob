@@ -1,0 +1,34 @@
+name: pi_mob
+description: "pi-mob Flutter mobile control surface (M1 scaffold)."
+publish_to: 'none'
+version: 0.0.0+1
+
+environment:
+  sdk: ^3.12.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: 1.0.9
+  unorm_dart: 0.3.2
+  drift: 2.34.1
+  drift_flutter: 0.3.1
+  sqlite3: 3.4.0
+  path: 1.9.1
+  path_provider: 2.1.6
+  uuid: 4.5.3
+  mobile_scanner: ^7.0.0
+  image_picker: ^1.1.2
+  image: ^4.5.4
+  share_plus: ^12.0.1
+  cross_file: ^0.3.5+2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: 6.0.0
+  build_runner: 2.15.1
+  drift_dev: 2.34.3
+
+flutter:
+  uses-material-design: true

@@ -1,0 +1,30 @@
+{
+  "name": "response-workspace-file-content-search-result-valid",
+  "kind": "response",
+  "valid": true,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "workspaceId": "88888888-8888-4888-8888-888888888888",
+      "rootRevision": "tree-r1",
+      "items": [
+        {
+          "path": "src/index.ts",
+          "line": 1,
+          "column": 7,
+          "matchStart": 6,
+          "matchLength": 7,
+          "lineText": "const fixture = true;"
+        }
+      ],
+      "isTruncated": false
+    },
+    "requestId": "22222222-2222-4222-8222-222222222222",
+    "type": "workspace.file.content.search.result"
+  }
+}

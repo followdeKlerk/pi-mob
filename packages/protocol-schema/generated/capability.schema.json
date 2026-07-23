@@ -1,0 +1,45 @@
+{
+  "$id": "pi-mob/protocol/capability",
+  "anyOf": [
+    {
+      "const": "streams.v1",
+      "type": "string"
+    },
+    {
+      "const": "commands.v1",
+      "type": "string"
+    },
+    {
+      "const": "controller_leases.v1",
+      "type": "string"
+    },
+    {
+      "const": "attachments.v1",
+      "type": "string"
+    },
+    {
+      "const": "extension_dialogs.v1",
+      "type": "string"
+    },
+    {
+      "const": "notifications.v1",
+      "type": "string"
+    },
+    {
+      "const": "files.v1",
+      "type": "string"
+    },
+    {
+      "const": "contexts.v1",
+      "type": "string"
+    },
+    {
+      "const": "runtime.processes.v1",
+      "type": "string"
+    },
+    {
+      "const": "git-ci.v1",
+      "type": "string"
+    }
+  ]
+}

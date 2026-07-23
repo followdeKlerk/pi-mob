@@ -1,0 +1,23 @@
+{
+  "name": "@pi-mob/protocol-schema",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./src/index.ts",
+  "module": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts",
+    "./generate": "./cmd/generate.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit",
+    "test": "bun test",
+    "generate": "bun run cmd/generate.ts"
+  },
+  "dependencies": {
+    "@sinclair/typebox": "0.34.52"
+  },
+  "devDependencies": {
+    "@pi-mob/typescript-config": "workspace:*"
+  }
+}

@@ -1,0 +1,5 @@
+{
+  "extends": "@pi-mob/typescript-config/strict",
+  "include": ["src/**/*", "test/**/*", "cmd/**/*"],
+  "exclude": ["node_modules", "dist", "build", "generated"]
+}

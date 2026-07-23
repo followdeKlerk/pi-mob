@@ -1,0 +1,5 @@
+{
+  "$id": "pi-mob/protocol/decimal-cursor",
+  "pattern": "^(0|[1-9][0-9]*)$",
+  "type": "string"
+}
