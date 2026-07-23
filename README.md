@@ -1,123 +1,48 @@
 # pi-mob
 
-A private Flutter mobile control surface for Pi coding-agent sessions running on a user-controlled host over Tailscale.
+A private mobile control surface for [Pi](https://github.com/earendil-works/pi) coding-agent sessions running on a host you control.
 
-## Status
-
-The product and architecture are implemented checkpoint by checkpoint. M1–M9 delivered the protocol, durable bridge, private host, trust policy, transcript, tools, and composer. M10–M11 delivered configured Pi controls and safe multiplexed multi-session control. M12 delivered durable session lineage and lifecycle. M13 delivered bounded private attachments, opaque HTML exports, and explicit native sharing. M14 delivered durable follow-up queues and reconnect-safe extension interaction. M15 delivered privacy-preserving Android FCM status notifications and background reconciliation.
-
-Completed through: **M15 — notifications and background experience**. Real Android FCM delivery is proven; Apple activation is explicitly deferred from the foreseeable product scope. Active checkpoint: **M16 — mobile product UX, visual system, and workflow integration**. Its first slice ships an original light/dark token theme, Sessions/Activity/Host product shell, progressive host diagnostics, and calmer transcript hierarchy; full surface migration and Android accessibility evidence remain.
-
-M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is retained in the milestone summaries.
-
-See [`BACKLOG.md`](BACKLOG.md) for the completed delivery record and current maintenance priorities.
+> **Status: pre-release.** pi-mob is under active development and is not yet a supported public release.
 
 ## What it does
 
-`pi-mob` lets one owner use an iPhone or Android phone to:
+- Connects a Flutter mobile app to a local Bun bridge over a private Tailscale network.
+- Lets you create, observe, steer, queue, and stop Pi sessions without putting repositories or provider credentials on the phone.
+- Keeps command delivery durable and reconnect-safe; uncertain work is shown as indeterminate rather than silently repeated.
+- Supports trusted workspaces, host-enforced read-only policy, bounded attachments, exports, and privacy-preserving status notifications.
 
-- pair with a private Mac host,
-- select trusted coding workspaces,
-- create, resume, and switch Pi sessions,
-- submit, steer, queue, and abort work,
-- inspect streaming reasoning, tool calls, and answers,
-- recover after network, app, Pi, bridge, and host interruptions,
-- answer extension dialogs,
-- manage session branches and lifecycle,
-- upload images and export/share sessions,
-- receive privacy-preserving background status.
-
-Repositories, shells, provider credentials, and actual Pi execution stay on the host.
-
-## Core architecture
+## Architecture
 
 ```text
-Flutter mobile app
-    |
-    | HTTPS / one multiplexed WebSocket
-    | over private Tailscale Serve
-    v
-Bun/TypeScript bridge on macOS 13+
-    |
-    | strict stdin/stdout JSONL
-    v
-one pi --mode rpc subprocess per active session
+Mobile app → private HTTPS/WebSocket → loopback Bun bridge → Pi RPC → host workspace
 ```
 
-The bridge binds to loopback only. Tailscale is the sole connection-authentication boundary for the initial single-user application. Funnel is unsupported.
+The host remains authoritative for repositories, Pi processes, credentials, and durable session state. The mobile app is a reconnectable control and presentation client.
 
-## Read this first
+## Requirements
 
-1. [`docs/PRODUCT.md`](docs/PRODUCT.md) — product job, user journeys, requirements, non-goals, and success criteria.
-2. [`docs/IMPLEMENTATION_DEFAULTS.md`](docs/IMPLEMENTATION_DEFAULTS.md) — compact implementation baseline.
-3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, state ownership, streams, leases, queues, and runtime flows.
-4. [`docs/PROTOCOL.md`](docs/PROTOCOL.md) — versioned bridge-mobile wire contract.
-5. [`docs/DATA_MODEL.md`](docs/DATA_MODEL.md) — host/mobile persistence, retention, migration, deletion, and repair.
-6. [`docs/RUNTIME.md`](docs/RUNTIME.md) — host process, service, storage, workspace, policy, and recovery behaviour.
-7. [`docs/UX.md`](docs/UX.md) — mobile screens, interactions, visible states, and accessibility.
-8. [`docs/SECURITY.md`](docs/SECURITY.md) — threat model, controls, accepted risks, and review triggers.
-9. [`docs/TESTING.md`](docs/TESTING.md) — contract, fault, device, accessibility, performance, and release gates.
-10. [`docs/RELEASE.md`](docs/RELEASE.md) — build, distribution, install, update, rollback, and release evidence.
-11. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) — verified initial versions and platform floors.
-12. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision ledger and revisit conditions.
-13. [`BACKLOG.md`](BACKLOG.md) — completed checkpoints and maintenance priorities.
-14. [`WORKING.md`](WORKING.md) — current objective and immediate next actions.
+- macOS host with Bun and a supported Pi installation
+- Flutter toolchain for mobile development
+- Tailscale on the host and mobile device
 
-## Locked foundations
+## Development
 
-- Flutter/Dart mobile app.
-- Bun `1.3.14` TypeScript bridge compiled as a standalone executable.
-- macOS `13.0+` host floor imposed by the pinned Bun runtime.
-- Pi source `earendil-works/pi`, package `@earendil-works/pi-coding-agent`, initial exact version `0.80.6`.
-- One WebSocket per host with replayable host and session streams.
-- Decimal-string stream cursors; no unsafe JSON 64-bit numbers.
-- SQLite/WAL command, event, lease, queue, trust, and lifecycle state.
-- Client command IDs and durable duplicate-safe bridge dispatch.
-- Running-at-crash work becomes indeterminate and never silently reruns.
-- One active controller lease per session; other clients observe.
-- One Pi RPC process per active session, three active by default.
-- Durable bridge-owned follow-up queue; no automatic offline sends.
-- Configured workspace roots and explicit Pi resource trust.
-- Trusted Full mode plus host-enforced Read-only mode.
-- APNs/FCM/Live Activity as best-effort status, never execution authority.
-- Private TestFlight/signed Android distribution first.
-
-## MVP checkpoints
-
-The MVP is not one giant build. It progresses through independently demonstrable checkpoints:
-
-```text
-M0  Specification/upstream freeze
-M1  Scaffold and CI
-M2  Protocol schemas/fixtures
-M3  Real Pi adapter
-M4  Durable bridge streams/idempotency
-M5  One-session end-to-end client
-M6  Failure recovery/process supervision
-M7  macOS install/Serve/pairing/doctor
-M8  Workspace trust/read-only
-M9  Transcript/tools/composer
-M10 Model/context/retry/compaction/commands
-M11 Multi-session/controller leases
-M12 Fork/clone/tree/delete/restore
-M13 Attachments/export/share
-M14 Extension UI/durable queue
-M15 Notifications/background
-M16 Mobile product UX, visual system, workflow integration
-M17 Accessibility/performance/privacy hardening
-M18 Signed personal MVP release
+```sh
+bun install
+bun run typecheck
+bun test
+cd apps/mobile && flutter analyze && flutter test
 ```
 
-Each checkpoint has tasks, dependencies, a concrete demo, exit criteria, and required evidence in [`BACKLOG.md`](BACKLOG.md).
+## Documentation
 
-## Deliberate MVP constraints
+- [Architecture](docs/ARCHITECTURE.md)
+- [Protocol](docs/PROTOCOL.md)
+- [Privacy](docs/PRIVACY.md)
+- [Security policy](SECURITY.md)
+- [Contributing](CONTRIBUTING.md)
+- [Package documentation](apps/mobile/README.md)
 
-- One human owner.
-- Private tailnet only.
-- No public Funnel or public share links.
-- No application account or biometric gate.
-- No provider keys on mobile.
-- No full filesystem browser, terminal, code editor, or mobile IDE.
-- No claim that workspace roots or Read-only mode are an OS sandbox.
-- No automatic bridge updater.
-- No Windows host, Termux parity, Obsidian integration, or public store launch in MVP.
+## License
+
+[MIT](LICENSE)
