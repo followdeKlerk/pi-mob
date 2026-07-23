@@ -41,6 +41,7 @@ jobs:
           echo "32bca4386121042e827ff2d90edbd7c7fb47c514fc04d5a87db6e3202dafde5d  /tmp/flutter.zip" | shasum -a 256 -c -
           sudo mkdir -p /opt
           sudo unzip -q /tmp/flutter.zip -d /opt
+          sudo chown -R "$(id -u):$(id -g)" /opt/flutter
           echo "/opt/flutter/bin" >> "$GITHUB_PATH"
           /opt/flutter/bin/flutter --version
 
@@ -79,6 +80,7 @@ jobs:
           echo "32bca4386121042e827ff2d90edbd7c7fb47c514fc04d5a87db6e3202dafde5d  /tmp/flutter.zip" | shasum -a 256 -c -
           sudo mkdir -p /opt
           sudo unzip -q /tmp/flutter.zip -d /opt
+          sudo chown -R "$(id -u):$(id -g)" /opt/flutter
           echo "/opt/flutter/bin" >> "$GITHUB_PATH"
           /opt/flutter/bin/flutter --version
 
