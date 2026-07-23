@@ -228,14 +228,14 @@ const LICENSE_INVENTORY: ReadonlyArray<{
 
 /** Install-config sample shipped to operators. Uses placeholder paths the
  *  installer rewrites to host-absolute paths on install. */
-function buildConfigSample(daemonPath: string): string {
+function buildConfigSample(daemonPath: string, version: string): string {
   return [
     "# pi-mob bridge install-config sample.",
     "# Copy to release/config.toml on the target host and edit pi_executable.",
     "# The installer rewrites the /opt/pi-mob placeholders to host-absolute paths.",
     "schema_version = 1",
     `environment = "release"`,
-    `bridge_version = ${JSON.stringify(RELEASE_VERSION)}`,
+    `bridge_version = ${JSON.stringify(version)}`,
     `protocol_version = ${JSON.stringify(PROTOCOL_VERSION)}`,
     `pi_executable = ${JSON.stringify("/opt/pi-mob/bin/pi")}`,
     `bridge_executable = ${JSON.stringify(daemonPath)}`,
@@ -591,9 +591,10 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
   //    relative to the bundle so copying the release cannot invalidate it.
   //    Operator templates use /opt/pi-mob placeholders that the installer
   //    rewrites on the target host.
+  const version = opts.version ?? RELEASE_VERSION;
   const placeholderDaemon = `${INSTALL_PLACEHOLDER_RELEASE}/bin/bridge-daemon`;
   const placeholderExtension = `${INSTALL_PLACEHOLDER_RELEASE}/extensions/${EXTENSION_BUNDLE_NAME}`;
-  const configSample = buildConfigSample(placeholderDaemon);
+  const configSample = buildConfigSample(placeholderDaemon, version);
   writeFileSync(configSamplePath, configSample, { mode: 0o600 });
   const configSampleSha = sha256Of(configSample);
   const configSampleSize = Buffer.byteLength(configSample, "utf8");
@@ -675,7 +676,6 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
   //    only pins the on-disk contract; we extend the literal here with
   //    `capabilities` / `migrationClass` / `limitations` and serialize via
   //    a hand-rolled JSON encoder so the cast stays explicit.
-  const version = opts.version ?? RELEASE_VERSION;
   const protocolVersion = opts.protocolVersion ?? PROTOCOL_VERSION;
   const bunMinimum = opts.bunMinimum ?? BUN_MINIMUM;
   const migrationClass = opts.migrationClass ?? MIGRATION_CLASS;

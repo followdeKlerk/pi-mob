@@ -60,6 +60,7 @@ import {
 // Constants — kept in lock-step with scripts/build.ts.
 // ---------------------------------------------------------------------------
 
+const DEFAULT_BRIDGE_VERSION = "0.0.0-m7";
 const BRIDGE_VERSION = process.env.PI_MOB_VERSION?.trim() || DEFAULT_BRIDGE_VERSION;
 const PROTOCOL_VERSION = "1.0";
 const BUN_MINIMUM = "1.3.14";
