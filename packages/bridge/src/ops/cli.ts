@@ -30,7 +30,7 @@
  */
 
 import { validateBridgeEndpoint } from "./endpoint-guard";
-import { buildPairingPayload, encodePairingPayload, renderPairingTerminal, type PairingPayload } from "./pairing";
+import { buildPairingPayload, encodePairingPayload, parsePairingPayload, renderPairingTerminal, type PairingPayload } from "./pairing";
 import {
   buildEnvironment,
   DEFAULT_ENV_ALLOWLIST,
@@ -56,6 +56,7 @@ import {
 import {
   applyServeRoute,
   BRIDGE_ROUTE_OWNER,
+  inspectServeRoutes,
   type ServeDriver,
   type ServeRouteAccept,
 } from "./tailscale-serve";
@@ -89,6 +90,10 @@ import { runDoctor, type PiProbe, type PushProbe } from "./doctor";
 
 /** All M7 commands the CLI understands. */
 export type CliCommand =
+  | "setup"
+  | "start"
+  | "stop"
+  | "status"
   | "install"
   | "serve"
   | "pair"
@@ -100,6 +105,10 @@ export type CliCommand =
 
 /** Canonical ordered list of supported commands. */
 export const CLI_COMMANDS: readonly CliCommand[] = [
+  "setup",
+  "start",
+  "stop",
+  "status",
   "install",
   "serve",
   "pair",
@@ -114,10 +123,14 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
 export const CLI_HELP = [
   "pi-mob bridge ops CLI",
   "",
-  "Usage: pi-mob-ops <command> [flags]",
+  "Usage: pi-mob <command> [flags]",
   "",
   "Commands:",
-  "  install     install paths, versioned config, LaunchAgent, env file",
+  "  setup       guided first-time setup (start with --workspace PATH)",
+  "  start       idempotently start the configured bridge and owned Serve route",
+  "  stop        idempotently stop the bridge and remove its owned Serve route",
+  "  status      compact lifecycle, Serve, and pairing readiness",
+  "  install     low-level install paths, config, LaunchAgent, and env file",
   "  serve       apply the owned Tailscale Serve route for the install",
   "  pair        emit canonical pairing payload + optional terminal QR",
   "  doctor      run every probe and emit a redacted report",
@@ -126,8 +139,9 @@ export const CLI_HELP = [
   "  rollback    transactional rollback with explicit mode + confirmation",
   "  uninstall   explicit uninstall with explicit mode + confirmation",
   "",
-  "Every flag is explicit; no interactive shell, no defaults that may",
-  "trigger destructive actions. Pass `--help` after a command for help.",
+  "Setup detects Tailscale and gives safe next steps; it never installs",
+  "software or runs `tailscale up`. Low-level commands retain explicit flags.",
+  "Pass `--help` after a command for help.",
 ].join("\n");
 
 /**
@@ -135,8 +149,16 @@ export const CLI_HELP = [
  * filesystem: the production caller (the bun entry script) supplies them.
  * Tests substitute in-memory implementations for every port.
  */
+export interface LifecycleState {
+  readonly launchAgentLoaded: boolean;
+  readonly listenerReady: boolean;
+}
+
 export interface LifecycleDriver {
   installAndVerify(paths: InstallPaths, port: number): void | Promise<void>;
+  startConfigured(port: number): Promise<{ readonly alreadyRunning: boolean }>;
+  stopConfigured(): Promise<{ readonly alreadyStopped: boolean }>;
+  lifecycleState(port: number): Promise<LifecycleState>;
   preflight(): void | Promise<void>;
   verifyTarget(manifest: ReleaseManifest): void | Promise<void>;
   backup(paths: InstallPaths, manifest: ReleaseManifest): string | Promise<string>;
@@ -152,6 +174,27 @@ export interface LifecycleDriver {
   removeOwnedServe(): void | Promise<void>;
 }
 
+export interface TailscaleState {
+  readonly installed: boolean;
+  readonly loggedIn: boolean;
+  readonly magicDnsName: string | null;
+  readonly detail?: string;
+}
+
+export interface SetupDefaults {
+  readonly installRoot: string;
+  readonly launchAgentsRoot: string;
+  readonly piExecutable: string | null;
+  readonly sourceCliExecutable: string;
+  readonly sourceBridgeExecutable: string;
+  readonly piSessionDir: string;
+  readonly sourceExtensionPath: string;
+  readonly bridgeVersion: string;
+  readonly protocolVersion: string;
+  readonly pathDirs: readonly string[];
+  readonly port?: number;
+}
+
 export interface CliDeps {
   readonly fs: FileSystemPort;
   readonly clock: ClockPort;
@@ -159,7 +202,13 @@ export interface CliDeps {
   /** Required for destructive lifecycle commands; absence fails closed. */
   readonly lifecycle?: LifecycleDriver;
   readonly databaseIntegrity?: (path: string) => { ok: boolean; detail?: string };
-  readonly processProbe?: () => { loaded: boolean; listenerReady: boolean };
+  readonly processProbe?: (port: number) => { loaded: boolean; listenerReady: boolean };
+  /** Detection only: implementations must never install Tailscale or log in. */
+  readonly tailscaleProbe?: () => Promise<TailscaleState>;
+  /** Safe defaults used only by the public setup command. */
+  readonly setupDefaults?: SetupDefaults;
+  /** Reads the daemon-created canonical host identity after setup readiness. */
+  readonly hostIdentity?: (databasePath: string) => { readonly hostId: string };
   /** Optional Pi integration; if absent, the doctor Pi probe reports warn. */
   readonly piProbe?: PiProbe;
   /** Optional push integration; if absent, the doctor push probe reports warn. */
@@ -206,6 +255,46 @@ export interface InstallResult {
   readonly envPath: string | null;
   readonly envPathWritten: boolean;
   readonly plistPath: string;
+  readonly timestamp: string;
+}
+
+export interface SetupResult {
+  readonly ready: boolean;
+  readonly tailscale: TailscaleState;
+  readonly installed: boolean;
+  readonly install: InstallResult | null;
+  readonly manualEndpoint: string | null;
+  readonly pairingAvailable: boolean;
+  readonly pairingPayload: PairingPayload | null;
+  readonly pairingTerminal: string | null;
+  readonly nextActions: readonly string[];
+  readonly timestamp: string;
+}
+
+export interface StartResult {
+  readonly started: boolean;
+  readonly alreadyRunning: boolean;
+  readonly port: number;
+  readonly ownedServePresent: boolean;
+  readonly timestamp: string;
+}
+
+export interface StopResult {
+  readonly stopped: boolean;
+  readonly alreadyStopped: boolean;
+  readonly timestamp: string;
+}
+
+export interface StatusResult {
+  readonly installed: boolean;
+  readonly launchAgentLoaded: boolean;
+  readonly listenerReady: boolean;
+  readonly ownedServePresent: boolean;
+  readonly ownedServePort: number | null;
+  readonly pairingAvailable: boolean;
+  readonly pairingEndpoint: string | null;
+  readonly pairingHostId: string | null;
+  readonly remediation: readonly string[];
   readonly timestamp: string;
 }
 
@@ -466,6 +555,137 @@ function loadInstallPaths(args: ParsedCommand): InstallPaths {
 }
 
 // ---------------------------------------------------------------------------
+// Public lifecycle UX
+// ---------------------------------------------------------------------------
+
+function configForLifecycle(args: ParsedCommand, deps: CliDeps): { paths: InstallPaths; config: BridgeInstallConfig } {
+  const paths = loadInstallPaths(args);
+  return { paths, config: readInstallConfig(paths.configFile, deps.fs) };
+}
+
+function setupInstallArgs(args: ParsedCommand, defaults: SetupDefaults): ParsedCommand {
+  const workspace = requireAbsolute("workspace", getFlagStringRequired(args, "workspace"));
+  if (!defaults.piExecutable) {
+    throw new CliArgsError("pi_not_found", "Pi CLI was not found; install Pi, ensure `pi` is on PATH, then rerun pi-mob setup --workspace <path>");
+  }
+  const flags = new Map(args.flags);
+  const put = (key: string, value: string): void => { if (!flags.has(key)) flags.set(key, value); };
+  put("install-root", defaults.installRoot);
+  put("launch-agents-root", defaults.launchAgentsRoot);
+  put("pi-executable", defaults.piExecutable);
+  put("bridge-executable", `${defaults.installRoot}/release/bin/bridge-daemon`);
+  put("bridge-source", defaults.sourceBridgeExecutable);
+  put("workspace", workspace);
+  put("pi-session-dir", defaults.piSessionDir);
+  put("extension", `${defaults.installRoot}/release/extensions/pi-mob-extension.js`);
+  put("extension-source", defaults.sourceExtensionPath);
+  put("bridge-version", defaults.bridgeVersion);
+  put("protocol-version", defaults.protocolVersion);
+  put("port", String(defaults.port ?? 8788));
+  put("hostname", "127.0.0.1");
+  put("environment", "release");
+  if (!flags.has("path-dir")) flags.set("path-dir", [...defaults.pathDirs]);
+  return { command: "install", flags, positional: args.positional };
+}
+
+export async function handleSetup(args: ParsedCommand, deps: CliDeps): Promise<SetupResult> {
+  assertCommand(args, "setup");
+  if (!deps.tailscaleProbe) throw new CliArgsError("tailscale_probe_unavailable", "setup requires Tailscale detection support");
+  const tailscale = await deps.tailscaleProbe();
+  const nextActions: string[] = [];
+  if (!tailscale.installed) {
+    nextActions.push("Install the Tailscale macOS app from https://tailscale.com/download/mac, open it, and sign in.");
+  } else if (!tailscale.loggedIn) {
+    nextActions.push("Open the Tailscale app and sign in (or run the Tailscale CLI `up` yourself), then rerun setup.");
+  } else if (!tailscale.magicDnsName) {
+    nextActions.push("Enable MagicDNS in the Tailscale admin console, confirm `tailscale status --json` shows Self.DNSName, then rerun setup.");
+  }
+  if (nextActions.length > 0) {
+    return { ready: false, tailscale, installed: false, install: null, manualEndpoint: null, pairingAvailable: false, pairingPayload: null, pairingTerminal: null, nextActions, timestamp: deps.clock.iso() };
+  }
+  if (!deps.setupDefaults) throw new CliArgsError("setup_defaults_unavailable", "setup defaults are unavailable in this build");
+  const sourceCliExecutable = requireAbsolute("source-cli-executable", deps.setupDefaults.sourceCliExecutable);
+  if (!deps.fs.exists(sourceCliExecutable)) throw new CliArgsError("artifact_missing", `CLI source not found: ${sourceCliExecutable}`);
+  const cliArtifact = deps.fs.readFile(sourceCliExecutable);
+  const installArgs = setupInstallArgs(args, deps.setupDefaults);
+  const install = await handleInstall(installArgs, deps);
+  writeInstalledArtifact(deps.fs, `${install.paths.binRoot}/pi-mob`, cliArtifact, 0o700);
+  writeInstalledArtifact(deps.fs, `${install.paths.binRoot}/pi-mob-ops`, cliArtifact, 0o700);
+  const port = Number(getFlagStringRequired(installArgs, "port"));
+  const portSuffix = port === 443 ? "" : `:${port}`;
+  const manualEndpoint = `https://${tailscale.magicDnsName}${portSuffix}`;
+  const displayName = getFlagStringRequired(installArgs, "workspace").split("/").filter(Boolean).at(-1) ?? "pi-mob host";
+  let pairingPayload: PairingPayload | null = null;
+  let pairingTerminal: string | null = null;
+  if (deps.hostIdentity) {
+    try {
+      const identity = deps.hostIdentity(`${install.paths.stateRoot}/bridge.sqlite`);
+      pairingPayload = buildPairingPayload({ hostId: identity.hostId, displayName, endpoint: manualEndpoint });
+      pairingTerminal = renderPairingTerminal(pairingPayload);
+      const pairingPath = `${install.paths.secretsRoot}/pairing.json`;
+      deps.fs.writeFile(pairingPath, `${JSON.stringify({ payload: pairingPayload })}\n`, FILE_MODE);
+      deps.fs.chmod(pairingPath, FILE_MODE);
+      nextActions.push("Scan the pairing QR shown below in the pi-mob app, then verify the displayed host identity.");
+    } catch (error) {
+      nextActions.push(`The bridge is running, but automatic pairing could not be created: ${error instanceof Error ? error.message : String(error)}. Use the manual address below.`);
+    }
+  } else {
+    nextActions.push("This build cannot read the bridge host identity automatically. Use the manual address below.");
+  }
+  nextActions.push(`Manual fallback: on your phone, enter ${manualEndpoint}. The app verifies and saves it after connecting.`);
+  return { ready: true, tailscale, installed: true, install, manualEndpoint, pairingAvailable: pairingPayload !== null, pairingPayload, pairingTerminal, nextActions, timestamp: deps.clock.iso() };
+}
+
+export async function handleStart(args: ParsedCommand, deps: CliDeps): Promise<StartResult> {
+  assertCommand(args, "start");
+  const { config } = configForLifecycle(args, deps);
+  if (!deps.lifecycle) throw new CliArgsError("lifecycle_unavailable", "start requires the macOS lifecycle driver");
+  const result = await deps.lifecycle.startConfigured(config.port);
+  const serve = await inspectServeRoutes({ driver: deps.serveDriver });
+  return { started: true, alreadyRunning: result.alreadyRunning, port: config.port, ownedServePresent: serve.ownedRoute?.source.tcp?.port === config.port, timestamp: deps.clock.iso() };
+}
+
+export async function handleStop(args: ParsedCommand, deps: CliDeps): Promise<StopResult> {
+  assertCommand(args, "stop");
+  configForLifecycle(args, deps);
+  if (!deps.lifecycle) throw new CliArgsError("lifecycle_unavailable", "stop requires the macOS lifecycle driver");
+  const result = await deps.lifecycle.stopConfigured();
+  return { stopped: true, alreadyStopped: result.alreadyStopped, timestamp: deps.clock.iso() };
+}
+
+function pairingSnapshot(paths: InstallPaths, deps: CliDeps): { available: boolean; endpoint: string | null; hostId: string | null } {
+  const path = `${paths.secretsRoot}/pairing.json`;
+  if (!deps.fs.exists(path)) return { available: false, endpoint: null, hostId: null };
+  try {
+    const value = JSON.parse(deps.fs.readFile(path).toString("utf8")) as { payload?: unknown } | unknown;
+    const candidate = typeof value === "object" && value !== null && "payload" in value ? (value as { payload: unknown }).payload : value;
+    const payload = parsePairingPayload(JSON.stringify(candidate));
+    return { available: true, endpoint: payload.endpoint, hostId: payload.hostId };
+  } catch {
+    return { available: false, endpoint: null, hostId: null };
+  }
+}
+
+export async function handleStatus(args: ParsedCommand, deps: CliDeps): Promise<StatusResult> {
+  assertCommand(args, "status");
+  const paths = loadInstallPaths(args);
+  const remediation: string[] = [];
+  if (!deps.fs.exists(paths.configFile)) {
+    remediation.push("Run `pi-mob setup --workspace <path>`.");
+    return { installed: false, launchAgentLoaded: false, listenerReady: false, ownedServePresent: false, ownedServePort: null, pairingAvailable: false, pairingEndpoint: null, pairingHostId: null, remediation, timestamp: deps.clock.iso() };
+  }
+  const config = readInstallConfig(paths.configFile, deps.fs);
+  const state = deps.lifecycle ? await deps.lifecycle.lifecycleState(config.port) : { launchAgentLoaded: false, listenerReady: false };
+  let ownedServePort: number | null = null;
+  try { ownedServePort = (await inspectServeRoutes({ driver: deps.serveDriver })).ownedRoute?.source.tcp?.port ?? null; }
+  catch { remediation.push("Open Tailscale, sign in, and rerun status."); }
+  const pairing = pairingSnapshot(paths, deps);
+  if (!state.launchAgentLoaded || !state.listenerReady || ownedServePort !== config.port) remediation.push("Run `pi-mob start`.");
+  if (!pairing.available) remediation.push("Create pairing with `pi-mob-ops pair` after obtaining a canonical host UUID and MagicDNS HTTPS endpoint.");
+  return { installed: deps.fs.exists(paths.plistPath), launchAgentLoaded: state.launchAgentLoaded, listenerReady: state.listenerReady, ownedServePresent: ownedServePort === config.port, ownedServePort, pairingAvailable: pairing.available, pairingEndpoint: pairing.endpoint, pairingHostId: pairing.hostId, remediation, timestamp: deps.clock.iso() };
+}
+
+// ---------------------------------------------------------------------------
 // install
 // ---------------------------------------------------------------------------
 
@@ -483,9 +703,24 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
   const installRoot = requireAbsolute("install-root", getFlagStringRequired(args, "install-root"));
   const piExecutable = requireAbsolute("pi-executable", getFlagStringRequired(args, "pi-executable"));
   const bridgeExecutable = requireAbsolute("bridge-executable", getFlagStringRequired(args, "bridge-executable"));
+  const bridgeSourceFlag = getFlagString(args, "bridge-source");
+  const bridgeSource = bridgeSourceFlag === undefined ? null : requireAbsolute("bridge-source", bridgeSourceFlag);
   const workspaceRoot = requireAbsolute("workspace", getFlagStringRequired(args, "workspace"));
   const piSessionDir = requireAbsolute("pi-session-dir", getFlagStringRequired(args, "pi-session-dir"));
   const extensionPath = requireAbsolute("extension", getFlagStringRequired(args, "extension"));
+  const extensionSourceFlag = getFlagString(args, "extension-source");
+  const extensionSource = extensionSourceFlag === undefined ? null : requireAbsolute("extension-source", extensionSourceFlag);
+  if ((bridgeSource === null) !== (extensionSource === null)) {
+    throw new CliArgsError("flag_missing", "--bridge-source and --extension-source must be passed together");
+  }
+  let bridgeArtifact: Buffer | null = null;
+  let extensionArtifact: Buffer | null = null;
+  if (bridgeSource !== null && extensionSource !== null) {
+    if (!deps.fs.exists(bridgeSource)) throw new CliArgsError("artifact_missing", `bridge source not found: ${bridgeSource}`);
+    if (!deps.fs.exists(extensionSource)) throw new CliArgsError("artifact_missing", `extension source not found: ${extensionSource}`);
+    bridgeArtifact = deps.fs.readFile(bridgeSource);
+    extensionArtifact = deps.fs.readFile(extensionSource);
+  }
   const bridgeVersion = getFlagStringRequired(args, "bridge-version");
   const protocolVersion = getFlagStringRequired(args, "protocol-version");
   const port = getFlagIntegerRequired(args, "port");
@@ -518,6 +753,13 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
   }
 
   const paths = buildInstallPaths({ installRoot, launchAgentLabel, launchAgentsRoot });
+  if (bridgeArtifact !== null && extensionArtifact !== null) {
+    const expectedBridge = `${paths.binRoot}/bridge-daemon`;
+    const expectedExtension = `${paths.installRoot}/release/extensions/pi-mob-extension.js`;
+    if (bridgeExecutable !== expectedBridge || extensionPath !== expectedExtension) {
+      throw new CliArgsError("flag_invalid", `artifact copy targets must be ${expectedBridge} and ${expectedExtension}`);
+    }
+  }
 
   // defaultInstallConfig validates port + hostname + absolute paths.
   const config = defaultInstallConfig({
@@ -570,6 +812,13 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
   // Phase 2 — perform the filesystem writes. Each writer validates again
   // (writeInstallConfig / renderPlist) and re-checks permissions.
   ensureInstallPaths(paths, deps.fs);
+  if (bridgeArtifact !== null && extensionArtifact !== null) {
+    const extensionRoot = `${paths.installRoot}/release/extensions`;
+    deps.fs.mkdir(extensionRoot, { recursive: true, mode: 0o700 });
+    deps.fs.chmod(extensionRoot, 0o700);
+    writeInstalledArtifact(deps.fs, bridgeExecutable, bridgeArtifact, 0o700);
+    writeInstalledArtifact(deps.fs, extensionPath, extensionArtifact, FILE_MODE);
+  }
   writeInstallConfig(paths.configFile, config, deps.fs);
   if (envFileEnabled) {
     const lines = [
@@ -592,6 +841,14 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
     plistPath: paths.plistPath,
     timestamp: deps.clock.iso(),
   };
+}
+
+function writeInstalledArtifact(fs: FileSystemPort, path: string, data: Buffer, mode: number): void {
+  const temporary = `${path}.next`;
+  fs.writeFile(temporary, data, mode);
+  fs.chmod(temporary, mode);
+  fs.rename(temporary, path);
+  fs.chmod(path, mode);
 }
 
 // ---------------------------------------------------------------------------
@@ -751,7 +1008,7 @@ export async function handleDoctor(args: ParsedCommand, deps: CliDeps): Promise<
     clock: deps.clock,
     serveDriver: deps.serveDriver,
     ...(deps.databaseIntegrity ? { databaseIntegrity: deps.databaseIntegrity } : {}),
-    ...(deps.processProbe ? { processProbe: deps.processProbe } : {}),
+    ...(deps.processProbe ? { processProbe: () => deps.processProbe!(config.port) } : {}),
     ...(deps.piProbe !== undefined ? { piProbe: deps.piProbe } : {}),
     ...(deps.pushProbe !== undefined ? { pushProbe: deps.pushProbe } : {}),
   };
@@ -1001,6 +1258,10 @@ function assertCommand(args: ParsedCommand, expected: CliCommand): void {
  */
 export async function dispatch(args: ParsedCommand, deps: CliDeps): Promise<unknown> {
   switch (args.command) {
+    case "setup": return await handleSetup(args, deps);
+    case "start": return await handleStart(args, deps);
+    case "stop": return await handleStop(args, deps);
+    case "status": return await handleStatus(args, deps);
     case "install": return await handleInstall(args, deps);
     case "serve": return await handleServe(args, deps);
     case "pair": return handlePair(args, deps);
@@ -1036,9 +1297,18 @@ export async function runCli(deps: CliDeps): Promise<CliRunResult> {
     deps.stderr(chunk);
   };
 
+  if (deps.argv[0] === "--help" || deps.argv[0] === "-h") {
+    captureStdout(`${CLI_HELP}\n`);
+    return { command: null, exitCode: 0, stdout: stdoutChunks.join(""), stderr: "", parsed: null, data: null };
+  }
+
   let parsed: ParsedCommand | null = null;
   try {
     parsed = parseArgs(deps.argv);
+    if (parsed.flags.get("help") === true) {
+      captureStdout(`${CLI_HELP}\n`);
+      return { command: parsed.command, exitCode: 0, stdout: stdoutChunks.join(""), stderr: "", parsed, data: null };
+    }
   } catch (error) {
     captureStderr(`${(error as Error).message}\n`);
     captureStderr(`\n${CLI_HELP}\n`);

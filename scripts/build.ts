@@ -63,6 +63,7 @@ const CFG_PATH = join(DIST, "release-config.toml");
 const RELEASE_ROOT = join(DIST, "release");
 const EXTENSION_SOURCE = join(ROOT, "packages/pi-extension/src/extension.ts");
 const EXTENSION_BUNDLE_NAME = "pi-mob-extension.js";
+const PUBLIC_CLI_NAME = "pi-mob";
 const OPS_EXEC_NAME = "pi-mob-ops";
 
 // Portable, installer-rewritable absolute paths used only by templates. No
@@ -78,7 +79,12 @@ const INSTALL_PLACEHOLDER_RELEASE = `${INSTALL_PLACEHOLDER_ROOT}/release`;
 // flow stay in lock-step.
 // ---------------------------------------------------------------------------
 
-const BRIDGE_VERSION = "0.0.0-m7";
+const DEFAULT_BRIDGE_VERSION = "0.0.0-m7";
+const releaseVersionOverride = process.env.PI_MOB_VERSION?.trim();
+if (process.env.PI_MOB_VERSION !== undefined && !releaseVersionOverride) {
+  throw new Error("PI_MOB_VERSION must be non-empty when provided");
+}
+const RELEASE_VERSION = releaseVersionOverride || DEFAULT_BRIDGE_VERSION;
 const PROTOCOL_VERSION = "1.0";
 const BUN_MINIMUM = "1.3.14";
 const MIN_MACOS = "13.0";
@@ -95,6 +101,9 @@ const CAPABILITIES: readonly string[] = [
   "owner-only-install-state",
   "explicit-install-config",
   "launch-agent-template",
+  "friendly-lifecycle-cli",
+  "guided-tailscale-serve-lifecycle",
+  "self-contained-install-copy",
   "autoload-disabled-compiled-binary",
 ];
 
@@ -107,7 +116,7 @@ const LIMITATIONS: readonly string[] = [
   "x64-only (host arch proven on macOS 13+; arm64 not yet validated)",
   "single-workspace one-session adapter",
   "no remote install/rollback over the wire (M8)",
-  "no Tailscale Serve private endpoint (M8)",
+  "Tailscale must already be installed and signed in; setup detects and guides but does not provision it",
   "no code signing / notarization in this bundle",
   "no signed package (.pkg) artefact",
 ];
@@ -226,7 +235,7 @@ function buildConfigSample(daemonPath: string): string {
     "# The installer rewrites the /opt/pi-mob placeholders to host-absolute paths.",
     "schema_version = 1",
     `environment = "release"`,
-    `bridge_version = ${JSON.stringify(BRIDGE_VERSION)}`,
+    `bridge_version = ${JSON.stringify(RELEASE_VERSION)}`,
     `protocol_version = ${JSON.stringify(PROTOCOL_VERSION)}`,
     `pi_executable = ${JSON.stringify("/opt/pi-mob/bin/pi")}`,
     `bridge_executable = ${JSON.stringify(daemonPath)}`,
@@ -552,6 +561,8 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
   const opsBuffer = readFileSync(opsInBundle);
   const opsSha = sha256Of(opsBuffer);
   const opsSize = opsBuffer.length;
+  const publicCliInBundle = join(binDir, PUBLIC_CLI_NAME);
+  writeFileSync(publicCliInBundle, opsBuffer, { mode: 0o700 });
 
   const extensionInBundle = join(extensionsDir, EXTENSION_BUNDLE_NAME);
   compileExtension(extensionInBundle);
@@ -623,6 +634,13 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
       size: daemonInBundleStat.size,
     },
     {
+      name: PUBLIC_CLI_NAME,
+      kind: "lifecycle-cli",
+      path: `bin/${PUBLIC_CLI_NAME}`,
+      sha256: opsSha,
+      size: opsSize,
+    },
+    {
       name: OPS_EXEC_NAME,
       kind: "lifecycle-cli",
       path: `bin/${OPS_EXEC_NAME}`,
@@ -657,7 +675,7 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
   //    only pins the on-disk contract; we extend the literal here with
   //    `capabilities` / `migrationClass` / `limitations` and serialize via
   //    a hand-rolled JSON encoder so the cast stays explicit.
-  const version = opts.version ?? BRIDGE_VERSION;
+  const version = opts.version ?? RELEASE_VERSION;
   const protocolVersion = opts.protocolVersion ?? PROTOCOL_VERSION;
   const bunMinimum = opts.bunMinimum ?? BUN_MINIMUM;
   const migrationClass = opts.migrationClass ?? MIGRATION_CLASS;

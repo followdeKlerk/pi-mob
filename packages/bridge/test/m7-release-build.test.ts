@@ -60,7 +60,7 @@ import {
 // Constants — kept in lock-step with scripts/build.ts.
 // ---------------------------------------------------------------------------
 
-const BRIDGE_VERSION = "0.0.0-m7";
+const BRIDGE_VERSION = process.env.PI_MOB_VERSION?.trim() || DEFAULT_BRIDGE_VERSION;
 const PROTOCOL_VERSION = "1.0";
 const BUN_MINIMUM = "1.3.14";
 const MIN_MACOS = "13.0";
@@ -68,6 +68,8 @@ const PRODUCT = "pi-mob-bridge";
 const MIGRATION_CLASS = "reversible_migration";
 const ARCHITECTURE = "x64" as const;
 const EXTENSION_BUNDLE_NAME = "pi-mob-extension.js";
+const PUBLIC_CLI_NAME = "pi-mob";
+const OPS_CLI_NAME = "pi-mob-ops";
 const PLACEHOLDER_ROOT = "/opt/pi-mob";
 const PLACEHOLDER_RELEASE = `${PLACEHOLDER_ROOT}/release`;
 
@@ -179,6 +181,8 @@ let configSamplePath = "";
 let plistPath = "";
 let licensesDir = "";
 let daemonInBundle = "";
+let publicCliInBundle = "";
+let opsCliInBundle = "";
 let extensionInBundle = "";
 let manifest: ReturnType<typeof JSON.parse> = {};
 let manifestRaw = "";
@@ -198,6 +202,8 @@ beforeAll(() => {
   plistPath = join(RELEASE_DIR, "launch-agents", `${DEFAULT_LAUNCH_AGENT_LABEL}.plist`);
   licensesDir = join(RELEASE_DIR, "licenses");
   daemonInBundle = join(RELEASE_DIR, "bin", "bridge-daemon");
+  publicCliInBundle = join(RELEASE_DIR, "bin", PUBLIC_CLI_NAME);
+  opsCliInBundle = join(RELEASE_DIR, "bin", OPS_CLI_NAME);
   extensionInBundle = join(RELEASE_DIR, "extensions", EXTENSION_BUNDLE_NAME);
   manifestRaw = readFileSync(manifestPath, "utf8");
   manifest = JSON.parse(manifestRaw);
@@ -221,6 +227,8 @@ describe("release bundle: layout", () => {
       { path: join(licensesDir, "Apache-2.0"), mode: 0o600 },
       { path: join(licensesDir, "BSD-3-Clause"), mode: 0o600 },
       { path: daemonInBundle, mode: 0o700 },
+      { path: publicCliInBundle, mode: 0o700 },
+      { path: opsCliInBundle, mode: 0o700 },
       { path: extensionInBundle, mode: 0o600 },
     ];
     for (const entry of expectedFiles) {
@@ -235,6 +243,15 @@ describe("release bundle: layout", () => {
     expect(bundleSha).toBe(daemonSha);
     // Mach-O arch is preserved through the copy.
     expect(detectMachOArch(daemonInBundle).arch).toBe("x64");
+  });
+
+  test("bundles the friendly and advanced lifecycle CLI names from the same executable", () => {
+    expect(readFileSync(publicCliInBundle)).toEqual(readFileSync(opsCliInBundle));
+    const lifecycleNames = manifest.artifacts
+      .filter((artifact: { kind: string }) => artifact.kind === "lifecycle-cli")
+      .map((artifact: { name: string }) => artifact.name)
+      .sort();
+    expect(lifecycleNames).toEqual([PUBLIC_CLI_NAME, OPS_CLI_NAME].sort());
   });
 
   test("bundles the loadable policy extension and inventories its checksum and license", () => {
@@ -263,6 +280,18 @@ describe("release bundle: layout", () => {
     expect(manifestRaw.startsWith("{")).toBe(true);
     const keys = Object.keys(manifest).sort();
     expect(Object.keys(manifest)).toEqual(keys);
+  });
+
+  test("honors an explicit release version", () => {
+    const taggedDir = join(SUITE_ROOT, "tagged-release");
+    const tagged = buildReleaseBundle({
+      daemonBinary: DAEMON_BINARY,
+      releaseDir: taggedDir,
+      version: "v9.8.7-preview",
+    });
+    expect(tagged.manifest.version).toBe("v9.8.7-preview");
+    expect(readFileSync(join(taggedDir, "config.sample.toml"), "utf8"))
+      .toContain('bridge_version = "v9.8.7-preview"');
   });
 
   test("manifest.json round-trips through the strict release-manifest parser", () => {
@@ -314,6 +343,8 @@ describe("release bundle: manifest fields", () => {
   test("artifacts array carries daemon, extension, config template, and plist", () => {
     const names = manifest.artifacts.map((a: { name: string }) => a.name).sort();
     expect(names).toContain("bridge-daemon");
+    expect(names).toContain(PUBLIC_CLI_NAME);
+    expect(names).toContain(OPS_CLI_NAME);
     expect(names).toContain(EXTENSION_BUNDLE_NAME);
     expect(names).toContain("config.sample.toml");
     expect(names).toContain(`${DEFAULT_LAUNCH_AGENT_LABEL}.plist`);

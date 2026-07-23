@@ -170,7 +170,7 @@ export interface DurableRuntimeOptions {
   readonly plans?: PlanSourceService;
   /** R4 — optional context-inspector authority. When omitted, the bridge
    * never advertises `contexts.v1` and surfaces a truthful
-   * `context.unavailable` host-stream event so the mobile inspector
+   * `context.unavailable` session-stream event so the mobile inspector
    * shows explicit unavailable UX rather than fabricated state. */
   readonly contexts?: ContextSourceService;
 }
@@ -480,7 +480,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
    * bridge can cancel it. The response is the closed `ContextSnapshot`
    * schema (`context.snapshot.result`). When the service truthfully
    * reports the surface is unavailable, the bridge emits
-   * `context.unavailable` on the host stream and throws
+   * `context.unavailable` on the session stream and throws
    * `unsupported_capability`; the schema forbids embedding
    * `ContextUnavailable` inside `context.snapshot.result`. */
   private async contextSnapshotRequest(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -494,8 +494,14 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     try {
       const result = await this.contexts.snapshot({ sessionId, signal: controller.signal });
       if (isContextUnavailable(result)) {
+        this.options.store.ensureSession(result.sessionId, { runtimeState: "idle" });
+        this.options.store.ensureStream(
+          `session:${result.sessionId}`,
+          "session",
+          result.sessionId,
+        );
         this.options.store.appendEvent(
-          `host:${this.identity().hostId}`,
+          `session:${result.sessionId}`,
           "context.unavailable",
           { sessionId: result.sessionId, capability: result.capability, status: result.status },
         );

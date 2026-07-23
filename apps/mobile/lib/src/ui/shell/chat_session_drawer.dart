@@ -211,6 +211,36 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     await widget.coordinator.takeControl(sessionId);
   }
 
+  Future<void> _changeBridgeAddress() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Change bridge address?'),
+        content: const Text(
+          'You’ll be unpaired from the current bridge. Saved chats and cached '
+          'data associated with this host may be cleared, but local drafts are '
+          'preserved. You’ll then enter and verify the new address.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('cancel-change-bridge-address'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-change-bridge-address'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Change address'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    Navigator.of(context).pop();
+    await widget.onForgetHost();
+  }
+
   Future<void> _openChatActions(SessionState session) async {
     final result = await showDialog<_ChatActionResult>(
       context: context,
@@ -545,9 +575,9 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
               ),
             ListTile(
               key: const Key('drawer-forget-host'),
-              leading: const Icon(Icons.link_off),
-              title: const Text('Forget connection'),
-              onTap: () => unawaited(widget.onForgetHost()),
+              leading: const Icon(Icons.swap_horiz),
+              title: const Text('Change bridge address'),
+              onTap: () => unawaited(_changeBridgeAddress()),
             ),
           ],
         ),

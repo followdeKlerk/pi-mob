@@ -152,7 +152,7 @@ Map<String, Object?> _contextSnapshotResult(Map<String, Object?> payload) =>
     };
 
 Map<String, Object?> _contextUnavailableEvent(Map<String, Object?> payload) =>
-    _hostEvent('context.unavailable', payload);
+    _recipeEvent('context.unavailable', payload);
 
 Map<String, Object?> _recipeActivity(String kind) => <String, Object?>{
   'kind': kind,
@@ -1505,10 +1505,7 @@ void main() {
       },
     };
     expect(
-      validateProtocolFixture(
-        'event',
-        _hostEvent('recipe.unavailable', valid),
-      ),
+      validateProtocolFixture('event', _hostEvent('recipe.unavailable', valid)),
       isA<ProtocolEvent>(),
     );
 

@@ -14,21 +14,26 @@ const _maxContextSourceKindLength = 32;
 const _maxContextSourceSummary = 240;
 const _maxThinkingLevelLength = 32;
 
-const _tokenUsageDigitsPattern = '^(0|[1-9][0-9]{0,15})\$';
+const _tokenUsageDigitsPattern = r'^(0|[1-9][0-9]{0,15})$';
 final _tokenUsageDigitsRegExp = RegExp(_tokenUsageDigitsPattern);
 
 const _uuidPattern =
-    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\$';
+    r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$';
 final _uuidRegExp = RegExp(_uuidPattern);
 
 const _isoUtcPattern =
-    r'^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3})?Z\$';
+    r'^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]{3})?Z$';
 final _isoUtcRegExp = RegExp(_isoUtcPattern);
 
 /// R4 — A single pinned file row on the inspector.
 @immutable
 class ContextPinnedFile {
-  const ContextPinnedFile({required this.path, required this.pinnedAt, required this.revision, this.ranges});
+  const ContextPinnedFile({
+    required this.path,
+    required this.pinnedAt,
+    required this.revision,
+    this.ranges,
+  });
   final String path;
   final String pinnedAt;
   final String revision;
@@ -74,7 +79,14 @@ class ContextSource {
 /// truthful reason/remediation text.
 @immutable
 class ContextCapability {
-  const ContextCapability({required this.state, this.reason, this.remediation, this.source, this.revision, this.lastRefreshedAt});
+  const ContextCapability({
+    required this.state,
+    this.reason,
+    this.remediation,
+    this.source,
+    this.revision,
+    this.lastRefreshedAt,
+  });
   final String state;
   final String? reason;
   final String? remediation;
@@ -82,7 +94,9 @@ class ContextCapability {
   final String? revision;
   final String? lastRefreshedAt;
 
-  static const ContextCapability unavailable = ContextCapability(state: 'unavailable');
+  static const ContextCapability unavailable = ContextCapability(
+    state: 'unavailable',
+  );
 }
 
 /// R4 — Token-usage telemetry. Token counts are canonical decimal
@@ -148,10 +162,17 @@ class ContextSnapshotData {
     final lastRefreshedAt = payload['lastRefreshedAt'];
     final capability = payload['capability'];
     if (sessionId is! String || !_uuidRegExp.hasMatch(sessionId)) return null;
-    if (revision is! String || revision.isEmpty || revision.length > _maxRevisionLength) return null;
-    if (source is! String || source.isEmpty || source.length > _maxCapabilitySourceLength) return null;
+    if (revision is! String ||
+        revision.isEmpty ||
+        revision.length > _maxRevisionLength)
+      return null;
+    if (source is! String ||
+        source.isEmpty ||
+        source.length > _maxCapabilitySourceLength)
+      return null;
     if (stale is! bool) return null;
-    if (lastRefreshedAt is! String || !_isoUtcRegExp.hasMatch(lastRefreshedAt)) return null;
+    if (lastRefreshedAt is! String || !_isoUtcRegExp.hasMatch(lastRefreshedAt))
+      return null;
     if (capability is! Map) return null;
     final cap = Map<String, Object?>.from(capability);
     if (cap['state'] != 'available') return null;
@@ -162,8 +183,12 @@ class ContextSnapshotData {
       final map = Map<String, Object?>.from(rawModel);
       final provider = map['provider'];
       final modelId = map['modelId'];
-      if (provider is String && provider.isNotEmpty && provider.length <= _maxProviderLength &&
-          modelId is String && modelId.isNotEmpty && modelId.length <= _maxModelIdLength) {
+      if (provider is String &&
+          provider.isNotEmpty &&
+          provider.length <= _maxProviderLength &&
+          modelId is String &&
+          modelId.isNotEmpty &&
+          modelId.length <= _maxModelIdLength) {
         model = ContextModel(provider: provider, modelId: modelId);
       } else {
         return null;
@@ -173,7 +198,8 @@ class ContextSnapshotData {
     String? thinkingLevel;
     final rawThinking = payload['thinkingLevel'];
     if (rawThinking is String) {
-      if (rawThinking.isEmpty || rawThinking.length > _maxThinkingLevelLength) return null;
+      if (rawThinking.isEmpty || rawThinking.length > _maxThinkingLevelLength)
+        return null;
       thinkingLevel = rawThinking;
     }
 
@@ -195,9 +221,14 @@ class ContextSnapshotData {
         final path = m['path'];
         final pinnedAt = m['pinnedAt'];
         final rev = m['revision'];
-        if (path is! String || path.isEmpty || path.length > _maxPinnedPathLength) return null;
-        if (pinnedAt is! String || !_isoUtcRegExp.hasMatch(pinnedAt)) return null;
-        if (rev is! String || rev.isEmpty || rev.length > _maxRevisionLength) return null;
+        if (path is! String ||
+            path.isEmpty ||
+            path.length > _maxPinnedPathLength)
+          return null;
+        if (pinnedAt is! String || !_isoUtcRegExp.hasMatch(pinnedAt))
+          return null;
+        if (rev is! String || rev.isEmpty || rev.length > _maxRevisionLength)
+          return null;
         List<ContextLineRange>? ranges;
         final rawRanges = m['ranges'];
         if (rawRanges is List) {
@@ -208,12 +239,20 @@ class ContextSnapshotData {
             final rm = Map<String, Object?>.from(r);
             final start = rm['startLine'];
             final end = rm['endLine'];
-            if (start is! int || end is! int || start < 1 || end < start) return null;
+            if (start is! int || end is! int || start < 1 || end < start)
+              return null;
             built.add(ContextLineRange(startLine: start, endLine: end));
           }
           ranges = List.unmodifiable(built);
         }
-        out.add(ContextPinnedFile(path: path, pinnedAt: pinnedAt, revision: rev, ranges: ranges));
+        out.add(
+          ContextPinnedFile(
+            path: path,
+            pinnedAt: pinnedAt,
+            revision: rev,
+            ranges: ranges,
+          ),
+        );
       }
       pinnedFiles = List.unmodifiable(out);
     }
@@ -224,10 +263,14 @@ class ContextSnapshotData {
       final map = Map<String, Object?>.from(rawUsage);
       final input = map['inputTokens'];
       final output = map['outputTokens'];
-      if (input is! String || !_tokenUsageDigitsRegExp.hasMatch(input)) return null;
-      if (output is! String || !_tokenUsageDigitsRegExp.hasMatch(output)) return null;
+      if (input is! String || !_tokenUsageDigitsRegExp.hasMatch(input))
+        return null;
+      if (output is! String || !_tokenUsageDigitsRegExp.hasMatch(output))
+        return null;
       String? optional(Object? value) =>
-          value is String && _tokenUsageDigitsRegExp.hasMatch(value) ? value : null;
+          value is String && _tokenUsageDigitsRegExp.hasMatch(value)
+          ? value
+          : null;
       double? percent;
       final rawPercent = map['usagePercent'];
       if (rawPercent is num) {
@@ -254,7 +297,9 @@ class ContextSnapshotData {
     String? compactRevision;
     final rawCompactRevision = payload['compactRevision'];
     if (rawCompactRevision is String) {
-      if (rawCompactRevision.isEmpty || rawCompactRevision.length > _maxRevisionLength) return null;
+      if (rawCompactRevision.isEmpty ||
+          rawCompactRevision.length > _maxRevisionLength)
+        return null;
       compactRevision = rawCompactRevision;
     }
 
@@ -278,14 +323,28 @@ class ContextSnapshotData {
         final summary = m['summary'];
         final staleSource = m['stale'];
         final cap = m['capability'];
-        if (sourceId is! String || sourceId.isEmpty || sourceId.length > _maxContextSourceIdLength) return null;
-        if (sourceKind is! String || sourceKind.isEmpty || sourceKind.length > _maxContextSourceKindLength) return null;
-        if (summary is! String || summary.length > _maxContextSourceSummary) return null;
+        if (sourceId is! String ||
+            sourceId.isEmpty ||
+            sourceId.length > _maxContextSourceIdLength)
+          return null;
+        if (sourceKind is! String ||
+            sourceKind.isEmpty ||
+            sourceKind.length > _maxContextSourceKindLength)
+          return null;
+        if (summary is! String || summary.length > _maxContextSourceSummary)
+          return null;
         if (staleSource is! bool) return null;
         if (cap is! Map) return null;
         final capMap = Map<String, Object?>.from(cap);
         final state = capMap['state'];
-        if (state is! String || !<String>{'available', 'degraded', 'unavailable', 'stale'}.contains(state)) return null;
+        if (state is! String ||
+            !<String>{
+              'available',
+              'degraded',
+              'unavailable',
+              'stale',
+            }.contains(state))
+          return null;
         if (state != 'available') {
           final reason = capMap['reason'];
           final remediation = capMap['remediation'];
@@ -304,19 +363,25 @@ class ContextSnapshotData {
           if (!_isoUtcRegExp.hasMatch(refreshed)) return null;
           lastRefreshed = refreshed;
         }
-        out.add(ContextSource(
-          sourceId: sourceId,
-          sourceKind: sourceKind,
-          summary: summary,
-          stale: staleSource,
-          capability: ContextCapability(
-            state: state,
-            reason: capMap['reason'] is String ? capMap['reason'] as String : null,
-            remediation: capMap['remediation'] is String ? capMap['remediation'] as String : null,
+        out.add(
+          ContextSource(
+            sourceId: sourceId,
+            sourceKind: sourceKind,
+            summary: summary,
+            stale: staleSource,
+            capability: ContextCapability(
+              state: state,
+              reason: capMap['reason'] is String
+                  ? capMap['reason'] as String
+                  : null,
+              remediation: capMap['remediation'] is String
+                  ? capMap['remediation'] as String
+                  : null,
+            ),
+            revision: sourceRev,
+            lastRefreshedAt: lastRefreshed,
           ),
-          revision: sourceRev,
-          lastRefreshedAt: lastRefreshed,
-        ));
+        );
       }
       sources = List.unmodifiable(out);
     }
@@ -343,7 +408,12 @@ class ContextSnapshotData {
 /// R4 — Truthful no-context surface.
 @immutable
 class ContextUnavailableData {
-  const ContextUnavailableData({required this.sessionId, required this.reason, required this.message, required this.remediation});
+  const ContextUnavailableData({
+    required this.sessionId,
+    required this.reason,
+    required this.message,
+    required this.remediation,
+  });
   final String sessionId;
   final String reason;
   final String message;
@@ -357,12 +427,19 @@ class ContextUnavailableData {
     if (status is! Map) return null;
     final map = Map<String, Object?>.from(status);
     final state = map['state'];
-    if (state is! String || !<String>{'unavailable', 'degraded', 'stale'}.contains(state)) return null;
+    if (state is! String ||
+        !<String>{'unavailable', 'degraded', 'stale'}.contains(state))
+      return null;
     final reason = map['reason'];
     final remediation = map['remediation'];
     if (reason is! String || reason.isEmpty) return null;
     if (remediation is! String || remediation.isEmpty) return null;
-    return ContextUnavailableData(sessionId: sessionId, reason: state, message: reason, remediation: remediation);
+    return ContextUnavailableData(
+      sessionId: sessionId,
+      reason: state,
+      message: reason,
+      remediation: remediation,
+    );
   }
 }
 
@@ -379,13 +456,25 @@ class ContextModel {
 /// tracks the in-flight `context.snapshot.request`.
 @immutable
 class ContextState {
-  const ContextState({this.snapshot, this.unavailable, this.refreshing = false, this.lastRequestRevision});
+  const ContextState({
+    this.snapshot,
+    this.unavailable,
+    this.refreshing = false,
+    this.lastRequestRevision,
+  });
   final ContextSnapshotData? snapshot;
   final ContextUnavailableData? unavailable;
   final bool refreshing;
   final String? lastRequestRevision;
 
-  ContextState copyWith({ContextSnapshotData? snapshot, ContextUnavailableData? unavailable, bool? refreshing, String? lastRequestRevision, bool clearSnapshot = false, bool clearUnavailable = false}) {
+  ContextState copyWith({
+    ContextSnapshotData? snapshot,
+    ContextUnavailableData? unavailable,
+    bool? refreshing,
+    String? lastRequestRevision,
+    bool clearSnapshot = false,
+    bool clearUnavailable = false,
+  }) {
     return ContextState(
       snapshot: clearSnapshot ? null : (snapshot ?? this.snapshot),
       unavailable: clearUnavailable ? null : (unavailable ?? this.unavailable),
@@ -398,23 +487,27 @@ class ContextState {
 /// R4 — Closed mutation target union mirror.
 @immutable
 class ContextMutationTarget {
-  const ContextMutationTarget.file({required this.path, this.ranges, this.revision})
-      : sourceId = null;
+  const ContextMutationTarget.file({
+    required this.path,
+    this.ranges,
+    this.revision,
+  }) : sourceId = null;
   const ContextMutationTarget.source({required this.sourceId, this.revision})
-      : path = null,
-        ranges = null;
+    : path = null,
+      ranges = null;
   const ContextMutationTarget.all()
-      : path = null,
-        ranges = null,
-        sourceId = null,
-        revision = null;
+    : path = null,
+      ranges = null,
+      sourceId = null,
+      revision = null;
 
   final String? path;
   final List<ContextLineRange>? ranges;
   final String? revision;
   final String? sourceId;
 
-  String get kind => sourceId != null ? 'source' : (path != null ? 'file' : 'all');
+  String get kind =>
+      sourceId != null ? 'source' : (path != null ? 'file' : 'all');
 
   Map<String, Object?> toJson() {
     if (sourceId != null) {
@@ -429,7 +522,9 @@ class ContextMutationTarget {
         'kind': 'file',
         'path': path,
         if (ranges != null)
-          'ranges': ranges!.map((r) => {'startLine': r.startLine, 'endLine': r.endLine}).toList(),
+          'ranges': ranges!
+              .map((r) => {'startLine': r.startLine, 'endLine': r.endLine})
+              .toList(),
         if (revision != null) 'revision': revision,
       };
     }
@@ -438,18 +533,27 @@ class ContextMutationTarget {
 }
 
 /// R4 — Reducer mirroring `reducePlan` / `reduceGit`.
-ContextState reduceContext(ContextState state, String type, Map<String, Object?> payload) {
+ContextState reduceContext(
+  ContextState state,
+  String type,
+  Map<String, Object?> payload,
+) {
   if (type == 'context.snapshot.result' || type == 'context.snapshot') {
     final snapshot = ContextSnapshotData.tryParse(payload);
     if (snapshot != null) {
-      return ContextState(snapshot: snapshot, refreshing: false, lastRequestRevision: snapshot.revision);
+      return ContextState(
+        snapshot: snapshot,
+        refreshing: false,
+        lastRequestRevision: snapshot.revision,
+      );
     }
     return const ContextState(
       unavailable: ContextUnavailableData(
         sessionId: '',
         reason: 'invalid_payload',
         message: 'Context snapshot payload was invalid',
-        remediation: 'Refresh after the host publishes a valid R4 context snapshot.',
+        remediation:
+            'Refresh after the host publishes a valid R4 context snapshot.',
       ),
       refreshing: false,
     );
@@ -468,11 +572,13 @@ ContextState reduceContext(ContextState state, String type, Map<String, Object?>
         sessionId: '',
         reason: 'invalid_payload',
         message: 'Context unavailable payload was invalid',
-        remediation: 'Refresh after the host publishes a valid R4 context unavailable payload.',
+        remediation:
+            'Refresh after the host publishes a valid R4 context unavailable payload.',
       ),
       refreshing: false,
     );
   }
-  if (type == 'context.snapshot.request') return state.copyWith(refreshing: true);
+  if (type == 'context.snapshot.request')
+    return state.copyWith(refreshing: true);
   return state;
 }

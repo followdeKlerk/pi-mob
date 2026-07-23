@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
-import { COMMAND_TYPES, CONTROL_TYPES, ERROR_CODES, EVENT_TYPES, LIMITS, RESPONSE_TYPES } from "@pi-mob/protocol-schema";
+import { COMMAND_TYPES, CONTROL_TYPES, ERROR_CODES, EVENT_STREAM_OWNERSHIP, EVENT_TYPES, LIMITS, RESPONSE_TYPES, type EventType } from "@pi-mob/protocol-schema";
 
 const corpus = resolve(process.env.PROTOCOL_FIXTURES_OUT_DIR ?? new URL("../corpus", import.meta.url).pathname);
 const FILE_CONTENT = 'const fixture = true;\n';
@@ -165,8 +165,8 @@ function commandPayload(type: string): Record<string, unknown> {
   if (type === "extension.respond") return { sessionId: ids.sessionId, dialogId: ids.sessionId, response: {} };
   return { sessionId: ids.sessionId };
 }
-function eventEnvelope(type: string, payload: Record<string, unknown>): Record<string, unknown> {
-  return { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type, payload };
+function eventEnvelope(type: EventType, payload: Record<string, unknown>): Record<string, unknown> {
+  return { ...base, eventId: ids.eventId, streamId: `${EVENT_STREAM_OWNERSHIP[type] === "host" ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload };
 }
 function recipeActivity(kind: "thinking" | "tool", extra: Record<string, unknown> = {}): Record<string, unknown> {
   const common = { kind, sessionId: ids.sessionId, turnId: "turn-fixture", activityId: "activity-fixture", ordinal: 0, status: "running", timing: { startedAt: base.sentAt }, title: "Fixture activity" };
@@ -272,19 +272,12 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "command.current") return { commandId: ids.commandId };
   return {};
 }
-const hostEvents = new Set([
-  "host.state", "host.degraded", "host.draining", "host.capacity", "host.backup_state", "host.compatibility",
-  "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
-  "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
-  "git.summary", "git.unavailable",
-]);
-
 rmSync(corpus, { recursive: true, force: true });
 mkdirSync(corpus, { recursive: true });
 emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "git-ci.v1", "future.optional"] } });
 for (const type of COMMAND_TYPES) emit(fileName("command", type), "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload: commandPayload(type) });
 for (const type of CONTROL_TYPES) emit(fileName("control", type), "control", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, type, payload: controlPayload(type) });
-for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: type === "recipe.activity" ? recipeActivity("thinking") : type === "recipe.unavailable" ? { capability: "recipes.v1", status: capabilityStatus("unavailable") } : type === "plan.snapshot" ? planSnapshot() : type === "plan.unavailable" ? { capability: "plans.v1", status: capabilityStatus("stale") } : eventPayload(type) });
+for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${EVENT_STREAM_OWNERSHIP[type] === "host" ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: type === "recipe.activity" ? recipeActivity("thinking") : type === "recipe.unavailable" ? { capability: "recipes.v1", status: capabilityStatus("unavailable") } : type === "plan.snapshot" ? planSnapshot() : type === "plan.unavailable" ? { capability: "plans.v1", status: capabilityStatus("stale") } : eventPayload(type) });
 for (const type of RESPONSE_TYPES) emit(fileName("response", type), "response", true, { ...base, requestId: ids.requestId, ...(type === "command.receipt" ? { commandId: ids.commandId } : {}), type, payload: responsePayload(type) });
 for (const code of ERROR_CODES) emit(`error-${code.replaceAll("_", "-")}-valid`, "error", true, { ...base, requestId: ids.requestId, type: "error", payload: { code, message: "safe protocol error", retryable: false, details: {} } });
 emit("pairing-valid", "pairing", true, { kind: "pi-mob-host", version: 1, hostId: ids.sessionId, displayName: "fixture host", endpoint: "https://fixture-host.example", protocolMajor: 1 });
@@ -438,10 +431,11 @@ for (const [name, type, payload] of [
   ["command-duplicate", "command.state", { commandId: ids.commandId, commandType: "prompt.submit", state: "accepted", errorCode: null, duplicate: true }], ["command-indeterminate", "turn.indeterminate", { commandId: ids.commandId }],
   ["queue-restart", "queue.snapshot", { items: [] }], ["attachment-boundary", "turn.accepted", { attachmentBytes: 10485760 }], ["export-boundary", "command.state", { commandId: ids.commandId, commandType: "session.export", state: "accepted", errorCode: null, exportId: ids.messageId }],
   ["dialog-expiry", "extension.dialog", { dialogId: ids.sessionId, method: "confirm", expiresAt: "2026-07-12T00:05:00.000Z" }], ["pagination-boundary", "session.summary", { sessionId: ids.sessionId, runtimeState: "idle", queueCount: 0, pageSize: 100 }],
-] as const) emit(name, "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload });
+] as const) emit(name, "event", true, { ...base, eventId: ids.eventId, streamId: `${EVENT_STREAM_OWNERSHIP[type] === "host" ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload });
 interface ScenarioStep { readonly fixture: string; readonly action: string; readonly expect: string; }
 function scenarioMessage(action: string): { readonly kind: Kind; readonly valid: boolean; readonly message: Record<string, unknown> } {
-  const event = (type: string, payload: Record<string, unknown>): Record<string, unknown> => ({ ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload });
+  const event = (type: EventType, payload: Record<string, unknown>): Record<string, unknown> => ({ ...base, eventId: ids.eventId, streamId: `${EVENT_STREAM_OWNERSHIP[type] === "host" ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload });
+  const futureEvent = (type: string, payload: Record<string, unknown>): Record<string, unknown> => ({ ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type, payload });
   const command = (type: string, payload: Record<string, unknown>): Record<string, unknown> => ({ ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload });
   const response = (type: string, payload: Record<string, unknown>): Record<string, unknown> => ({ ...base, requestId: ids.requestId, ...(type === "command.receipt" ? { commandId: ids.commandId } : {}), type, payload });
   const error = (code: string): Record<string, unknown> => ({ ...base, requestId: ids.requestId, commandId: ids.commandId, type: "error", payload: { code, message: "scenario error", retryable: false, details: {} } });
@@ -492,7 +486,7 @@ function scenarioMessage(action: string): { readonly kind: Kind; readonly valid:
     const failureCode = action === "failure.oversized_json" ? "payload_too_large" : action === "failure.pi_mismatch" ? "pi_version_mismatch" : action.slice("failure.".length);
     return { kind: "error", valid: true, message: error(failureCode) };
   }
-  if (action === "capability.optional_event") return { kind: "event", valid: true, message: event("future.notice", { optional: true }) };
+  if (action === "capability.optional_event") return { kind: "event", valid: true, message: futureEvent("future.notice", { optional: true }) };
   return { kind: "hello", valid: false, message: { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["unsupported.required"], optionalCapabilities: [] } } };
 }
 function scenarioStep(name: string, action: string, expect: string): ScenarioStep {

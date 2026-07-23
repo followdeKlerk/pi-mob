@@ -66,7 +66,7 @@ export interface ContextSnapshot {
 
 /** R4 — Truthful no-context surface. The schema forbids embedding this
  * shape inside `context.snapshot.result`; the bridge surfaces it
- * through the host-stream `context.unavailable` event then rejects the
+ * through the session-stream `context.unavailable` event then rejects the
  * synchronous response with `unsupported_capability`. */
 export interface ContextUnavailable {
   readonly sessionId: string;
