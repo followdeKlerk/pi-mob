@@ -66,9 +66,6 @@ M1 shipped the scaffold (`M1-SUMMARY.md`). M2 shipped executable cross-language 
 16. [`M3-SUMMARY.md`](M3-SUMMARY.md)
 17. [`M4-SUMMARY.md`](M4-SUMMARY.md)
 18. [`WORKING.md`](WORKING.md)
-19. [`PLANNING.md`](PLANNING.md) — historical research only
-
-Normative documents under `docs/`, `BACKLOG.md`, and current `WORKING.md` override contradictory historical text in `PLANNING.md`.
 
 ## architecture
 

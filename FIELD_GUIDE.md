@@ -8,7 +8,7 @@ wins.
 ## Canonical references (read in this order)
 
 1. [`WORKING.md`](WORKING.md) — tracked active checkpoint and immediate next actions.
-2. [`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) — canonical plan for R1–R12 (authoritative for leaf specs, integration phases, gates).
+2. [`BACKLOG.md`](BACKLOG.md) — completed delivery record and maintenance priorities.
 3. [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) — components, authority, state machines.
 4. [`docs/PRODUCT.md`](docs/PRODUCT.md) — product statement, journeys, non-goals.
 5. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decisions with review triggers.
@@ -70,9 +70,7 @@ merge. Preserving a branch does not accept its current design. Commit/review
 on the existing branch first, freeze the relevant contract, then rebase and
 selectively merge.
 
-Canonical list, paths, branches, and current treatment:
-[`docs/REMAINING_UX_PLAN.md`](docs/REMAINING_UX_PLAN.md) §4 (verified
-against the actual worktree branches at the documentation checkpoint).
+Preserved worktree references are historical evidence only; verify current branches and worktrees with Git before using them.
 
 **Incidental-noise safeguard:** if `feat/agent-supervision` shows a `bun.lock`
 diff consisting only of removed semver carets on unrelated existing
@@ -121,7 +119,7 @@ stable IDs and one deduplicating reducer; replay must be deterministic.
 
 Phases: preserve/freeze → foundation/performance → runtime → plans/files/
 context → attention/agents → git/catalogue → search → polish/evidence
-(full dependency graph in `docs/REMAINING_UX_PLAN.md` §6).
+(follow the current dependency order recorded in `BACKLOG.md` and `WORKING.md`).
 
 After every central integration commit:
 

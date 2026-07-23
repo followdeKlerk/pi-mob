@@ -8,9 +8,9 @@ The product and architecture are implemented checkpoint by checkpoint. M1–M9 d
 
 Completed through: **M15 — notifications and background experience**. Real Android FCM delivery is proven; Apple activation is explicitly deferred from the foreseeable product scope. Active checkpoint: **M16 — mobile product UX, visual system, and workflow integration**. Its first slice ships an original light/dark token theme, Sessions/Activity/Host product shell, progressive host diagnostics, and calmer transcript hierarchy; full surface migration and Android accessibility evidence remain.
 
-M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is in [`M1-SUMMARY.md`](M1-SUMMARY.md) through [`M15-SUMMARY.md`](M15-SUMMARY.md).
+M0 compatibility evidence is frozen in [`docs/compatibility/`](docs/compatibility/); completed checkpoint evidence is retained in the milestone summaries.
 
-See [`BACKLOG.md`](BACKLOG.md) for the complete checkpoint plan and [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) for the final coverage review.
+See [`BACKLOG.md`](BACKLOG.md) for the completed delivery record and current maintenance priorities.
 
 ## What it does
 
@@ -60,12 +60,8 @@ The bridge binds to loopback only. Tailscale is the sole connection-authenticati
 10. [`docs/RELEASE.md`](docs/RELEASE.md) — build, distribution, install, update, rollback, and release evidence.
 11. [`docs/TOOLCHAIN.md`](docs/TOOLCHAIN.md) — verified initial versions and platform floors.
 12. [`docs/DECISIONS.md`](docs/DECISIONS.md) — architecture decision ledger and revisit conditions.
-13. [`docs/SPEC_AUDIT.md`](docs/SPEC_AUDIT.md) — concern-by-concern coverage and remaining executable evidence.
-14. [`BACKLOG.md`](BACKLOG.md) — achievable checkpoints M0–M18 and post-MVP work.
-15. [`WORKING.md`](WORKING.md) — current objective and immediate next actions.
-16. [`PLANNING.md`](PLANNING.md) — research history and earlier exploration.
-
-Normative documents under `docs/`, `BACKLOG.md`, and current `WORKING.md` override contradictory historical text in `PLANNING.md`.
+13. [`BACKLOG.md`](BACKLOG.md) — completed checkpoints and maintenance priorities.
+14. [`WORKING.md`](WORKING.md) — current objective and immediate next actions.
 
 ## Locked foundations
 
