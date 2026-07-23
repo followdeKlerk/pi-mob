@@ -30,7 +30,7 @@ function run(
   label: string,
   cmd: readonly string[],
   cwd?: string,
-  timeoutMs = 60_000,
+  timeoutMs = 3 * 60_000,
 ): number {
   process.stdout.write(`==> ${label}\n`);
   const result = spawnSync(cmd[0]!, cmd.slice(1), {
@@ -38,7 +38,11 @@ function run(
     stdio: "inherit",
     timeout: timeoutMs,
   });
-  if (result.signal === "SIGTERM") process.stderr.write(`==> ${label} unavailable: SDK command did not become runnable within 60 seconds\n`);
+  if (result.signal === "SIGTERM") {
+    process.stderr.write(
+      `==> ${label} timed out after ${Math.round(timeoutMs / 1000)} seconds\n`,
+    );
+  }
   return result.status ?? 1;
 }
 
