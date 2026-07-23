@@ -400,7 +400,7 @@ void main() {
             data: ObserverBannerViewData(
               session: _session(id: 'o', name: 'Other session'),
               reason: ObserverReason.anotherClient,
-              controllerClientName: "Nathan's iPad",
+              controllerClientName: 'Another device',
             ),
             callbacks: ObserverBannerCallbacks(onTakeControl: (s) => taken = s),
           ),
