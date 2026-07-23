@@ -71,6 +71,18 @@ class _TranscriptSearchSheetState extends State<TranscriptSearchSheet> {
                 onChanged: (value) => setState(() => query = value),
               ),
             ),
+            if (q.isNotEmpty)
+              Semantics(
+                liveRegion: true,
+                label: '${results.length} matches',
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('${results.length} matches'),
+                  ),
+                ),
+              ),
             Expanded(
               child: q.isEmpty
                   ? const Center(child: Text('Type to search local messages'))
@@ -81,27 +93,30 @@ class _TranscriptSearchSheetState extends State<TranscriptSearchSheet> {
                       separatorBuilder: (_, _) => const Divider(height: 1),
                       itemBuilder: (context, index) {
                         final result = results[index];
-                        return ListTile(
-                          leading: Icon(
-                            result.event.type == 'turn.started'
-                                ? Icons.person_outline
-                                : Icons.smart_toy_outlined,
-                          ),
-                          title: Text(
-                            result.text,
-                            maxLines: 4,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                          subtitle: Text(
-                            result.event.type == 'turn.started'
-                                ? 'Your prompt'
-                                : 'Assistant response',
-                          ),
-                          trailing: IconButton(
-                            tooltip: 'Copy match',
-                            icon: const Icon(Icons.copy_outlined),
-                            onPressed: () => Clipboard.setData(
-                              ClipboardData(text: result.text),
+                        return Semantics(
+                          label: 'Result ${index + 1} of ${results.length}',
+                          child: ListTile(
+                            leading: Icon(
+                              result.event.type == 'turn.started'
+                                  ? Icons.person_outline
+                                  : Icons.smart_toy_outlined,
+                            ),
+                            title: Text(
+                              result.text,
+                              maxLines: 4,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Text(
+                              result.event.type == 'turn.started'
+                                  ? 'Your prompt'
+                                  : 'Assistant response',
+                            ),
+                            trailing: IconButton(
+                              tooltip: 'Copy match',
+                              icon: const Icon(Icons.copy_outlined),
+                              onPressed: () => Clipboard.setData(
+                                ClipboardData(text: result.text),
+                              ),
                             ),
                           ),
                         );

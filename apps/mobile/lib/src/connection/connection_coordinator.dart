@@ -17,6 +17,14 @@ import '../domain/prompt_send_lifecycle.dart';
 import '../domain/process_domain.dart';
 import '../git/git_domain.dart' show GitState, reduceGit;
 import '../plans/plan_domain.dart' show PlanState, reducePlan;
+import '../attention/attention_domain.dart'
+    show AttentionState, reduceAttention;
+import '../agents/domain/agent_supervision.dart'
+    show
+        AgentAuthoritativeRecord,
+        AgentAuthoritativeSnapshot,
+        AgentSupervisionState,
+        reduceAuthoritativeAgentSnapshot;
 import '../context/context_domain.dart'
     show ContextState, reduceContext, ContextMutationTarget;
 import '../domain/session_controls.dart';
@@ -25,6 +33,8 @@ import '../domain/session_subscriptions.dart';
 import '../controls/control_view_data.dart';
 import '../domain/session_tree.dart';
 import '../sync/event_reducer.dart';
+import '../search/global_search_controller.dart';
+import '../search/search_indexer.dart';
 import 'bridge_transport.dart';
 
 enum ConnectionPhase {
@@ -234,6 +244,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   final AppDatabase _database;
   final Uuid _uuid;
   final DateTime Function() _now;
+  late final SearchIndexer _searchIndexer = SearchIndexer(
+    database: _database,
+    coordinator: this,
+  );
+  late final GlobalSearchController _globalSearchController =
+      GlobalSearchController(coordinator: this, database: _database);
   final OrderedEventReducer _reducer = const OrderedEventReducer();
   final Map<String, StreamViewState> _streams = {};
   final Map<String, SnapshotAssembler> _snapshots = {};
@@ -295,6 +311,9 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, PromptSendStatus> _promptSendBySession = {};
   final Map<String, String> _lastPromptCommandBySession = {};
   bool _sendRecoveryInFlight = false;
+  AttentionState _attentionItems = const AttentionState();
+  AgentSupervisionState _agents = AgentSupervisionState.empty();
+  List<SupportedCommandData>? _supportedCommands;
   final Map<String, SessionAttentionState> _attention = {};
   final Map<String, String> _attentionWire = {};
   final Map<String, int> _unreadCount = {};
@@ -333,8 +352,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   bool _carryDraftAfterGeneration = false;
   bool _hostReadinessRecoveryInFlight = false;
   bool _notifyScheduled = false;
+  int? _burstNotifyFrameCallbackId;
   bool _initialized = false;
   bool _disposed = false;
+  int _searchRebuildEpoch = -1;
 
   ConnectionPhase phase = ConnectionPhase.unpaired;
   Uri? endpoint;
@@ -637,7 +658,16 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// before the first host handshake completes and stays an empty list
   /// while the bridge is reconnecting. The mobile UI uses null/empty to
   /// render a calm fallback that still explains the gap.
-  List<SupportedCommandData>? get supportedCommands => null;
+  ///
+  /// R9 — backed by the bridge's `catalogue.snapshot` projection. The
+  /// list stays `null` when the host did not advertise `catalogue.v1`;
+  /// an explicit `catalogue.unavailable` envelope maps to an empty list
+  /// so the UI can show the truthful "Catalogue unavailable" card
+  /// instead of inventing entries.
+  List<SupportedCommandData>? get supportedCommands =>
+      _supportedCommands == null
+      ? null
+      : List.unmodifiable(_supportedCommands!);
 
   /// Display name shown in the chat header and command palette. Falls
   /// back to the host endpoint when no display name has been published.
@@ -648,6 +678,8 @@ final class ConnectionCoordinator extends ChangeNotifier
             SessionControlState.empty(selectedSessionId!));
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
   Map<String, StreamViewState> get streams => Map.unmodifiable(_streams);
+  SearchIndexer get searchIndexer => _searchIndexer;
+  GlobalSearchController get globalSearchController => _globalSearchController;
 
   SessionHistoryState historyFor(String sessionId) =>
       _history[sessionId] ?? SessionHistoryState.empty(sessionId);
@@ -1605,6 +1637,7 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> _pruneSessionReferences(String sessionId) async {
     if (_isActiveChat(sessionId)) return;
+    await _searchIndexer.removeSession(sessionId);
     final removedSelection = selectedSessionId == sessionId;
     final removedDeferred = _deferredAutoSelectSessionId == sessionId;
     if (removedSelection) _clearSelectedChatProjection();
@@ -2614,7 +2647,20 @@ final class ConnectionCoordinator extends ChangeNotifier
       if (type == 'context.unavailable' || type == 'context.snapshot') {
         _applyContextStreamEvent(type, payload);
       }
-      _notify();
+      // R7 — attention.item rides the session stream and applies before
+      // the cursor advance so the UI sees an ordered attention projection
+      // rather than out-of-order transitions.
+      if (type == 'attention.item') {
+        _applyAttentionStreamEvent(type, payload);
+      }
+      // R9 — catalogue.snapshot / catalogue.unavailable ride the host
+      // stream. The snapshot populates the supported command list; the
+      // unavailable envelope maps to an empty list so the UI can show the
+      // truthful "Catalogue unavailable" card.
+      if (type == 'catalogue.snapshot' || type == 'catalogue.unavailable') {
+        _applyCatalogueStreamEvent(type, payload);
+      }
+      if (!_isBurstProjectionEvent(type)) _notify();
       return;
     }
 
@@ -2664,7 +2710,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       default:
         break;
     }
-    _notify();
+    if (!_isBurstProjectionEvent(type)) _notify();
   }
 
   Future<void> _helloAccepted(Map<String, Object?> payload) async {
@@ -2926,6 +2972,13 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
       if (selectedSessionId != null) await _acquireController();
       await _reconcilePending();
+      final currentHost = hostId;
+      if (currentHost != null &&
+          selectedSessionId != null &&
+          _searchRebuildEpoch != _connectionEpoch) {
+        _searchRebuildEpoch = _connectionEpoch;
+        await _searchIndexer.rebuildHost(currentHost);
+      }
     }
   }
 
@@ -2953,6 +3006,22 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _database.persistEvent(event);
         _streams[streamId] = reduction.state;
         _handleEventPayload(type, payload);
+        if (streamId.startsWith('session:') &&
+            const <String>{
+              'turn.started',
+              'assistant.delta',
+              'assistant.completed',
+              'reasoning.completed',
+              'tool.started',
+              'tool.output',
+              'tool.completed',
+              'tool.failed',
+              'tool.cancelled',
+            }.contains(type)) {
+          await _searchIndexer.indexSession(
+            streamId.substring('session:'.length),
+          );
+        }
         _eventsSinceAck += 1;
         if (_eventsSinceAck >= 20) await _ackCursors();
       case EventDisposition.duplicate:
@@ -3062,6 +3131,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       final id = payload['sessionId'];
       if (id is String) {
         _locallyDeletedSessionIds.add(id);
+        unawaited(_searchIndexer.removeSession(id));
         if (payload['permanent'] == true) {
           _sessions.remove(id);
           _sessionTree.remove(id);
@@ -3174,6 +3244,15 @@ final class ConnectionCoordinator extends ChangeNotifier
       _applyPlanStreamEvent(type, payload);
     } else if (type == 'context.snapshot' || type == 'context.unavailable') {
       _applyContextStreamEvent(type, payload);
+    } else if (type == 'attention.item') {
+      _applyAttentionStreamEvent(type, payload);
+    } else if (type == 'catalogue.snapshot' ||
+        type == 'catalogue.unavailable') {
+      _applyCatalogueStreamEvent(type, payload);
+    } else if (type == 'agent.snapshot' ||
+        type == 'agent.unavailable' ||
+        type == 'agent.snapshot.result') {
+      _applyAgentStreamEvent(type, payload);
     } else if (type == 'session.state' || type.startsWith('turn.')) {
       final eventSessionId = payload['sessionId'];
       final eventCommandId = payload['commandId'];
@@ -3294,6 +3373,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
     _sessions[id] = state;
     unawaited(_database.upsertSessionState(state));
+    unawaited(_searchIndexer.indexSessionMeta(state));
   }
 
   void _failModelListRequest(String message) {
@@ -3489,7 +3569,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final request = _gitSummaryRequests.remove(requestId);
     if (request == null || request.epoch != _connectionEpoch) return;
     _git = reduceGit(_git, 'git.summary.result', payload);
-    notifyListeners();
+    _notifyBurst();
   }
 
   /// R2 — Correlates `plan.snapshot.result` by request ID and applies the
@@ -3505,7 +3585,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final request = _planSummaryRequests.remove(requestId);
     if (request == null || request.epoch != _connectionEpoch) return;
     _plans = reducePlan(_plans, 'plan.snapshot.result', payload);
-    notifyListeners();
+    _notifyBurst();
   }
 
   /// R2 — Applies the host-stream `plan.snapshot` (session stream) and
@@ -3514,7 +3594,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// coordinator reconciles them without requiring a new request tap.
   void _applyPlanStreamEvent(String type, Map<String, Object?> payload) {
     _plans = reducePlan(_plans, type, payload);
-    notifyListeners();
+    _notifyBurst();
   }
 
   /// R4 — Correlates `context.snapshot.result` by request ID and applies
@@ -3531,7 +3611,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final request = _contextSnapshotRequests.remove(requestId);
     if (request == null || request.epoch != _connectionEpoch) return;
     _context = reduceContext(_context, 'context.snapshot.result', payload);
-    notifyListeners();
+    _notifyBurst();
   }
 
   /// R4 — Applies the session-stream `context.snapshot` and
@@ -3540,7 +3620,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// the coordinator reconciles them without requiring a new request tap.
   void _applyContextStreamEvent(String type, Map<String, Object?> payload) {
     _context = reduceContext(_context, type, payload);
-    notifyListeners();
+    _notifyBurst();
   }
 
   /// Applies the host-stream `git.summary` and `git.unavailable` events to
@@ -3551,7 +3631,153 @@ final class ConnectionCoordinator extends ChangeNotifier
     final next = reduceGit(_git, type, payload);
     if (identical(next, _git)) return;
     _git = next;
-    notifyListeners();
+    _notifyBurst();
+  }
+
+  /// R7 — applies the per-session `attention.item` event to the attention
+  /// projection. The bridge emits this whenever the host records a new
+  /// attention event the user can act on. The reducer is pure so re-runs
+  /// of the same event are idempotent; the local `read` flag is preserved
+  /// across replays.
+  void _applyAttentionStreamEvent(String type, Map<String, Object?> payload) {
+    if (type != 'attention.item') return;
+    final next = reduceAttention(_attentionItems, payload);
+    if (identical(next, _attentionItems)) return;
+    _attentionItems = next;
+    _notifyBurst();
+  }
+
+  /// R9 — applies the host-stream `catalogue.snapshot` and
+  /// `catalogue.unavailable` events to the supported command list. The
+  /// snapshot populates the command list verbatim; the unavailable
+  /// envelope maps to an empty list so the UI can show the truthful
+  /// "Catalogue unavailable" card without inventing entries.
+  void _applyCatalogueStreamEvent(String type, Map<String, Object?> payload) {
+    if (type == 'catalogue.unavailable') {
+      if (_supportedCommands != null && _supportedCommands!.isEmpty) return;
+      _supportedCommands = const <SupportedCommandData>[];
+      _notifyBurst();
+      return;
+    }
+    if (type != 'catalogue.snapshot') return;
+    final entries = payload['entries'];
+    if (entries is! List) return;
+    final next = <SupportedCommandData>[];
+    for (final raw in entries) {
+      if (raw is! Map) continue;
+      final entry = Map<String, Object?>.from(raw);
+      next.add(_decodeCatalogueEntry(entry));
+    }
+    _supportedCommands = List<SupportedCommandData>.unmodifiable(next);
+    _notifyBurst();
+  }
+
+  SupportedCommandData _decodeCatalogueEntry(Map<String, Object?> entry) {
+    final kind = entry['kind'] as String? ?? 'skill';
+    final category = switch (kind) {
+      'template' => SupportedCommandCategory.template,
+      'extension' => SupportedCommandCategory.extension,
+      'mcp_server' => SupportedCommandCategory.mcpServer,
+      'mcp_tool' => SupportedCommandCategory.mcpTool,
+      _ => SupportedCommandCategory.skill,
+    };
+    final id =
+        (entry['entryId'] as String?) ??
+        (entry['name'] as String? ?? 'unknown');
+    final title = (entry['name'] as String?) ?? id;
+    final description = entry['description'] as String?;
+    final invocation = entry['invocation'] as String?;
+    final availability = entry['availability'];
+    final availabilityState = availability is Map
+        ? availability['state'] as String?
+        : null;
+    final available = availabilityState == 'available';
+    final availabilityReason = availability is Map
+        ? availability['reason'] as String?
+        : null;
+    final togglingDisabled = entry['canToggle'] == false;
+    return SupportedCommandData(
+      id: id,
+      title: title,
+      category: category,
+      description: description,
+      invocation: invocation,
+      enabled: available,
+      disabledReason: available
+          ? (togglingDisabled
+                ? 'This entry cannot be toggled from mobile.'
+                : null)
+          : availabilityReason ?? 'Catalogue reports this entry as unavailable',
+      unavailableNote: available ? null : availabilityReason,
+      togglingDisabled: togglingDisabled,
+      requiresReloadAfterToggle: entry['reloadRequired'] == true,
+    );
+  }
+
+  /// R8 — applies the authoritative `agent.snapshot` /
+  /// `agent.snapshot.result` events to the supervision projection. The
+  /// reducer lowers each record into a single [AgentRun] keyed by
+  /// `agent:<agentId>` and records explicit blockers for any action the
+  /// host did not advertise so the UI can render a truthful
+  /// "unsupported" affordance.
+  void _applyAgentStreamEvent(String type, Map<String, Object?> payload) {
+    if (type == 'agent.unavailable') {
+      return;
+    }
+    final snapshot = _decodeAgentSnapshot(payload);
+    if (snapshot == null) return;
+    final next = reduceAuthoritativeAgentSnapshot(_agents, snapshot);
+    if (identical(next, _agents)) return;
+    _agents = next;
+    _notifyBurst();
+  }
+
+  AgentAuthoritativeSnapshot? _decodeAgentSnapshot(
+    Map<String, Object?> payload,
+  ) {
+    final revision = payload['revision'];
+    final itemsRaw = payload['items'];
+    if (revision is! String || itemsRaw is! List) return null;
+    final records = <AgentAuthoritativeRecord>[];
+    for (final raw in itemsRaw) {
+      if (raw is! Map) continue;
+      final record = Map<String, Object?>.from(raw);
+      final agentId = record['agentId'];
+      final task = record['task'];
+      final state = record['state'];
+      final originSessionId = record['originSessionId'];
+      final originTurnId = record['originTurnId'];
+      final recordRevision = record['revision'] ?? revision;
+      final supported = record['supportedActions'];
+      if (agentId is! String ||
+          task is! String ||
+          state is! String ||
+          originSessionId is! String ||
+          originTurnId is! String ||
+          recordRevision is! String ||
+          supported is! List) {
+        continue;
+      }
+      final actions = <String>[
+        for (final entry in supported)
+          if (entry is String) entry,
+      ];
+      records.add(
+        AgentAuthoritativeRecord(
+          agentId: agentId,
+          task: task,
+          state: state,
+          originSessionId: originSessionId,
+          originTurnId: originTurnId,
+          revision: recordRevision,
+          supportedActions: actions,
+          model: record['model'] as String?,
+          latestActivity: record['latestActivity'] as String?,
+          completionSummary: record['completionSummary'] as String?,
+        ),
+      );
+    }
+    return AgentAuthoritativeSnapshot(revision: revision, records: records);
   }
 
   void _workspaceList(Map<String, Object?> payload) {
@@ -4623,6 +4849,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     _ackTimer?.cancel();
     _leaseTimer?.cancel();
+    _globalSearchController.dispose();
     unawaited(_closeSocket());
     connectionId = null;
     leaseId = null;
@@ -4708,9 +4935,50 @@ final class ConnectionCoordinator extends ChangeNotifier
     });
   }
 
+  /// Coalesce projection updates from a host-stream burst into one rebuild per
+  /// frame. Ordinary local mutations retain [_notify]'s microtask semantics.
+  void _notifyBurst() {
+    if (_disposed) return;
+    final pending = _burstNotifyFrameCallbackId;
+    if (pending != null) {
+      WidgetsBinding.instance.cancelFrameCallbackWithId(pending);
+    }
+    _burstNotifyFrameCallbackId = WidgetsBinding.instance.scheduleFrameCallback(
+      (_) {
+        _burstNotifyFrameCallbackId = null;
+        if (!_disposed) notifyListeners();
+      },
+    );
+  }
+
+  static bool _isBurstProjectionEvent(String type) => const <String>{
+    'git.summary',
+    'git.summary.result',
+    'git.unavailable',
+    'plan.snapshot',
+    'plan.snapshot.result',
+    'plan.unavailable',
+    'context.snapshot',
+    'context.snapshot.result',
+    'context.unavailable',
+    'attention.item',
+    'catalogue.snapshot',
+    'catalogue.unavailable',
+    'agent.snapshot',
+    'agent.unavailable',
+    'agent.snapshot.result',
+  }.contains(type);
+
   @override
   void dispose() {
     _disposed = true;
+    final pendingBurstNotification = _burstNotifyFrameCallbackId;
+    if (pendingBurstNotification != null) {
+      WidgetsBinding.instance.cancelFrameCallbackWithId(
+        pendingBurstNotification,
+      );
+      _burstNotifyFrameCallbackId = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     _failSessionCreation('Chat creation was cancelled.');
     _sessionCreationTimer?.cancel();

@@ -1142,5 +1142,196 @@
       "git_action_failed"
     ],
     "type": "git.push.request"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "attention.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "attention_unavailable",
+      "attention_not_found",
+      "attention_stale"
+    ],
+    "type": "attention.resolve"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
+    ],
+    "type": "agent.steer"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
+    ],
+    "type": "agent.cancel"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
+    ],
+    "type": "agent.adopt"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
+    ],
+    "type": "agent.merge"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "catalogue.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "catalogue_unavailable",
+      "catalogue_not_found",
+      "catalogue_stale",
+      "catalogue_action_failed"
+    ],
+    "type": "catalogue.set_enabled"
   }
 ]

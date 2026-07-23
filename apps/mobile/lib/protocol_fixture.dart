@@ -806,6 +806,9 @@ const _supportedCapabilities = <String>{
   'contexts.v1',
   'runtime.processes.v1',
   'git-ci.v1',
+  'attention.v1',
+  'agents.v1',
+  'catalogue.v1',
 };
 const _commandTypes = <String>{
   'controller.acquire',
@@ -848,6 +851,12 @@ const _commandTypes = <String>{
   'process.rerun',
   'git.commit.request',
   'git.push.request',
+  'attention.resolve',
+  'agent.steer',
+  'agent.cancel',
+  'agent.adopt',
+  'agent.merge',
+  'catalogue.set_enabled',
 };
 const _controlTypes = <String>{
   'subscription.set',
@@ -871,6 +880,9 @@ const _controlTypes = <String>{
   'process.output.page',
   'git.summary.request',
   'git.summary.cancel',
+  'agent.snapshot.request',
+  'agent.transcript.page',
+  'catalogue.snapshot.request',
 };
 const _leaseFreeCommands = <String>{
   'controller.acquire',
@@ -904,6 +916,9 @@ const _responseTypes = <String>{
   'process.output.page.result',
   'git.summary.result',
   'plan.snapshot.result',
+  'agent.snapshot.result',
+  'agent.transcript.page.result',
+  'catalogue.snapshot.result',
 };
 const _eventTypes = <String>{
   'host.state',
@@ -972,6 +987,11 @@ const _eventTypes = <String>{
   'process.error',
   'git.summary',
   'git.unavailable',
+  'attention.item',
+  'agent.snapshot',
+  'agent.unavailable',
+  'catalogue.snapshot',
+  'catalogue.unavailable',
 };
 const _hostEventTypes = <String>{
   'host.state',
@@ -994,6 +1014,14 @@ const _hostEventTypes = <String>{
   // Capability-state envelopes (no sessionId) ride the host stream.
   'recipe.unavailable',
   'plan.unavailable',
+  // R7/R8/R9 — capability-state envelopes (no sessionId) ride the host
+  // stream. `attention.item` and `agent.snapshot` carry a sessionId and
+  // stay on the per-session stream; the agent/catalogue unavailable
+  // envelopes ride the host stream alongside the existing R3/R4/R6
+  // unavailable family.
+  'agent.unavailable',
+  'catalogue.snapshot',
+  'catalogue.unavailable',
   // R4 `context.unavailable` carries a sessionId and stays on that
   // session's stream, matching canonical EVENT_STREAM_OWNERSHIP.
 };
@@ -1061,6 +1089,17 @@ const _errorCodes = <String>{
   'git_auth_missing',
   'git_stale',
   'git_action_failed',
+  'attention_unavailable',
+  'attention_not_found',
+  'attention_stale',
+  'agent_unavailable',
+  'agent_not_found',
+  'agent_stale',
+  'agent_action_failed',
+  'catalogue_unavailable',
+  'catalogue_not_found',
+  'catalogue_stale',
+  'catalogue_action_failed',
 };
 String _nfc(String value) => unorm.nfc(value);
 void _requireEnvelope(Map<String, Object?> json) {
@@ -1249,9 +1288,74 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
     _validateGitCommandPayload(payload);
     return;
   }
+  if (type == 'attention.resolve') {
+    _validateAttentionResolvePayload(payload);
+    return;
+  }
+  if (const <String>{
+    'agent.steer',
+    'agent.cancel',
+    'agent.adopt',
+    'agent.merge',
+  }.contains(type)) {
+    _validateAgentActionPayload(payload);
+    return;
+  }
+  if (type == 'catalogue.set_enabled') {
+    _validateCatalogueSetEnabledPayload(payload);
+    return;
+  }
   if (type == 'extension.respond') {
     _uuidString(payload, 'dialogId');
     _object(payload, 'response');
+  }
+}
+
+void _validateAttentionResolvePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'attentionId',
+    'expectedRevision',
+  });
+  _uuidString(payload, 'sessionId');
+  _uuidString(payload, 'attentionId');
+  _revisionTokenString(payload, 'expectedRevision');
+}
+
+void _validateAgentActionPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'agentId',
+    'expectedRevision',
+    'instruction',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'agentId', 128);
+  _revisionTokenString(payload, 'expectedRevision');
+  if (payload.containsKey('instruction')) {
+    _boundedString(payload, 'instruction', 1024);
+  }
+}
+
+void _validateCatalogueSetEnabledPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'entryId',
+    'enabled',
+    'expectedRevision',
+    'confirmed',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'entryId', 128);
+  _boolean(payload, 'enabled');
+  _revisionTokenString(payload, 'expectedRevision');
+  final confirmed = payload['confirmed'];
+  if (confirmed != true) {
+    throw ProtocolValidationException(
+      'payload.confirmed',
+      'true literal',
+      confirmed,
+    );
   }
 }
 
@@ -1906,6 +2010,276 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
   if (type == 'git.unavailable') {
     _validateGitUnavailablePayload(payload);
   }
+  if (type == 'attention.item') {
+    _validateAttentionItemPayload(payload);
+  }
+  if (type == 'agent.snapshot') {
+    _validateAgentSnapshotPayload(payload);
+  }
+  if (type == 'agent.unavailable') {
+    _validateAgentUnavailablePayload(payload);
+  }
+  if (type == 'catalogue.snapshot') {
+    _validateCatalogueSnapshotPayload(payload);
+  }
+  if (type == 'catalogue.unavailable') {
+    _validateCatalogueUnavailablePayload(payload);
+  }
+}
+
+void _validateAttentionItemPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'attentionId',
+    'sessionId',
+    'turnId',
+    'category',
+    'occurrence',
+    'summary',
+    'actionable',
+    'revision',
+    'resolved',
+    'superseded',
+  });
+  _uuidString(payload, 'attentionId');
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'turnId', 128);
+  _oneOf(payload, 'category', const <String>{
+    'needs_input',
+    'completed',
+    'failed',
+    'interrupted',
+    'background',
+  });
+  if (!_timestamp.hasMatch(_string(payload, 'occurrence'))) {
+    throw ProtocolValidationException(
+      'payload.occurrence',
+      'UTC RFC3339 timestamp',
+      payload['occurrence'],
+    );
+  }
+  final summary = _string(payload, 'summary');
+  if (summary.isEmpty || summary.length > 240) {
+    throw ProtocolValidationException(
+      'payload.summary',
+      '1..240 characters',
+      summary,
+    );
+  }
+  _boolean(payload, 'actionable');
+  _revisionTokenString(payload, 'revision');
+  _boolean(payload, 'resolved');
+  _boolean(payload, 'superseded');
+}
+
+void _validateAgentSnapshotPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'revision', 'items'});
+  _revisionTokenString(payload, 'revision');
+  final items = _list(payload, 'items');
+  if (items.length > 64) {
+    throw ProtocolValidationException(
+      'payload.items',
+      '<= 64 items',
+      items.length,
+    );
+  }
+  const allowedActions = <String>{
+    'transcript',
+    'steer',
+    'cancel',
+    'compare',
+    'adopt',
+    'merge',
+  };
+  for (var index = 0; index < items.length; index += 1) {
+    final raw = items[index];
+    if (raw is! Map) {
+      throw ProtocolValidationException('payload.items[$index]', 'object', raw);
+    }
+    final item = Map<String, Object?>.from(raw);
+    _closedObject(item, 'payload.items[$index]', const <String>{
+      'agentId',
+      'task',
+      'state',
+      'startedAt',
+      'originSessionId',
+      'originTurnId',
+      'supportedActions',
+      'revision',
+      'model',
+      'finishedAt',
+      'latestActivity',
+      'completionSummary',
+      'transcriptRef',
+      'worktreeRef',
+    });
+    _boundedRequiredString(item, 'agentId', 128);
+    _boundedRequiredString(item, 'task', 512);
+    _oneOf(item, 'state', const <String>{
+      'running',
+      'blocked',
+      'needs_input',
+      'completed',
+      'failed',
+      'cancelled',
+      'indeterminate',
+    });
+    if (!_timestamp.hasMatch(_string(item, 'startedAt'))) {
+      throw ProtocolValidationException(
+        'payload.items[$index].startedAt',
+        'UTC RFC3339 timestamp',
+        item['startedAt'],
+      );
+    }
+    _uuidString(item, 'originSessionId');
+    _boundedRequiredString(item, 'originTurnId', 128);
+    if (item.containsKey('finishedAt')) {
+      if (!_timestamp.hasMatch(_string(item, 'finishedAt'))) {
+        throw ProtocolValidationException(
+          'payload.items[$index].finishedAt',
+          'UTC RFC3339 timestamp',
+          item['finishedAt'],
+        );
+      }
+    }
+    if (item.containsKey('latestActivity')) {
+      _boundedString(item, 'latestActivity', 1024);
+    }
+    if (item.containsKey('completionSummary')) {
+      _boundedString(item, 'completionSummary', 1024);
+    }
+    if (item.containsKey('model')) {
+      _boundedString(item, 'model', 128);
+    }
+    if (item.containsKey('transcriptRef')) {
+      _boundedString(item, 'transcriptRef', 128);
+    }
+    if (item.containsKey('worktreeRef')) {
+      _boundedString(item, 'worktreeRef', 256);
+    }
+    final actionsRaw = item['supportedActions'];
+    if (actionsRaw is! List) {
+      throw ProtocolValidationException(
+        'payload.items[$index].supportedActions',
+        'array',
+        actionsRaw,
+      );
+    }
+    if (actionsRaw.length > 6) {
+      throw ProtocolValidationException(
+        'payload.items[$index].supportedActions',
+        '<= 6 actions',
+        actionsRaw.length,
+      );
+    }
+    final seen = <String>{};
+    for (final entry in actionsRaw) {
+      if (entry is! String || !allowedActions.contains(entry)) {
+        throw ProtocolValidationException(
+          'payload.items[$index].supportedActions',
+          'transcript|steer|cancel|compare|adopt|merge',
+          entry,
+        );
+      }
+      if (!seen.add(entry)) {
+        throw ProtocolValidationException(
+          'payload.items[$index].supportedActions',
+          'unique',
+          entry,
+        );
+      }
+    }
+    _revisionTokenString(item, 'revision');
+  }
+}
+
+void _validateAgentUnavailablePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'capability', 'status'});
+  final capability = _string(payload, 'capability');
+  if (capability != 'agents.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'agents.v1 literal',
+      capability,
+    );
+  }
+  _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
+}
+
+void _validateCatalogueSnapshotPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'revision', 'entries'});
+  _revisionTokenString(payload, 'revision');
+  final entries = _list(payload, 'entries');
+  if (entries.length > 512) {
+    throw ProtocolValidationException(
+      'payload.entries',
+      '<= 512 items',
+      entries.length,
+    );
+  }
+  const allowedKinds = <String>{
+    'skill',
+    'template',
+    'extension',
+    'mcp_server',
+    'mcp_tool',
+  };
+  for (var index = 0; index < entries.length; index += 1) {
+    final raw = entries[index];
+    if (raw is! Map) {
+      throw ProtocolValidationException(
+        'payload.entries[$index]',
+        'object',
+        raw,
+      );
+    }
+    final entry = Map<String, Object?>.from(raw);
+    _closedObject(entry, 'payload.entries[$index]', const <String>{
+      'entryId',
+      'kind',
+      'name',
+      'source',
+      'availability',
+      'canToggle',
+      'reloadRequired',
+      'revision',
+      'description',
+      'invocation',
+      'enabled',
+    });
+    _boundedRequiredString(entry, 'entryId', 128);
+    _oneOf(entry, 'kind', allowedKinds);
+    _boundedRequiredString(entry, 'name', 128);
+    if (entry.containsKey('description')) {
+      _boundedString(entry, 'description', 512);
+    }
+    if (entry.containsKey('invocation')) {
+      _boundedString(entry, 'invocation', 256);
+    }
+    _boundedRequiredString(entry, 'source', 128);
+    _validateCapabilityStatus(
+      _object(entry, 'availability'),
+      'payload.entries[$index].availability',
+    );
+    _boolean(entry, 'canToggle');
+    _boolean(entry, 'reloadRequired');
+    if (entry.containsKey('enabled')) {
+      _boolean(entry, 'enabled');
+    }
+    _revisionTokenString(entry, 'revision');
+  }
+}
+
+void _validateCatalogueUnavailablePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'capability', 'status'});
+  final capability = _string(payload, 'capability');
+  if (capability != 'catalogue.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'catalogue.v1 literal',
+      capability,
+    );
+  }
+  _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
 }
 
 void _validateProcessSnapshotPayload(Map<String, Object?> payload) {
@@ -2675,6 +3049,27 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
   }
   if (type == 'git.summary.result') {
     _validateGitSummaryPayload(payload);
+  }
+  if (type == 'agent.snapshot.result') {
+    _validateAgentSnapshotPayload(payload);
+  }
+  if (type == 'agent.transcript.page.result') {
+    _closedObject(payload, 'payload', const <String>{
+      'agentId',
+      'items',
+      'isTruncated',
+      'nextPageToken',
+    });
+    _boundedRequiredString(payload, 'agentId', 128);
+    _list(payload, 'items');
+    _boolean(payload, 'isTruncated');
+    if (payload.containsKey('nextPageToken') &&
+        payload['nextPageToken'] != null) {
+      _string(payload, 'nextPageToken');
+    }
+  }
+  if (type == 'catalogue.snapshot.result') {
+    _validateCatalogueSnapshotPayload(payload);
   }
   if (type == 'hello.accepted') {
     _uuidString(payload, 'connectionId');

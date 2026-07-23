@@ -118,12 +118,21 @@ test("declares mutation recovery/idempotency and exact event stream ownership", 
   expect(COMMAND_METADATA.map(({ type }) => type)).toEqual([...COMMAND_TYPES]);
   const processCommands = new Set(["process.stop", "process.restart", "process.rerun"]);
   const gitCommands = new Set(["git.commit.request", "git.push.request"]);
+  const attentionCommands = new Set(["attention.resolve"]);
+  const agentCommands = new Set(["agent.steer", "agent.cancel", "agent.adopt", "agent.merge"]);
+  const catalogueCommands = new Set(["catalogue.set_enabled"]);
   for (const command of COMMAND_METADATA) {
     const requiredCapability = processCommands.has(command.type)
       ? "runtime.processes.v1"
       : gitCommands.has(command.type)
         ? "git-ci.v1"
-        : "commands.v1";
+        : catalogueCommands.has(command.type)
+          ? "catalogue.v1"
+          : agentCommands.has(command.type)
+            ? "agents.v1"
+            : attentionCommands.has(command.type)
+              ? "attention.v1"
+              : "commands.v1";
     expect(command.requiredCapability).toBe(requiredCapability);
     expect(command.acceptedStates.length).toBeGreaterThan(0);
     expect(command.semanticHashFields).toEqual(["type", "payload"]);
@@ -137,4 +146,12 @@ test("declares mutation recovery/idempotency and exact event stream ownership", 
   expect(EVENT_STREAM_OWNERSHIP["turn.started"]).toBe("session");
   expect(EVENT_STREAM_OWNERSHIP["command.state"]).toBe("host-or-session");
   expect(EVENT_STREAM_OWNERSHIP["error.event"]).toBe("host-or-session");
+  // R7 — attention.item rides the session stream.
+  expect(EVENT_STREAM_OWNERSHIP["attention.item"]).toBe("session");
+  // R8 — agent.snapshot rides the session stream, agent.unavailable rides host.
+  expect(EVENT_STREAM_OWNERSHIP["agent.snapshot"]).toBe("session");
+  expect(EVENT_STREAM_OWNERSHIP["agent.unavailable"]).toBe("host");
+  // R9 — catalogue.snapshot and catalogue.unavailable ride the host stream.
+  expect(EVENT_STREAM_OWNERSHIP["catalogue.snapshot"]).toBe("host");
+  expect(EVENT_STREAM_OWNERSHIP["catalogue.unavailable"]).toBe("host");
 });

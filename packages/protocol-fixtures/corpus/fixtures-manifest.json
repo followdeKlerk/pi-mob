@@ -10,6 +10,36 @@
     "kind": "attachment"
   },
   {
+    "file": "command-agent-adopt-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-agent-cancel-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-agent-merge-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-agent-steer-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-attention-resolve-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
+    "file": "command-catalogue-set_enabled-valid.json",
+    "valid": true,
+    "kind": "command"
+  },
+  {
     "file": "command-compaction-auto-set-valid.json",
     "valid": true,
     "kind": "command"
@@ -230,6 +260,21 @@
     "kind": "command"
   },
   {
+    "file": "control-agent-snapshot-request-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-agent-transcript-page-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
+    "file": "control-catalogue-snapshot-request-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
     "file": "control-command-current-valid.json",
     "valid": true,
     "kind": "control"
@@ -340,7 +385,62 @@
     "kind": "event"
   },
   {
+    "file": "error-agent-action-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-agent-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-agent-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-agent-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
     "file": "error-attachment-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-attention-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-attention-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-attention-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-action-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },
@@ -650,6 +750,16 @@
     "kind": "error"
   },
   {
+    "file": "event-agent-snapshot-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-agent-unavailable-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
     "file": "event-assistant-completed-valid.json",
     "valid": true,
     "kind": "event"
@@ -661,6 +771,21 @@
   },
   {
     "file": "event-assistant-started-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-attention-item-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-catalogue-snapshot-valid.json",
+    "valid": true,
+    "kind": "event"
+  },
+  {
+    "file": "event-catalogue-unavailable-valid.json",
     "valid": true,
     "kind": "event"
   },
@@ -1030,9 +1155,59 @@
     "kind": "hello"
   },
   {
+    "file": "invalid-agent-action-private-field.json",
+    "valid": false,
+    "kind": "command"
+  },
+  {
+    "file": "invalid-agent-record-bad-state.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-agent-record-too-many-actions.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-agent-record-unsupported-action.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
     "file": "invalid-attachment-oversized.json",
     "valid": false,
     "kind": "attachment"
+  },
+  {
+    "file": "invalid-attention-item-category.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-attention-item-summary-empty.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-attention-item-unknown-field.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-attention-resolve-bad-revision.json",
+    "valid": false,
+    "kind": "command"
+  },
+  {
+    "file": "invalid-catalogue-entry-private-field.json",
+    "valid": false,
+    "kind": "event"
+  },
+  {
+    "file": "invalid-catalogue-toggle-unconfirmed.json",
+    "valid": false,
+    "kind": "command"
   },
   {
     "file": "invalid-command-optional-field-type.json",
@@ -1491,6 +1666,21 @@
     "file": "recipe-unavailable-valid.json",
     "valid": true,
     "kind": "event"
+  },
+  {
+    "file": "response-agent-snapshot-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-agent-transcript-page-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-catalogue-snapshot-result-valid.json",
+    "valid": true,
+    "kind": "response"
   },
   {
     "file": "response-command-current-result-valid.json",

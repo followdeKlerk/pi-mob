@@ -1,0 +1,30 @@
+{
+  "name": "invalid-attention-item-unknown-field",
+  "kind": "event",
+  "valid": false,
+  "message": {
+    "protocol": {
+      "major": 1,
+      "minor": 0
+    },
+    "messageId": "11111111-1111-4111-8111-111111111111",
+    "sentAt": "2026-07-12T00:00:00.000Z",
+    "payload": {
+      "attentionId": "99999999-9999-4999-8999-999999999999",
+      "sessionId": "66666666-6666-4666-8666-666666666666",
+      "turnId": "turn-fixture",
+      "category": "needs_input",
+      "occurrence": "2026-07-12T00:00:00.000Z",
+      "summary": "Fixture attention item",
+      "actionable": true,
+      "revision": "attention-r1",
+      "resolved": false,
+      "superseded": false,
+      "private": "leak"
+    },
+    "eventId": "44444444-4444-4444-8444-444444444444",
+    "streamId": "session:66666666-6666-4666-8666-666666666666",
+    "cursor": "9007199254740992",
+    "type": "attention.item"
+  }
+}

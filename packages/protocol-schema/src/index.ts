@@ -152,6 +152,23 @@ export const LIMITS = {
 	maxGitPullRequestTitleLength: 240,
 	maxGitConfirmationIdLength: 128,
 	maxGitSummaryHintLength: 240,
+	// R7 — bounded surfaces for the attention inbox. `maxAttentionSummaryLength`
+	// shares the canonical 240-code-unit narrative bound used by
+	// recipe arguments / output / plan blockers so an attention card
+	// never risks overflowing a mobile list cell.
+	maxAttentionSummaryLength: 240,
+	// R8 — bounded surfaces for the authoritative agent supervision snapshot.
+	// `maxAgentTaskLength` is the bounded task text; `maxAgentSummaryLength`
+	// is the bounded latest-activity / completion-summary narrative; the
+	// shared `maxAgentItems` cap mirrors the R4/R5 closed snapshot pattern.
+	maxAgentTaskLength: 512,
+	maxAgentSummaryLength: 1024,
+	maxAgentItems: 64,
+	// R9 — bounded surfaces for the mobile catalogue service. The snapshot
+	// entries array is capped at 512 items so a runaway provider never
+	// overruns the protocol ceiling; entry identifiers, names, descriptions
+	// and invocations share the canonical identifier / narrative bounds.
+	maxCatalogueEntries: 512,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -205,6 +222,26 @@ export const COMMAND_TYPES = [
 	// schema closes that surface.
 	"git.commit.request",
 	"git.push.request",
+	// R7 — durable, revision-bound attention action. Mobile uses this to
+	// resolve an `attention.item` event with the matching `expectedRevision`;
+	// the bridge validates the revision and emits a follow-up `attention.item`
+	// with `resolved=true`. The command requires a session lease because
+	// resolving attention mutates per-session state.
+	"attention.resolve",
+	// R8 — durable, revision-bound agent supervision actions. Each carries
+	// the `expectedRevision` from the authoritative `agent.snapshot` so the
+	// bridge can reject stale requests before they reach the Pi runtime;
+	// `agent.merge` is reserved for the future merge leaf and is gated on
+	// `agents.v1` like the rest of the family.
+	"agent.steer",
+	"agent.cancel",
+	"agent.adopt",
+	"agent.merge",
+	// R9 — durable, revision-bound catalogue toggle. The command carries
+	// `confirmed: true` so the mobile client can prove the user explicitly
+	// approved the toggle; the bridge validates the catalogue revision
+	// before publishing the next `catalogue.snapshot` event.
+	"catalogue.set_enabled",
 ] as const;
 
 export const EVENT_TYPES = [
@@ -288,6 +325,26 @@ export const EVENT_TYPES = [
 	// can reconcile it against the host workspace listing.
 	"git.summary",
 	"git.unavailable",
+	// R7 — per-session attention item event. The bridge emits this for each
+	// durable attention event the host produces (a turn that needs input, a
+	// background completion, a turn that was interrupted, …). The event
+	// carries `sessionId` and rides the per-session stream; mobile keeps the
+	// read marker locally so the same event can be re-rendered across
+	// reconnects without losing the user state.
+	"attention.item",
+	// R8 — authoritative agent supervision snapshot. `agent.snapshot` carries
+	// the closed bounded list of agent runs the host knows about and rides
+	// the per-session stream; `agent.unavailable` is the truthful capability-
+	// state envelope when the bridge advertises `agents.v1` but the host has
+	// no agents to report right now.
+	"agent.snapshot",
+	"agent.unavailable",
+	// R9 — catalogue snapshot / unavailable events. Both ride the host
+	// stream because the catalogue is host-wide capability state; the
+	// snapshot carries the bounded entries list plus the revision token the
+	// `catalogue.set_enabled` command will guard against.
+	"catalogue.snapshot",
+	"catalogue.unavailable",
 ] as const;
 
 export const RESPONSE_TYPES = [
@@ -325,6 +382,19 @@ export const RESPONSE_TYPES = [
 	// commands report through `command.receipt` / `command.state` / `command.
 	// current.result`, mirroring the R5 process pattern.
 	"git.summary.result",
+	// R7 — the durable `context.snapshot.result` is the only R4 read
+	// response; durable mutations report through command receipts and the
+	// resulting context.snapshot event.
+	// R8 — additive agent supervision read responses. `agent.snapshot.result`
+	// carries the same payload shape as `agent.snapshot` and is returned by
+	// the `agent.snapshot.request` control; `agent.transcript.page.result`
+	// returns the bounded transcript page for a given agentId.
+	"agent.snapshot.result",
+	"agent.transcript.page.result",
+	// R9 — additive mobile catalogue read response. The `catalogue.snapshot.
+	// result` carries the same payload shape as `catalogue.snapshot` and is
+	// returned by the `catalogue.snapshot.request` control.
+	"catalogue.snapshot.result",
 ] as const;
 export const SUPPORTED_CAPABILITIES = [
 	"streams.v1",
@@ -351,6 +421,22 @@ export const SUPPORTED_CAPABILITIES = [
 	// map absence directly to the truthful "Git/CI unavailable" state; a
 	// fabricated summary is never published.
 	"git-ci.v1",
+	// R7 — additive capability literal for the durable attention inbox. The
+	// bridge advertises `attention.v1` only when the host genuinely produces
+	// bounded attention events; absence maps to "Attention unavailable" and
+	// the mobile UI never invents an item from transcript prose.
+	"attention.v1",
+	// R8 — additive capability literal for the authoritative agent
+	// supervision snapshot. The bridge advertises `agents.v1` only when the
+	// host genuinely produces the bounded `agent.snapshot` events; absence
+	// maps to "Agent supervision unavailable" and the mobile UI never
+	// fabricates agent runs from tool transcripts.
+	"agents.v1",
+	// R9 — additive capability literal for the mobile catalogue service. The
+	// bridge advertises `catalogue.v1` only when the host genuinely produces
+	// the bounded `catalogue.snapshot` events; absence maps to "Catalogue
+	// unavailable" and the mobile UI never invents catalogue entries.
+	"catalogue.v1",
 ] as const;
 export const CONTROL_TYPES = [
 	"subscription.set",
@@ -381,6 +467,16 @@ export const CONTROL_TYPES = [
 	// COMMAND_TYPES above.
 	"git.summary.request",
 	"git.summary.cancel",
+	// R8 — repeatable, nonjournaled agent supervision reads. The snapshot
+	// request returns the same payload shape as `agent.snapshot`; the
+	// transcript page control returns a bounded transcript page for one
+	// `agentId`. Both controls are repeatable and never journaled.
+	"agent.snapshot.request",
+	"agent.transcript.page",
+	// R9 — repeatable, nonjournaled catalogue snapshot read. The request
+	// returns the same payload shape as `catalogue.snapshot`; the durable
+	// toggle command is listed in COMMAND_TYPES above.
+	"catalogue.snapshot.request",
 ] as const;
 
 export const ERROR_CODES = [
@@ -470,6 +566,37 @@ export const ERROR_CODES = [
 	"git_auth_missing",
 	"git_stale",
 	"git_action_failed",
+	// F0 R7/R8/R9 — additive stability codes for the bounded attention
+	// inbox, authoritative agent supervision, and mobile catalogue surfaces.
+	// Each code mirrors the R5/R6 stable-error vocabulary so the mobile
+	// client can render a typed failure with the same labels the
+	// `attention.item` / `agent.snapshot` / `catalogue.snapshot` events
+	// use.
+	//
+	//   - `attention_unavailable` — capability not advertised / surface gone
+	//   - `attention_not_found`   — `attentionId` is unknown
+	//   - `attention_stale`       — `expectedRevision` no longer matches
+	//
+	//   - `agent_unavailable`     — capability not advertised / surface gone
+	//   - `agent_not_found`       — `agentId` is unknown
+	//   - `agent_stale`           — `expectedRevision` no longer matches
+	//   - `agent_action_failed`   — durable steer/cancel/adopt refused
+	//
+	//   - `catalogue_unavailable` — capability not advertised / surface gone
+	//   - `catalogue_not_found`   — `entryId` is unknown
+	//   - `catalogue_stale`       — `expectedRevision` no longer matches
+	//   - `catalogue_action_failed`— durable toggle refused by host
+	"attention_unavailable",
+	"attention_not_found",
+	"attention_stale",
+	"agent_unavailable",
+	"agent_not_found",
+	"agent_stale",
+	"agent_action_failed",
+	"catalogue_unavailable",
+	"catalogue_not_found",
+	"catalogue_stale",
+	"catalogue_action_failed",
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -484,7 +611,10 @@ export interface CommandMetadata {
 	readonly requiredCapability:
 		| "commands.v1"
 		| "runtime.processes.v1"
-		| "git-ci.v1";
+		| "git-ci.v1"
+		| "attention.v1"
+		| "agents.v1"
+		| "catalogue.v1";
 	readonly acceptedStates: readonly string[];
 	readonly semanticHashFields: readonly ["type", "payload"];
 	readonly idempotency: "command-id-semantic-payload-sha256";
@@ -534,12 +664,12 @@ const processStableErrors = [
 	"process_failed",
 ] as const;
 // F0 R6 — git.commit.request / git.push.request are gated on the optional
-// `git-ci.v1` capability (the bridge advertises the surface only when it
-// genuinely implements the bounded Git/CI summary AND the explicit
-// commit-through-Pi / push-through-Pi durable commands). The stableErrors
-// list is the additive git-specific subset of ERROR_CODES so clients can
-// render a typed failure with the same vocabulary the `git.unavailable`
-// event uses.
+	// `git-ci.v1` capability (the bridge advertises the surface only when it
+	// genuinely implements the bounded Git/CI summary AND the explicit
+	// commit-through-Pi / push-through-Pi durable commands). The stableErrors
+	// list is the additive git-specific subset of ERROR_CODES so clients can
+	// render a typed failure with the same vocabulary the `git.unavailable`
+	// event uses.
 const gitCommands = new Set<CommandType>([
 	"git.commit.request",
 	"git.push.request",
@@ -551,6 +681,41 @@ const gitStableErrors = [
 	"git_auth_missing",
 	"git_stale",
 	"git_action_failed",
+] as const;
+// R7 — `attention.resolve` is gated on the optional `attention.v1`
+// capability. The stableErrors list mirrors the revision-stale pattern used
+// by R5 process and R6 git so clients can render a typed failure with the
+// same vocabulary.
+const attentionCommands = new Set<CommandType>(["attention.resolve"]);
+const attentionStableErrors = [
+	"attention_unavailable",
+	"attention_not_found",
+	"attention_stale",
+] as const;
+// R8 — `agent.steer` / `agent.cancel` / `agent.adopt` / `agent.merge` are
+// gated on the optional `agents.v1` capability. Stable errors mirror the
+// R6 git-stale pattern so clients can render a typed failure with the same
+// vocabulary the `agent.unavailable` event uses.
+const agentCommands = new Set<CommandType>([
+	"agent.steer",
+	"agent.cancel",
+	"agent.adopt",
+	"agent.merge",
+]);
+const agentStableErrors = [
+	"agent_unavailable",
+	"agent_not_found",
+	"agent_stale",
+	"agent_action_failed",
+] as const;
+// R9 — `catalogue.set_enabled` is gated on the optional `catalogue.v1`
+// capability. Stable errors mirror the revision-stale pattern.
+const catalogueCommands = new Set<CommandType>(["catalogue.set_enabled"]);
+const catalogueStableErrors = [
+	"catalogue_unavailable",
+	"catalogue_not_found",
+	"catalogue_stale",
+	"catalogue_action_failed",
 ] as const;
 const baseStableErrors = [
 	"invalid_message",
@@ -572,7 +737,13 @@ export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map(
 			? "runtime.processes.v1"
 			: gitCommands.has(type)
 				? "git-ci.v1"
-				: "commands.v1",
+				: catalogueCommands.has(type)
+					? "catalogue.v1"
+					: agentCommands.has(type)
+						? "agents.v1"
+						: attentionCommands.has(type)
+							? "attention.v1"
+							: "commands.v1",
 		acceptedStates: [
 			"protocol-valid",
 			"capability-supported",
@@ -587,7 +758,13 @@ export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map(
 			? [...baseStableErrors, ...processStableErrors]
 			: gitCommands.has(type)
 				? [...baseStableErrors, ...gitStableErrors]
-				: [...baseStableErrors],
+				: catalogueCommands.has(type)
+					? [...baseStableErrors, ...catalogueStableErrors]
+					: agentCommands.has(type)
+						? [...baseStableErrors, ...agentStableErrors]
+						: attentionCommands.has(type)
+							? [...baseStableErrors, ...attentionStableErrors]
+							: [...baseStableErrors],
 	}),
 );
 
@@ -619,6 +796,14 @@ const hostEventTypes = new Set<EventType>([
 	// sessionId and stays on the per-session stream.
 	"recipe.unavailable",
 	"plan.unavailable",
+	// R7/R8/R9 — capability-state envelopes (no sessionId) ride the host
+	// stream. `attention.item` carries a sessionId and stays on the per-
+	// session stream; `agent.snapshot` carries a sessionId too; the agent/
+	// catalogue unavailable envelopes ride the host stream alongside the
+	// existing R3/R4/R6 unavailable family.
+	"agent.unavailable",
+	"catalogue.snapshot",
+	"catalogue.unavailable",
 ]);
 export const EVENT_STREAM_OWNERSHIP: Readonly<
 	Record<EventType, StreamOwnership>
@@ -2140,6 +2325,208 @@ const ControllerScope = Type.Union([
 		{ additionalProperties: true },
 	),
 ]);
+
+// R9 — Mobile catalogue closed entry. The schema carries a `kind` union
+// covering skills, templates, extensions, and the MCP server/tool families.
+// `canToggle` is the truthful answer to whether the entry can be enabled/
+// disabled from the mobile surface; `reloadRequired` flags entries that
+// require a host restart to take effect after a toggle. The shape is
+// closed (`additionalProperties: false`) so the bridge cannot smuggle a
+// private field (workspace path, API key, host credential) alongside the
+// declared catalogue payload.
+export const CatalogueEntrySchema = Type.Object(
+	{
+		entryId: Type.String({ minLength: 1, maxLength: 128 }),
+		kind: Type.Union([
+			Type.Literal("skill"),
+			Type.Literal("template"),
+			Type.Literal("extension"),
+			Type.Literal("mcp_server"),
+			Type.Literal("mcp_tool"),
+		]),
+		name: Type.String({ minLength: 1, maxLength: 128 }),
+		description: Type.Optional(Type.String({ maxLength: 512 })),
+		invocation: Type.Optional(
+			Type.String({ minLength: 1, maxLength: 256 }),
+		),
+		source: Type.String({ minLength: 1, maxLength: 128 }),
+		availability: CapabilityStatusSchema,
+		enabled: Type.Optional(Type.Boolean()),
+		canToggle: Type.Boolean(),
+		reloadRequired: Type.Boolean(),
+		revision: RevisionTokenSchema,
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/catalogue-entry" },
+);
+export const CatalogueSnapshotSchema = Type.Object(
+	{
+		revision: RevisionTokenSchema,
+		entries: Type.Array(CatalogueEntrySchema, {
+			maxItems: LIMITS.maxCatalogueEntries,
+		}),
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/catalogue-snapshot" },
+);
+export const CatalogueUnavailableSchema = Type.Object(
+	{
+		capability: Type.Literal("catalogue.v1"),
+		status: CapabilityStatusSchema,
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/catalogue-unavailable" },
+);
+const CatalogueSnapshotRequestSchema = Type.Object(
+	{ requestId: Uuid },
+	{ additionalProperties: false },
+);
+const CatalogueSetEnabledSchema = Type.Object(
+	{
+		sessionId: SessionId,
+		entryId: Type.String({ minLength: 1, maxLength: 128 }),
+		enabled: Type.Boolean(),
+		expectedRevision: RevisionTokenSchema,
+		confirmed: Type.Literal(true),
+	},
+	{ additionalProperties: false },
+);
+
+// R8 — Closed agent action surface. The bridge only advertises these six
+// actions; anything else is closed at the schema layer so the mobile client
+// cannot be tricked into inventing capability. `transcript` is the always-
+// available read; `steer` / `cancel` / `adopt` / `merge` are guarded.
+export const AgentActionSchema = Type.Union([
+	Type.Literal("transcript"),
+	Type.Literal("steer"),
+	Type.Literal("cancel"),
+	Type.Literal("compare"),
+	Type.Literal("adopt"),
+	Type.Literal("merge"),
+]);
+// R8 — Closed per-agent record. The payload is bounded (task text up to
+// maxAgentTaskLength, latest activity / completion summary up to
+// maxAgentSummaryLength) and `supportedActions` is the truthful per-run
+// capability list the mobile UI uses to enable or disable affordances.
+export const AgentRecordSchema = Type.Object(
+	{
+		agentId: Type.String({ minLength: 1, maxLength: 128 }),
+		task: Type.String({
+			minLength: 1,
+			maxLength: LIMITS.maxAgentTaskLength,
+		}),
+		model: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+		state: Type.Union([
+			Type.Literal("running"),
+			Type.Literal("blocked"),
+			Type.Literal("needs_input"),
+			Type.Literal("completed"),
+			Type.Literal("failed"),
+			Type.Literal("cancelled"),
+			Type.Literal("indeterminate"),
+		]),
+		startedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+		finishedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+		originSessionId: SessionId,
+		originTurnId: Type.String({ minLength: 1, maxLength: 128 }),
+		latestActivity: Type.Optional(
+			Type.String({ maxLength: LIMITS.maxAgentSummaryLength }),
+		),
+		completionSummary: Type.Optional(
+			Type.String({ maxLength: LIMITS.maxAgentSummaryLength }),
+		),
+		transcriptRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+		worktreeRef: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+		supportedActions: Type.Array(AgentActionSchema, {
+			maxItems: 6,
+			uniqueItems: true,
+		}),
+		revision: RevisionTokenSchema,
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/agent-record" },
+);
+export const AgentSnapshotSchema = Type.Object(
+	{
+		revision: RevisionTokenSchema,
+		items: Type.Array(AgentRecordSchema, {
+			maxItems: LIMITS.maxAgentItems,
+		}),
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/agent-snapshot" },
+);
+export const AgentUnavailableSchema = Type.Object(
+	{
+		capability: Type.Literal("agents.v1"),
+		status: CapabilityStatusSchema,
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/agent-unavailable" },
+);
+const AgentSnapshotRequestSchema = Type.Object(
+	{ requestId: Uuid },
+	{ additionalProperties: false },
+);
+const AgentTranscriptPageSchema = Type.Object(
+	{
+		agentId: Type.String({ minLength: 1, maxLength: 128 }),
+		pageSize: Type.Integer({ minimum: 1, maximum: 100 }),
+		pageToken: Type.Optional(
+			Type.Union([
+				Type.String({ minLength: 1, maxLength: 512 }),
+				Type.Null(),
+			]),
+		),
+	},
+	{ additionalProperties: false },
+);
+const AgentActionPayloadSchema = Type.Object(
+	{
+		sessionId: SessionId,
+		agentId: Type.String({ minLength: 1, maxLength: 128 }),
+		expectedRevision: RevisionTokenSchema,
+		instruction: Type.Optional(
+			Type.String({ minLength: 1, maxLength: 1024 }),
+		),
+	},
+	{ additionalProperties: false },
+);
+
+// R7 — Closed attention event payload. The five categories are the
+// authoritative truth set; the schema rejects anything else so the mobile
+// UI can render a closed vocabulary without inventing one. `resolved` /
+// `superseded` are durable state flags the bridge owns.
+export const AttentionCategorySchema = Type.Union([
+	Type.Literal("needs_input"),
+	Type.Literal("completed"),
+	Type.Literal("failed"),
+	Type.Literal("interrupted"),
+	Type.Literal("background"),
+]);
+export const AttentionItemSchema = Type.Object(
+	{
+		attentionId: Uuid,
+		sessionId: SessionId,
+		turnId: Type.String({ minLength: 1, maxLength: 128 }),
+		category: AttentionCategorySchema,
+		occurrence: Type.String({ pattern: ISO_UTC_PATTERN }),
+		summary: Type.String({
+			minLength: 1,
+			maxLength: LIMITS.maxAttentionSummaryLength,
+		}),
+		actionable: Type.Boolean(),
+		revision: RevisionTokenSchema,
+		resolved: Type.Boolean(),
+		superseded: Type.Boolean(),
+	},
+	{
+		additionalProperties: false,
+		$id: "pi-mob/protocol/attention-item",
+	},
+);
+export const AttentionResolvePayloadSchema = Type.Object(
+	{
+		sessionId: SessionId,
+		attentionId: Uuid,
+		expectedRevision: RevisionTokenSchema,
+	},
+	{ additionalProperties: false },
+);
 const CommandPayloads = {
 	"controller.acquire": ControllerScope,
 	"controller.takeover": ControllerScope,
@@ -2259,6 +2646,12 @@ const CommandPayloads = {
 	// on the schema closes that surface.
 	"git.commit.request": GitCommandPayloadSchema,
 	"git.push.request": GitCommandPayloadSchema,
+	"attention.resolve": AttentionResolvePayloadSchema,
+	"catalogue.set_enabled": CatalogueSetEnabledSchema,
+	"agent.merge": AgentActionPayloadSchema,
+	"agent.adopt": AgentActionPayloadSchema,
+	"agent.cancel": AgentActionPayloadSchema,
+	"agent.steer": AgentActionPayloadSchema,
 	"turn.abort": Type.Object(
 		{ sessionId: SessionId },
 		{ additionalProperties: true },
@@ -2424,6 +2817,11 @@ const EventPayloads = {
 	// mobile client can reconcile against the host workspace listing.
 	"git.summary": GitSummarySchema,
 	"git.unavailable": GitUnavailableEventSchema,
+	"attention.item": AttentionItemSchema,
+	"agent.snapshot": AgentSnapshotSchema,
+	"agent.unavailable": AgentUnavailableSchema,
+	"catalogue.snapshot": CatalogueSnapshotSchema,
+	"catalogue.unavailable": CatalogueUnavailableSchema,
 } as const;
 const genericEventPayload = Type.Object(
 	{ sessionId: Type.Optional(SessionId) },
@@ -2509,6 +2907,9 @@ const ControlPayloads = {
 	"workspace.file.metadata": WorkspaceFileMetadataPayloadSchema,
 	"workspace.file.read": WorkspaceFileReadPayloadSchema,
 	"context.snapshot.request": ContextSnapshotRequestPayloadSchema,
+	"agent.snapshot.request": AgentSnapshotRequestSchema,
+	"agent.transcript.page": AgentTranscriptPageSchema,
+	"catalogue.snapshot.request": CatalogueSnapshotRequestSchema,
 	"process.snapshot.request": Type.Object(
 		{ sessionId: SessionId },
 		{ additionalProperties: false },
@@ -2655,6 +3056,22 @@ const ResponsePayloads = {
 	"workspace.file.content.search.result": R3ContentSearchResponseSchema,
 	"workspace.file.metadata.result": R3MetadataResponseSchema,
 	"workspace.file.read.result": R3ReadResponseSchema,
+	"catalogue.snapshot.result": CatalogueSnapshotSchema,
+	"agent.snapshot.result": AgentSnapshotSchema,
+	"agent.transcript.page.result": Type.Object(
+		{
+			agentId: Type.String({ minLength: 1, maxLength: 128 }),
+			items: Type.Array(Payload, { maxItems: 100 }),
+			nextPageToken: Type.Optional(
+				Type.String({ minLength: 1, maxLength: 512 }),
+			),
+			isTruncated: Type.Boolean(),
+		},
+		{
+			additionalProperties: false,
+			$id: "pi-mob/protocol/agent-transcript-page-response",
+		},
+	),
 	"context.snapshot.result": ContextSnapshotSchema,
 	"process.snapshot.result": Type.Object(
 		{

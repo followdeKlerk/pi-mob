@@ -1,14 +1,19 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../notifications/notification_controller.dart';
+import '../../controls/catalogue_unavailable_notice.dart';
 import '../../controls/control_view_data.dart';
 import '../../controls/supported_command_list.dart';
 import 'activity_destination.dart';
 import '../theme/pi_tokens.dart';
+import '../keyboard_shortcuts.dart';
 import 'chat_session_drawer.dart';
 import 'model_picker_sheet.dart';
 import 'session_sync_screen.dart';
+import 'global_search_sheet.dart';
 import 'transcript_search_sheet.dart';
 
 /// Single-screen chat shell.
@@ -24,6 +29,7 @@ class AppShell extends StatefulWidget {
     required this.notifications,
     required this.onForgetHost,
     required this.onOpenDialog,
+    this.shortcutDelegate,
     super.key,
   });
 
@@ -35,6 +41,7 @@ class AppShell extends StatefulWidget {
   final NotificationController? notifications;
   final Future<void> Function() onForgetHost;
   final VoidCallback onOpenDialog;
+  final ShellShortcutDelegate? shortcutDelegate;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -47,6 +54,7 @@ class _AppShellState extends State<AppShell> {
   void initState() {
     super.initState();
     widget.coordinator.addListener(_onCoordinatorChanged);
+    _registerShortcuts();
   }
 
   @override
@@ -56,11 +64,16 @@ class _AppShellState extends State<AppShell> {
       oldWidget.coordinator.removeListener(_onCoordinatorChanged);
       widget.coordinator.addListener(_onCoordinatorChanged);
     }
+    if (oldWidget.shortcutDelegate != widget.shortcutDelegate) {
+      oldWidget.shortcutDelegate?.clear();
+      _registerShortcuts();
+    }
   }
 
   @override
   void dispose() {
     widget.coordinator.removeListener(_onCoordinatorChanged);
+    widget.shortcutDelegate?.clear();
     super.dispose();
   }
 
@@ -82,17 +95,26 @@ class _AppShellState extends State<AppShell> {
 
   void _openChats() => _scaffoldKey.currentState?.openDrawer();
 
-  /// Surfaces the M16 command palette.
+  void _registerShortcuts() {
+    widget.shortcutDelegate?.register(
+      openTranscriptSearch: () =>
+          showTranscriptSearch(context, widget.coordinator),
+      openModelPicker: () => showModelPickerSheet(context, widget.coordinator),
+      openChats: _openChats,
+      openCommands: () => unawaited(_openCommands(context)),
+    );
+  }
+
+  /// Surfaces the command palette from the host-authoritative catalogue.
   ///
-  /// The bridge still owns the actual command catalogue, so the sheet
-  /// consumes whatever the [ConnectionCoordinator] exposes through
-  /// [ConnectionCoordinator.supportedCommands] once that field lands. Until
-  /// then the sheet renders a curated baseline of common skills / templates
-  /// so the discoverable affordance is visible end-to-end and can be wired
-  /// to the bridge without a UX rework.
+  /// The curated fallback remains only until the bridge has published a
+  /// catalogue outcome. An observed empty list is an explicit unavailable
+  /// result, not permission to invent local entries.
   Future<void> _openCommands(BuildContext context) async {
+    final publishedCommands = widget.coordinator.supportedCommands;
+    final catalogueUnavailable = publishedCommands?.isEmpty ?? false;
     final commands =
-        widget.coordinator.supportedCommands ??
+        publishedCommands ??
         const <SupportedCommandData>[
           SupportedCommandData(
             id: 'skill:help',
@@ -152,19 +174,26 @@ class _AppShellState extends State<AppShell> {
             ),
             child: SizedBox(
               height: MediaQuery.of(sheetContext).size.height * 0.7,
-              child: SupportedCommandList(
-                commands: commands,
-                onInvoke: (cmd) {
-                  Navigator.of(sheetContext).pop();
-                  ScaffoldMessenger.of(sheetContext).showSnackBar(
-                    SnackBar(
-                      content: Text(
-                        '${cmd.title} queued for ${widget.coordinator.displayName}.',
-                      ),
-                      behavior: SnackBarBehavior.floating,
+              child: Column(
+                children: [
+                  if (catalogueUnavailable) const CatalogueUnavailableNotice(),
+                  Expanded(
+                    child: SupportedCommandList(
+                      commands: commands,
+                      onInvoke: (cmd) {
+                        Navigator.of(sheetContext).pop();
+                        ScaffoldMessenger.of(sheetContext).showSnackBar(
+                          SnackBar(
+                            content: Text(
+                              '${cmd.title} queued for ${widget.coordinator.displayName}.',
+                            ),
+                            behavior: SnackBarBehavior.floating,
+                          ),
+                        );
+                      },
                     ),
-                  );
-                },
+                  ),
+                ],
               ),
             ),
           ),
@@ -241,6 +270,12 @@ class _AppShellState extends State<AppShell> {
               tooltip: 'Commands and skills',
               onPressed: () => _openCommands(context),
               icon: const Icon(Icons.bolt_rounded),
+            ),
+            IconButton(
+              key: const Key('open-global-search'),
+              tooltip: 'Search every chat',
+              onPressed: () => showGlobalSearch(context, widget.coordinator),
+              icon: const Icon(Icons.travel_explore),
             ),
             IconButton(
               key: const Key('open-transcript-search'),

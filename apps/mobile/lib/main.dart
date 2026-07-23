@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import 'src/connection/bridge_transport.dart';
 import 'src/connection/connection_coordinator.dart';
@@ -10,6 +11,7 @@ import 'src/notifications/notification_controller.dart';
 import 'src/pairing/pairing_payload.dart';
 import 'src/pairing/pairing_screen.dart';
 import 'src/ui/shell/app_shell.dart';
+import 'src/ui/keyboard_shortcuts.dart';
 import 'src/ui/theme/pi_theme.dart';
 
 Future<void> main() async {
@@ -80,6 +82,7 @@ class _HomeRouter extends StatefulWidget {
 
 class _HomeRouterState extends State<_HomeRouter> {
   late bool _paired;
+  final _shortcutDelegate = ShellShortcutDelegate();
 
   @override
   void initState() {
@@ -134,19 +137,57 @@ class _HomeRouterState extends State<_HomeRouter> {
 
   @override
   Widget build(BuildContext context) {
-    if (!_paired) {
-      return PairingScreen(
-        key: const ValueKey('pairing-screen'),
-        onPair: _handlePair,
-        onForgetHost: _handleForget,
-        allowForgetWhenUnpaired: false,
-      );
-    }
-    return DiagnosticHome(
-      key: const ValueKey('diagnostic-home'),
-      coordinator: widget.coordinator,
-      notifications: widget.notifications,
-      onForgetHost: _handleForget,
+    final child = _paired
+        ? DiagnosticHome(
+            key: const ValueKey('diagnostic-home'),
+            coordinator: widget.coordinator,
+            notifications: widget.notifications,
+            onForgetHost: _handleForget,
+            shortcutDelegate: _shortcutDelegate,
+          )
+        : PairingScreen(
+            key: const ValueKey('pairing-screen'),
+            onPair: _handlePair,
+            onForgetHost: _handleForget,
+            allowForgetWhenUnpaired: false,
+          );
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.keyK, control: true):
+            OpenTranscriptSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.keyK, meta: true):
+            OpenTranscriptSearchIntent(),
+        SingleActivator(LogicalKeyboardKey.keyM, control: true):
+            OpenModelPickerIntent(),
+        SingleActivator(LogicalKeyboardKey.keyM, meta: true):
+            OpenModelPickerIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, control: true, shift: true):
+            OpenChatsIntent(),
+        SingleActivator(LogicalKeyboardKey.keyO, meta: true, shift: true):
+            OpenChatsIntent(),
+        SingleActivator(LogicalKeyboardKey.keyP, control: true, shift: true):
+            OpenCommandsIntent(),
+        SingleActivator(LogicalKeyboardKey.keyP, meta: true, shift: true):
+            OpenCommandsIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          OpenTranscriptSearchIntent:
+              CallbackAction<OpenTranscriptSearchIntent>(
+                onInvoke: (_) => _shortcutDelegate.openTranscriptSearch(),
+              ),
+          OpenModelPickerIntent: CallbackAction<OpenModelPickerIntent>(
+            onInvoke: (_) => _shortcutDelegate.openModelPicker(),
+          ),
+          OpenChatsIntent: CallbackAction<OpenChatsIntent>(
+            onInvoke: (_) => _shortcutDelegate.openChats(),
+          ),
+          OpenCommandsIntent: CallbackAction<OpenCommandsIntent>(
+            onInvoke: (_) => _shortcutDelegate.openCommands(),
+          ),
+        },
+        child: child,
+      ),
     );
   }
 }
@@ -164,12 +205,14 @@ class DiagnosticHome extends StatefulWidget {
     required this.coordinator,
     required this.onForgetHost,
     this.notifications,
+    this.shortcutDelegate,
     super.key,
   });
 
   final ConnectionCoordinator coordinator;
   final NotificationController? notifications;
   final Future<void> Function() onForgetHost;
+  final ShellShortcutDelegate? shortcutDelegate;
 
   @override
   State<DiagnosticHome> createState() => _DiagnosticHomeState();
@@ -290,6 +333,7 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
       notifications: widget.notifications,
       onForgetHost: widget.onForgetHost,
       onOpenDialog: () => _presentDialogIfNeeded(force: true),
+      shortcutDelegate: widget.shortcutDelegate,
     );
   }
 }

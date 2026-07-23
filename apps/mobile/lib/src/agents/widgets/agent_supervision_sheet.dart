@@ -77,19 +77,25 @@ class AgentSupervisionSheet extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Row(
-            children: [
-              Expanded(
-                child: Text(
-                  title,
-                  style: text.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+          Semantics(
+            header: true,
+            label: state.runningCount > 0
+                ? '$title, ${state.runningCount} running'
+                : title,
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    title,
+                    style: text.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                    ),
                   ),
                 ),
-              ),
-              if (state.runningCount > 0)
-                _RunningBadge(count: state.runningCount),
-            ],
+                if (state.runningCount > 0)
+                  _RunningBadge(count: state.runningCount),
+              ],
+            ),
           ),
           const SizedBox(height: PiSpacing.sm),
           if (runs.isEmpty)
@@ -154,66 +160,75 @@ class AgentRunRow extends StatelessWidget {
     final text = theme.textTheme;
     final statusColor = _statusColor(run.status, colors);
     final statusLabel = run.status.label;
-    return Container(
-      key: const Key('agent-run-row'),
-      padding: const EdgeInsets.all(PiSpacing.md),
-      decoration: BoxDecoration(
-        color: colors.surfaceContainerLow,
-        borderRadius: BorderRadius.circular(PiRadius.md),
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.65),
+    return Semantics(
+      container: true,
+      label: 'Agent run ${run.agentId ?? run.toolCallId}: ${run.task}',
+      hint: 'Status ${run.status.label}',
+      child: Container(
+        key: const Key('agent-run-row'),
+        padding: const EdgeInsets.all(PiSpacing.md),
+        decoration: BoxDecoration(
+          color: colors.surfaceContainerLow,
+          borderRadius: BorderRadius.circular(PiRadius.md),
+          border: Border.all(
+            color: colors.outlineVariant.withValues(alpha: 0.65),
+          ),
         ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Row(
-            children: [
-              Icon(_statusIcon(run.status), color: statusColor, size: 16),
-              const SizedBox(width: PiSpacing.sm),
-              Expanded(
-                child: Text(
-                  run.task.isEmpty ? '(no task text)' : run.task,
-                  style: text.titleSmall?.copyWith(
-                    fontFeatures: const [FontFeature.tabularFigures()],
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Row(
+              children: [
+                Icon(_statusIcon(run.status), color: statusColor, size: 16),
+                const SizedBox(width: PiSpacing.sm),
+                Expanded(
+                  child: Text(
+                    run.task.isEmpty ? '(no task text)' : run.task,
+                    style: text.titleSmall?.copyWith(
+                      fontFeatures: const [FontFeature.tabularFigures()],
+                    ),
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
                   ),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
                 ),
-              ),
-              const SizedBox(width: PiSpacing.sm),
-              Text(
-                statusLabel,
-                style: text.labelMedium?.copyWith(
-                  color: statusColor,
-                  fontWeight: FontWeight.w600,
+                const SizedBox(width: PiSpacing.sm),
+                Text(
+                  statusLabel,
+                  style: text.labelMedium?.copyWith(
+                    color: statusColor,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
+              ],
+            ),
+            const SizedBox(height: PiSpacing.xs),
+            _MetaLine(text: text, colors: colors, run: run, now: now),
+            if (run.latestOutput != null && run.latestOutput!.isNotEmpty) ...[
+              const SizedBox(height: PiSpacing.xs),
+              _OutputPreview(
+                text: text,
+                colors: colors,
+                content: run.latestOutput!,
               ),
             ],
-          ),
-          const SizedBox(height: PiSpacing.xs),
-          _MetaLine(text: text, colors: colors, run: run, now: now),
-          if (run.latestOutput != null && run.latestOutput!.isNotEmpty) ...[
-            const SizedBox(height: PiSpacing.xs),
-            _OutputPreview(
-              text: text,
-              colors: colors,
-              content: run.latestOutput!,
+            if (run.errorMessage != null && run.errorMessage!.isNotEmpty) ...[
+              const SizedBox(height: PiSpacing.xs),
+              _ErrorLine(
+                text: text,
+                colors: colors,
+                message: run.errorMessage!,
+              ),
+            ],
+            const SizedBox(height: PiSpacing.sm),
+            _ActionRow(
+              run: run,
+              onOpenTranscript: onOpenTranscript,
+              onOpenResult: onOpenResult,
             ),
+            _CapabilityRow(run: run),
           ],
-          if (run.errorMessage != null && run.errorMessage!.isNotEmpty) ...[
-            const SizedBox(height: PiSpacing.xs),
-            _ErrorLine(text: text, colors: colors, message: run.errorMessage!),
-          ],
-          const SizedBox(height: PiSpacing.sm),
-          _ActionRow(
-            run: run,
-            onOpenTranscript: onOpenTranscript,
-            onOpenResult: onOpenResult,
-          ),
-          _CapabilityRow(run: run),
-        ],
+        ),
       ),
     );
   }
@@ -370,19 +385,27 @@ class _ActionRow extends StatelessWidget {
     return Row(
       children: [
         if (hasTranscript)
-          TextButton.icon(
-            key: const Key('agent-run-open-transcript'),
-            onPressed: onOpenTranscript,
-            icon: const Icon(Icons.subject, size: 16),
-            label: const Text('Open transcript'),
+          Semantics(
+            button: true,
+            label: 'Open transcript for ${run.agentId ?? run.toolCallId}',
+            child: TextButton.icon(
+              key: const Key('agent-run-open-transcript'),
+              onPressed: onOpenTranscript,
+              icon: const Icon(Icons.subject, size: 16),
+              label: const Text('Open transcript'),
+            ),
           ),
         if (hasResult) ...[
           const SizedBox(width: PiSpacing.xs),
-          TextButton.icon(
-            key: const Key('agent-run-open-result'),
-            onPressed: onOpenResult,
-            icon: const Icon(Icons.description_outlined, size: 16),
-            label: const Text('Open result'),
+          Semantics(
+            button: true,
+            label: 'Open result for ${run.agentId ?? run.toolCallId}',
+            child: TextButton.icon(
+              key: const Key('agent-run-open-result'),
+              onPressed: onOpenResult,
+              icon: const Icon(Icons.description_outlined, size: 16),
+              label: const Text('Open result'),
+            ),
           ),
         ],
       ],
@@ -406,11 +429,16 @@ class _CapabilityRow extends StatelessWidget {
     final colors = theme.colorScheme;
     final text = theme.textTheme;
     if (!hasAny) {
-      return Padding(
-        padding: const EdgeInsets.only(top: PiSpacing.xs),
-        child: Text(
-          'Steer / cancel / adopt: unavailable — no authoritative contract.',
-          style: text.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+      return Semantics(
+        container: true,
+        label:
+            'Capability unavailable: ${run.blockedReason ?? 'action not supported'}',
+        child: Padding(
+          padding: const EdgeInsets.only(top: PiSpacing.xs),
+          child: Text(
+            'Steer / cancel / adopt: unavailable — no authoritative contract.',
+            style: text.bodySmall?.copyWith(color: colors.onSurfaceVariant),
+          ),
         ),
       );
     }

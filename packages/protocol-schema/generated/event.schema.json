@@ -996,6 +996,30 @@
                 {
                   "const": "git.push.request",
                   "type": "string"
+                },
+                {
+                  "const": "attention.resolve",
+                  "type": "string"
+                },
+                {
+                  "const": "agent.steer",
+                  "type": "string"
+                },
+                {
+                  "const": "agent.cancel",
+                  "type": "string"
+                },
+                {
+                  "const": "agent.adopt",
+                  "type": "string"
+                },
+                {
+                  "const": "agent.merge",
+                  "type": "string"
+                },
+                {
+                  "const": "catalogue.set_enabled",
+                  "type": "string"
                 }
               ]
             },
@@ -1249,6 +1273,50 @@
                     },
                     {
                       "const": "git_action_failed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_action_failed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_action_failed",
                       "type": "string"
                     }
                   ]
@@ -4644,6 +4712,50 @@
                         },
                         {
                           "const": "git_action_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "attention_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "attention_not_found",
+                          "type": "string"
+                        },
+                        {
+                          "const": "attention_stale",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_not_found",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_stale",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_action_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_not_found",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_stale",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_action_failed",
                           "type": "string"
                         }
                       ]
@@ -8156,6 +8268,50 @@
                     {
                       "const": "git_action_failed",
                       "type": "string"
+                    },
+                    {
+                      "const": "attention_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_action_failed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_action_failed",
+                      "type": "string"
                     }
                   ]
                 },
@@ -9126,6 +9282,1168 @@
           "type": "string"
         },
         "payload": {
+          "$id": "pi-mob/protocol/attention-item",
+          "additionalProperties": false,
+          "properties": {
+            "actionable": {
+              "type": "boolean"
+            },
+            "attentionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "category": {
+              "anyOf": [
+                {
+                  "const": "needs_input",
+                  "type": "string"
+                },
+                {
+                  "const": "completed",
+                  "type": "string"
+                },
+                {
+                  "const": "failed",
+                  "type": "string"
+                },
+                {
+                  "const": "interrupted",
+                  "type": "string"
+                },
+                {
+                  "const": "background",
+                  "type": "string"
+                }
+              ]
+            },
+            "occurrence": {
+              "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+              "type": "string"
+            },
+            "resolved": {
+              "type": "boolean"
+            },
+            "revision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            },
+            "sessionId": {
+              "$id": "pi-mob/protocol/uuid",
+              "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+              "type": "string"
+            },
+            "summary": {
+              "maxLength": 240,
+              "minLength": 1,
+              "type": "string"
+            },
+            "superseded": {
+              "type": "boolean"
+            },
+            "turnId": {
+              "maxLength": 128,
+              "minLength": 1,
+              "type": "string"
+            }
+          },
+          "required": [
+            "attentionId",
+            "sessionId",
+            "turnId",
+            "category",
+            "occurrence",
+            "summary",
+            "actionable",
+            "revision",
+            "resolved",
+            "superseded"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "attention.item",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "eventId",
+        "streamId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "cursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "eventId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "$id": "pi-mob/protocol/agent-snapshot",
+          "additionalProperties": false,
+          "properties": {
+            "items": {
+              "items": {
+                "$id": "pi-mob/protocol/agent-record",
+                "additionalProperties": false,
+                "properties": {
+                  "agentId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "completionSummary": {
+                    "maxLength": 1024,
+                    "type": "string"
+                  },
+                  "finishedAt": {
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                    "type": "string"
+                  },
+                  "latestActivity": {
+                    "maxLength": 1024,
+                    "type": "string"
+                  },
+                  "model": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "originSessionId": {
+                    "$id": "pi-mob/protocol/uuid",
+                    "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+                    "type": "string"
+                  },
+                  "originTurnId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "revision": {
+                    "$id": "pi-mob/protocol/revision-token",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                    "type": "string"
+                  },
+                  "startedAt": {
+                    "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                    "type": "string"
+                  },
+                  "state": {
+                    "anyOf": [
+                      {
+                        "const": "running",
+                        "type": "string"
+                      },
+                      {
+                        "const": "blocked",
+                        "type": "string"
+                      },
+                      {
+                        "const": "needs_input",
+                        "type": "string"
+                      },
+                      {
+                        "const": "completed",
+                        "type": "string"
+                      },
+                      {
+                        "const": "failed",
+                        "type": "string"
+                      },
+                      {
+                        "const": "cancelled",
+                        "type": "string"
+                      },
+                      {
+                        "const": "indeterminate",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "supportedActions": {
+                    "items": {
+                      "anyOf": [
+                        {
+                          "const": "transcript",
+                          "type": "string"
+                        },
+                        {
+                          "const": "steer",
+                          "type": "string"
+                        },
+                        {
+                          "const": "cancel",
+                          "type": "string"
+                        },
+                        {
+                          "const": "compare",
+                          "type": "string"
+                        },
+                        {
+                          "const": "adopt",
+                          "type": "string"
+                        },
+                        {
+                          "const": "merge",
+                          "type": "string"
+                        }
+                      ]
+                    },
+                    "maxItems": 6,
+                    "type": "array",
+                    "uniqueItems": true
+                  },
+                  "task": {
+                    "maxLength": 512,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "transcriptRef": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "worktreeRef": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "agentId",
+                  "task",
+                  "state",
+                  "startedAt",
+                  "originSessionId",
+                  "originTurnId",
+                  "supportedActions",
+                  "revision"
+                ],
+                "type": "object"
+              },
+              "maxItems": 64,
+              "type": "array"
+            },
+            "revision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "revision",
+            "items"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^session:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent.snapshot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "eventId",
+        "streamId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "cursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "eventId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "$id": "pi-mob/protocol/agent-unavailable",
+          "additionalProperties": false,
+          "properties": {
+            "capability": {
+              "const": "agents.v1",
+              "type": "string"
+            },
+            "status": {
+              "$id": "pi-mob/protocol/capability-status",
+              "anyOf": [
+                {
+                  "$id": "pi-mob/protocol/capability-status#available",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "available",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#degraded",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "degraded",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#unavailable",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#stale",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "stale",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "capability",
+            "status"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^host:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "agent.unavailable",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "eventId",
+        "streamId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "cursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "eventId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "$id": "pi-mob/protocol/catalogue-snapshot",
+          "additionalProperties": false,
+          "properties": {
+            "entries": {
+              "items": {
+                "$id": "pi-mob/protocol/catalogue-entry",
+                "additionalProperties": false,
+                "properties": {
+                  "availability": {
+                    "$id": "pi-mob/protocol/capability-status",
+                    "anyOf": [
+                      {
+                        "$id": "pi-mob/protocol/capability-status#available",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "available",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "$id": "pi-mob/protocol/capability-status#degraded",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "degraded",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "reason",
+                          "remediation"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "$id": "pi-mob/protocol/capability-status#unavailable",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "unavailable",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "reason",
+                          "remediation"
+                        ],
+                        "type": "object"
+                      },
+                      {
+                        "$id": "pi-mob/protocol/capability-status#stale",
+                        "additionalProperties": false,
+                        "properties": {
+                          "lastRefreshedAt": {
+                            "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                            "type": "string"
+                          },
+                          "reason": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "remediation": {
+                            "maxLength": 512,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "revision": {
+                            "$id": "pi-mob/protocol/revision-token",
+                            "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                            "type": "string"
+                          },
+                          "source": {
+                            "maxLength": 128,
+                            "minLength": 1,
+                            "type": "string"
+                          },
+                          "state": {
+                            "const": "stale",
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "state",
+                          "reason",
+                          "remediation"
+                        ],
+                        "type": "object"
+                      }
+                    ]
+                  },
+                  "canToggle": {
+                    "type": "boolean"
+                  },
+                  "description": {
+                    "maxLength": 512,
+                    "type": "string"
+                  },
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "entryId": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "invocation": {
+                    "maxLength": 256,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "kind": {
+                    "anyOf": [
+                      {
+                        "const": "skill",
+                        "type": "string"
+                      },
+                      {
+                        "const": "template",
+                        "type": "string"
+                      },
+                      {
+                        "const": "extension",
+                        "type": "string"
+                      },
+                      {
+                        "const": "mcp_server",
+                        "type": "string"
+                      },
+                      {
+                        "const": "mcp_tool",
+                        "type": "string"
+                      }
+                    ]
+                  },
+                  "name": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  },
+                  "reloadRequired": {
+                    "type": "boolean"
+                  },
+                  "revision": {
+                    "$id": "pi-mob/protocol/revision-token",
+                    "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                    "type": "string"
+                  },
+                  "source": {
+                    "maxLength": 128,
+                    "minLength": 1,
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "entryId",
+                  "kind",
+                  "name",
+                  "source",
+                  "availability",
+                  "canToggle",
+                  "reloadRequired",
+                  "revision"
+                ],
+                "type": "object"
+              },
+              "maxItems": 512,
+              "type": "array"
+            },
+            "revision": {
+              "$id": "pi-mob/protocol/revision-token",
+              "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+              "type": "string"
+            }
+          },
+          "required": [
+            "revision",
+            "entries"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^host:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "catalogue.snapshot",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "eventId",
+        "streamId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "cursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "eventId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
+          "$id": "pi-mob/protocol/catalogue-unavailable",
+          "additionalProperties": false,
+          "properties": {
+            "capability": {
+              "const": "catalogue.v1",
+              "type": "string"
+            },
+            "status": {
+              "$id": "pi-mob/protocol/capability-status",
+              "anyOf": [
+                {
+                  "$id": "pi-mob/protocol/capability-status#available",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "available",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#degraded",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "degraded",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#unavailable",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "unavailable",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                },
+                {
+                  "$id": "pi-mob/protocol/capability-status#stale",
+                  "additionalProperties": false,
+                  "properties": {
+                    "lastRefreshedAt": {
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+                      "type": "string"
+                    },
+                    "reason": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "remediation": {
+                      "maxLength": 512,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "revision": {
+                      "$id": "pi-mob/protocol/revision-token",
+                      "pattern": "^[A-Za-z][A-Za-z0-9_.:-]{0,127}$",
+                      "type": "string"
+                    },
+                    "source": {
+                      "maxLength": 128,
+                      "minLength": 1,
+                      "type": "string"
+                    },
+                    "state": {
+                      "const": "stale",
+                      "type": "string"
+                    }
+                  },
+                  "required": [
+                    "state",
+                    "reason",
+                    "remediation"
+                  ],
+                  "type": "object"
+                }
+              ]
+            }
+          },
+          "required": [
+            "capability",
+            "status"
+          ],
+          "type": "object"
+        },
+        "protocol": {
+          "$id": "pi-mob/protocol/version",
+          "additionalProperties": true,
+          "properties": {
+            "major": {
+              "const": 1,
+              "type": "number"
+            },
+            "minor": {
+              "minimum": 0,
+              "type": "integer"
+            }
+          },
+          "required": [
+            "major",
+            "minor"
+          ],
+          "type": "object"
+        },
+        "sentAt": {
+          "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(?:\\.[0-9]{3})?Z$",
+          "type": "string"
+        },
+        "streamId": {
+          "pattern": "^host:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "type": {
+          "const": "catalogue.unavailable",
+          "type": "string"
+        }
+      },
+      "required": [
+        "protocol",
+        "messageId",
+        "type",
+        "sentAt",
+        "payload",
+        "eventId",
+        "streamId",
+        "cursor"
+      ],
+      "type": "object"
+    },
+    {
+      "additionalProperties": true,
+      "properties": {
+        "cursor": {
+          "pattern": "^(0|[1-9][0-9]*)$",
+          "type": "string"
+        },
+        "eventId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "messageId": {
+          "$id": "pi-mob/protocol/uuid",
+          "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+          "type": "string"
+        },
+        "payload": {
           "additionalProperties": true,
           "properties": {
             "optional": {
@@ -9174,6 +10492,18 @@
                   },
                   {
                     "const": "git-ci.v1",
+                    "type": "string"
+                  },
+                  {
+                    "const": "attention.v1",
+                    "type": "string"
+                  },
+                  {
+                    "const": "agents.v1",
+                    "type": "string"
+                  },
+                  {
+                    "const": "catalogue.v1",
                     "type": "string"
                   }
                 ]
@@ -9484,6 +10814,26 @@
                   },
                   {
                     "const": "git.unavailable",
+                    "type": "string"
+                  },
+                  {
+                    "const": "attention.item",
+                    "type": "string"
+                  },
+                  {
+                    "const": "agent.snapshot",
+                    "type": "string"
+                  },
+                  {
+                    "const": "agent.unavailable",
+                    "type": "string"
+                  },
+                  {
+                    "const": "catalogue.snapshot",
+                    "type": "string"
+                  },
+                  {
+                    "const": "catalogue.unavailable",
                     "type": "string"
                   }
                 ]

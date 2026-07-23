@@ -153,6 +153,8 @@ class AppDatabase extends _$AppDatabase {
       await _ensureM12Schema();
       await _ensureM13Schema();
       await _ensureHistorySyncSchema();
+      await _ensureAttentionItemsSchema();
+      await _ensureSearchIndexSchema();
       if (details.wasCreated) {
         await batch((b) {
           b.insert(
@@ -202,6 +204,8 @@ class AppDatabase extends _$AppDatabase {
         'DELETE FROM session_history_sync WHERE host_id = ?',
         [hostId],
       );
+      await resetAttentionItems(hostId);
+      await resetSearchEntries(hostId);
     });
   }
 
@@ -463,6 +467,202 @@ class AppDatabase extends _$AppDatabase {
   Future<List<SessionEntry>> allSessions() => select(sessionEntries).get();
   Future<List<DraftEntry>> allDrafts() => select(draftEntries).get();
 
+  // ---------------------------------------------------------------------
+  // R12 local search index. This deliberately remains raw SQL rather than a
+  // Drift table so it is additive on installations already at schema version
+  // one; the index is always reconstructible from the durable event journal.
+  // ---------------------------------------------------------------------
+
+  static const String kCreateSearchEntries =
+      'CREATE TABLE IF NOT EXISTS search_entries (host_id TEXT NOT NULL, session_id TEXT NOT NULL, source_key TEXT NOT NULL, cursor TEXT NOT NULL, source TEXT NOT NULL, summary TEXT NOT NULL, tokens TEXT NOT NULL, occurred_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (host_id, session_id, source_key))';
+  static const String kCreateSearchSessionIndex =
+      'CREATE INDEX IF NOT EXISTS search_entries_session_idx ON search_entries(host_id, session_id)';
+  static const String kCreateSearchTokenIndex =
+      'CREATE INDEX IF NOT EXISTS search_entries_token_idx ON search_entries(host_id, tokens)';
+
+  Future<void> _ensureSearchIndexSchema() async {
+    await customStatement(kCreateSearchEntries);
+    await customStatement(kCreateSearchSessionIndex);
+    await customStatement(kCreateSearchTokenIndex);
+  }
+
+  Future<void> upsertSearchEntry({
+    required String hostId,
+    required String sessionId,
+    required String sourceKey,
+    required String cursor,
+    required String source,
+    required String summary,
+    required String tokens,
+    required DateTime occurredAt,
+    required DateTime updatedAt,
+  }) async {
+    await _ensureSearchIndexSchema();
+    await customStatement(
+      'INSERT INTO search_entries(host_id,session_id,source_key,cursor,source,summary,tokens,occurred_at,updated_at) '
+      'VALUES(?,?,?,?,?,?,?,?,?) ON CONFLICT(host_id,session_id,source_key) DO UPDATE SET '
+      'cursor=excluded.cursor,source=excluded.source,summary=excluded.summary,tokens=excluded.tokens,occurred_at=excluded.occurred_at,updated_at=excluded.updated_at',
+      <Object?>[
+        hostId,
+        sessionId,
+        sourceKey,
+        cursor,
+        source,
+        summary,
+        tokens,
+        occurredAt.toUtc().toIso8601String(),
+        updatedAt.toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  /// Searches all requested normalized tokens. The bound variables are
+  /// escaped for LIKE so punctuation in user input is never interpreted as a
+  /// wildcard. Cursor sorting uses decimal length before lexical order.
+  Future<List<Map<String, Object?>>> querySearchEntries({
+    required String hostId,
+    required List<String> tokens,
+    required int limit,
+    String? sourceFilter,
+  }) async {
+    await _ensureSearchIndexSchema();
+    if (tokens.isEmpty || limit < 1) return const <Map<String, Object?>>[];
+    final clauses = <String>['host_id = ?'];
+    final values = <Variable<Object>>[Variable<String>(hostId)];
+    if (sourceFilter != null) {
+      clauses.add('source = ?');
+      values.add(Variable<String>(sourceFilter));
+    }
+    for (final token in tokens) {
+      clauses.add("(' ' || tokens || ' ') LIKE ? ESCAPE '\\'");
+      values.add(Variable<String>('% ${_escapeLike(token)} %'));
+    }
+    values.add(Variable<int>(limit));
+    final rows = await customSelect(
+      'SELECT session_id,source_key,cursor,source,summary,tokens,occurred_at,updated_at '
+      'FROM search_entries WHERE ${clauses.join(' AND ')} '
+      'ORDER BY LENGTH(cursor) DESC,cursor DESC,session_id ASC,source_key ASC LIMIT ?',
+      variables: values,
+    ).get();
+    return rows
+        .map(
+          (row) => <String, Object?>{
+            'sessionId': row.read<String>('session_id'),
+            'sourceKey': row.read<String>('source_key'),
+            'cursor': row.read<String>('cursor'),
+            'source': row.read<String>('source'),
+            'summary': row.read<String>('summary'),
+            'tokens': row.read<String>('tokens'),
+            'occurredAt': row.read<String>('occurred_at'),
+            'updatedAt': row.read<String>('updated_at'),
+          },
+        )
+        .toList(growable: false);
+  }
+
+  Future<int> searchEntryCountForSession({
+    required String hostId,
+    required String sessionId,
+  }) async {
+    await _ensureSearchIndexSchema();
+    final row = await customSelect(
+      'SELECT COUNT(*) AS count FROM search_entries WHERE host_id=? AND session_id=?',
+      variables: <Variable<Object>>[
+        Variable<String>(hostId),
+        Variable<String>(sessionId),
+      ],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Future<int> searchEntryCountForHost(String hostId) async {
+    await _ensureSearchIndexSchema();
+    final row = await customSelect(
+      'SELECT COUNT(*) AS count FROM search_entries WHERE host_id=?',
+      variables: <Variable<Object>>[Variable<String>(hostId)],
+    ).getSingle();
+    return row.read<int>('count');
+  }
+
+  Future<List<Map<String, Object?>>> searchEntriesOldestForSession({
+    required String hostId,
+    required String sessionId,
+    required int limit,
+  }) async {
+    await _ensureSearchIndexSchema();
+    final rows = await customSelect(
+      'SELECT source_key,cursor FROM search_entries WHERE host_id=? AND session_id=? '
+      'ORDER BY LENGTH(cursor) ASC,cursor ASC,source_key ASC LIMIT ?',
+      variables: <Variable<Object>>[
+        Variable<String>(hostId),
+        Variable<String>(sessionId),
+        Variable<int>(limit),
+      ],
+    ).get();
+    return rows
+        .map(
+          (row) => <String, Object?>{
+            'sourceKey': row.read<String>('source_key'),
+            'cursor': row.read<String>('cursor'),
+          },
+        )
+        .toList(growable: false);
+  }
+
+  Future<List<Map<String, Object?>>> searchEntriesOldestForHost({
+    required String hostId,
+    required int limit,
+  }) async {
+    await _ensureSearchIndexSchema();
+    final rows = await customSelect(
+      'SELECT session_id,source_key FROM search_entries WHERE host_id=? '
+      'ORDER BY LENGTH(cursor) ASC,cursor ASC,session_id ASC,source_key ASC LIMIT ?',
+      variables: <Variable<Object>>[
+        Variable<String>(hostId),
+        Variable<int>(limit),
+      ],
+    ).get();
+    return rows
+        .map(
+          (row) => <String, Object?>{
+            'sessionId': row.read<String>('session_id'),
+            'sourceKey': row.read<String>('source_key'),
+          },
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> removeSearchEntriesForSession({
+    required String hostId,
+    required String sessionId,
+  }) async {
+    await _ensureSearchIndexSchema();
+    await customStatement(
+      'DELETE FROM search_entries WHERE host_id=? AND session_id=?',
+      <Object?>[hostId, sessionId],
+    );
+  }
+
+  Future<void> removeSearchEntry({
+    required String hostId,
+    required String sessionId,
+    required String sourceKey,
+  }) async {
+    await _ensureSearchIndexSchema();
+    await customStatement(
+      'DELETE FROM search_entries WHERE host_id=? AND session_id=? AND source_key=?',
+      <Object?>[hostId, sessionId, sourceKey],
+    );
+  }
+
+  Future<void> resetSearchEntries(String hostId) async {
+    await _ensureSearchIndexSchema();
+    await customStatement(
+      'DELETE FROM search_entries WHERE host_id=?',
+      <Object?>[hostId],
+    );
+  }
+
   Future<void> _ensureHistorySyncSchema() async {
     await customStatement('''
       CREATE TABLE IF NOT EXISTS session_history_sync (
@@ -534,6 +734,82 @@ class AppDatabase extends _$AppDatabase {
       PRIMARY KEY (host_id, session_id)
     )
   ''';
+
+  // R7 — durable per-attention storage for the mobile-authoritative `read`
+  // marker. The wire `attention.item` payload is stored verbatim so a
+  // reconnecting client can rehydrate the projection without relying on
+  // an in-memory mirror. `is_read` is the mobile-authoritative flag the
+  // schema cannot enforce; the host never sees it.
+  static const String kCreateAttentionItems = '''
+    CREATE TABLE IF NOT EXISTS attention_items (
+      host_id TEXT NOT NULL,
+      attention_id TEXT NOT NULL,
+      session_id TEXT NOT NULL,
+      payload_json TEXT NOT NULL,
+      is_read INTEGER NOT NULL DEFAULT 0,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (host_id, attention_id)
+    )
+  ''';
+
+  Future<void> _ensureAttentionItemsSchema() async =>
+      customStatement(kCreateAttentionItems);
+
+  Future<void> upsertAttentionItem({
+    required String hostId,
+    required String attentionId,
+    required String sessionId,
+    required String payloadJson,
+    required DateTime updatedAt,
+  }) async {
+    await _ensureAttentionItemsSchema();
+    await customStatement(
+      'INSERT INTO attention_items(host_id,attention_id,session_id,payload_json,is_read,updated_at) '
+      'VALUES(?,?,?,?,0,?) ON CONFLICT(host_id,attention_id) DO UPDATE SET '
+      'session_id=excluded.session_id,payload_json=excluded.payload_json,updated_at=excluded.updated_at',
+      <Object?>[
+        hostId,
+        attentionId,
+        sessionId,
+        payloadJson,
+        updatedAt.toUtc().toIso8601String(),
+      ],
+    );
+  }
+
+  Future<List<Map<String, Object?>>> attentionItemsForHost(
+    String hostId,
+  ) async {
+    await _ensureAttentionItemsSchema();
+    final rows = await customSelect(
+      'SELECT payload_json,is_read FROM attention_items WHERE host_id=? ORDER BY updated_at DESC',
+      variables: <Variable<Object>>[Variable<String>(hostId)],
+    ).get();
+    return rows
+        .map(
+          (row) => <String, Object?>{
+            'payloadJson': row.read<String>('payload_json'),
+            'isRead': row.read<int>('is_read') != 0,
+          },
+        )
+        .toList(growable: false);
+  }
+
+  Future<void> markAttentionItemRead(String hostId, String attentionId) async {
+    await _ensureAttentionItemsSchema();
+    await customStatement(
+      'UPDATE attention_items SET is_read=1 WHERE host_id=? AND attention_id=?',
+      <Object?>[hostId, attentionId],
+    );
+  }
+
+  Future<void> resetAttentionItems(String hostId) async {
+    await _ensureAttentionItemsSchema();
+    await customStatement(
+      'DELETE FROM attention_items WHERE host_id=?',
+      <Object?>[hostId],
+    );
+  }
 
   static const String kCreateSubscriptionSet = '''
     CREATE TABLE IF NOT EXISTS subscription_set (
@@ -864,6 +1140,11 @@ class AppDatabase extends _$AppDatabase {
 }
 
 String _bootstrapInstallationId() => const Uuid().v4().toLowerCase();
+
+String _escapeLike(String value) => value
+    .replaceAll('\\', '\\\\')
+    .replaceAll('%', '\\%')
+    .replaceAll('_', '\\_');
 
 QueryExecutor _openConnection() {
   return driftDatabase(name: 'pi_mob');

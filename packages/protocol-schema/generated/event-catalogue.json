@@ -328,5 +328,30 @@
     "class": "event",
     "stream": "host",
     "type": "git.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "attention.item"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "agent.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "agent.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "catalogue.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "catalogue.unavailable"
   }
 ]
