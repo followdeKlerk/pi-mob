@@ -8,7 +8,6 @@ import '../../sessions/observer_banner.dart';
 import '../../sessions/session_view_data.dart' as session_ui;
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
-import 'trust_review.dart';
 
 /// Session and workspace control surface shown on the Sessions destination.
 ///
@@ -56,9 +55,6 @@ class _WorkspaceSessionPanelState extends State<WorkspaceSessionPanel> {
             coordinator: widget.coordinator,
             onSelect: (entry) => Navigator.of(sheetContext).pop(entry),
             onCancel: () => Navigator.of(sheetContext).pop(),
-            onApproveTrust: (entry) async {
-              await widget.coordinator.approveWorkspaceTrust(entry.workspaceId);
-            },
           ),
         );
       },
@@ -66,21 +62,6 @@ class _WorkspaceSessionPanelState extends State<WorkspaceSessionPanel> {
     if (selected != null) {
       await widget.coordinator.selectWorkspaceEntry(selected);
     }
-  }
-
-  Future<void> _openTrustReviewForSelected() async {
-    final selected = widget.coordinator.selectedWorkspace;
-    if (selected == null) return;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => InlineTrustReview(
-        entry: selected,
-        onApprove: () async {
-          await widget.coordinator.approveWorkspaceTrust(selected.workspaceId);
-          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-        },
-      ),
-    );
   }
 
   WorkspaceEntry? _workspaceFor(String? workspaceId) {
@@ -132,7 +113,6 @@ class _WorkspaceSessionPanelState extends State<WorkspaceSessionPanel> {
     final selectedSessionWorkspace = _workspaceFor(
       selectedSession?.workspaceId,
     );
-    final trustRequired = coordinator.requiresTrustApproval;
     return Card(
       key: const Key('workspace-session-card'),
       child: Padding(
@@ -249,13 +229,6 @@ class _WorkspaceSessionPanelState extends State<WorkspaceSessionPanel> {
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-              ),
-            ],
-            if (trustRequired) ...[
-              const SizedBox(height: PiSpacing.sm),
-              TrustRequiredBanner(
-                entry: selectedWorkspace,
-                onReview: _openTrustReviewForSelected,
               ),
             ],
           ],

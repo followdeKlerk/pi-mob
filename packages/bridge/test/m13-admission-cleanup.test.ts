@@ -26,7 +26,7 @@ describe("M13 admission, retention, and cleanup", () => {
         if (type === "prompt.submit" && Array.isArray(payload.attachmentIds) && payload.attachmentIds.length) throw new Error("attachment_unavailable");
       },
     };
-    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "fixture", piVersion: "0.80.6", hostDisplayName: "fixture" });
+    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "fixture", piVersion: "0.82.0", hostDisplayName: "fixture" });
     runtime.setReadyForTest(true);
     const commandId = "33333333-3333-4333-8333-333333333333";
     expect(() => runtime.command(connection, {

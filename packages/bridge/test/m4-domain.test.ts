@@ -62,7 +62,7 @@ describe("M4 runtime startup recovery", () => {
     const identity = store.identity(); store.ensureStream(`host:${identity.hostId}`, "host");
     store.acceptCommand({ commandId: "resume", type: "session.create", scopeKey: `host:${identity.hostId}`, streamId: `host:${identity.hostId}`, semanticHash: "a", payload: {} });
     store.acceptCommand({ commandId: "uncertain-restart", type: "session.create", scopeKey: `host:${identity.hostId}`, streamId: `host:${identity.hostId}`, semanticHash: "b", payload: {} }); store.transitionCommand("uncertain-restart", ["accepted"], "running"); store.close();
-    store = new BridgeStore(path); let dispatches = 0; const runtime = new DurableBridgeRuntime({ store, adapter: { async dispatch() { dispatches += 1; } }, bridgeVersion: "fixture", piVersion: "0.80.6", hostDisplayName: "fixture" });
+    store = new BridgeStore(path); let dispatches = 0; const runtime = new DurableBridgeRuntime({ store, adapter: { async dispatch() { dispatches += 1; } }, bridgeVersion: "fixture", piVersion: "0.82.0", hostDisplayName: "fixture" });
     expect(runtime.ready().ready).toBe(false); expect(await runtime.start()).toEqual({ resumed: 1, indeterminate: 1 }); expect(runtime.ready().ready).toBe(true);
     expect(dispatches).toBe(1); expect(store.command("resume")?.state).toBe("completed"); expect(store.command("uncertain-restart")?.state).toBe("indeterminate"); store.close();
   });
@@ -72,7 +72,7 @@ describe("M4 runtime routing and bounded subscriptions", () => {
   test("does not create phantom sessions and filters summary replay/snapshots", async () => {
     const { store, stream } = setup(); const identity = store.identity(); store.ensureStream(`host:${identity.hostId}`, "host");
     store.appendEvent(stream, "assistant.delta", { sessionId: "s", text: "private transcript" }); store.appendEvent(stream, "command.state", { commandId: "c", state: "accepted" });
-    const runtime = new DurableBridgeRuntime({ store, adapter: { async dispatch() {} }, bridgeVersion: "fixture", piVersion: "0.80.6", hostDisplayName: "fixture" }); await runtime.start();
+    const runtime = new DurableBridgeRuntime({ store, adapter: { async dispatch() {} }, bridgeVersion: "fixture", piVersion: "0.82.0", hostDisplayName: "fixture" }); await runtime.start();
     const connection = { connectionId: "connection", installationId: "installation", subscriptions: new Set<string>() };
     expect(() => runtime.command(connection, { type: "session.activate", commandId: "missing-command", leaseId: "missing", payload: { sessionId: "missing" } })).toThrow("session does not exist");
     expect(store.sessionExists("missing")).toBe(false);

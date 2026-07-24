@@ -10,14 +10,16 @@ import { BridgeStore } from "../core/store";
 import { parseInstallConfig } from "./install-config";
 
 export interface CommandResult { readonly exitCode: number; readonly stdout: string; readonly stderr: string }
-export interface CommandRunner { run(executable: string, args: readonly string[]): Promise<CommandResult> }
+export interface CommandRunner { run(executable: string, args: readonly string[], opts?: { readonly inheritParentEnv?: boolean }): Promise<CommandResult> }
 
 export class BunCommandRunner implements CommandRunner {
-  async run(executable: string, args: readonly string[]): Promise<CommandResult> {
+  async run(executable: string, args: readonly string[], opts: { readonly inheritParentEnv?: boolean } = {}): Promise<CommandResult> {
     if (!executable.startsWith("/")) throw new Error("system executable must be absolute");
-    const env = Object.fromEntries(
-      ["HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR"].flatMap((key) => process.env[key] ? [[key, process.env[key]!]] : []),
-    );
+    const env = opts.inheritParentEnv
+      ? { ...process.env as Record<string, string> }
+      : Object.fromEntries(
+        ["HOME", "USER", "LOGNAME", "LANG", "LC_ALL", "TMPDIR"].flatMap((key) => process.env[key] ? [[key, process.env[key]!]] : []),
+      );
     env.PATH = "/usr/bin:/bin:/usr/sbin:/sbin:/usr/local/bin:/opt/homebrew/bin";
     const proc = Bun.spawn([executable, ...args], { stdout: "pipe", stderr: "pipe", env });
     const [exitCode, stdout, stderr] = await Promise.all([
@@ -29,8 +31,8 @@ export class BunCommandRunner implements CommandRunner {
   }
 }
 
-async function checked(runner: CommandRunner, executable: string, args: readonly string[]): Promise<CommandResult> {
-  const result = await runner.run(executable, args);
+async function checked(runner: CommandRunner, executable: string, args: readonly string[], opts: { readonly inheritParentEnv?: boolean } = {}): Promise<CommandResult> {
+  const result = await runner.run(executable, args, opts);
   if (result.exitCode !== 0) throw new Error(`command failed (${result.exitCode}): ${executable} ${args[0] ?? ""}`);
   return result;
 }
@@ -49,10 +51,44 @@ export class LaunchAgentDriver {
   enable(label: string): Promise<CommandResult> { return checked(this.runner, this.launchctl, ["enable", `${this.domain}/${label}`]); }
   kickstart(label: string): Promise<CommandResult> { return checked(this.runner, this.launchctl, ["kickstart", "-k", `${this.domain}/${label}`]); }
   print(label: string): Promise<CommandResult> { return checked(this.runner, this.launchctl, ["print", `${this.domain}/${label}`]); }
+  async isLoaded(label: string): Promise<boolean> {
+    try { await this.print(label); return true; } catch { return false; }
+  }
 }
 
 /** Real persistent Serve driver. It round-trips the complete Serve JSON so
  * callers can alter only the bridge-owned route and preserve every other route. */
+export interface DetectedTailscaleState {
+  readonly installed: boolean;
+  readonly loggedIn: boolean;
+  readonly magicDnsName: string | null;
+  readonly detail?: string;
+}
+
+/** Read-only Tailscale readiness detection. Never installs software or invokes `tailscale up`. */
+export class TailscaleStatusDriver {
+  constructor(
+    private readonly runner: CommandRunner,
+    private readonly executable: string | null,
+  ) {}
+
+  async probe(): Promise<DetectedTailscaleState> {
+    if (!this.executable) return { installed: false, loggedIn: false, magicDnsName: null, detail: "Tailscale CLI/app not found" };
+    const result = await this.runner.run(this.executable, ["status", "--json"], { inheritParentEnv: true });
+    if (result.exitCode !== 0) {
+      return { installed: true, loggedIn: false, magicDnsName: null, detail: "Tailscale is installed but not logged in" };
+    }
+    try {
+      const value = JSON.parse(result.stdout) as { BackendState?: unknown; Self?: { DNSName?: unknown } };
+      const dns = typeof value.Self?.DNSName === "string" ? value.Self.DNSName.replace(/\.$/, "") : null;
+      const loggedIn = value.BackendState === "Running";
+      return { installed: true, loggedIn, magicDnsName: loggedIn && dns?.endsWith(".ts.net") ? dns : null };
+    } catch {
+      return { installed: true, loggedIn: false, magicDnsName: null, detail: "Tailscale status returned invalid JSON" };
+    }
+  }
+}
+
 export class TailscaleCliServeDriver implements ServeDriver {
   constructor(
     private readonly runner: CommandRunner,
@@ -60,7 +96,7 @@ export class TailscaleCliServeDriver implements ServeDriver {
     private readonly ownershipFile?: string,
   ) {}
   async listRoutes(): Promise<readonly ServeRoute[]> {
-    const result = await checked(this.runner, this.tailscale, ["serve", "status", "--json"]);
+    const result = await checked(this.runner, this.tailscale, ["serve", "status", "--json"], { inheritParentEnv: true });
     const value = JSON.parse(result.stdout) as { routes?: ServeRoute[]; Web?: Record<string, { Handlers?: Record<string, { Proxy?: string }> }>; AllowFunnel?: Record<string, boolean> } | ServeRoute[];
     if (Array.isArray(value)) return value;
     if (Array.isArray(value.routes)) return value.routes;
@@ -96,14 +132,14 @@ export class TailscaleCliServeDriver implements ServeDriver {
       if (current.some((route) => route !== currentOwned && route.source.tcp?.port === currentPort)) {
         throw new Error("refusing to remove a shared Serve HTTPS port");
       }
-      await checked(this.runner, this.tailscale, ["serve", `--https=${currentPort}`, "off"]);
+      await checked(this.runner, this.tailscale, ["serve", `--https=${currentPort}`, "off"], { inheritParentEnv: true });
       if (this.ownershipFile && existsSync(this.ownershipFile)) unlinkSync(this.ownershipFile);
       return;
     }
     const handler = owned.handlers.find((entry) => entry.kind === "https" || entry.kind === "forward");
     const port = owned.source.tcp?.port ?? 443;
     if (!handler || !("address" in handler)) throw new Error("owned Serve route has no target");
-    await checked(this.runner, this.tailscale, ["serve", "--bg", `--https=${port}`, handler.address]);
+    await checked(this.runner, this.tailscale, ["serve", "--bg", `--https=${port}`, handler.address], { inheritParentEnv: true });
     if (this.ownershipFile) {
       mkdirSync(dirname(this.ownershipFile), { recursive: true, mode: 0o700 });
       writeFileSync(this.ownershipFile, JSON.stringify({ port, address: handler.address }), { mode: 0o600 });
@@ -144,8 +180,8 @@ export class MacLifecycleDriver {
     label: string;
     plistPath: string;
     installPaths: InstallPaths;
-    targetBundleRoot: string;
-    readyEndpoint: URL;
+    targetBundleRoot?: string;
+    readyEndpoint?: URL;
   }) {}
   async installAndVerify(paths: InstallPaths, port: number): Promise<void> {
     await this.options.launchAgent.bootstrap(paths.plistPath);
@@ -154,10 +190,41 @@ export class MacLifecycleDriver {
     await waitForReady(new URL(`http://127.0.0.1:${port}/readyz`));
     await applyServeRoute({ driver: this.options.serve, tcpPort: port });
   }
+  async lifecycleState(port: number): Promise<{ launchAgentLoaded: boolean; listenerReady: boolean }> {
+    const launchAgentLoaded = await this.options.launchAgent.isLoaded(this.options.label);
+    let listenerReady = false;
+    if (launchAgentLoaded) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/readyz`, { signal: AbortSignal.timeout(2_000) });
+        listenerReady = response.ok;
+      } catch { listenerReady = false; }
+    }
+    return { launchAgentLoaded, listenerReady };
+  }
+  async startConfigured(port: number): Promise<{ alreadyRunning: boolean }> {
+    const before = await this.lifecycleState(port);
+    if (!before.listenerReady) {
+      if (!before.launchAgentLoaded) {
+        await this.options.launchAgent.bootstrap(this.options.plistPath);
+        await this.options.launchAgent.enable(this.options.label);
+      }
+      await this.options.launchAgent.kickstart(this.options.label);
+      await waitForReady(new URL(`http://127.0.0.1:${port}/readyz`));
+    }
+    await applyServeRoute({ driver: this.options.serve, tcpPort: port });
+    return { alreadyRunning: before.listenerReady };
+  }
+  async stopConfigured(): Promise<{ alreadyStopped: boolean }> {
+    const loaded = await this.options.launchAgent.isLoaded(this.options.label);
+    if (loaded) await this.options.launchAgent.bootout(this.options.label);
+    await removeOwnedServeRoute({ driver: this.options.serve });
+    return { alreadyStopped: !loaded };
+  }
   preflight(): void {
-    if (!existsSync(this.options.targetBundleRoot)) throw new Error("target release bundle is missing");
+    if (!this.options.targetBundleRoot || !existsSync(this.options.targetBundleRoot)) throw new Error("target release bundle is missing; pass --target-bundle for update/swap");
   }
   verifyTarget(manifest: ReleaseManifest): void {
+    if (!this.options.targetBundleRoot) throw new Error("target release bundle is required for update/swap");
     const result = verifyManifest(manifest, this.options.targetBundleRoot, createNodeFileSystemPort());
     if (!result.ok) throw new Error("target release checksum verification failed");
   }
@@ -176,6 +243,7 @@ export class MacLifecycleDriver {
   }
   async stop(): Promise<void> { try { await this.options.launchAgent.bootout(this.options.label); } catch { /* not loaded */ } }
   swap(paths: InstallPaths, manifest: ReleaseManifest): void {
+    if (!this.options.targetBundleRoot) throw new Error("target release bundle is required for update/swap");
     const daemon = manifest.artifacts.find((entry) => entry.name === "bridge-daemon");
     const extension = manifest.artifacts.find((entry) => entry.kind === "extension");
     if (!daemon) throw new Error("release daemon artifact is missing");
@@ -183,14 +251,20 @@ export class MacLifecycleDriver {
     if (extension) atomicReplace(join(this.options.targetBundleRoot, extension.path), join(paths.installRoot, "release", "extensions", "pi-mob-extension.js"));
   }
   migrate(_migrationClass: MigrationClass): void { const store = new BridgeStore(join(this.currentPaths().stateRoot, "bridge.sqlite")); store.close(); }
-  async start(): Promise<void> { await this.options.launchAgent.bootstrap(this.options.plistPath); await this.options.launchAgent.kickstart(this.options.label); }
+  async start(): Promise<void> {
+    if (!(await this.options.launchAgent.isLoaded(this.options.label))) {
+      await this.options.launchAgent.bootstrap(this.options.plistPath);
+      await this.options.launchAgent.enable(this.options.label);
+    }
+    await this.options.launchAgent.kickstart(this.options.label);
+  }
   verifyRunning(): Promise<void> {
-    let endpoint = this.options.readyEndpoint;
     if (existsSync(this.options.installPaths.configFile)) {
       const config = parseInstallConfig(readFileSync(this.options.installPaths.configFile, "utf8"));
-      endpoint = new URL(`http://127.0.0.1:${config.port}/readyz`);
+      return waitForReady(new URL(`http://127.0.0.1:${config.port}/readyz`));
     }
-    return waitForReady(endpoint);
+    if (this.options.readyEndpoint) return waitForReady(this.options.readyEndpoint);
+    throw new Error("install config is required to determine the readiness port");
   }
   verifyBackup(backupId: string): void {
     const selected = this.resolveBackupId(this.currentPaths(), backupId);

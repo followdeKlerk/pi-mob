@@ -72,7 +72,7 @@ describe("M6 slow-consumer continuation and replay", () => {
       store, rpc,
       workspace: { workspaceId: "77777777-7777-4777-8777-777777777777", rootPath: "/private/fixture", displayName: "fixture", fingerprint: "fixture", policyMode: "full" },
     });
-    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.80.6", hostDisplayName: "fixture" });
+    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.82.0", hostDisplayName: "fixture" });
     await runtime.start(); let server = createBridgeServer({ runtime, port: 0, outboundBackpressureLimit: 1_000_000 }); servers.push(server);
 
     const submission = runtime.commands.submit({ commandId: "22222222-2222-4222-8222-222222222222", type: "prompt.submit", payload: { sessionId, deliveryMode: "immediate", message: "once", attachmentIds: [] }, scopeKey: sessionStream, streamId: sessionStream });
@@ -132,7 +132,7 @@ describe("M6 slow-consumer continuation and replay", () => {
     const actualDigest = createHash("sha256").update(JSON.stringify(replayed)).digest("hex");
     expect(finalCursor).toBe(expected.at(-1)!.cursor);
     expect(actualDigest).toBe(expectedDigest);
-    expect(replayed.at(-1)?.[1]).toBe("turn.settled");
+    expect(replayed.filter(([, type]) => type !== "pi.rpc.event").at(-1)?.[1]).toBe("turn.settled");
     expect(rpc.requests).toBe(1);
     await new Promise<void>((resolve) => {
       replay.ws.onclose = () => resolve();

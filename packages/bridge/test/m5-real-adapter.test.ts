@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { BridgeStore } from "../src/core/store";
 import { OneSessionPiAdapter } from "../src/pi/one-session-adapter";
 import { RpcProcess } from "../src/pi/rpc-process";
+import { resolvePiLaunchConfig } from "../src/pi/launch-config";
 
 const workspaceId = "11111111-1111-4111-8111-111111111111";
 const sessionId = "22222222-2222-4222-8222-222222222222";
@@ -19,10 +20,13 @@ describe("M5 real Pi adapter proof", () => {
     const home = join(root, "home"); const sessions = join(root, "sessions");
     mkdirSync(home); mkdirSync(sessions); writeFileSync(join(root, "contract-input.txt"), "fixture input\n");
     const rpc = new RpcProcess({
-      executable: new URL("../node_modules/.bin/pi", import.meta.url).pathname,
+      launchConfig: resolvePiLaunchConfig({
+        executable: new URL("../node_modules/.bin/pi", import.meta.url).pathname,
+        cwd: root,
+        env: { HOME: home, LANG: "C.UTF-8", PATH: process.env.PATH ?? "/usr/bin:/bin" },
+      }),
       args: ["--mode", "rpc", "--no-extensions", "--extension", new URL("./fixtures/contract-provider.ts", import.meta.url).pathname, "--session-dir", sessions, "--provider", "pi-mob-fixture", "--model", "contract"],
-      cwd: root, environment: { HOME: home, LANG: "C.UTF-8" },
-      pathDirs: ["/usr/local/bin", "/usr/bin", "/bin"], defaultRequestTimeoutMs: 10_000, closeGracePeriodMs: 1_000,
+      defaultRequestTimeoutMs: 10_000, closeGracePeriodMs: 1_000,
     });
     const store = new BridgeStore(join(root, "bridge.sqlite"));
     store.ensureStream(`host:${store.identity().hostId}`, "host");
@@ -43,7 +47,7 @@ describe("M5 real Pi adapter proof", () => {
       const events = store.listEvents(`session:${sessionId}`);
       expect(events.some((event) => event.type === "tool.started")).toBe(true);
       expect(events.some((event) => event.type === "tool.completed")).toBe(true);
-      expect(events.at(-1)?.type).toBe("turn.settled");
+      expect(events.filter((event) => event.type !== "pi.rpc.event").at(-1)?.type).toBe("turn.settled");
       expect(events.map((event) => event.cursor)).toEqual(events.map((_, index) => String(index + 1)));
 
       await expect(adapter.dispatch(command("55555555-5555-4555-8555-555555555555", "turn.abort", `session:${sessionId}`, { sessionId }))).resolves.toBeUndefined();
@@ -57,10 +61,13 @@ describe("M5 real Pi adapter proof", () => {
     const home = join(root, "home"); const sessions = join(root, "sessions");
     mkdirSync(home); mkdirSync(sessions);
     const rpc = new RpcProcess({
-      executable: new URL("../node_modules/.bin/pi", import.meta.url).pathname,
+      launchConfig: resolvePiLaunchConfig({
+        executable: new URL("../node_modules/.bin/pi", import.meta.url).pathname,
+        cwd: root,
+        env: { HOME: home, LANG: "C.UTF-8", PATH: process.env.PATH ?? "/usr/bin:/bin" },
+      }),
       args: ["--mode", "rpc", "--no-extensions", "--extension", new URL("./fixtures/slow-provider.ts", import.meta.url).pathname, "--session-dir", sessions, "--provider", "pi-mob-slow", "--model", "slow"],
-      cwd: root, environment: { HOME: home, LANG: "C.UTF-8" },
-      pathDirs: ["/usr/local/bin", "/usr/bin", "/bin"], defaultRequestTimeoutMs: 10_000, closeGracePeriodMs: 1_000,
+      defaultRequestTimeoutMs: 10_000, closeGracePeriodMs: 1_000,
     });
     const store = new BridgeStore(join(root, "bridge.sqlite"));
     store.ensureStream(`host:${store.identity().hostId}`, "host");

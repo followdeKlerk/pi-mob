@@ -4,6 +4,11 @@
  * transport. Install, private Serve exposure, pairing, and service lifecycle
  * land in M7.
  *
+ * The bridge intentionally owns no policy / trust / read-only machinery.
+ * Pi's normal execution model is the default. The legacy read-only path
+ * has been removed from the default code path; persisted databases that
+ * still record `policyMode: "read_only"` are coerced to `"full"`.
+ *
  * CLI:
  *
  *   bun packages/bridge/src/daemon.ts \
@@ -23,14 +28,15 @@
  *   --help                            print usage
  */
 
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, basename, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
+import { resolvePiLaunchConfig, type PiLaunchConfig } from "./pi/launch-config";
 import { importExternalSessionHistory } from "./pi/external-history";
-import { OneSessionPiAdapter, type OneSessionPolicyBridge, type OneSessionWorkspaceConfig } from "./pi/one-session-adapter";
+import { OneSessionPiAdapter, type OneSessionWorkspaceConfig } from "./pi/one-session-adapter";
 import { BridgeStore } from "./core/store";
-import { DurableBridgeRuntime, type RuntimePolicyHandler } from "./core/runtime";
+import { DurableBridgeRuntime } from "./core/runtime";
 import { createBridgeServer, type BridgeServer } from "./core/server";
 import { AttachmentStore } from "./core/attachments";
 import { createBinaryHttpHandler } from "./core/binary-http";
@@ -46,19 +52,11 @@ import type {
 import { createRedactingLogger, type RedactingLogger } from "./logger";
 import { parseInstallConfig } from "./ops/install-config";
 import {
-  DurableTrustPolicyStore,
-  HostPolicyService,
-  addAllowedRoot,
-  buildTrustManifest,
   canonicalize,
-  createWorkspaceRootsConfig,
-  defaultBoundedSearch,
   deriveRootId,
-  type HostPolicyMode,
-  type WorkspaceRoot,
-  type WorkspaceRootsConfig,
-  type WorkspaceRootId,
   type CanonicalPath,
+  type WorkspaceRootId,
+  type HostPolicyMode,
 } from "./core/workspace-policy";
 
 const PROTOCOL_VERSION = "1.0";
@@ -73,13 +71,25 @@ export interface DaemonOptions {
   readonly displayName?: string;
   readonly rpcArgs?: readonly string[];
   readonly environment?: Readonly<Record<string, string>>;
-  readonly pathDirs?: readonly string[];
   readonly logger?: RedactingLogger;
-  /** M8 — host policy mode seed; ignored on re-launch when persisted state already exists. */
+  /**
+   * @deprecated The bridge no longer owns a host policy. The field is
+   * preserved for back-compat with persisted install configs that still
+   * record `policyMode`; the value is always coerced to `"full"` and a
+   * warning is logged when a non-full value is supplied.
+   */
   readonly policyMode?: HostPolicyMode;
-  /** M8 — extra allowed workspace roots beyond `workspace`. */
+  /**
+   * @deprecated The bridge no longer maintains a multi-root allowlist;
+   * only the single configured `--workspace` is exposed. The field is
+   * accepted but ignored, kept for back-compat with persisted configs.
+   */
   readonly allowedRoots?: readonly string[];
-  /** Loadable host-policy Pi extension. Defaults to the monorepo extension in development. */
+  /**
+   * Optional Pi extension path. The bridge no longer injects a default
+   * policy extension; pass this when the operator wants Pi loaded with
+   * a custom extension. Omit to run Pi with no `--extension` flag.
+   */
   readonly extensionPath?: string;
   /** M15 configured host-side APNs/FCM service. Omit to advertise push unavailable. */
   readonly notificationService?: NotificationService;
@@ -151,19 +161,6 @@ export class UnavailableApnsTransport implements NotificationTransport {
   }
 }
 
-interface DaemonPolicyBootstrap {
-  readonly rootsConfig: WorkspaceRootsConfig;
-  readonly primaryRoot: WorkspaceRoot;
-  readonly trustStore: DurableTrustPolicyStore;
-  readonly hostPolicy: HostPolicyService;
-  readonly handler: RuntimePolicyHandler;
-  readonly hostPolicyMode: HostPolicyMode;
-  /** True when the primary workspace currently passes the start gate
-   *  (trust state == `trusted`). When false, the bridge is up but Pi
-   *  is not running and the owner must approve + activate. */
-  readonly trustGateAllowed: boolean;
-}
-
 export interface DaemonHandle {
   readonly server: BridgeServer;
   readonly runtime: DurableBridgeRuntime;
@@ -171,14 +168,8 @@ export interface DaemonHandle {
   readonly rpc: SupervisedRpcClient;
   readonly store: BridgeStore;
   readonly workspace: OneSessionWorkspaceConfig;
-  /** True when the Pi RPC supervisor has been started. False for an
-   *  untrusted workspace until {@link activate} succeeds. */
+  /** True when the Pi RPC supervisor has been started. */
   readonly rpcStarted: boolean;
-  /** Re-evaluates the trust gate and, if the workspace is trusted,
-   *  starts the Pi RPC supervisor exactly once. Idempotent and
-   *  no-throw when the gate is still closed; throws when the runtime
-   *  cannot accept activation (e.g. supervisor already drained). */
-  activate(): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -215,16 +206,12 @@ function compactSessionName(value: string, fallback: string): string {
   return singleLine.length > 72 ? `${singleLine.slice(0, 69)}…` : singleLine;
 }
 
-function discoverHostModels(
-  executable: string,
-  cwd: string,
-  environment: Record<string, string | undefined> = {},
-): Array<Record<string, unknown>> {
+function discoverHostModels(launchConfig: PiLaunchConfig): Array<Record<string, unknown>> {
   try {
     const result = Bun.spawnSync({
-      cmd: [executable, "--list-models"],
-      cwd,
-      env: { ...process.env, ...environment },
+      cmd: [launchConfig.executable, "--list-models"],
+      cwd: launchConfig.cwd,
+      env: launchConfig.env,
       stdout: "pipe",
       stderr: "ignore",
     });
@@ -255,8 +242,8 @@ function discoverHostModels(
   }
 }
 
-function discoverPiSessions(workspaceRoot: string): DiscoveredPiSession[] {
-  const home = process.env.HOME;
+function discoverPiSessions(workspaceRoot: string, environment: Readonly<Record<string, string>>): DiscoveredPiSession[] {
+  const home = environment.HOME;
   if (!home) return [];
   const root = join(home, ".pi", "agent", "sessions");
   if (!existsSync(root)) return [];
@@ -322,6 +309,17 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   if (!existsSync(options.workspace)) throw new Error(`workspace does not exist: ${options.workspace}`);
   if (!existsSync(options.executable)) throw new Error(`executable does not exist: ${options.executable}`);
 
+  if (options.policyMode && options.policyMode !== "full") {
+    options.logger?.log({ class: "warning", event: "policy-mode-deprecated" });
+  }
+  if (options.allowedRoots && options.allowedRoots.length > 0) {
+    options.logger?.log({ class: "warning", event: "allowed-root-deprecated" });
+  }
+  if (options.extensionPath) {
+    assertAbsolute("extensionPath", options.extensionPath);
+    if (!existsSync(options.extensionPath)) throw new Error(`extension does not exist: ${options.extensionPath}`);
+  }
+
   const stateDir = resolve(options.stateDir ?? join(tmpdir(), "pi-mob-state"));
   const sessionDir = resolve(options.sessionDir ?? join(tmpdir(), "pi-mob-sessions"));
   mkdirSync(stateDir, { recursive: true, mode: 0o700 });
@@ -331,10 +329,6 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const logger = options.logger ?? createRedactingLogger();
   void logger;
   const displayName = options.displayName ?? basename(options.workspace);
-  // Use the canonical-path UUID-shaped root id so the bridge speaks the
-  // same identifier the runtime / trust store will see after realpath.
-  // Falling back to the lexical path keeps the daemon bootable for
-  // workspaces that have not yet been materialised on disk.
   let canonicalWorkspacePath: CanonicalPath;
   try { canonicalWorkspacePath = canonicalize(options.workspace); }
   catch { canonicalWorkspacePath = options.workspace; }
@@ -369,33 +363,20 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     });
   }
 
-  // Bootstrap trust BEFORE creating the RPC supervisor. The trust gate
-  // decides whether the supervisor is started at all on this launch; an
-  // untrusted workspace still boots the bridge so the owner can approve
-  // + activate without a separate restart.
-  const bootstrap = bootstrapPolicy({ store, primaryWorkspacePath: canonicalWorkspacePath, primaryWorkspaceLabel: displayName, requestedPolicyMode: options.policyMode ?? "full", extraRoots: options.allowedRoots ?? [] });
-  const policyFile = join(stateDir, "host-policy.json");
-  const publishPolicy: NonNullable<OneSessionPolicyBridge["publish"]> = (snapshot) => {
-    const effective = bootstrap.hostPolicy.effective();
-    const trust = bootstrap.handler.resolveTrust(bootstrap.primaryRoot.canonicalPath);
-    writeFileSync(policyFile, `${JSON.stringify({
-      mode: snapshot?.policyMode ?? effective.mode,
-      version: snapshot?.policyVersion ?? effective.rules.policyVersion,
-      fingerprint: snapshot?.fingerprint ?? trust.fingerprint,
-      snapshottedAt: snapshot?.snapshottedAt ?? new Date().toISOString(),
-    })}\n`, { mode: 0o600 });
-  };
-  publishPolicy();
+  // One owner-captured launch contract is shared by model discovery and every
+  // primary or per-session Pi RPC. Per-session arguments/cwds are explicit
+  // overlays, while executable and environment never diverge.
+  const piLaunchConfig = resolvePiLaunchConfig({
+    executable: options.executable,
+    cwd: options.workspace,
+    env: { ...(options.environment ?? {}) },
+  });
 
   // Pi's normal TUI and pi-mob historically used separate session
   // directories. Import the canonical TUI index into the bridge directory so
   // mobile can discover and resume existing conversations. The JSONL remains
   // Pi-owned; only bounded metadata and the absolute resume path are stored.
-  const effectivePolicy = bootstrap.hostPolicy.effective();
-  const primaryTrust = bootstrap.handler.resolveTrust(
-    bootstrap.primaryRoot.canonicalPath,
-  );
-  for (const session of discoverPiSessions(canonicalWorkspacePath)) {
+  for (const session of discoverPiSessions(canonicalWorkspacePath, piLaunchConfig.env)) {
     if (store.sessionExists(session.sessionId)) continue;
     let sessionWorkspaceId: WorkspaceRootId;
     try { sessionWorkspaceId = deriveRootId(canonicalize(session.cwd)); }
@@ -408,10 +389,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       attentionState: "none",
       controllerState: "none",
       queueCount: 0,
-      policyMode: effectivePolicy.mode,
-      policyVersion: effectivePolicy.rules.policyVersion,
-      trustFingerprint: primaryTrust.fingerprint,
-      lastPolicySnapshotAt: new Date().toISOString(),
+      policyMode: "full" as HostPolicyMode,
       workspaceId: sessionWorkspaceId,
       workspaceRootPath: session.cwd,
       workspaceRelativePath: relativePath,
@@ -437,25 +415,13 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     }
   }
 
-  const developmentExtension = resolve(import.meta.dir, "../../pi-extension/src/extension.ts");
-  const extensionPath = options.extensionPath ?? (existsSync(developmentExtension) ? developmentExtension : undefined);
-  if (!extensionPath) throw new Error("host policy extension path is required");
-  assertAbsolute("extensionPath", extensionPath);
-  if (!existsSync(extensionPath)) throw new Error(`host policy extension does not exist: ${extensionPath}`);
-
+  const extensionArgs: string[] = options.extensionPath ? ["--extension", options.extensionPath] : [];
   const rpc = new SupervisedRpcClient({
     processId: workspaceId,
-    beforeSpawn: () => {
-      const trust = bootstrap.handler.resolveTrust(bootstrap.primaryRoot.canonicalPath);
-      if (trust.status !== "trusted") throw new Error("workspace_trust_required");
-    },
     initialState: restoredRuntime === "crash_loop" ? "crash_loop" : "stopped",
     rpc: {
-      executable: options.executable,
-      args: ["--mode", "rpc", "--session-dir", sessionDir, "--extension", extensionPath, ...(options.rpcArgs ?? [])],
-      cwd: options.workspace,
-      environment: { ...(options.environment ?? {}), PI_MOB_HOST_POLICY_FILE: policyFile },
-      pathDirs: options.pathDirs ?? ["/usr/local/bin", "/usr/bin", "/bin"],
+      launchConfig: piLaunchConfig,
+      args: ["--mode", "rpc", "--session-dir", sessionDir, ...extensionArgs, ...(options.rpcArgs ?? [])],
       defaultRequestTimeoutMs: 30_000,
       closeGracePeriodMs: 5_000,
     },
@@ -487,25 +453,16 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     },
   });
   let rpcStarted = false;
-  if (bootstrap.trustGateAllowed && restoredRuntime !== "crash_loop") {
+  if (restoredRuntime !== "crash_loop") {
     await rpc.start();
     rpcStarted = true;
   }
-  const policyBridge: OneSessionPolicyBridge = {
-    hostMode: () => bootstrap.hostPolicy.effective().mode,
-    publish: publishPolicy,
-    snapshotModeFor: (sessionId) => {
-      const state = store.sessionState(sessionId) ?? {};
-      if (typeof state.policyMode !== "string" || typeof state.policyVersion !== "string" || typeof state.trustFingerprint !== "string" || typeof state.lastPolicySnapshotAt !== "string") return null;
-      return { policyMode: state.policyMode as HostPolicyMode, policyVersion: state.policyVersion, fingerprint: state.trustFingerprint, snapshottedAt: state.lastPolicySnapshotAt };
-    },
-  };
   const config: OneSessionWorkspaceConfig = {
     workspaceId,
     rootPath: options.workspace,
     displayName,
     fingerprint,
-    policyMode: bootstrap.hostPolicyMode,
+    policyMode: "full",
     availableSince: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
   };
@@ -549,28 +506,18 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     if (cwd === options.workspace && !externalSessionPath) return rpc;
     const client = new SupervisedRpcClient({
       processId: sessionId,
-      beforeSpawn: () => {
-        const trust = bootstrap.handler.resolveTrust(
-          bootstrap.primaryRoot.canonicalPath,
-        );
-        if (trust.status !== "trusted") {
-          throw new Error("workspace_trust_required");
-        }
-      },
       initialState: "stopped",
       rpc: {
-        executable: options.executable,
+        launchConfig: piLaunchConfig,
         args: [
           "--mode", "rpc",
           ...(externalSessionPath
             ? ["--session", externalSessionPath, "--session-dir", sessionDir]
             : ["--session-dir", sessionDir]),
-          "--extension", extensionPath,
+          ...extensionArgs,
           ...(options.rpcArgs ?? []),
         ],
         cwd,
-        environment: { ...(options.environment ?? {}), PI_MOB_HOST_POLICY_FILE: policyFile },
-        pathDirs: options.pathDirs ?? ["/usr/local/bin", "/usr/bin", "/bin"],
         defaultRequestTimeoutMs: 30_000,
         closeGracePeriodMs: 5_000,
       },
@@ -593,12 +540,8 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     sessionRpcs.set(sessionId, client);
     return client;
   };
-  const hostModels = discoverHostModels(
-    options.executable,
-    options.workspace,
-    options.environment ?? {},
-  );
-  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, policyBridge, attachmentStore: attachments, exportRegistry: exports, hostModels, ...(notificationService ? {notificationService} : {}) });
+  const hostModels = discoverHostModels(piLaunchConfig);
+  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, attachmentStore: attachments, exportRegistry: exports, hostModels, ...(notificationService ? {notificationService} : {}) });
   if(notificationService && capabilityProviders) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:[...capabilityProviders],bestEffort:true});
   const notificationSweepTimer=setInterval(()=>{ try{notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
   notificationSweepTimer.unref();
@@ -608,10 +551,8 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     store,
     adapter,
     bridgeVersion: BRIDGE_VERSION,
-    piVersion: "0.80.6",
+    piVersion: "0.82.0",
     hostDisplayName: displayName,
-    policy: bootstrap.handler,
-    defaultSessionPolicyMode: bootstrap.hostPolicyMode,
   });
   await runtime.start();
 
@@ -625,14 +566,6 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   return {
     server, runtime, adapter, rpc, store, workspace: config,
     get rpcStarted() { return rpcStarted; },
-    async activate() {
-      const trust = bootstrap.handler.resolveTrust(bootstrap.primaryRoot.canonicalPath);
-      if (trust.status !== "trusted" || restoredRuntime === "crash_loop") return;
-      if (!rpcStarted) {
-        await rpc.manualRetry();
-        rpcStarted = true;
-      }
-    },
     async close() {
       clearInterval(attachmentSweepTimer);
       clearInterval(dialogSweepTimer);
@@ -657,63 +590,6 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
 }
 
 // ---------------- helpers ----------------
-
-/**
- * Builds the M8 policy bootstrap before Pi starts. New workspaces remain
- * approval-required; only the host policy mode is seeded from configuration.
- */
-function bootstrapPolicy(input: {
-  store: BridgeStore;
-  primaryWorkspacePath: string;
-  primaryWorkspaceLabel: string;
-  requestedPolicyMode: HostPolicyMode;
-  extraRoots: readonly string[];
-}): DaemonPolicyBootstrap {
-  const trustStore = new DurableTrustPolicyStore(input.store);
-  const hostPolicy = new HostPolicyService(input.store);
-  let rootsConfig = createWorkspaceRootsConfig();
-  let primaryRoot: WorkspaceRoot;
-  try {
-    const canonical = canonicalize(input.primaryWorkspacePath);
-    rootsConfig = addAllowedRoot(rootsConfig, canonical, input.primaryWorkspaceLabel);
-    primaryRoot = rootsConfig.roots[0]!;
-  } catch {
-    primaryRoot = { id: deriveRootId(input.primaryWorkspacePath), canonicalPath: input.primaryWorkspacePath, label: input.primaryWorkspaceLabel };
-    rootsConfig = createWorkspaceRootsConfig([primaryRoot]);
-  }
-  for (const extra of input.extraRoots) {
-    try {
-      const extraCanonical = canonicalize(extra);
-      rootsConfig = addAllowedRoot(rootsConfig, extraCanonical, basename(extraCanonical));
-    } catch { /* refuse silently: extra roots are optional */ }
-  }
-
-  // Seed the host policy from the requested mode on first launch only.
-  const hostSeed = hostPolicy.seedIfAbsent({ mode: input.requestedPolicyMode, actor: "daemon-config" });
-
-  const handler: RuntimePolicyHandler = {
-    trustStore,
-    hostPolicy,
-    search: (sub) => defaultBoundedSearch({ ...sub, rootCanonical: primaryRoot.canonicalPath }),
-    resolveTrust: (rootCanonical, workspaceId = primaryRoot.id) => trustStore.resolveTrustState({ workspaceId, rootCanonical }),
-    rootSeed: () => primaryRoot,
-    approve: ({ workspaceId = primaryRoot.id, rootCanonical = primaryRoot.canonicalPath, label = primaryRoot.label, fingerprint, approvedBy, now }) => {
-      const manifest = buildTrustManifest(rootCanonical);
-      const record = trustStore.approve({
-        workspaceId,
-        rootPath: rootCanonical,
-        label,
-        fingerprint,
-        policyVersion: manifest.policyVersion,
-        approvedBy,
-        ...(now !== undefined ? { now } : {}),
-      });
-      return { workspaceId: record.workspaceId, fingerprint: record.fingerprint, approvedAt: record.approvedAt, policyVersion: record.policyVersion };
-    },
-  };
-  const trustGateAllowed = handler.resolveTrust(primaryRoot.canonicalPath).status === "trusted";
-  return { rootsConfig, primaryRoot, trustStore, hostPolicy, handler, hostPolicyMode: hostSeed.policy.mode, trustGateAllowed };
-}
 
 function hashFingerprint(rootPath: string): string {
   return new Bun.CryptoHasher("sha256").update(`workspace:${rootPath}`).digest("hex").slice(0, 32);
@@ -756,12 +632,17 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
         break;
       }
       case "--policy-mode": {
+        // Deprecated: kept as a no-op for back-compat with persisted
+        // install configs that still pass the flag. The bridge no longer
+        // owns a host policy; any value is coerced to "full".
         const next = argv[++i] ?? null;
         if (next !== "full" && next !== "read_only") throw new Error("--policy-mode must be `full` or `read_only`");
         out.policyMode = next;
         break;
       }
       case "--allowed-root": {
+        // Deprecated: kept for back-compat. The bridge no longer
+        // maintains a multi-root allowlist; the value is ignored.
         const next = argv[++i] ?? null;
         if (!next) throw new Error("--allowed-root requires a path");
         out.allowedRoots.push(next);
@@ -777,7 +658,7 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
   return out;
 }
 
-const USAGE = `usage: daemon --workspace <abs path> [--config <abs path> | --executable <abs path>] [--extension <abs path>] [--port N] [--state-dir <abs path>] [--session-dir <abs path>] [--display-name <str>] [--policy-mode full|read_only] [--allowed-root <abs path>]... [--fcm-service-account <abs path>]`;
+const USAGE = `usage: daemon --workspace <abs path> [--config <abs path> | --executable <abs path>] [--extension <abs path>] [--port N] [--state-dir <abs path>] [--session-dir <abs path>] [--display-name <str>] [--fcm-service-account <abs path>]`;
 
 export async function main(argv: readonly string[]): Promise<number> {
   let args: CliArgs;
@@ -816,7 +697,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     ...(args.allowedRoots.length > 0 ? { allowedRoots: args.allowedRoots } : {}),
     ...(args.extensionPath ? { extensionPath: args.extensionPath } : {}),
     ...(fcmConfig ? { fcm: fcmConfig } : {}),
-    ...(process.env.PI_MOB_PAIRING_FILE ? { environment: { PI_MOB_PAIRING_FILE: process.env.PI_MOB_PAIRING_FILE } } : {}),
+    environment: process.env as Record<string, string>,
   });
   process.stdout.write(`${JSON.stringify({
     protocolVersion: PROTOCOL_VERSION,

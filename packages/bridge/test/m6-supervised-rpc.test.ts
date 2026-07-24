@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { SupervisedRpcClient } from "../src/pi/supervised-rpc-client";
+import { resolvePiLaunchConfig } from "../src/pi/launch-config";
 import type { ProcessLifecycleEvent } from "../src/core/process-supervisor";
 
 describe("M6 supervised real subprocess", () => {
@@ -14,11 +15,8 @@ describe("M6 supervised real subprocess", () => {
       restartDelayMs: 10,
       emit: (event) => events.push(event),
       rpc: {
-        executable: Bun.which("bun")!,
+        launchConfig: resolvePiLaunchConfig({ executable: Bun.which("bun")!, cwd: root, env: { HOME: join(root, "home"), PATH: process.env.PATH ?? "/usr/bin:/bin" } }),
         args: [new URL("./fixtures/fake-pi-rpc.ts", import.meta.url).pathname],
-        cwd: root,
-        environment: { HOME: join(root, "home") },
-        pathDirs: ["/usr/local/bin", "/usr/bin", "/bin"],
         defaultRequestTimeoutMs: 2_000,
         closeGracePeriodMs: 100,
       },
@@ -51,10 +49,8 @@ describe("M6 supervised real subprocess", () => {
       maintenanceIntervalMs: 5,
       emit: (event) => events.push(event),
       rpc: {
-        executable: Bun.which("bun")!,
+        launchConfig: resolvePiLaunchConfig({ executable: Bun.which("bun")!, cwd: root, env: { HOME: join(root, "home"), PATH: process.env.PATH ?? "/usr/bin:/bin" } }),
         args: [new URL("./fixtures/fake-pi-rpc.ts", import.meta.url).pathname],
-        cwd: root, environment: { HOME: join(root, "home") },
-        pathDirs: ["/usr/local/bin", "/usr/bin", "/bin"],
         defaultRequestTimeoutMs: 2_000, closeGracePeriodMs: 100,
       },
     });

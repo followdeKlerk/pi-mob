@@ -20,29 +20,6 @@ test("cursor comparison and fixture validation never crash on malformed inputs",
   for (const value of malformed) expect(() => validateFixture(value)).not.toThrow();
 });
 
-test("workspace trust approval is a host command that does not require a controller lease", () => {
-  const metadata = COMMAND_METADATA.find((item) => item.type === "workspace.trust.approve");
-  expect(metadata?.requiresLeaseId).toBe(false);
-  expect(validateFixture({
-    name: "workspace-trust-without-lease",
-    kind: "command",
-    valid: true,
-    message: {
-      protocol: { major: 1, minor: 0 },
-      messageId: "11111111-1111-4111-8111-111111111111",
-      requestId: "22222222-2222-4222-8222-222222222222",
-      connectionId: "33333333-3333-4333-8333-333333333333",
-      commandId: "44444444-4444-4444-8444-444444444444",
-      type: "workspace.trust.approve",
-      sentAt: "2026-07-15T00:00:00.000Z",
-      payload: {
-        workspaceId: "55555555-5555-4555-8555-555555555555",
-        fingerprint: "fixture",
-      },
-    },
-  })).toBe(true);
-});
-
 test("controller lease renewal has a declared response envelope", () => {
   expect(validateFixture({
     name: "controller-renew-result",
@@ -118,12 +95,21 @@ test("declares mutation recovery/idempotency and exact event stream ownership", 
   expect(COMMAND_METADATA.map(({ type }) => type)).toEqual([...COMMAND_TYPES]);
   const processCommands = new Set(["process.stop", "process.restart", "process.rerun"]);
   const gitCommands = new Set(["git.commit.request", "git.push.request"]);
+  const attentionCommands = new Set(["attention.resolve"]);
+  const agentCommands = new Set(["agent.steer", "agent.cancel", "agent.adopt", "agent.merge"]);
+  const catalogueCommands = new Set(["catalogue.set_enabled"]);
   for (const command of COMMAND_METADATA) {
     const requiredCapability = processCommands.has(command.type)
       ? "runtime.processes.v1"
-      : gitCommands.has(command.type)
-        ? "git-ci.v1"
-        : "commands.v1";
+      : attentionCommands.has(command.type)
+        ? "attention.v1"
+        : agentCommands.has(command.type)
+          ? "agents.v1"
+          : catalogueCommands.has(command.type)
+            ? "catalogue.v1"
+            : gitCommands.has(command.type)
+              ? "git-ci.v1"
+              : "commands.v1";
     expect(command.requiredCapability).toBe(requiredCapability);
     expect(command.acceptedStates.length).toBeGreaterThan(0);
     expect(command.semanticHashFields).toEqual(["type", "payload"]);

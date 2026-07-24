@@ -24,7 +24,7 @@ function startRuntime(): { store: BridgeStore; server: ReturnType<typeof createB
   const store = new BridgeStore(path);
   const adapter: AdapterPort = { async dispatch() {} };
   const runtime = new DurableBridgeRuntime({
-    store, adapter, bridgeVersion: "fixture", piVersion: "0.80.6", hostDisplayName: "fixture",
+    store, adapter, bridgeVersion: "fixture", piVersion: "0.82.0", hostDisplayName: "fixture",
   });
   runtime.setReadyForTest(true);
   const server = createBridgeServer({ runtime, port: 0 });

@@ -19,7 +19,6 @@
  *       * a `manifest.json` (SHA-256 / version / protocol / Bun / arch /
  *         capabilities / migration class / limitations),
  *       * a `checksums.txt` (sha256 for every shipped file),
- *       * a compiled host-policy extension under `extensions/`,
  *       * a `licenses/` directory (SPDX inventory),
  *       * a `config.sample.toml` install-config sample,
  *       * a `launch-agent/com.pi-mob.bridge.plist` LaunchAgent template,
@@ -61,8 +60,7 @@ const DAEMON_EXEC = join(DIST, "bridge-daemon");
 const HOSTILE_DIR = join(DIST, "hostile-env-test");
 const CFG_PATH = join(DIST, "release-config.toml");
 const RELEASE_ROOT = join(DIST, "release");
-const EXTENSION_SOURCE = join(ROOT, "packages/pi-extension/src/extension.ts");
-const EXTENSION_BUNDLE_NAME = "pi-mob-extension.js";
+const PUBLIC_CLI_NAME = "pi-mob";
 const OPS_EXEC_NAME = "pi-mob-ops";
 
 // Portable, installer-rewritable absolute paths used only by templates. No
@@ -95,6 +93,9 @@ const CAPABILITIES: readonly string[] = [
   "owner-only-install-state",
   "explicit-install-config",
   "launch-agent-template",
+  "friendly-lifecycle-cli",
+  "guided-tailscale-serve-lifecycle",
+  "self-contained-install-copy",
   "autoload-disabled-compiled-binary",
 ];
 
@@ -107,7 +108,7 @@ const LIMITATIONS: readonly string[] = [
   "x64-only (host arch proven on macOS 13+; arm64 not yet validated)",
   "single-workspace one-session adapter",
   "no remote install/rollback over the wire (M8)",
-  "no Tailscale Serve private endpoint (M8)",
+  "Tailscale must already be installed and signed in; setup detects and guides but does not provision it",
   "no code signing / notarization in this bundle",
   "no signed package (.pkg) artefact",
 ];
@@ -378,7 +379,6 @@ const FAULT_MARKERS: readonly string[] = [
   "cleanup_timeout",
 ];
 
-/** Bundles the loadable host-policy extension as a single Bun-targeted ESM file. */
 function compileOps(outputPath: string): void {
   process.stdout.write("==> compile pi-mob operations CLI (autoload disabled)\n");
   const result = spawnSync("bun", [
@@ -386,30 +386,6 @@ function compileOps(outputPath: string): void {
     "--outfile", outputPath, "src/ops-entry.ts",
   ], { cwd: `${ROOT}/packages/bridge`, stdio: "inherit" });
   if ((result.status ?? 1) !== 0 || !existsSync(outputPath)) throw new BuildError("ops_build", "failed to compile operations CLI");
-}
-
-function compileExtension(outputPath: string): void {
-  process.stdout.write("==> bundle pi-mob host-policy extension\n");
-  const result = spawnSync(
-    "bun",
-    [
-      "build",
-      "--target",
-      "bun",
-      "--format",
-      "esm",
-      "--outfile",
-      outputPath,
-      "src/extension.ts",
-    ],
-    { cwd: `${ROOT}/packages/pi-extension`, stdio: "inherit" },
-  );
-  if ((result.status ?? 1) !== 0 || !existsSync(outputPath)) {
-    throw new BuildError(
-      "extension_build",
-      `failed to bundle ${EXTENSION_SOURCE} into the release`,
-    );
-  }
 }
 
 function writeReleaseConfig(): void {
@@ -446,7 +422,7 @@ function runSmokeCaptureStdout(): string {
 // `buildReleaseBundle` is the single producer of the M7 release directory.
 // It is exported so the unit test can drive it without re-compiling the
 // daemon (the caller is responsible for `compileDaemon` having already
-// produced `dist/bridge-daemon`; the extension is bundled by this function).
+// produced `dist/bridge-daemon`).
 // ---------------------------------------------------------------------------
 
 export interface BuildReleaseBundleOptions {
@@ -495,9 +471,8 @@ function assertAbsolute(label: string, value: string): void {
 
 /**
  * Builds the M7 release bundle directory. Callers provide an already-built
- * daemon; the function bundles the host-policy extension itself. The bundle
- * always advertises the architecture detected from the compiled binary's
- * Mach-O header — never the host runtime's `process.arch`.
+ * daemon. The bundle always advertises the architecture detected from the
+ * compiled binary's Mach-O header — never the host runtime's `process.arch`.
  */
 export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBundleResult {
   assertAbsolute("daemonBinary", opts.daemonBinary);
@@ -511,7 +486,6 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
   const releaseDir = opts.releaseDir ?? RELEASE_ROOT;
   assertAbsolute("releaseDir", releaseDir);
   const binDir = join(releaseDir, "bin");
-  const extensionsDir = join(releaseDir, "extensions");
   const licensesDir = join(releaseDir, "licenses");
   const launchAgentsDir = join(releaseDir, "launch-agents");
   const configSamplePath = join(releaseDir, "config.sample.toml");
@@ -523,7 +497,6 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
   rmSync(releaseDir, { recursive: true, force: true });
   mkdirSync(releaseDir, { recursive: true, mode: 0o700 });
   mkdirSync(binDir, { recursive: true, mode: 0o700 });
-  mkdirSync(extensionsDir, { recursive: true, mode: 0o700 });
   mkdirSync(licensesDir, { recursive: true, mode: 0o700 });
   mkdirSync(launchAgentsDir, { recursive: true, mode: 0o700 });
 
@@ -543,22 +516,17 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
     );
   }
 
-  // 3) Bundle the loadable host-policy extension into the release. It is
-  //    emitted as one ESM file so the installed LaunchAgent never relies on
-  //    the source checkout or build-machine node_modules tree.
+  // 3) Compile the operations CLI and copy both lifecycle CLIs into
+  //    the bundle. Phase 4 removed the policy extension; the bundle now
+  //    ships only the daemon and the lifecycle CLIs.
   const opsInBundle = join(binDir, OPS_EXEC_NAME);
   compileOps(opsInBundle);
   chmodSync(opsInBundle, 0o700);
   const opsBuffer = readFileSync(opsInBundle);
   const opsSha = sha256Of(opsBuffer);
   const opsSize = opsBuffer.length;
-
-  const extensionInBundle = join(extensionsDir, EXTENSION_BUNDLE_NAME);
-  compileExtension(extensionInBundle);
-  const extensionBuffer = readFileSync(extensionInBundle);
-  chmodSync(extensionInBundle, 0o600);
-  const extensionSha = sha256Of(extensionBuffer);
-  const extensionSize = extensionBuffer.length;
+  const publicCliInBundle = join(binDir, PUBLIC_CLI_NAME);
+  writeFileSync(publicCliInBundle, opsBuffer, { mode: 0o700 });
 
   // 4) Materialise licenses.
   const licenses: ManifestLicense[] = [];
@@ -575,13 +543,12 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
     });
   }
 
-  // 5) Build the artifact list. Order is stable: daemon, extension, config
+  // 5) Build the artifact list. Order is stable: daemon, ops CLIs, config
   //    sample, launch-agent plist. All manifest paths are normalized and
   //    relative to the bundle so copying the release cannot invalidate it.
   //    Operator templates use /opt/pi-mob placeholders that the installer
   //    rewrites on the target host.
   const placeholderDaemon = `${INSTALL_PLACEHOLDER_RELEASE}/bin/bridge-daemon`;
-  const placeholderExtension = `${INSTALL_PLACEHOLDER_RELEASE}/extensions/${EXTENSION_BUNDLE_NAME}`;
   const configSample = buildConfigSample(placeholderDaemon);
   writeFileSync(configSamplePath, configSample, { mode: 0o600 });
   const configSampleSha = sha256Of(configSample);
@@ -595,7 +562,6 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
       "--config", `${INSTALL_PLACEHOLDER_RELEASE}/config.toml`,
       "--workspace", `${INSTALL_PLACEHOLDER_ROOT}/workspace`,
       "--session-dir", `${INSTALL_PLACEHOLDER_RELEASE}/sessions`,
-      "--extension", placeholderExtension,
     ],
     workingDirectory: `${INSTALL_PLACEHOLDER_ROOT}/workspace`,
     environment: {
@@ -623,18 +589,18 @@ export function buildReleaseBundle(opts: BuildReleaseBundleOptions): ReleaseBund
       size: daemonInBundleStat.size,
     },
     {
+      name: PUBLIC_CLI_NAME,
+      kind: "lifecycle-cli",
+      path: `bin/${PUBLIC_CLI_NAME}`,
+      sha256: opsSha,
+      size: opsSize,
+    },
+    {
       name: OPS_EXEC_NAME,
       kind: "lifecycle-cli",
       path: `bin/${OPS_EXEC_NAME}`,
       sha256: opsSha,
       size: opsSize,
-    },
-    {
-      name: EXTENSION_BUNDLE_NAME,
-      kind: "extension",
-      path: `extensions/${EXTENSION_BUNDLE_NAME}`,
-      sha256: extensionSha,
-      size: extensionSize,
     },
     {
       name: "config.sample.toml",

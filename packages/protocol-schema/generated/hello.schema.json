@@ -82,6 +82,22 @@
               {
                 "const": "git-ci.v1",
                 "type": "string"
+              },
+              {
+                "const": "attention.v1",
+                "type": "string"
+              },
+              {
+                "const": "agents.v1",
+                "type": "string"
+              },
+              {
+                "const": "catalogue.v1",
+                "type": "string"
+              },
+              {
+                "const": "raw_rpc.v1",
+                "type": "string"
               }
             ]
           },

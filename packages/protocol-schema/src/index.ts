@@ -152,6 +152,10 @@ export const LIMITS = {
 	maxGitPullRequestTitleLength: 240,
 	maxGitConfirmationIdLength: 128,
 	maxGitSummaryHintLength: 240,
+	maxAttentionSummaryLength: 240,
+	maxAgentTaskLength: 512,
+	maxAgentSummaryLength: 1024,
+	maxAgentItems: 64,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -159,14 +163,12 @@ export const COMMAND_TYPES = [
 	"controller.takeover",
 	"controller.release",
 	"host.display_name.set",
-	"workspace.trust.approve",
 	"notification.device.register",
 	"notification.device.unregister",
 	"session.create",
 	"session.activate",
 	"session.stop",
 	"session.rename",
-	"session.policy.set",
 	"session.delete",
 	"session.restore",
 	"session.purge",
@@ -205,6 +207,13 @@ export const COMMAND_TYPES = [
 	// schema closes that surface.
 	"git.commit.request",
 	"git.push.request",
+	"attention.resolve",
+	"agent.steer",
+	"agent.cancel",
+	"agent.adopt",
+	"agent.merge",
+	"catalogue.set_enabled",
+	"pi.rpc.request",
 ] as const;
 
 export const EVENT_TYPES = [
@@ -217,13 +226,11 @@ export const EVENT_TYPES = [
 	"session.summary",
 	"session.removed",
 	"workspace.summary",
-	"workspace.trust_state",
 	"notification.capability",
 	"command.state",
 	"error.event",
 	"session.state",
 	"session.metadata",
-	"session.policy",
 	"session.tree",
 	"controller.state",
 	"turn.accepted",
@@ -288,6 +295,13 @@ export const EVENT_TYPES = [
 	// can reconcile it against the host workspace listing.
 	"git.summary",
 	"git.unavailable",
+	"attention.item",
+	"agent.snapshot",
+	"agent.unavailable",
+	"catalogue.snapshot",
+	"catalogue.unavailable",
+	"pi.rpc.response",
+	"pi.rpc.event",
 ] as const;
 
 export const RESPONSE_TYPES = [
@@ -318,6 +332,9 @@ export const RESPONSE_TYPES = [
 	// is the only read response; durable mutations report through command
 	// receipts/state and the resulting context.snapshot event.
 	"context.snapshot.result",
+	"agent.snapshot.result",
+	"agent.transcript.page.result",
+	"catalogue.snapshot.result",
 	"process.snapshot.result",
 	"process.output.page.result",
 	// F0 R6 — additive Git/CI response. `git.summary.result` is the response
@@ -325,6 +342,7 @@ export const RESPONSE_TYPES = [
 	// commands report through `command.receipt` / `command.state` / `command.
 	// current.result`, mirroring the R5 process pattern.
 	"git.summary.result",
+	"pi.rpc.response",
 ] as const;
 export const SUPPORTED_CAPABILITIES = [
 	"streams.v1",
@@ -351,6 +369,10 @@ export const SUPPORTED_CAPABILITIES = [
 	// map absence directly to the truthful "Git/CI unavailable" state; a
 	// fabricated summary is never published.
 	"git-ci.v1",
+	"attention.v1",
+	"agents.v1",
+	"catalogue.v1",
+	"raw_rpc.v1",
 ] as const;
 export const CONTROL_TYPES = [
 	"subscription.set",
@@ -372,6 +394,9 @@ export const CONTROL_TYPES = [
 	"workspace.file.metadata",
 	"workspace.file.read",
 	"context.snapshot.request",
+	"agent.snapshot.request",
+	"agent.transcript.page",
+	"catalogue.snapshot.request",
 	"process.snapshot.request",
 	"process.output.page",
 	// F0 R6 — repeatable, nonjournaled Git/CI summary read and cancellation.
@@ -402,7 +427,6 @@ export const ERROR_CODES = [
 	"workspace_not_found",
 	"workspace_not_allowed",
 	"workspace_unavailable",
-	"workspace_trust_required",
 	"controller_required",
 	"controller_conflict",
 	"stale_controller",
@@ -484,7 +508,10 @@ export interface CommandMetadata {
 	readonly requiredCapability:
 		| "commands.v1"
 		| "runtime.processes.v1"
-		| "git-ci.v1";
+		| "git-ci.v1"
+		| "attention.v1"
+		| "agents.v1"
+		| "catalogue.v1";
 	readonly acceptedStates: readonly string[];
 	readonly semanticHashFields: readonly ["type", "payload"];
 	readonly idempotency: "command-id-semantic-payload-sha256";
@@ -503,14 +530,12 @@ const hostCommands = new Set<CommandType>([
 	"controller.takeover",
 	"controller.release",
 	"host.display_name.set",
-	"workspace.trust.approve",
 	"notification.device.register",
 	"notification.device.unregister",
 	"session.create",
 ]);
 const leaseFreeCommands = new Set<CommandType>([
 	...controllerCommands,
-	"workspace.trust.approve",
 	"session.create",
 	"session.delete",
 	"notification.device.register",
@@ -540,9 +565,18 @@ const processStableErrors = [
 // list is the additive git-specific subset of ERROR_CODES so clients can
 // render a typed failure with the same vocabulary the `git.unavailable`
 // event uses.
+const catalogueCommands = new Set<CommandType>(["catalogue.set_enabled"]);
+const agentCommands = new Set<CommandType>(["agent.steer", "agent.cancel", "agent.adopt", "agent.merge"]);
+const attentionCommands = new Set<CommandType>(["attention.resolve"]);
 const gitCommands = new Set<CommandType>([
 	"git.commit.request",
 	"git.push.request",
+	"attention.resolve",
+	"agent.steer",
+	"agent.cancel",
+	"agent.adopt",
+	"agent.merge",
+	"catalogue.set_enabled",
 ]);
 const gitStableErrors = [
 	"git_unavailable",
@@ -570,8 +604,14 @@ export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map(
 		requiresLeaseId: !leaseFreeCommands.has(type),
 		requiredCapability: processCommands.has(type)
 			? "runtime.processes.v1"
-			: gitCommands.has(type)
-				? "git-ci.v1"
+			: catalogueCommands.has(type)
+				? "catalogue.v1"
+				: agentCommands.has(type)
+					? "agents.v1"
+				: attentionCommands.has(type)
+					? "attention.v1"
+				: gitCommands.has(type)
+					? "git-ci.v1"
 				: "commands.v1",
 		acceptedStates: [
 			"protocol-valid",
@@ -601,7 +641,6 @@ const hostEventTypes = new Set<EventType>([
 	"session.summary",
 	"session.removed",
 	"workspace.summary",
-	"workspace.trust_state",
 	"notification.capability",
 	// D-037: workspace invalidations are owned by the mandatory host stream.
 	"workspace.tree.snapshot",
@@ -619,6 +658,13 @@ const hostEventTypes = new Set<EventType>([
 	// sessionId and stays on the per-session stream.
 	"recipe.unavailable",
 	"plan.unavailable",
+	// R7/R8/R9 — capability-state envelopes (no sessionId) ride the host
+	// stream. `attention.item` carries a sessionId and stays on the per-
+	// session stream; `agent.snapshot` / `catalogue.snapshot` carry only a
+	// revision + items array and are authoritative host state.
+	"agent.unavailable",
+	"catalogue.snapshot",
+	"catalogue.unavailable",
 ]);
 export const EVENT_STREAM_OWNERSHIP: Readonly<
 	Record<EventType, StreamOwnership>
@@ -1665,6 +1711,35 @@ const R3ReadResponseSchema = Type.Object(
 );
 
 const Payload = Type.Object({}, { additionalProperties: true });
+const PiRpcRequestIdSchema = Type.String({ minLength: 1, maxLength: 128 });
+const RawPiCommandSchema = Type.Object(
+	{ type: Type.String({ minLength: 1, maxLength: 128 }) },
+	{ additionalProperties: true },
+);
+const RawPiBodySchema = Type.Object({}, { additionalProperties: true });
+export const PiRpcRequestEnvelopeSchema = Type.Object(
+	{
+		sessionId: Uuid,
+		requestId: PiRpcRequestIdSchema,
+		command: RawPiCommandSchema,
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/pi-rpc-request-envelope" },
+);
+export const PiRpcResponseEnvelopeSchema = Type.Object(
+	{
+		sessionId: Uuid,
+		requestId: PiRpcRequestIdSchema,
+		response: RawPiBodySchema,
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/pi-rpc-response-envelope" },
+);
+export const PiRpcEventEnvelopeSchema = Type.Object(
+	{ sessionId: Uuid, event: RawPiBodySchema },
+	{ additionalProperties: false, $id: "pi-mob/protocol/pi-rpc-event-envelope" },
+);
+export type PiRpcRequestEnvelope = Static<typeof PiRpcRequestEnvelopeSchema>;
+export type PiRpcResponseEnvelope = Static<typeof PiRpcResponseEnvelopeSchema>;
+export type PiRpcEventEnvelope = Static<typeof PiRpcEventEnvelopeSchema>;
 export const ProtocolVersionSchema = Type.Object(
 	{ major: Type.Literal(PROTOCOL_MAJOR), minor: Type.Integer({ minimum: 0 }) },
 	{ additionalProperties: true, $id: "pi-mob/protocol/version" },
@@ -2140,16 +2215,112 @@ const ControllerScope = Type.Union([
 		{ additionalProperties: true },
 	),
 ]);
+export const CatalogueEntrySchema = Type.Object(
+	{
+		entryId: Type.String({ minLength: 1, maxLength: 128 }),
+		kind: Type.Union([Type.Literal("skill"), Type.Literal("template"), Type.Literal("extension"), Type.Literal("mcp_server"), Type.Literal("mcp_tool")]),
+		name: Type.String({ minLength: 1, maxLength: 128 }),
+		description: Type.Optional(Type.String({ maxLength: 512 })),
+		invocation: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+		source: Type.String({ minLength: 1, maxLength: 128 }),
+		availability: CapabilityStatusSchema,
+		enabled: Type.Optional(Type.Boolean()),
+		canToggle: Type.Boolean(),
+		reloadRequired: Type.Boolean(),
+		revision: RevisionTokenSchema,
+	},
+	{ additionalProperties: false },
+);
+export const CatalogueSnapshotSchema = Type.Object(
+	{ revision: RevisionTokenSchema, entries: Type.Array(CatalogueEntrySchema, { maxItems: 512 }) },
+	{ additionalProperties: false },
+);
+export const CatalogueUnavailableSchema = Type.Object(
+	{ capability: Type.Literal("catalogue.v1"), status: CapabilityStatusSchema },
+	{ additionalProperties: false },
+);
+const CatalogueSnapshotRequestSchema = Type.Object({ requestId: Uuid }, { additionalProperties: false });
+const CatalogueSetEnabledSchema = Type.Object(
+	{ sessionId: SessionId, entryId: Type.String({ minLength: 1, maxLength: 128 }), enabled: Type.Boolean(), expectedRevision: RevisionTokenSchema, confirmed: Type.Literal(true) },
+	{ additionalProperties: false },
+);
+
+export const AgentActionSchema = Type.Union([
+	Type.Literal("transcript"), Type.Literal("steer"), Type.Literal("cancel"),
+	Type.Literal("compare"), Type.Literal("adopt"), Type.Literal("merge"),
+]);
+export const AgentRecordSchema = Type.Object(
+	{
+		agentId: Type.String({ minLength: 1, maxLength: 128 }),
+		task: Type.String({ minLength: 1, maxLength: LIMITS.maxAgentTaskLength }),
+		model: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+		state: Type.Union([Type.Literal("running"), Type.Literal("blocked"), Type.Literal("needs_input"), Type.Literal("completed"), Type.Literal("failed"), Type.Literal("cancelled"), Type.Literal("indeterminate")]),
+		startedAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+		finishedAt: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
+		originSessionId: SessionId,
+		originTurnId: Type.String({ minLength: 1, maxLength: 128 }),
+		latestActivity: Type.Optional(Type.String({ maxLength: LIMITS.maxAgentSummaryLength })),
+		completionSummary: Type.Optional(Type.String({ maxLength: LIMITS.maxAgentSummaryLength })),
+		transcriptRef: Type.Optional(Type.String({ minLength: 1, maxLength: 128 })),
+		worktreeRef: Type.Optional(Type.String({ minLength: 1, maxLength: 256 })),
+		supportedActions: Type.Array(AgentActionSchema, { maxItems: 6, uniqueItems: true }),
+		revision: RevisionTokenSchema,
+	},
+	{ additionalProperties: false },
+);
+export const AgentSnapshotSchema = Type.Object(
+	{ revision: RevisionTokenSchema, items: Type.Array(AgentRecordSchema, { maxItems: LIMITS.maxAgentItems }) },
+	{ additionalProperties: false },
+);
+export const AgentUnavailableSchema = Type.Object(
+	{ capability: Type.Literal("agents.v1"), status: CapabilityStatusSchema },
+	{ additionalProperties: false },
+);
+const AgentSnapshotRequestSchema = Type.Object(
+	{ requestId: Uuid }, { additionalProperties: false },
+);
+const AgentTranscriptPageSchema = Type.Object(
+	{ agentId: Type.String({ minLength: 1, maxLength: 128 }), pageSize: Type.Integer({ minimum: 1, maximum: 100 }), pageToken: Type.Optional(Type.Union([Type.String({ minLength: 1, maxLength: 512 }), Type.Null()])) },
+	{ additionalProperties: false },
+);
+const AgentActionPayloadSchema = Type.Object(
+	{ sessionId: SessionId, agentId: Type.String({ minLength: 1, maxLength: 128 }), expectedRevision: RevisionTokenSchema, instruction: Type.Optional(Type.String({ minLength: 1, maxLength: 1024 })) },
+	{ additionalProperties: false },
+);
+
+export const AttentionCategorySchema = Type.Union([
+	Type.Literal("needs_input"),
+	Type.Literal("completed"),
+	Type.Literal("failed"),
+	Type.Literal("interrupted"),
+	Type.Literal("background"),
+]);
+export const AttentionItemSchema = Type.Object(
+	{
+		attentionId: Uuid,
+		sessionId: SessionId,
+		turnId: Type.String({ minLength: 1, maxLength: 128 }),
+		category: AttentionCategorySchema,
+		occurrence: Type.String({ pattern: ISO_UTC_PATTERN }),
+		summary: Type.String({ minLength: 1, maxLength: LIMITS.maxAttentionSummaryLength }),
+		actionable: Type.Boolean(),
+		revision: RevisionTokenSchema,
+		resolved: Type.Boolean(),
+		superseded: Type.Boolean(),
+	},
+	{ additionalProperties: false, $id: "pi-mob/protocol/attention-item" },
+);
+export const AttentionResolvePayloadSchema = Type.Object(
+	{ sessionId: SessionId, attentionId: Uuid, expectedRevision: RevisionTokenSchema },
+	{ additionalProperties: false },
+);
+
 const CommandPayloads = {
 	"controller.acquire": ControllerScope,
 	"controller.takeover": ControllerScope,
 	"controller.release": ControllerScope,
 	"host.display_name.set": Type.Object(
 		{ displayName: Type.String({ minLength: 1 }) },
-		{ additionalProperties: true },
-	),
-	"workspace.trust.approve": Type.Object(
-		{ workspaceId: Uuid, fingerprint: Type.String({ minLength: 1 }) },
 		{ additionalProperties: true },
 	),
 	"notification.device.register": Type.Object(
@@ -2168,7 +2339,6 @@ const CommandPayloads = {
 		{
 			workspaceId: Uuid,
 			workspaceRelativePath: Type.Optional(Type.String({ maxLength: 4096 })),
-			policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]),
 			name: Type.Optional(Type.String()),
 			modelIntent: Type.Optional(Type.String()),
 			modelId: Type.Optional(Type.String({ minLength: 1 })),
@@ -2186,13 +2356,6 @@ const CommandPayloads = {
 	),
 	"session.rename": Type.Object(
 		{ sessionId: SessionId, name: Type.String({ minLength: 1 }) },
-		{ additionalProperties: true },
-	),
-	"session.policy.set": Type.Object(
-		{
-			sessionId: SessionId,
-			policyMode: Type.Union([Type.Literal("full"), Type.Literal("read_only")]),
-		},
 		{ additionalProperties: true },
 	),
 	"session.delete": Type.Object(
@@ -2259,6 +2422,13 @@ const CommandPayloads = {
 	// on the schema closes that surface.
 	"git.commit.request": GitCommandPayloadSchema,
 	"git.push.request": GitCommandPayloadSchema,
+	"attention.resolve": AttentionResolvePayloadSchema,
+	"catalogue.set_enabled": CatalogueSetEnabledSchema,
+	"pi.rpc.request": PiRpcRequestEnvelopeSchema,
+	"agent.merge": AgentActionPayloadSchema,
+	"agent.adopt": AgentActionPayloadSchema,
+	"agent.cancel": AgentActionPayloadSchema,
+	"agent.steer": AgentActionPayloadSchema,
 	"turn.abort": Type.Object(
 		{ sessionId: SessionId },
 		{ additionalProperties: true },
@@ -2424,6 +2594,13 @@ const EventPayloads = {
 	// mobile client can reconcile against the host workspace listing.
 	"git.summary": GitSummarySchema,
 	"git.unavailable": GitUnavailableEventSchema,
+	"attention.item": AttentionItemSchema,
+	"agent.snapshot": AgentSnapshotSchema,
+	"agent.unavailable": AgentUnavailableSchema,
+	"catalogue.snapshot": CatalogueSnapshotSchema,
+	"catalogue.unavailable": CatalogueUnavailableSchema,
+	"pi.rpc.response": PiRpcResponseEnvelopeSchema,
+	"pi.rpc.event": PiRpcEventEnvelopeSchema,
 } as const;
 const genericEventPayload = Type.Object(
 	{ sessionId: Type.Optional(SessionId) },
@@ -2509,6 +2686,9 @@ const ControlPayloads = {
 	"workspace.file.metadata": WorkspaceFileMetadataPayloadSchema,
 	"workspace.file.read": WorkspaceFileReadPayloadSchema,
 	"context.snapshot.request": ContextSnapshotRequestPayloadSchema,
+	"agent.snapshot.request": AgentSnapshotRequestSchema,
+	"agent.transcript.page": AgentTranscriptPageSchema,
+	"catalogue.snapshot.request": CatalogueSnapshotRequestSchema,
 	"process.snapshot.request": Type.Object(
 		{ sessionId: SessionId },
 		{ additionalProperties: false },
@@ -2655,6 +2835,9 @@ const ResponsePayloads = {
 	"workspace.file.content.search.result": R3ContentSearchResponseSchema,
 	"workspace.file.metadata.result": R3MetadataResponseSchema,
 	"workspace.file.read.result": R3ReadResponseSchema,
+	"catalogue.snapshot.result": CatalogueSnapshotSchema,
+	"agent.snapshot.result": AgentSnapshotSchema,
+	"agent.transcript.page.result": Type.Object({ agentId: Type.String({ minLength: 1, maxLength: 128 }), items: Type.Array(Payload, { maxItems: 100 }), nextPageToken: Type.Optional(Type.String({ minLength: 1, maxLength: 512 })), isTruncated: Type.Boolean() }, { additionalProperties: false, $id: "pi-mob/protocol/agent-transcript-page-response" }),
 	"context.snapshot.result": ContextSnapshotSchema,
 	"process.snapshot.result": Type.Object(
 		{
@@ -2666,6 +2849,7 @@ const ResponsePayloads = {
 	),
 	"process.output.page.result": ProcessOutputSchema,
 	"git.summary.result": GitSummarySchema,
+	"pi.rpc.response": PiRpcResponseEnvelopeSchema,
 } as const;
 
 export const SnapshotSchema = Type.Union(

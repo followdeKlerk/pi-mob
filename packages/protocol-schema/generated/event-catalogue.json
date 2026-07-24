@@ -47,11 +47,6 @@
   {
     "class": "event",
     "stream": "host",
-    "type": "workspace.trust_state"
-  },
-  {
-    "class": "event",
-    "stream": "host",
     "type": "notification.capability"
   },
   {
@@ -73,11 +68,6 @@
     "class": "event",
     "stream": "session",
     "type": "session.metadata"
-  },
-  {
-    "class": "event",
-    "stream": "session",
-    "type": "session.policy"
   },
   {
     "class": "event",
@@ -328,5 +318,40 @@
     "class": "event",
     "stream": "host",
     "type": "git.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "attention.item"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "agent.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "agent.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "catalogue.snapshot"
+  },
+  {
+    "class": "event",
+    "stream": "host",
+    "type": "catalogue.unavailable"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "pi.rpc.response"
+  },
+  {
+    "class": "event",
+    "stream": "session",
+    "type": "pi.rpc.event"
   }
 ]

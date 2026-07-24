@@ -4,7 +4,7 @@ import { createBridgeServer, exceedsSlowConsumerLimit, MAX_OUTBOUND_BYTES, type 
 const servers: Array<ReturnType<typeof createBridgeServer>> = [];
 function runtime(ready = true): BridgeRuntimePort {
   return {
-    bridgeVersion: "fixture", piVersion: "0.80.6",
+    bridgeVersion: "fixture", piVersion: "0.82.0",
     identity: () => ({ hostId: "11111111-1111-4111-8111-111111111111", hostGeneration: "1", hostDisplayName: "fixture" }),
     ready: () => ready ? { ready: true } : { ready: false, reason: "database unavailable" },
     subscribe: (_connection, payload) => ({ streams: (payload.streams as Array<Record<string,unknown>>).map((item) => ({ streamId: item.streamId, mode: "current" })) }),

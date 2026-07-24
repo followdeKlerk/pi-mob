@@ -28,7 +28,7 @@ export interface LaunchAgentSpec {
   readonly programArguments: readonly string[];
   /** Absolute working directory. */
   readonly workingDirectory: string;
-  /** Pre-allow-listed environment. */
+  /** Owner-captured login-shell environment, plus bridge-required overrides. */
   readonly environment: Readonly<Record<string, string>>;
   /** Absolute stdout log path. */
   readonly stdoutPath: string;
@@ -105,7 +105,7 @@ export function validateSpec(spec: LaunchAgentSpec): void {
     }
     const pathValued = /^(?:HOME|TMPDIR|PATH|PI_MOB_.*_FILE)$/;
     for (const [key, value] of Object.entries(spec.environment)) {
-      if (!/^[A-Z][A-Z0-9_]*$/.test(key) || value.length === 0 || /[\0\r\n]/.test(value)) {
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || value.length === 0 || /[\0\r\n]/.test(value)) {
         throw new LaunchAgentSpecError("not_absolute", `environment.${key} is invalid`);
       }
       if (pathValued.test(key)) {

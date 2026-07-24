@@ -16,7 +16,7 @@ describe("M6 host drain admission", () => {
       async dispatch() { dispatches++; },
       admission: () => draining ? { accepting: false, reason: "host_draining" } : { accepting: true },
     };
-    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.80.6", hostDisplayName: "host" });
+    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.82.0", hostDisplayName: "host" });
     await runtime.start();
     const connection = { connectionId: "connection", installationId: "installation", subscriptions: new Set<string>() };
     const command = { type: "session.create", commandId: "22222222-2222-4222-8222-222222222222", payload: { workspaceId: "33333333-3333-4333-8333-333333333333", policyMode: "full" } };

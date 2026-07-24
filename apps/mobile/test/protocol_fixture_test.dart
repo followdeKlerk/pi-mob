@@ -152,7 +152,7 @@ Map<String, Object?> _contextSnapshotResult(Map<String, Object?> payload) =>
     };
 
 Map<String, Object?> _contextUnavailableEvent(Map<String, Object?> payload) =>
-    _hostEvent('context.unavailable', payload);
+    _recipeEvent('context.unavailable', payload);
 
 Map<String, Object?> _recipeActivity(String kind) => <String, Object?>{
   'kind': kind,
@@ -1505,10 +1505,7 @@ void main() {
       },
     };
     expect(
-      validateProtocolFixture(
-        'event',
-        _hostEvent('recipe.unavailable', valid),
-      ),
+      validateProtocolFixture('event', _hostEvent('recipe.unavailable', valid)),
       isA<ProtocolEvent>(),
     );
 
@@ -1691,5 +1688,77 @@ void main() {
       () => ProtocolEnvelope.fromJson(invalidStream),
       throwsA(isA<ProtocolValidationException>()),
     );
+  });
+
+  // Regression suite for the closed `host:<uuid>` / `session:<uuid>`
+  // stream identity. Prior to the regex anchor fix the _streamId
+  // pattern used \$ (literal dollar) instead of `$` (end-of-input
+  // anchor), so a UUID followed by trailing junk would still parse as
+  // a ProtocolEvent. The two tests below pin both halves of the
+  // contract: a canonical streamId parses, and a UUID with a trailing
+  // suffix is rejected.
+  group('_streamId regex anchor', () {
+    final envelopeBase = <String, Object?>{
+      'protocol': <String, Object?>{'major': 1, 'minor': 0},
+      'messageId': '11111111-1111-4111-8111-111111111111',
+      'sentAt': '2026-07-12T00:00:00.000Z',
+    };
+
+    test('parses a canonical host streamId', () {
+      final message = <String, Object?>{
+        ...envelopeBase,
+        'eventId': '44444444-4444-4444-8444-444444444444',
+        'type': 'host.state',
+        'streamId': 'host:11111111-1111-4111-8111-111111111111',
+        'cursor': '1',
+        'payload': <String, Object?>{'ready': true},
+      };
+      expect(ProtocolEnvelope.fromJson(message), isA<ProtocolEvent>());
+    });
+
+    test('parses a canonical session streamId', () {
+      final message = <String, Object?>{
+        ...envelopeBase,
+        'eventId': '55555555-5555-4555-8555-555555555555',
+        'type': 'turn.started',
+        'streamId': 'session:22222222-2222-4222-8222-222222222222',
+        'cursor': '1',
+        'payload': <String, Object?>{
+          'sessionId': '22222222-2222-4222-8222-222222222222',
+          'turnId': 'turn-fixture',
+        },
+      };
+      expect(ProtocolEnvelope.fromJson(message), isA<ProtocolEvent>());
+    });
+
+    test('rejects a streamId with a trailing suffix after the UUID', () {
+      final message = <String, Object?>{
+        ...envelopeBase,
+        'eventId': '66666666-6666-4666-8666-666666666666',
+        'type': 'host.state',
+        'streamId': 'host:11111111-1111-4111-8111-111111111111-extra',
+        'cursor': '1',
+        'payload': <String, Object?>{},
+      };
+      expect(
+        () => ProtocolEnvelope.fromJson(message),
+        throwsA(isA<ProtocolValidationException>()),
+      );
+    });
+
+    test('rejects a streamId with a trailing suffix after a session UUID', () {
+      final message = <String, Object?>{
+        ...envelopeBase,
+        'eventId': '77777777-7777-4777-8777-777777777777',
+        'type': 'turn.started',
+        'streamId': 'session:22222222-2222-4222-8222-222222222222-tailing',
+        'cursor': '1',
+        'payload': <String, Object?>{},
+      };
+      expect(
+        () => ProtocolEnvelope.fromJson(message),
+        throwsA(isA<ProtocolValidationException>()),
+      );
+    });
   });
 }

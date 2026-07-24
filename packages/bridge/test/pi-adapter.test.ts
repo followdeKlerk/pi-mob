@@ -6,7 +6,7 @@ import { extensionUiResponse, normalizePiEvent, normalizePiResponse, toPiRpcComm
 
 const noPayload: PiCommandName[] = ["abort", "new_session", "get_state", "get_messages", "get_session_stats", "get_commands", "cycle_model", "get_available_models", "cycle_thinking_level", "abort_retry", "abort_bash", "clone", "get_fork_messages", "get_tree", "get_last_assistant_text"];
 
-describe("exact Pi 0.80.6 command adapter", () => {
+describe("exact Pi 0.82.0 command adapter", () => {
   test("maps every command family and prevalidates session files", () => {
     for (const type of noPayload) expect(toPiRpcCommand({ type }, "id")).toMatchObject({ id: "id", type });
     const cases: NormalizedPiCommand[] = [
@@ -35,7 +35,7 @@ describe("Pi event normalization", () => {
   const context = { sessionId: "session" };
   test("agent_settled is the only settled boundary", () => {
     expect(normalizePiEvent({ type: "agent_end", willRetry: false }, context).map((item) => item.type)).not.toContain("turn.settled");
-    expect(normalizePiEvent({ type: "agent_settled" }, context).map((item) => item.type)).toEqual(["turn.settled"]);
+    expect(normalizePiEvent({ type: "agent_settled" }, context).map((item) => item.type)).toEqual(["turn.settled", "pi.rpc.event"]);
   });
 
   test("covers lifecycle, content, tools, queue, retry, compaction, and extension UI", () => {
@@ -58,8 +58,10 @@ describe("Pi event normalization", () => {
     const output = raws.flatMap((raw) => normalizePiEvent(raw, context));
     expect(new Set(output.map((item) => item.type)).size).toBeGreaterThan(12);
     expect(output.filter((item) => item.type === "tool.started").map((item) => item.payload.toolCallId)).toEqual(["one", "two"]);
-    expect(JSON.stringify(output)).not.toContain("/private");
-    expect(JSON.stringify(output)).not.toContain("/home/private");
+    const curated = output.filter((item) => item.type !== "pi.rpc.event");
+    expect(JSON.stringify(curated)).not.toContain("/private");
+    expect(JSON.stringify(curated)).not.toContain("/home/private");
+    expect(output.filter((item) => item.type === "pi.rpc.event")).toHaveLength(raws.length);
     expect(output.some((item) => item.type === "turn.failed" && item.payload.errorCode === "provider_interrupted")).toBe(true);
   });
 });

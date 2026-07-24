@@ -5,7 +5,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, relative } from "node:path";
 
 const ROOT = new URL("..", import.meta.url).pathname;
-const TARGETS = ["README.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md", "docs", "apps/mobile/README.md", "packages/bridge/README.md", "packages/pi-extension/README.md", "packages/protocol-schema/README.md", "packages/protocol-fixtures/README.md"];
+const TARGETS = ["README.md", "CONTRIBUTING.md", "SECURITY.md", "CHANGELOG.md", "docs", "apps/mobile/README.md", "packages/bridge/README.md", "packages/protocol-schema/README.md", "packages/protocol-fixtures/README.md"];
 
 function walk(dir: string): string[] {
   const files: string[] = [];

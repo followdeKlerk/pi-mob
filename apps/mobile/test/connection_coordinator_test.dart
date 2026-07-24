@@ -66,73 +66,104 @@ void main() {
     await database.close();
   });
 
-  test('D-039 correlates and consumes empty process snapshot responses', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    socket.server(
-      event(
-        type: 'process.snapshot',
-        streamId: 'session:$sessionId',
-        cursor: '2',
-        eventId: '12121212-1212-4121-8121-121212121212',
-        payload: {
-          'sessionId': sessionId,
-          'processId': 'process-1',
-          'revision': 'r1',
-          'status': 'running',
-          'command': 'bun test',
-          'startedAt': '2026-07-15T00:00:00.000Z',
-          'capability': 'runtime.processes.v1',
-          'stale': false,
-          'supportedActions': ['stop'],
-        },
-      ),
-    );
-    await eventually(() => coordinator.processes.items.length == 1);
+  // R11 — burst-coalescing frame budget. Calling the [_notify] coalescer
+  // 100 times in a tight loop must drain to at most one listener
+  // notification per Flutter frame. The frame-coalescer seam is exercised
+  // directly so the test does not depend on FakeAsync, runAsync real-time
+  // drains, or bridge fixture setup; the production path inside the
+  // coordinator funnels every burst through the same [_notify] method.
+  testWidgets(
+    'R11 burst coalescing drains 100 _notify calls to <= 1 notification',
+    (tester) async {
+      var burstNotifications = 0;
+      coordinator.addListener(() => burstNotifications++);
+      coordinator.debugTriggerBurstNotify(100);
+      await tester.pump();
+      expect(burstNotifications, lessThanOrEqualTo(1));
+    },
+  );
 
-    // An uncorrelated empty result has no session identity and must not clear
-    // the live projection.
-    socket.server(response('process.snapshot.result', {'items': []}));
-    await Future<void>.delayed(const Duration(milliseconds: 10));
-    expect(coordinator.processes.items, hasLength(1));
+  test(
+    'D-039 correlates and consumes empty process snapshot responses',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'process.snapshot',
+          streamId: 'session:$sessionId',
+          cursor: '2',
+          eventId: '12121212-1212-4121-8121-121212121212',
+          payload: {
+            'sessionId': sessionId,
+            'processId': 'process-1',
+            'revision': 'r1',
+            'status': 'running',
+            'command': 'bun test',
+            'startedAt': '2026-07-15T00:00:00.000Z',
+            'capability': 'runtime.processes.v1',
+            'stale': false,
+            'supportedActions': ['stop'],
+          },
+        ),
+      );
+      await eventually(() => coordinator.processes.items.length == 1);
 
-    final request = coordinator.requestProcessSnapshot(sessionId);
-    await eventually(
-      () => socket.sent.any(
-        (message) => message['type'] == 'process.snapshot.request',
-      ),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'process.snapshot.request')['requestId'] as String;
-    socket.server(response('process.snapshot.result', {'items': []}, requestId: requestId));
-    await request;
-    await eventually(() => coordinator.processes.items.isEmpty);
+      // An uncorrelated empty result has no session identity and must not clear
+      // the live projection.
+      socket.server(response('process.snapshot.result', {'items': []}));
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(coordinator.processes.items, hasLength(1));
 
-    // A duplicate delayed response is consumed and cannot alter a new state.
-    socket.server(
-      event(
-        type: 'process.snapshot',
-        streamId: 'session:$sessionId',
-        cursor: '3',
-        eventId: '13131313-1313-4131-8131-131313131313',
-        payload: {
-          'sessionId': sessionId,
-          'processId': 'process-2',
-          'revision': 'r2',
-          'status': 'running',
-          'command': 'bun test',
-          'startedAt': '2026-07-15T00:00:00.000Z',
-          'capability': 'runtime.processes.v1',
-          'stale': false,
-          'supportedActions': ['stop'],
-        },
-      ),
-    );
-    await eventually(() => coordinator.processes.items.length == 1);
-    socket.server(response('process.snapshot.result', {'items': []}, requestId: requestId));
-    await Future<void>.delayed(const Duration(milliseconds: 10));
-    expect(coordinator.processes.items.single.processId, 'process-2');
-  });
+      final request = coordinator.requestProcessSnapshot(sessionId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'process.snapshot.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'process.snapshot.request',
+              )['requestId']
+              as String;
+      socket.server(
+        response('process.snapshot.result', {
+          'items': [],
+        }, requestId: requestId),
+      );
+      await request;
+      await eventually(() => coordinator.processes.items.isEmpty);
+
+      // A duplicate delayed response is consumed and cannot alter a new state.
+      socket.server(
+        event(
+          type: 'process.snapshot',
+          streamId: 'session:$sessionId',
+          cursor: '3',
+          eventId: '13131313-1313-4131-8131-131313131313',
+          payload: {
+            'sessionId': sessionId,
+            'processId': 'process-2',
+            'revision': 'r2',
+            'status': 'running',
+            'command': 'bun test',
+            'startedAt': '2026-07-15T00:00:00.000Z',
+            'capability': 'runtime.processes.v1',
+            'stale': false,
+            'supportedActions': ['stop'],
+          },
+        ),
+      );
+      await eventually(() => coordinator.processes.items.length == 1);
+      socket.server(
+        response('process.snapshot.result', {
+          'items': [],
+        }, requestId: requestId),
+      );
+      await Future<void>.delayed(const Duration(milliseconds: 10));
+      expect(coordinator.processes.items.single.processId, 'process-2');
+    },
+  );
 
   test(
     'manual pairing waits for accepted host identity on an explicit port',
@@ -1804,41 +1835,6 @@ void main() {
     }
   });
 
-  test('read-only policy still allows composer submission', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    socket.server(
-      event(
-        type: 'session.summary',
-        streamId: 'host:$hostId',
-        cursor: '2',
-        eventId: '23232323-2323-4232-8232-232323232323',
-        payload: {
-          'sessionId': sessionId,
-          'name': 'Read-only',
-          'runtimeState': 'idle',
-          'queueCount': 0,
-          'policyMode': 'read_only',
-        },
-      ),
-    );
-    await eventually(
-      () => coordinator.activePolicyMode == SessionPolicyMode.readOnly,
-    );
-    await coordinator.updateDraft('Edit me but do not run tools');
-    expect(coordinator.canSend, isTrue);
-    expect(coordinator.composerDisabledReason, isNull);
-    await coordinator.submitPrompt();
-    final prompt = socket.sent.lastWhere(
-      (message) => message['type'] == 'prompt.submit',
-    );
-    expect(prompt['payload'], containsPair('deliveryMode', 'immediate'));
-    expect(
-      prompt['payload'],
-      containsPair('message', 'Edit me but do not run tools'),
-    );
-  });
-
   test(
     'M13 ready attachment IDs persist and enter prompt only on explicit send',
     () async {
@@ -2014,7 +2010,8 @@ void main() {
     'latestCommit': {
       'sha': 'abcdef1234567890abcdef1234567890abcdef12',
       'authoredAt': '2026-01-01T00:00:00.000Z',
-      'url': 'https://github.com/acme/repo/commit/abcdef1234567890abcdef1234567890abcdef12',
+      'url':
+          'https://github.com/acme/repo/commit/abcdef1234567890abcdef1234567890abcdef12',
     },
     'ciStatus': {'state': 'success'},
     'failedChecks': <Object?>[],
@@ -2023,257 +2020,389 @@ void main() {
     'lastRefreshedAt': '2026-01-02T00:00:00.000Z',
   };
 
-  test('R6 git summary request correlates git.summary.result to the workspace', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final future = coordinator.requestGitSummary(workspaceId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'git.summary.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'git.summary.request')['requestId'] as String;
-    expect(
-      socket.sent.lastWhere((message) => message['type'] == 'git.summary.request')['payload'],
-      equals({'workspaceId': workspaceId, 'requestId': requestId}),
-    );
-    socket.server(response('git.summary.result', validGitSummaryPayload(), requestId: requestId));
-    await future;
-    await eventually(() => coordinator.git.summary != null);
-    expect(coordinator.git.summary!.repository, 'acme/repo');
-    expect(coordinator.git.summary!.branch, 'main');
-    expect(coordinator.git.refreshing, isFalse);
-  });
+  test(
+    'R6 git summary request correlates git.summary.result to the workspace',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final future = coordinator.requestGitSummary(workspaceId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'git.summary.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'git.summary.request',
+              )['requestId']
+              as String;
+      expect(
+        socket.sent.lastWhere(
+          (message) => message['type'] == 'git.summary.request',
+        )['payload'],
+        equals({'workspaceId': workspaceId, 'requestId': requestId}),
+      );
+      socket.server(
+        response(
+          'git.summary.result',
+          validGitSummaryPayload(),
+          requestId: requestId,
+        ),
+      );
+      await future;
+      await eventually(() => coordinator.git.summary != null);
+      expect(coordinator.git.summary!.repository, 'acme/repo');
+      expect(coordinator.git.summary!.branch, 'main');
+      expect(coordinator.git.refreshing, isFalse);
+    },
+  );
 
-  test('R6 git.unavailable host-stream event marks the workspace unavailable', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    socket.server(
-      event(
-        type: 'git.summary',
-        streamId: 'host:$hostId',
-        cursor: '1',
-        eventId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
-        payload: validGitSummaryPayload(),
-      ),
-    );
-    await eventually(() => coordinator.git.summary != null);
-    socket.server(
-      event(
-        type: 'git.unavailable',
-        streamId: 'host:$hostId',
-        cursor: '2',
-        eventId: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
-        payload: {
-          'workspaceId': workspaceId,
-          'capability': 'git-ci.v1',
-          'status': {
-            'state': 'unavailable',
-            'reason': 'Repository has no origin remote',
-            'remediation': 'Configure an HTTPS-capable origin remote and refresh.',
+  test(
+    'R6 git.unavailable host-stream event marks the workspace unavailable',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'git.summary',
+          streamId: 'host:$hostId',
+          cursor: '1',
+          eventId: 'aaaaaaaa-1111-4111-8111-aaaaaaaaaaaa',
+          payload: validGitSummaryPayload(),
+        ),
+      );
+      await eventually(() => coordinator.git.summary != null);
+      socket.server(
+        event(
+          type: 'git.unavailable',
+          streamId: 'host:$hostId',
+          cursor: '2',
+          eventId: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
+          payload: {
+            'workspaceId': workspaceId,
+            'capability': 'git-ci.v1',
+            'status': {
+              'state': 'unavailable',
+              'reason': 'Repository has no origin remote',
+              'remediation':
+                  'Configure an HTTPS-capable origin remote and refresh.',
+            },
           },
-        },
-      ),
-    );
-    await eventually(() => coordinator.git.unavailable != null);
-    await eventually(() => coordinator.git.summary == null);
-    expect(coordinator.git.unavailable!.message, 'Repository has no origin remote');
-    expect(coordinator.git.unavailable!.workspaceId, workspaceId);
-    expect(coordinator.git.unavailable!.message, 'Repository has no origin remote');
-    expect(coordinator.git.unavailable!.workspaceId, workspaceId);
-  });
+        ),
+      );
+      await eventually(() => coordinator.git.unavailable != null);
+      await eventually(() => coordinator.git.summary == null);
+      expect(
+        coordinator.git.unavailable!.message,
+        'Repository has no origin remote',
+      );
+      expect(coordinator.git.unavailable!.workspaceId, workspaceId);
+      expect(
+        coordinator.git.unavailable!.message,
+        'Repository has no origin remote',
+      );
+      expect(coordinator.git.unavailable!.workspaceId, workspaceId);
+    },
+  );
 
-  test('R6 cancelGitSummary sends git.summary.cancel with the tracked requestId', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final pending = coordinator.requestGitSummary(workspaceId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'git.summary.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'git.summary.request')['requestId'] as String;
-    await coordinator.cancelGitSummary(workspaceId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'git.summary.cancel'),
-    );
-    final cancel = socket.sent
-        .lastWhere((message) => message['type'] == 'git.summary.cancel')['payload'];
-    expect(cancel, equals({'targetRequestId': requestId}));
-    expect(coordinator.git.refreshing, isFalse);
-    socket.server(response('git.summary.result', validGitSummaryPayload(), requestId: requestId));
-    await pending;
-  });
+  test(
+    'R6 cancelGitSummary sends git.summary.cancel with the tracked requestId',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final pending = coordinator.requestGitSummary(workspaceId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'git.summary.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'git.summary.request',
+              )['requestId']
+              as String;
+      await coordinator.cancelGitSummary(workspaceId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'git.summary.cancel',
+        ),
+      );
+      final cancel = socket.sent.lastWhere(
+        (message) => message['type'] == 'git.summary.cancel',
+      )['payload'];
+      expect(cancel, equals({'targetRequestId': requestId}));
+      expect(coordinator.git.refreshing, isFalse);
+      socket.server(
+        response(
+          'git.summary.result',
+          validGitSummaryPayload(),
+          requestId: requestId,
+        ),
+      );
+      await pending;
+    },
+  );
 
-  test('R6 cancelGitSummary is a no-op when no in-flight request exists for the workspace', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final sentBefore = socket.sent.length;
-    await coordinator.cancelGitSummary(workspaceId);
-    expect(socket.sent.length, equals(sentBefore));
-    expect(coordinator.git.refreshing, isFalse);
-  });
+  test(
+    'R6 cancelGitSummary is a no-op when no in-flight request exists for the workspace',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final sentBefore = socket.sent.length;
+      await coordinator.cancelGitSummary(workspaceId);
+      expect(socket.sent.length, equals(sentBefore));
+      expect(coordinator.git.refreshing, isFalse);
+    },
+  );
 
-  test('R6 stale git.summary.result from a prior connection epoch is dropped', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final pending = coordinator.requestGitSummary(workspaceId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'git.summary.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'git.summary.request')['requestId'] as String;
-    // Force a reconnect which bumps the connection epoch.
-    await coordinator.connect('https://fixture.test');
-    final newSocket = transport.sockets.last;
-    newSocket.server(helloAccepted());
-    await eventually(
-      () => newSocket.sent.any((message) => message['type'] == 'subscription.set'),
-    );
-    newSocket.server(response(
-      'subscription.accepted',
-      {'streams': <Object?>[]},
-      requestId: newSocket.sent
-          .firstWhere((message) => message['type'] == 'subscription.set')['requestId'] as String,
-    ));
-    // The delayed result from the prior epoch must not apply.
-    socket.server(response('git.summary.result', validGitSummaryPayload(), requestId: requestId));
-    await eventually(() => coordinator.git.summary == null);
-    pending.ignore();
-  });
+  test(
+    'R6 stale git.summary.result from a prior connection epoch is dropped',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final pending = coordinator.requestGitSummary(workspaceId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'git.summary.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'git.summary.request',
+              )['requestId']
+              as String;
+      // Force a reconnect which bumps the connection epoch.
+      await coordinator.connect('https://fixture.test');
+      final newSocket = transport.sockets.last;
+      newSocket.server(helloAccepted());
+      await eventually(
+        () => newSocket.sent.any(
+          (message) => message['type'] == 'subscription.set',
+        ),
+      );
+      newSocket.server(
+        response(
+          'subscription.accepted',
+          {'streams': <Object?>[]},
+          requestId:
+              newSocket.sent.firstWhere(
+                    (message) => message['type'] == 'subscription.set',
+                  )['requestId']
+                  as String,
+        ),
+      );
+      // The delayed result from the prior epoch must not apply.
+      socket.server(
+        response(
+          'git.summary.result',
+          validGitSummaryPayload(),
+          requestId: requestId,
+        ),
+      );
+      await eventually(() => coordinator.git.summary == null);
+      pending.ignore();
+    },
+  );
 
   Map<String, Object?> validPlanSnapshotPayload() => <String, Object?>{
-      'planId': 'plan-1',
-      'revision': 'plan-r1',
-      'sessionId': sessionId,
-      'turnId': 'turn-1',
-      'source': 'session-bridge',
-      'stale': false,
-      'capability': {'state': 'available', 'source': 'session-bridge'},
-      'steps': <Object?>[
-        <String, Object?>{
-          'stepId': 'step-1',
-          'title': 'Read file',
-          'status': 'completed',
-        },
-        <String, Object?>{
-          'stepId': 'step-2',
-          'title': 'Patch',
-          'status': 'running',
-        },
-      ],
-    };
+    'planId': 'plan-1',
+    'revision': 'plan-r1',
+    'sessionId': sessionId,
+    'turnId': 'turn-1',
+    'source': 'session-bridge',
+    'stale': false,
+    'capability': {'state': 'available', 'source': 'session-bridge'},
+    'steps': <Object?>[
+      <String, Object?>{
+        'stepId': 'step-1',
+        'title': 'Read file',
+        'status': 'completed',
+      },
+      <String, Object?>{
+        'stepId': 'step-2',
+        'title': 'Patch',
+        'status': 'running',
+      },
+    ],
+  };
 
-  test('R2 plan summary request correlates plan.snapshot.result to the session', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final future = coordinator.requestPlanSummary(sessionId, 'turn-1');
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'plan.summary.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'plan.summary.request')['requestId'] as String;
-    expect(
-      socket.sent.lastWhere((message) => message['type'] == 'plan.summary.request')['payload'],
-      equals(<String, Object?>{'sessionId': sessionId, 'turnId': 'turn-1', 'requestId': requestId}),
-    );
-    socket.server(response('plan.snapshot.result', validPlanSnapshotPayload(), requestId: requestId));
-    await future;
-    await eventually(() => coordinator.plans.snapshot != null);
-    expect(coordinator.plans.snapshot!.planId, 'plan-1');
-    expect(coordinator.plans.snapshot!.steps, hasLength(2));
-    expect(coordinator.plans.refreshing, isFalse);
-  });
+  test(
+    'R2 plan summary request correlates plan.snapshot.result to the session',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final future = coordinator.requestPlanSummary(sessionId, 'turn-1');
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'plan.summary.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'plan.summary.request',
+              )['requestId']
+              as String;
+      expect(
+        socket.sent.lastWhere(
+          (message) => message['type'] == 'plan.summary.request',
+        )['payload'],
+        equals(<String, Object?>{
+          'sessionId': sessionId,
+          'turnId': 'turn-1',
+          'requestId': requestId,
+        }),
+      );
+      socket.server(
+        response(
+          'plan.snapshot.result',
+          validPlanSnapshotPayload(),
+          requestId: requestId,
+        ),
+      );
+      await future;
+      await eventually(() => coordinator.plans.snapshot != null);
+      expect(coordinator.plans.snapshot!.planId, 'plan-1');
+      expect(coordinator.plans.snapshot!.steps, hasLength(2));
+      expect(coordinator.plans.refreshing, isFalse);
+    },
+  );
 
-  test('R2 plan.unavailable host-stream event marks the session unavailable', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    socket.server(
-      event(
-        type: 'plan.snapshot',
-        streamId: 'session:$sessionId',
-        cursor: '1',
-        eventId: 'cccccccc-1111-4111-8111-cccccccccccc',
-        payload: validPlanSnapshotPayload(),
-      ),
-    );
-    socket.server(
-      event(
-        type: 'plan.unavailable',
-        streamId: 'host:$hostId',
-        cursor: '2',
-        eventId: 'cccccccc-2222-4222-8222-cccccccccccc',
-        payload: <String, Object?>{
-          'capability': 'plans.v1',
-          'status': <String, Object?>{
-            'state': 'unavailable',
-            'reason': 'No vetted plan source installed',
-            'remediation': 'Install a vetted Pi extension that emits plan.snapshot events.',
+  test(
+    'R2 plan.unavailable host-stream event marks the session unavailable',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'plan.snapshot',
+          streamId: 'session:$sessionId',
+          cursor: '1',
+          eventId: 'cccccccc-1111-4111-8111-cccccccccccc',
+          payload: validPlanSnapshotPayload(),
+        ),
+      );
+      socket.server(
+        event(
+          type: 'plan.unavailable',
+          streamId: 'host:$hostId',
+          cursor: '2',
+          eventId: 'cccccccc-2222-4222-8222-cccccccccccc',
+          payload: <String, Object?>{
+            'capability': 'plans.v1',
+            'status': <String, Object?>{
+              'state': 'unavailable',
+              'reason': 'No vetted plan source installed',
+              'remediation':
+                  'Install a vetted Pi extension that emits plan.snapshot events.',
+            },
           },
-        },
-      ),
-    );
-    await eventually(() => coordinator.plans.unavailable != null);
-    await eventually(() => coordinator.plans.snapshot == null);
-    expect(coordinator.plans.unavailable!.reason, 'unavailable');
-    expect(coordinator.plans.unavailable!.message, 'No vetted plan source installed');
-    expect(coordinator.plans.unavailable!.remediation, contains('Pi extension'));
-  });
+        ),
+      );
+      await eventually(() => coordinator.plans.unavailable != null);
+      await eventually(() => coordinator.plans.snapshot == null);
+      expect(coordinator.plans.unavailable!.reason, 'unavailable');
+      expect(
+        coordinator.plans.unavailable!.message,
+        'No vetted plan source installed',
+      );
+      expect(
+        coordinator.plans.unavailable!.remediation,
+        contains('Pi extension'),
+      );
+    },
+  );
 
-  test('R2 cancelPlanSummary sends plan.summary.cancel with the tracked requestId', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final pending = coordinator.requestPlanSummary(sessionId, 'turn-1');
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'plan.summary.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'plan.summary.request')['requestId'] as String;
-    await coordinator.cancelPlanSummary(requestId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'plan.summary.cancel'),
-    );
-    final cancel = socket.sent
-        .lastWhere((message) => message['type'] == 'plan.summary.cancel')['payload'];
-    expect(cancel, equals(<String, Object?>{'targetRequestId': requestId}));
-    expect(coordinator.plans.refreshing, isFalse);
-    pending.ignore();
-  });
+  test(
+    'R2 cancelPlanSummary sends plan.summary.cancel with the tracked requestId',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final pending = coordinator.requestPlanSummary(sessionId, 'turn-1');
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'plan.summary.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'plan.summary.request',
+              )['requestId']
+              as String;
+      await coordinator.cancelPlanSummary(requestId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'plan.summary.cancel',
+        ),
+      );
+      final cancel = socket.sent.lastWhere(
+        (message) => message['type'] == 'plan.summary.cancel',
+      )['payload'];
+      expect(cancel, equals(<String, Object?>{'targetRequestId': requestId}));
+      expect(coordinator.plans.refreshing, isFalse);
+      pending.ignore();
+    },
+  );
 
-  test('R2 cancelPlanSummary is a no-op when no in-flight request exists', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    await coordinator.cancelPlanSummary('nonexistent');
-    expect(
-      socket.sent.any((message) => message['type'] == 'plan.summary.cancel'),
-      isFalse,
-    );
-    expect(coordinator.plans.refreshing, isFalse);
-  });
+  test(
+    'R2 cancelPlanSummary is a no-op when no in-flight request exists',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      await coordinator.cancelPlanSummary('nonexistent');
+      expect(
+        socket.sent.any((message) => message['type'] == 'plan.summary.cancel'),
+        isFalse,
+      );
+      expect(coordinator.plans.refreshing, isFalse);
+    },
+  );
 
-  test('R2 stale plan.snapshot.result from a prior connection epoch is dropped', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final pending = coordinator.requestPlanSummary(sessionId, 'turn-1');
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'plan.summary.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'plan.summary.request')['requestId'] as String;
-    await coordinator.connect('https://fixture.test');
-    final newSocket = transport.sockets.last;
-    newSocket.server(helloAccepted());
-    await eventually(
-      () => newSocket.sent.any((message) => message['type'] == 'subscription.set'),
-    );
-    newSocket.server(response(
-      'subscription.accepted',
-      {'streams': <Object?>[]},
-      requestId: newSocket.sent
-          .firstWhere((message) => message['type'] == 'subscription.set')['requestId'] as String,
-    ));
-    socket.server(response('plan.snapshot.result', validPlanSnapshotPayload(), requestId: requestId));
-    await eventually(() => coordinator.plans.snapshot == null);
-    pending.ignore();
-  });
+  test(
+    'R2 stale plan.snapshot.result from a prior connection epoch is dropped',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final pending = coordinator.requestPlanSummary(sessionId, 'turn-1');
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'plan.summary.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'plan.summary.request',
+              )['requestId']
+              as String;
+      await coordinator.connect('https://fixture.test');
+      final newSocket = transport.sockets.last;
+      newSocket.server(helloAccepted());
+      await eventually(
+        () => newSocket.sent.any(
+          (message) => message['type'] == 'subscription.set',
+        ),
+      );
+      newSocket.server(
+        response(
+          'subscription.accepted',
+          {'streams': <Object?>[]},
+          requestId:
+              newSocket.sent.firstWhere(
+                    (message) => message['type'] == 'subscription.set',
+                  )['requestId']
+                  as String,
+        ),
+      );
+      socket.server(
+        response(
+          'plan.snapshot.result',
+          validPlanSnapshotPayload(),
+          requestId: requestId,
+        ),
+      );
+      await eventually(() => coordinator.plans.snapshot == null);
+      pending.ignore();
+    },
+  );
 
   // ────────────────────────────────────────────────────────────────────────
   // R4 — Context inspector
@@ -2300,28 +2429,47 @@ void main() {
     'lastRefreshedAt': '2026-07-12T00:00:00.000Z',
   };
 
-  test('R4 context snapshot request correlates context.snapshot.result to the session', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final future = coordinator.requestContextSnapshot(sessionId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'context.snapshot.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'context.snapshot.request')['requestId'] as String;
-    expect(
-      socket.sent.lastWhere((message) => message['type'] == 'context.snapshot.request')['payload'],
-      equals(<String, Object?>{'sessionId': sessionId, 'requestId': requestId}),
-    );
-    socket.server(response('context.snapshot.result', validContextSnapshotPayload(), requestId: requestId));
-    await future;
-    await eventually(() => coordinator.contextState.snapshot != null);
-    expect(coordinator.contextState.snapshot!.revision, 'context-r1');
-    expect(coordinator.contextState.snapshot!.model?.provider, 'anthropic');
-    expect(coordinator.contextState.refreshing, isFalse);
-  });
+  test(
+    'R4 context snapshot request correlates context.snapshot.result to the session',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final future = coordinator.requestContextSnapshot(sessionId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'context.snapshot.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'context.snapshot.request',
+              )['requestId']
+              as String;
+      expect(
+        socket.sent.lastWhere(
+          (message) => message['type'] == 'context.snapshot.request',
+        )['payload'],
+        equals(<String, Object?>{
+          'sessionId': sessionId,
+          'requestId': requestId,
+        }),
+      );
+      socket.server(
+        response(
+          'context.snapshot.result',
+          validContextSnapshotPayload(),
+          requestId: requestId,
+        ),
+      );
+      await future;
+      await eventually(() => coordinator.contextState.snapshot != null);
+      expect(coordinator.contextState.snapshot!.revision, 'context-r1');
+      expect(coordinator.contextState.snapshot!.model?.provider, 'anthropic');
+      expect(coordinator.contextState.refreshing, isFalse);
+    },
+  );
 
-  test('R4 context.unavailable host-stream event marks the session unavailable', () async {
+  test('R4 context.unavailable event marks the session unavailable', () async {
     await makeReady(coordinator, transport);
     final socket = transport.sockets.single;
     socket.server(
@@ -2336,7 +2484,7 @@ void main() {
     socket.server(
       event(
         type: 'context.unavailable',
-        streamId: 'host:$hostId',
+        streamId: 'session:$sessionId',
         cursor: '2',
         eventId: 'bbbbbbbb-2222-4222-8222-bbbbbbbbbbbb',
         payload: <String, Object?>{
@@ -2345,7 +2493,8 @@ void main() {
           'status': <String, Object?>{
             'state': 'unavailable',
             'reason': 'No vetted context authority installed',
-            'remediation': 'Install a vetted Pi authority that emits context.snapshot events.',
+            'remediation':
+                'Install a vetted Pi authority that emits context.snapshot events.',
           },
         },
       ),
@@ -2353,109 +2502,160 @@ void main() {
     await eventually(() => coordinator.contextState.unavailable != null);
     await eventually(() => coordinator.contextState.snapshot == null);
     expect(coordinator.contextState.unavailable!.reason, 'unavailable');
-    expect(coordinator.contextState.unavailable!.message, contains('No vetted context authority'));
-  });
-
-  test('R4 cancelContextSnapshot clears refreshing when no in-flight request exists', () async {
-    await makeReady(coordinator, transport);
-    await coordinator.cancelContextSnapshot('nonexistent');
-    expect(coordinator.contextState.refreshing, isFalse);
-  });
-
-  test('R4 cancelContextSnapshot clears the tracked request and refreshing flag', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final pending = coordinator.requestContextSnapshot(sessionId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'context.snapshot.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'context.snapshot.request')['requestId'] as String;
-    await coordinator.cancelContextSnapshot(requestId);
-    expect(coordinator.contextState.refreshing, isFalse);
-    pending.ignore();
-  });
-
-  test('R4 pinContext sends context.pin with the closed target and expectedRevision', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    await coordinator.pinContext(
-      sessionId: sessionId,
-      expectedRevision: 'context-r1',
-      target: ContextMutationTarget.file(path: 'src/main.dart', revision: 'src-r1'),
-    );
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'context.pin'),
-    );
-    final payload = socket.sent.lastWhere((message) => message['type'] == 'context.pin')['payload']
-        as Map<String, Object?>;
-    expect(payload['sessionId'], sessionId);
-    expect(payload['expectedRevision'], 'context-r1');
-    expect(payload['target'], isA<Map<String, Object?>>());
-    final target = payload['target'] as Map<String, Object?>;
-    expect(target['kind'], 'file');
-    expect(target['path'], 'src/main.dart');
-  });
-
-  test('R4 unpin/exclude/refresh all send the matching control with the closed target', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    await coordinator.unpinContext(
-      sessionId: sessionId,
-      expectedRevision: 'context-r1',
-      target: ContextMutationTarget.source(sourceId: 'cmd-out-7'),
-    );
-    await coordinator.excludeContext(
-      sessionId: sessionId,
-      expectedRevision: 'context-r1',
-      target: ContextMutationTarget.source(sourceId: 'cmd-out-7'),
-    );
-    await coordinator.refreshContext(
-      sessionId: sessionId,
-      expectedRevision: 'context-r1',
-    );
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'context.refresh'),
-    );
     expect(
-      socket.sent.any((message) => message['type'] == 'context.unpin'),
-      isTrue,
+      coordinator.contextState.unavailable!.message,
+      contains('No vetted context authority'),
     );
-    expect(
-      socket.sent.any((message) => message['type'] == 'context.exclude'),
-      isTrue,
-    );
-    final refreshPayload = socket.sent.lastWhere((message) => message['type'] == 'context.refresh')['payload']
-        as Map<String, Object?>;
-    final target = refreshPayload['target'] as Map<String, Object?>;
-    expect(target['kind'], 'all');
   });
 
-  test('R4 stale context.snapshot.result from a prior connection epoch is dropped', () async {
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    final pending = coordinator.requestContextSnapshot(sessionId);
-    await eventually(
-      () => socket.sent.any((message) => message['type'] == 'context.snapshot.request'),
-    );
-    final requestId = socket.sent
-        .lastWhere((message) => message['type'] == 'context.snapshot.request')['requestId'] as String;
-    await coordinator.connect('https://fixture.test');
-    final newSocket = transport.sockets.last;
-    newSocket.server(helloAccepted());
-    await eventually(
-      () => newSocket.sent.any((message) => message['type'] == 'subscription.set'),
-    );
-    newSocket.server(response(
-      'subscription.accepted',
-      {'streams': <Object?>[]},
-      requestId: newSocket.sent
-          .firstWhere((message) => message['type'] == 'subscription.set')['requestId'] as String,
-    ));
-    socket.server(response('context.snapshot.result', validContextSnapshotPayload(), requestId: requestId));
-    await eventually(() => coordinator.contextState.snapshot == null);
-    pending.ignore();
-  });
+  test(
+    'R4 cancelContextSnapshot clears refreshing when no in-flight request exists',
+    () async {
+      await makeReady(coordinator, transport);
+      await coordinator.cancelContextSnapshot('nonexistent');
+      expect(coordinator.contextState.refreshing, isFalse);
+    },
+  );
+
+  test(
+    'R4 cancelContextSnapshot clears the tracked request and refreshing flag',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final pending = coordinator.requestContextSnapshot(sessionId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'context.snapshot.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'context.snapshot.request',
+              )['requestId']
+              as String;
+      await coordinator.cancelContextSnapshot(requestId);
+      expect(coordinator.contextState.refreshing, isFalse);
+      pending.ignore();
+    },
+  );
+
+  test(
+    'R4 pinContext sends context.pin with the closed target and expectedRevision',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      await coordinator.pinContext(
+        sessionId: sessionId,
+        expectedRevision: 'context-r1',
+        target: ContextMutationTarget.file(
+          path: 'src/main.dart',
+          revision: 'src-r1',
+        ),
+      );
+      await eventually(
+        () => socket.sent.any((message) => message['type'] == 'context.pin'),
+      );
+      final payload =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'context.pin',
+              )['payload']
+              as Map<String, Object?>;
+      expect(payload['sessionId'], sessionId);
+      expect(payload['expectedRevision'], 'context-r1');
+      expect(payload['target'], isA<Map<String, Object?>>());
+      final target = payload['target'] as Map<String, Object?>;
+      expect(target['kind'], 'file');
+      expect(target['path'], 'src/main.dart');
+    },
+  );
+
+  test(
+    'R4 unpin/exclude/refresh all send the matching control with the closed target',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      await coordinator.unpinContext(
+        sessionId: sessionId,
+        expectedRevision: 'context-r1',
+        target: ContextMutationTarget.source(sourceId: 'cmd-out-7'),
+      );
+      await coordinator.excludeContext(
+        sessionId: sessionId,
+        expectedRevision: 'context-r1',
+        target: ContextMutationTarget.source(sourceId: 'cmd-out-7'),
+      );
+      await coordinator.refreshContext(
+        sessionId: sessionId,
+        expectedRevision: 'context-r1',
+      );
+      await eventually(
+        () =>
+            socket.sent.any((message) => message['type'] == 'context.refresh'),
+      );
+      expect(
+        socket.sent.any((message) => message['type'] == 'context.unpin'),
+        isTrue,
+      );
+      expect(
+        socket.sent.any((message) => message['type'] == 'context.exclude'),
+        isTrue,
+      );
+      final refreshPayload =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'context.refresh',
+              )['payload']
+              as Map<String, Object?>;
+      final target = refreshPayload['target'] as Map<String, Object?>;
+      expect(target['kind'], 'all');
+    },
+  );
+
+  test(
+    'R4 stale context.snapshot.result from a prior connection epoch is dropped',
+    () async {
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      final pending = coordinator.requestContextSnapshot(sessionId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'context.snapshot.request',
+        ),
+      );
+      final requestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'context.snapshot.request',
+              )['requestId']
+              as String;
+      await coordinator.connect('https://fixture.test');
+      final newSocket = transport.sockets.last;
+      newSocket.server(helloAccepted());
+      await eventually(
+        () => newSocket.sent.any(
+          (message) => message['type'] == 'subscription.set',
+        ),
+      );
+      newSocket.server(
+        response(
+          'subscription.accepted',
+          {'streams': <Object?>[]},
+          requestId:
+              newSocket.sent.firstWhere(
+                    (message) => message['type'] == 'subscription.set',
+                  )['requestId']
+                  as String,
+        ),
+      );
+      socket.server(
+        response(
+          'context.snapshot.result',
+          validContextSnapshotPayload(),
+          requestId: requestId,
+        ),
+      );
+      await eventually(() => coordinator.contextState.snapshot == null);
+      pending.ignore();
+    },
+  );
 }
 
 Future<void> makeReady(
@@ -2663,7 +2863,7 @@ Map<String, Object?> helloAccepted({String generation = '1'}) =>
       'hostGeneration': generation,
       'hostDisplayName': 'Fixture host',
       'bridgeVersion': 'm5',
-      'piVersion': '0.80.6',
+      'piVersion': '0.82.0',
       'serverTime': '2026-07-13T00:00:00.000Z',
       'capabilities': ['streams.v1', 'commands.v1', 'controller_leases.v1'],
       'limits': {

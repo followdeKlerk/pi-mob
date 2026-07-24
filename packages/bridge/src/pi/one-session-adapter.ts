@@ -33,11 +33,11 @@ import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
 import type { AttachmentStore } from "../core/attachments";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
+import { handleRawRpcRequest } from "./raw-rpc";
 import { DurableRecipeActivityProjection } from "./external-history";
 import { normalizeCommandCatalogue } from "./command-catalogue";
 import { ExportRegistry, ExportRegistryInvalidInputError, type ExportMetadata } from "./export-registry";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
-import type { HostPolicyMode } from "../core/workspace-policy";
 import { classifyEvent, safePublishStatus, type NotificationService } from "../notifications";
 import {
   ProcessSupervisor,
@@ -47,20 +47,10 @@ import {
   ProcessSupervisorError,
 } from "../core/process-supervisor";
 
-/**
- * Bridge for the M8 runtime-owned policy module. The adapter never
- * mutates policy itself — it just sets the per-session default and
- * reports back the host policy snapshot that the runtime may have
- * written alongside the session. Tests pass `null` to opt out.
- */
-export interface OneSessionPolicyBridge {
-  /** Returns the host-wide policy mode the adapter should default new sessions to. */
-  hostMode(): HostPolicyMode;
-  /** Returns the mode the most recent prompt-start snapshot wrote into a session. */
-  snapshotModeFor(sessionId: string): { policyMode: HostPolicyMode; policyVersion: string; fingerprint: string; snapshottedAt: string } | null;
-  /** Publishes policy for the next turn to the bridge-owned extension file. */
-  publish?(snapshot?: { policyMode: HostPolicyMode; policyVersion: string; fingerprint: string; snapshottedAt: string }): void;
-}
+// The bridge no longer owns a host policy. `WorkspacePolicyMode` is
+// kept for back-compat with persisted session state that still records
+// the field; new sessions always start with `"full"`.
+export type WorkspacePolicyMode = "full" | "read_only";
 
 // ---------------- RPC client contract ----------------
 
@@ -98,15 +88,11 @@ export interface PiRpcClient {
 
 // ---------------- Workspace listing shape ----------------
 
-export type WorkspaceTrustState = "trusted" | "untrusted" | "approval_required";
-export type WorkspacePolicyMode = "full" | "read_only";
-
 export interface WorkspaceListingItem {
   readonly [key: string]: unknown;
   readonly workspaceId: string;
   readonly displayName: string;
   readonly fingerprint: string;
-  readonly trustState: WorkspaceTrustState;
   readonly policyMode: WorkspacePolicyMode;
   readonly availableSince: string;
   readonly lastSeenAt: string;
@@ -154,13 +140,6 @@ export interface OneSessionAdapterOptions {
   readonly now?: () => number;
   /** UUID generator; defaults to `crypto.randomUUID`. */
   readonly newSessionId?: () => string;
-  /**
-   * M8 — optional bridge into the host policy module so the adapter can
-   * honour the host-wide mode when seeding a new session. When `null` the
-   * adapter falls back to the configured `workspace.policyMode` for
-   * backwards-compat.
-   */
-  readonly policyBridge?: OneSessionPolicyBridge | null;
   /**
    * M11 — optional process supervisor. When supplied, the adapter uses
    * it to enforce capacity, run idle eviction, and drive lazy restore.
@@ -256,7 +235,6 @@ export class OneSessionPiAdapter {
   >();
   private readonly toolOutputLimiter = new ToolOutputLimiter();
   private readonly recipeProjections = new Map<string, DurableRecipeActivityProjection>();
-  private readonly policyBridge: OneSessionPolicyBridge | null;
   private readonly supervisor: ProcessSupervisor;
   private readonly reuseExistingOnCreate: boolean;
   private lastUsedSessionId: string | null = null;
@@ -275,7 +253,6 @@ export class OneSessionPiAdapter {
     this.rpc = options.rpc;
     this.now = options.now ?? Date.now;
     this.newSessionId = options.newSessionId ?? (() => crypto.randomUUID().toLowerCase());
-    this.policyBridge = options.policyBridge ?? null;
     this.createRpc = options.createRpc ?? null;
     this.processSpec = options.processSpec ?? null;
     this.reuseExistingOnCreate = options.reuseExistingOnCreate ?? false;
@@ -377,7 +354,6 @@ export class OneSessionPiAdapter {
           workspaceId: this.workspace.workspaceId,
           displayName: this.workspace.displayName,
           fingerprint: this.workspace.fingerprint,
-          trustState: "trusted",
           policyMode: this.workspace.policyMode,
           availableSince: this.workspace.availableSince ?? new Date(0).toISOString(),
           lastSeenAt: this.workspace.lastSeenAt ?? new Date(this.now()).toISOString(),
@@ -396,6 +372,8 @@ export class OneSessionPiAdapter {
         return this.handleSessionStop(command);
       case "prompt.submit":
         return this.handlePromptSubmit(command);
+      case "pi.rpc.request":
+        return handleRawRpcRequest(this, command, this.store);
       case "turn.abort":
         return this.handleTurnAbort(command);
       case "queue.remove":
@@ -406,9 +384,6 @@ export class OneSessionPiAdapter {
         return this.handleExtensionResponse(command);
       case "session.activate":
         return this.handleSessionActivate(command);
-      case "session.policy.set":
-        this.policyBridge?.publish?.();
-        return;
       case "model.set":
         return this.handleModelSet(command);
       case "thinking.set":
@@ -467,8 +442,8 @@ export class OneSessionPiAdapter {
         this.store.appendEvent(this.hostStream,"notification.capability",{available:Boolean(this.notificationService),registered:false});
         return;
       default:
-        // Session-scoped metadata commands (rename, policy.set, ...) are
-        // local-only at this checkpoint; no Pi RPC call is required.
+        // Session-scoped metadata commands (rename, ...) are local-only
+        // at this checkpoint; no Pi RPC call is required.
         return;
     }
   }
@@ -529,7 +504,7 @@ export class OneSessionPiAdapter {
 
   // ---------------- Internals ----------------
 
-  private resolveRpc(sessionId: string): PiRpcClient {
+  resolveRpc(sessionId: string): PiRpcClient {
     const slot = this.slots.get(sessionId);
     if (slot) return slot.rpc;
     if (this.createRpc) {
@@ -554,6 +529,28 @@ export class OneSessionPiAdapter {
       this.startedRpcs.delete(rpc);
       throw error;
     }
+  }
+
+  /** Shared dispatcher for pure-1:1 Pi RPC mappings (Phase 6); bridge-owned
+   * lifecycle orchestration (session create/stop/activate/restore/delete/purge,
+   * queue mutations, extension UI responses, device notifications, the raw RPC
+   * dispatcher) stays in its dedicated handler. */
+  private async rawRpc(
+    sessionId: string,
+    method: string,
+    params: Readonly<Record<string, unknown>>,
+    opts?: { readonly commandId?: string; readonly timeoutMs?: number },
+  ): Promise<unknown> {
+    const rpc = this.sessions.get(sessionId)?.rpc ?? this.resolveRpc(sessionId) ?? this.rpc;
+    if (!rpc) throw new Error(`rawRpc: no RPC available for session ${sessionId}`);
+    await this.ensureRpcStarted(rpc);
+    const hasParams = Object.keys(params).length > 0;
+    return rpc.request({
+      ...(opts?.commandId ? { id: opts.commandId } : {}),
+      method,
+      ...(hasParams ? { params } : {}),
+      ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
+    });
   }
 
   private bindSession(sessionId: string): SessionEntry {
@@ -671,7 +668,6 @@ export class OneSessionPiAdapter {
   private async handleSessionCreate(command: StoredCommand): Promise<void> {
     const payload = (command.payload ?? {}) as {
       workspaceId?: string;
-      policyMode?: WorkspacePolicyMode;
       name?: string;
       workspaceRelativePath?: string;
       modelId?: string;
@@ -680,8 +676,7 @@ export class OneSessionPiAdapter {
     const workspaceId = typeof payload.workspaceId === "string" && payload.workspaceId.length > 0
       ? payload.workspaceId
       : this.workspace.workspaceId;
-    const baseMode: WorkspacePolicyMode = payload.policyMode
-      ?? (this.policyBridge ? this.policyBridge.hostMode() : this.workspace.policyMode);
+    const baseMode: WorkspacePolicyMode = this.workspace.policyMode;
     let sessionRoot = this.workspace.rootPath;
     let workspaceRelativePath = ".";
     let workspaceDisplayName = this.workspace.displayName;
@@ -754,11 +749,7 @@ export class OneSessionPiAdapter {
 
     if (typeof payload.modelId === "string" &&
         typeof payload.provider === "string") {
-      await rpc.request({
-        id: `${command.commandId}-model`,
-        method: "set_model",
-        params: { provider: payload.provider, modelId: payload.modelId },
-      });
+      await this.rawRpc(sessionId, "set_model", { provider: payload.provider, modelId: payload.modelId }, { commandId: `${command.commandId}-model` });
     }
 
     const summary = {
@@ -902,7 +893,7 @@ export class OneSessionPiAdapter {
     const rpc = entry?.rpc ?? this.rpc;
     if (!rpc) return;
     const safeRequest = async (method: string): Promise<unknown> => {
-      try { return await rpc.request({ method, timeoutMs: 5_000 }); }
+      try { return await this.rawRpc(sessionId, method, {}, { timeoutMs: 5_000 }); }
       catch { return null; }
     };
     const [modelsRaw, stateRaw, statsRaw, commandsRaw, treeRaw, forkMessagesRaw] = await Promise.all([
@@ -1028,10 +1019,7 @@ export class OneSessionPiAdapter {
     const params = command.type === "steering_mode.set" || command.type === "follow_up_mode.set"
       ? { mode: command.payload.enabled === true ? "all" : "one-at-a-time" }
       : Object.fromEntries(Object.entries(command.payload).filter(([key]) => key !== "sessionId"));
-    const rpc = this.sessions.get(sessionId)?.rpc ?? this.resolveRpc(sessionId) ?? this.rpc;
-    if (!rpc) throw new Error(`${command.type} no RPC available`);
-    await this.ensureRpcStarted(rpc);
-    await rpc.request({ id: command.commandId, method, params });
+    await this.rawRpc(sessionId, method, params, { commandId: command.commandId });
     const patch = {
       sessionId,
       ...statePatch,
@@ -1071,9 +1059,6 @@ export class OneSessionPiAdapter {
     const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
     if (!rpc) throw new Error("prompt.submit no RPC available");
     await this.ensureRpcStarted(rpc);
-    const policySnapshot = this.policyBridge?.snapshotModeFor(payload.sessionId);
-    if (this.policyBridge && !policySnapshot) throw new Error("prompt.submit requires a durable policy snapshot");
-    this.policyBridge?.publish?.(policySnapshot ?? undefined);
     rpc.markDispatchStart?.();
     const method: "prompt" | "steer" | "follow_up" =
       payload.deliveryMode === "steer" ? "steer" :
@@ -1100,11 +1085,7 @@ export class OneSessionPiAdapter {
       this.attachmentStore.retain(attachmentId, this.now() + 24 * 60 * 60_000);
     }
     try {
-      await rpc.request({
-        id: command.commandId,
-        method,
-        params: { message: payload.message, ...(images.length ? { images } : {}) },
-      });
+      await this.rawRpc(payload.sessionId, method, { message: payload.message, ...(images.length ? { images } : {}) }, { commandId: command.commandId });
     } catch (error) {
       this.activeTurns.delete(payload.sessionId);
       const streamId = `session:${payload.sessionId}`;
@@ -1130,9 +1111,7 @@ export class OneSessionPiAdapter {
     if (typeof payload.sessionId !== "string") throw new Error("turn.abort requires sessionId");
     if (!this.store.sessionExists(payload.sessionId)) throw new Error("turn.abort session not found");
     this.lastUsedSessionId = payload.sessionId;
-    const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
-    if (!rpc) throw new Error("turn.abort no RPC available");
-    await rpc.request({ id: command.commandId, method: "abort" });
+    await this.rawRpc(payload.sessionId, "abort", {}, { commandId: command.commandId });
   }
 
   // ---------------- M12 lifecycle handlers ----------------
@@ -1184,7 +1163,7 @@ export class OneSessionPiAdapter {
     const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
     if (!rpc) throw new Error("session.rename no RPC available");
     try {
-      await rpc.request({ id: command.commandId, method: "set_session_name", params: { name: payload.name } });
+      await this.rawRpc(payload.sessionId, "set_session_name", { name: payload.name }, { commandId: command.commandId });
     } catch (error) {
       // Extension cancel / RPC failure — surface as capability-safe `invalid_state`
       // so mobile sees the rename failed but the durable summary is unchanged.
@@ -1227,7 +1206,7 @@ export class OneSessionPiAdapter {
     if (!rpc) throw new Error("session.fork no RPC available");
     let eligibleResponse: unknown;
     try {
-      eligibleResponse = await rpc.request({ id: `${command.commandId}:eligible`, method: "get_fork_messages" });
+      eligibleResponse = await this.rawRpc(payload.sessionId, "get_fork_messages", {}, { commandId: `${command.commandId}:eligible` });
     } catch (error) {
       this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
         sessionId: payload.sessionId,
@@ -1248,7 +1227,7 @@ export class OneSessionPiAdapter {
     }
     let response: unknown;
     try {
-      response = await rpc.request({ id: command.commandId, method: "fork", params: { entryId: payload.entryId } });
+      response = await this.rawRpc(payload.sessionId, "fork", { entryId: payload.entryId }, { commandId: command.commandId });
     } catch (error) {
       // Extension cancel or RPC failure — leave original unchanged.
       this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
@@ -1311,7 +1290,7 @@ export class OneSessionPiAdapter {
     if (!rpc) throw new Error("session.clone no RPC available");
     let response: unknown;
     try {
-      response = await rpc.request({ id: command.commandId, method: "clone" });
+      response = await this.rawRpc(payload.sessionId, "clone", {}, { commandId: command.commandId });
     } catch (error) {
       this.store.appendEvent(`session:${payload.sessionId}`, "session.metadata", {
         sessionId: payload.sessionId,
@@ -1502,11 +1481,7 @@ export class OneSessionPiAdapter {
     const reserved = exportRegistry.register({ sessionId, format: "html" });
     mkdirSync(exportRegistry.rootPath(), { recursive: true, mode: 0o700 });
     try {
-      const response = await rpc.request({
-        id: command.commandId,
-        method: "export_html",
-        params: { outputPath: reserved.storagePath },
-      });
+      const response = await this.rawRpc(sessionId, "export_html", { outputPath: reserved.storagePath }, { commandId: command.commandId });
       const responseObject = response && typeof response === "object" ? response as Record<string, unknown> : {};
       let bytes = typeof responseObject.bytes === "number" ? responseObject.bytes : 0;
       let digest = typeof responseObject.sha256 === "string" ? responseObject.sha256 : "";
@@ -1581,6 +1556,7 @@ export class OneSessionPiAdapter {
       const dialog = this.store.createDialog({ sessionId:inferredSessionId, upstreamId:String(record.id ?? "").slice(0,256), method, request, expiresAt:this.now()+timeout });
       this.store.appendEvent(streamId, "extension.dialog", { sessionId:inferredSessionId, dialogId:dialog.dialogId, method, ...request, createdAt:new Date(dialog.createdAt).toISOString(), expiresAt:new Date(dialog.expiresAt).toISOString(), state:"pending" });
       this.store.updateSessionState(inferredSessionId, { ...(this.store.sessionState(inferredSessionId) ?? {}), pendingDialog:{ dialogId:dialog.dialogId, method, ...request, expiresAt:new Date(dialog.expiresAt).toISOString() } });
+      this.store.appendEvent(streamId, "pi.rpc.event", { sessionId: inferredSessionId, event: record });
       return;
     }
     const normalized = normalizePiEvent(record as RawPiEvent, {

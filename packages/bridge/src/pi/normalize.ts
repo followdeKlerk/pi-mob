@@ -358,80 +358,84 @@ function event(type: NormalizedPiEvent["type"], sessionId: string, payload: Reco
   return { type, payload: { sessionId, ...payload } };
 }
 
-/** Normalize exact Pi 0.80.6 events without exposing upstream shapes or host paths. */
 export function normalizePiEvent(raw: RawPiEvent, context: PiNormalizationContext): readonly NormalizedPiEvent[] {
-  const sessionId = context.sessionId;
-  switch (raw.type) {
-    case "agent_start": return [event("session.state", sessionId, { runtimeState: "running" })];
-    case "agent_end": return [event("session.state", sessionId, { runtimeState: raw.willRetry === true ? "retrying" : "finishing" })];
-    case "agent_settled": {
-      context.toolOutputLimiter?.reset();
-      return [event("turn.settled", sessionId, {})];
-    }
-    case "turn_start": return [event("turn.started", sessionId, { turnIndex: raw.turnIndex, timestamp: raw.timestamp })];
-    case "turn_end": return [event("assistant.completed", sessionId, { summary: safe(raw.message), toolResultCount: Array.isArray(raw.toolResults) ? raw.toolResults.length : 0 })];
-    case "message_start": {
-      const message = object(raw.message);
-      if (message.role !== "assistant") return [];
-      return [event("assistant.started", sessionId, { contentBlockId: message.id ?? raw.messageId ?? "message" })];
-    }
-    case "message_update": return normalizeMessageUpdate(raw, sessionId);
-    case "message_end": {
-      const message = object(raw.message);
-      if (message.role !== "assistant") return [];
-      if (message.stopReason === "aborted") {
-        return [event("turn.aborted", sessionId, { reason: "aborted" })];
-      }
-      return [event("assistant.completed", sessionId, { content: safe(raw.message) })];
-    }
-    case "tool_execution_start": {
-      const toolCallId = identifier(raw.toolCallId);
-      context.toolOutputLimiter?.begin(toolCallId);
-      return [event("tool.started", sessionId, {
-        toolCallId, toolName: identifier(raw.toolName),
-        builtIn: BUILT_IN_PI_TOOLS.includes(raw.toolName as never), arguments: safe(raw.args), status: "running",
-      })];
-    }
-    case "tool_execution_update": {
-      const toolCallId = identifier(raw.toolCallId);
-      const limited = (context.toolOutputLimiter ?? new ToolOutputLimiter()).limit(toolCallId, raw.partialResult);
-      return [event("tool.output", sessionId, {
-        toolCallId, output: limited.value, retainedBytes: limited.retainedBytes,
-        totalBytes: limited.totalBytes, isTruncated: limited.isTruncated,
-        ...(limited.digest ? { digest: limited.digest } : {}),
-      })];
-    }
-    case "tool_execution_end": {
-      const toolCallId = identifier(raw.toolCallId);
-      const limiter = context.toolOutputLimiter ?? new ToolOutputLimiter();
-      const limited = limiter.limit(toolCallId, raw.result);
-      limiter.end(toolCallId);
-      return [event(raw.isError === true ? "tool.failed" : "tool.completed", sessionId, {
-        toolCallId, toolName: identifier(raw.toolName), result: limited.value, isError: raw.isError === true,
-        retainedBytes: limited.retainedBytes, totalBytes: limited.totalBytes, isTruncated: limited.isTruncated,
-        ...(limited.digest ? { digest: limited.digest } : {}),
-      })];
-    }
-    case "queue_update": return [event("queue.snapshot", sessionId, { steering: safe(raw.steering), followUp: safe(raw.followUp) })];
-    case "compaction_start": return [event("compaction.state", sessionId, { state: "running", reason: raw.reason })];
-    case "compaction_end": return [event("compaction.state", sessionId, { state: raw.aborted === true ? "aborted" : raw.errorMessage ? "failed" : "completed", willRetry: raw.willRetry === true })];
-    case "auto_retry_start": return [event("retry.state", sessionId, { state: "waiting", attempt: raw.attempt, maxAttempts: raw.maxAttempts, delayMs: raw.delayMs })];
-    case "auto_retry_end": return [event("retry.state", sessionId, { state: raw.success === true ? "completed" : "failed", attempt: raw.attempt })];
-    case "entry_appended": return [event("session.state", sessionId, { entry: safe(raw.entry) })];
-    case "session_info_changed": return [event("session.metadata", sessionId, { name: text(raw.name) })];
-    case "thinking_level_changed": return [event("model.state", sessionId, { thinkingLevel: raw.level })];
-    case "model_changed": return [event("model.state", sessionId, { provider: text(raw.provider), modelId: text(raw.id ?? raw.modelId) })];
-    case "steering_mode_changed": return [event("model.state", sessionId, { steeringMode: text(raw.mode) })];
-    case "follow_up_mode_changed": return [event("model.state", sessionId, { followUpMode: text(raw.mode) })];
-    case "session_stats": return [event("context.state", sessionId, {
-      tokens: numberOr(raw.tokens, null), cost: numberOr(raw.cost, null),
-      contextWindow: numberOr(raw.contextWindow ?? raw.context_window, null),
-    })];
-    case "extension_error": return [event("error.event", sessionId, { code: "internal_error", retryable: false, extensionEvent: safe(raw.event) })];
-    case "extension_ui_request": return normalizeExtensionUi(raw, sessionId);
-    default: return [];
-  }
+  return [
+    ...normalizeCuratedPiEvent(raw, context),
+    event("pi.rpc.event", context.sessionId, { event: raw }),
+  ];
 }
+
+function normalizeCuratedPiEvent(raw: RawPiEvent, context: PiNormalizationContext): readonly NormalizedPiEvent[] { const sessionId = context.sessionId;
+switch (raw.type) {
+  case "agent_start": return [event("session.state", sessionId, { runtimeState: "running" })];
+  case "agent_end": return [event("session.state", sessionId, { runtimeState: raw.willRetry === true ? "retrying" : "finishing" })];
+  case "agent_settled": {
+    context.toolOutputLimiter?.reset();
+    return [event("turn.settled", sessionId, {})];
+  }
+  case "turn_start": return [event("turn.started", sessionId, { turnIndex: raw.turnIndex, timestamp: raw.timestamp })];
+  case "turn_end": return [event("assistant.completed", sessionId, { summary: safe(raw.message), toolResultCount: Array.isArray(raw.toolResults) ? raw.toolResults.length : 0 })];
+  case "message_start": {
+    const message = object(raw.message);
+    if (message.role !== "assistant") return [];
+    return [event("assistant.started", sessionId, { contentBlockId: message.id ?? raw.messageId ?? "message" })];
+  }
+  case "message_update": return normalizeMessageUpdate(raw, sessionId);
+  case "message_end": {
+    const message = object(raw.message);
+    if (message.role !== "assistant") return [];
+    if (message.stopReason === "aborted") {
+      return [event("turn.aborted", sessionId, { reason: "aborted" })];
+    }
+    return [event("assistant.completed", sessionId, { content: safe(raw.message) })];
+  }
+  case "tool_execution_start": {
+    const toolCallId = identifier(raw.toolCallId);
+    context.toolOutputLimiter?.begin(toolCallId);
+    return [event("tool.started", sessionId, {
+      toolCallId, toolName: identifier(raw.toolName),
+      builtIn: BUILT_IN_PI_TOOLS.includes(raw.toolName as never), arguments: safe(raw.args), status: "running",
+    })];
+  }
+  case "tool_execution_update": {
+    const toolCallId = identifier(raw.toolCallId);
+    const limited = (context.toolOutputLimiter ?? new ToolOutputLimiter()).limit(toolCallId, raw.partialResult);
+    return [event("tool.output", sessionId, {
+      toolCallId, output: limited.value, retainedBytes: limited.retainedBytes,
+      totalBytes: limited.totalBytes, isTruncated: limited.isTruncated,
+      ...(limited.digest ? { digest: limited.digest } : {}),
+    })];
+  }
+  case "tool_execution_end": {
+    const toolCallId = identifier(raw.toolCallId);
+    const limiter = context.toolOutputLimiter ?? new ToolOutputLimiter();
+    const limited = limiter.limit(toolCallId, raw.result);
+    limiter.end(toolCallId);
+    return [event(raw.isError === true ? "tool.failed" : "tool.completed", sessionId, {
+      toolCallId, toolName: identifier(raw.toolName), result: limited.value, isError: raw.isError === true,
+      retainedBytes: limited.retainedBytes, totalBytes: limited.totalBytes, isTruncated: limited.isTruncated,
+      ...(limited.digest ? { digest: limited.digest } : {}),
+    })];
+  }
+  case "queue_update": return [event("queue.snapshot", sessionId, { steering: safe(raw.steering), followUp: safe(raw.followUp) })];
+  case "compaction_start": return [event("compaction.state", sessionId, { state: "running", reason: raw.reason })];
+  case "compaction_end": return [event("compaction.state", sessionId, { state: raw.aborted === true ? "aborted" : raw.errorMessage ? "failed" : "completed", willRetry: raw.willRetry === true })];
+  case "auto_retry_start": return [event("retry.state", sessionId, { state: "waiting", attempt: raw.attempt, maxAttempts: raw.maxAttempts, delayMs: raw.delayMs })];
+  case "auto_retry_end": return [event("retry.state", sessionId, { state: raw.success === true ? "completed" : "failed", attempt: raw.attempt })];
+  case "entry_appended": return [event("session.state", sessionId, { entry: safe(raw.entry) })];
+  case "session_info_changed": return [event("session.metadata", sessionId, { name: text(raw.name) })];
+  case "thinking_level_changed": return [event("model.state", sessionId, { thinkingLevel: raw.level })];
+  case "model_changed": return [event("model.state", sessionId, { provider: text(raw.provider), modelId: text(raw.id ?? raw.modelId) })];
+  case "steering_mode_changed": return [event("model.state", sessionId, { steeringMode: text(raw.mode) })];
+  case "follow_up_mode_changed": return [event("model.state", sessionId, { followUpMode: text(raw.mode) })];
+  case "session_stats": return [event("context.state", sessionId, {
+    tokens: numberOr(raw.tokens, null), cost: numberOr(raw.cost, null),
+    contextWindow: numberOr(raw.contextWindow ?? raw.context_window, null),
+  })];
+  case "extension_error": return [event("error.event", sessionId, { code: "internal_error", retryable: false, extensionEvent: safe(raw.event) })];
+  case "extension_ui_request": return normalizeExtensionUi(raw, sessionId);
+  default: return [];
+} }
 
 function normalizeMessageUpdate(raw: RawPiEvent, sessionId: string): readonly NormalizedPiEvent[] {
   const delta = object(raw.assistantMessageEvent);

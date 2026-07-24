@@ -320,6 +320,15 @@ final class ProtocolControl extends ProtocolEnvelope {
       _closedObject(payload, 'payload', const <String>{'targetRequestId'});
       _uuidString(payload, 'targetRequestId');
     }
+    if (type == 'agent.snapshot.request') {
+      _validateAgentSnapshotRequestPayload(payload);
+    }
+    if (type == 'agent.transcript.page') {
+      _validateAgentTranscriptPageControlPayload(payload);
+    }
+    if (type == 'catalogue.snapshot.request') {
+      _validateCatalogueSnapshotRequestPayload(payload);
+    }
     if (const <String>{
       'workspace.tree.page',
       'workspace.file.search',
@@ -806,20 +815,22 @@ const _supportedCapabilities = <String>{
   'contexts.v1',
   'runtime.processes.v1',
   'git-ci.v1',
+  'attention.v1',
+  'agents.v1',
+  'catalogue.v1',
+  'raw_rpc.v1',
 };
 const _commandTypes = <String>{
   'controller.acquire',
   'controller.takeover',
   'controller.release',
   'host.display_name.set',
-  'workspace.trust.approve',
   'notification.device.register',
   'notification.device.unregister',
   'session.create',
   'session.activate',
   'session.stop',
   'session.rename',
-  'session.policy.set',
   'session.delete',
   'session.restore',
   'session.purge',
@@ -848,6 +859,13 @@ const _commandTypes = <String>{
   'process.rerun',
   'git.commit.request',
   'git.push.request',
+  'attention.resolve',
+  'agent.steer',
+  'agent.cancel',
+  'agent.adopt',
+  'agent.merge',
+  'catalogue.set_enabled',
+  'pi.rpc.request',
 };
 const _controlTypes = <String>{
   'subscription.set',
@@ -867,6 +885,9 @@ const _controlTypes = <String>{
   'workspace.file.metadata',
   'workspace.file.read',
   'context.snapshot.request',
+  'agent.snapshot.request',
+  'agent.transcript.page',
+  'catalogue.snapshot.request',
   'process.snapshot.request',
   'process.output.page',
   'git.summary.request',
@@ -903,7 +924,11 @@ const _responseTypes = <String>{
   'process.snapshot.result',
   'process.output.page.result',
   'git.summary.result',
+  'agent.snapshot.result',
+  'agent.transcript.page.result',
+  'catalogue.snapshot.result',
   'plan.snapshot.result',
+  'pi.rpc.response',
 };
 const _eventTypes = <String>{
   'host.state',
@@ -915,13 +940,13 @@ const _eventTypes = <String>{
   'session.summary',
   'session.removed',
   'workspace.summary',
-  'workspace.trust_state',
+
   'notification.capability',
   'command.state',
   'error.event',
   'session.state',
   'session.metadata',
-  'session.policy',
+
   'session.tree',
   'controller.state',
   'turn.accepted',
@@ -972,6 +997,13 @@ const _eventTypes = <String>{
   'process.error',
   'git.summary',
   'git.unavailable',
+  'attention.item',
+  'agent.snapshot',
+  'agent.unavailable',
+  'catalogue.snapshot',
+  'catalogue.unavailable',
+  'pi.rpc.response',
+  'pi.rpc.event',
 };
 const _hostEventTypes = <String>{
   'host.state',
@@ -983,7 +1015,7 @@ const _hostEventTypes = <String>{
   'session.summary',
   'session.removed',
   'workspace.summary',
-  'workspace.trust_state',
+
   'notification.capability',
   'workspace.tree.snapshot',
   'workspace.file.metadata',
@@ -992,12 +1024,16 @@ const _hostEventTypes = <String>{
   'git.summary',
   'git.unavailable',
   // Capability-state envelopes (no sessionId) ride the host stream.
+  // Note: `context.unavailable` is intentionally absent here because the
+  // canonical schema (packages/protocol-schema/src/index.ts
+  // EVENT_STREAM_OWNERSHIP) keeps it on the per-session stream — both
+  // `context.snapshot` and `context.unavailable` carry a sessionId and
+  // follow the session-scoped R4 inspector contract.
   'recipe.unavailable',
   'plan.unavailable',
-  // R4 — context.unavailable is the contexts.v1 capability-state
-  // envelope (no sessionId). `context.snapshot` carries a sessionId
-  // and stays on the per-session stream.
-  'context.unavailable',
+  'agent.unavailable',
+  'catalogue.snapshot',
+  'catalogue.unavailable',
 };
 const _dualStreamEventTypes = <String>{'command.state', 'error.event'};
 const _errorCodes = <String>{
@@ -1019,7 +1055,7 @@ const _errorCodes = <String>{
   'workspace_not_found',
   'workspace_not_allowed',
   'workspace_unavailable',
-  'workspace_trust_required',
+
   'controller_required',
   'controller_conflict',
   'stale_controller',
@@ -1106,11 +1142,6 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
     _string(payload, 'displayName');
     return;
   }
-  if (type == 'workspace.trust.approve') {
-    _uuidString(payload, 'workspaceId');
-    _string(payload, 'fingerprint');
-    return;
-  }
   if (type == 'notification.device.register') {
     _uuidString(payload, 'deviceId');
     _string(payload, 'platform');
@@ -1123,7 +1154,6 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
   }
   if (type == 'session.create') {
     _uuidString(payload, 'workspaceId');
-    _oneOf(payload, 'policyMode', const <String>{'full', 'read_only'});
     if (payload['workspaceRelativePath'] != null) {
       _stringAllowEmpty(payload, 'workspaceRelativePath');
     }
@@ -1133,11 +1163,20 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
     }
     return;
   }
+  if (type == 'pi.rpc.request') {
+    _closedObject(payload, 'payload', const <String>{
+      'sessionId',
+      'requestId',
+      'command',
+    });
+    _uuidString(payload, 'sessionId');
+    _boundedRequiredString(payload, 'requestId', 128);
+    final command = _object(payload, 'command');
+    _boundedRequiredString(command, 'type', 128);
+    return;
+  }
   _uuidString(payload, 'sessionId');
   if (type == 'session.rename') _string(payload, 'name');
-  if (type == 'session.policy.set') {
-    _oneOf(payload, 'policyMode', const <String>{'full', 'read_only'});
-  }
   if (type == 'session.fork') _string(payload, 'entryId');
   if (type == 'session.export') {
     _oneOf(payload, 'format', const <String>{'html'});
@@ -1249,6 +1288,23 @@ void _validateCommandPayload(String type, Map<String, Object?> payload) {
   }
   if (const <String>{'git.commit.request', 'git.push.request'}.contains(type)) {
     _validateGitCommandPayload(payload);
+    return;
+  }
+  if (type == 'attention.resolve') {
+    _validateAttentionResolvePayload(payload);
+    return;
+  }
+  if (const <String>{
+    'agent.steer',
+    'agent.cancel',
+    'agent.adopt',
+    'agent.merge',
+  }.contains(type)) {
+    _validateAgentActionPayload(payload);
+    return;
+  }
+  if (type == 'catalogue.set_enabled') {
+    _validateCatalogueSetEnabledPayload(payload);
     return;
   }
   if (type == 'extension.respond') {
@@ -1568,6 +1624,23 @@ void _validateUtcTimestamp(Map<String, Object?> object, String key) {
 }
 
 void _validateEventPayload(String type, Map<String, Object?> payload) {
+  if (type == 'pi.rpc.response') {
+    _closedObject(payload, 'payload', const <String>{
+      'sessionId',
+      'requestId',
+      'response',
+    });
+    _uuidString(payload, 'sessionId');
+    _boundedRequiredString(payload, 'requestId', 128);
+    _object(payload, 'response');
+    return;
+  }
+  if (type == 'pi.rpc.event') {
+    _closedObject(payload, 'payload', const <String>{'sessionId', 'event'});
+    _uuidString(payload, 'sessionId');
+    _object(payload, 'event');
+    return;
+  }
   if (payload['sessionId'] != null) _uuidString(payload, 'sessionId');
   if (type == 'session.summary') {
     _uuidString(payload, 'sessionId');
@@ -1907,6 +1980,21 @@ void _validateEventPayload(String type, Map<String, Object?> payload) {
   }
   if (type == 'git.unavailable') {
     _validateGitUnavailablePayload(payload);
+  }
+  if (type == 'attention.item') {
+    _validateAttentionItemPayload(payload);
+  }
+  if (type == 'agent.snapshot') {
+    _validateAgentSnapshotPayload(payload);
+  }
+  if (type == 'agent.unavailable') {
+    _validateAgentUnavailablePayload(payload);
+  }
+  if (type == 'catalogue.snapshot') {
+    _validateCatalogueSnapshotPayload(payload);
+  }
+  if (type == 'catalogue.unavailable') {
+    _validateCatalogueUnavailablePayload(payload);
   }
 }
 
@@ -2336,6 +2424,358 @@ void _validateGitUnavailablePayload(Map<String, Object?> payload) {
   _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
 }
 
+void _validateAttentionItemPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'attentionId',
+    'sessionId',
+    'turnId',
+    'category',
+    'occurrence',
+    'summary',
+    'actionable',
+    'revision',
+    'resolved',
+    'superseded',
+  });
+  _uuidString(payload, 'attentionId');
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'turnId', 128);
+  _oneOf(payload, 'category', const <String>{
+    'needs_input',
+    'completed',
+    'failed',
+    'interrupted',
+    'background',
+  });
+  _validateUtcTimestamp(payload, 'occurrence');
+  _boundedRequiredString(payload, 'summary', 240);
+  _boolean(payload, 'actionable');
+  _revisionTokenString(payload, 'revision');
+  _boolean(payload, 'resolved');
+  _boolean(payload, 'superseded');
+}
+
+void _validateAttentionResolvePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'attentionId',
+    'expectedRevision',
+  });
+  _uuidString(payload, 'sessionId');
+  _uuidString(payload, 'attentionId');
+  _revisionTokenString(payload, 'expectedRevision');
+}
+
+void _validateCatalogueEntry(Object? value, String path) {
+  if (value is! Map) {
+    throw ProtocolValidationException(path, 'entry object', value);
+  }
+  final entry = Map<String, Object?>.from(value);
+  _closedObject(entry, path, const <String>{
+    'entryId',
+    'kind',
+    'name',
+    'description',
+    'invocation',
+    'source',
+    'availability',
+    'enabled',
+    'canToggle',
+    'reloadRequired',
+    'revision',
+  });
+  _boundedRequiredString(entry, 'entryId', 128);
+  _oneOf(entry, 'kind', const <String>{
+    'skill',
+    'template',
+    'extension',
+    'mcp_server',
+    'mcp_tool',
+  });
+  _boundedRequiredString(entry, 'name', 128);
+  if (entry.containsKey('description')) {
+    _boundedString(entry, 'description', 512);
+  }
+  if (entry.containsKey('invocation')) {
+    _boundedRequiredString(entry, 'invocation', 256);
+  }
+  _boundedRequiredString(entry, 'source', 128);
+  _validateCapabilityStatus(
+    _object(entry, 'availability'),
+    '$path.availability',
+  );
+  if (entry.containsKey('enabled')) {
+    _boolean(entry, 'enabled');
+  }
+  _boolean(entry, 'canToggle');
+  _boolean(entry, 'reloadRequired');
+  _revisionTokenString(entry, 'revision');
+}
+
+void _validateCatalogueSnapshotPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'revision', 'entries'});
+  _revisionTokenString(payload, 'revision');
+  final entries = _list(payload, 'entries');
+  if (entries.length > 512) {
+    throw ProtocolValidationException(
+      'payload.entries',
+      '<= 512 entries',
+      entries.length,
+    );
+  }
+  for (var index = 0; index < entries.length; index++) {
+    _validateCatalogueEntry(entries[index], 'payload.entries[$index]');
+  }
+}
+
+void _validateCatalogueUnavailablePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'capability', 'status'});
+  if (_string(payload, 'capability') != 'catalogue.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'catalogue.v1 literal',
+      payload['capability'],
+    );
+  }
+  _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
+}
+
+void _validateCatalogueSetEnabledPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'entryId',
+    'enabled',
+    'expectedRevision',
+    'confirmed',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'entryId', 128);
+  _boolean(payload, 'enabled');
+  _revisionTokenString(payload, 'expectedRevision');
+  final confirmed = _boolean(payload, 'confirmed');
+  if (!confirmed) {
+    throw ProtocolValidationException(
+      'payload.confirmed',
+      'true literal',
+      confirmed,
+    );
+  }
+}
+
+void _validateAgentRecord(Object? value, String path) {
+  if (value is! Map) {
+    throw ProtocolValidationException(path, 'agent record', value);
+  }
+  final record = Map<String, Object?>.from(value);
+  _closedObject(record, path, const <String>{
+    'agentId',
+    'task',
+    'model',
+    'state',
+    'startedAt',
+    'finishedAt',
+    'originSessionId',
+    'originTurnId',
+    'latestActivity',
+    'completionSummary',
+    'transcriptRef',
+    'worktreeRef',
+    'supportedActions',
+    'revision',
+  });
+  _boundedRequiredString(record, 'agentId', 128);
+  _boundedRequiredString(record, 'task', 512);
+  if (record.containsKey('model')) {
+    _boundedRequiredString(record, 'model', 128);
+  }
+  _oneOf(record, 'state', const <String>{
+    'running',
+    'blocked',
+    'needs_input',
+    'completed',
+    'failed',
+    'cancelled',
+    'indeterminate',
+  });
+  _validateUtcTimestamp(record, 'startedAt');
+  if (record.containsKey('finishedAt')) {
+    _validateUtcTimestamp(record, 'finishedAt');
+  }
+  _uuidString(record, 'originSessionId');
+  _boundedRequiredString(record, 'originTurnId', 128);
+  if (record.containsKey('latestActivity')) {
+    _boundedString(record, 'latestActivity', 1024);
+  }
+  if (record.containsKey('completionSummary')) {
+    _boundedString(record, 'completionSummary', 1024);
+  }
+  if (record.containsKey('transcriptRef')) {
+    _boundedRequiredString(record, 'transcriptRef', 128);
+  }
+  if (record.containsKey('worktreeRef')) {
+    _boundedRequiredString(record, 'worktreeRef', 256);
+  }
+  final actions = _list(record, 'supportedActions');
+  final actionSet = <String>{};
+  for (final action in actions) {
+    if (action is! String) {
+      throw ProtocolValidationException(
+        '$path.supportedActions[]',
+        'agent action literal',
+        action,
+      );
+    }
+    if (!const <String>{
+      'transcript',
+      'steer',
+      'cancel',
+      'compare',
+      'adopt',
+      'merge',
+    }.contains(action)) {
+      throw ProtocolValidationException(
+        '$path.supportedActions[]',
+        'known agent action',
+        action,
+      );
+    }
+    if (!actionSet.add(action)) {
+      throw ProtocolValidationException(
+        '$path.supportedActions[]',
+        'unique agent action',
+        action,
+      );
+    }
+  }
+  if (actions.length > 6) {
+    throw ProtocolValidationException(
+      '$path.supportedActions',
+      '<= 6 actions',
+      actions.length,
+    );
+  }
+  _revisionTokenString(record, 'revision');
+}
+
+void _validateAgentSnapshotPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'revision', 'items'});
+  _revisionTokenString(payload, 'revision');
+  final items = _list(payload, 'items');
+  if (items.length > 64) {
+    throw ProtocolValidationException(
+      'payload.items',
+      '<= 64 items',
+      items.length,
+    );
+  }
+  for (var index = 0; index < items.length; index++) {
+    _validateAgentRecord(items[index], 'payload.items[$index]');
+  }
+}
+
+void _validateAgentUnavailablePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'capability', 'status'});
+  if (_string(payload, 'capability') != 'agents.v1') {
+    throw ProtocolValidationException(
+      'payload.capability',
+      'agents.v1 literal',
+      payload['capability'],
+    );
+  }
+  _validateCapabilityStatus(_object(payload, 'status'), 'payload.status');
+}
+
+void _validateAgentActionPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'agentId',
+    'expectedRevision',
+    'instruction',
+  });
+  _uuidString(payload, 'sessionId');
+  _boundedRequiredString(payload, 'agentId', 128);
+  _revisionTokenString(payload, 'expectedRevision');
+  if (payload.containsKey('instruction')) {
+    _boundedRequiredString(payload, 'instruction', 1024);
+  }
+}
+
+void _validateAgentTranscriptPageResponsePayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'agentId',
+    'items',
+    'nextPageToken',
+    'isTruncated',
+  });
+  _boundedRequiredString(payload, 'agentId', 128);
+  final items = _list(payload, 'items');
+  if (items.length > 100) {
+    throw ProtocolValidationException(
+      'payload.items',
+      '<= 100 items',
+      items.length,
+    );
+  }
+  if (payload.containsKey('nextPageToken')) {
+    final value = payload['nextPageToken'];
+    if (value is! String) {
+      throw ProtocolValidationException(
+        'payload.nextPageToken',
+        'string token',
+        value,
+      );
+    }
+    if (value.length > 512) {
+      throw ProtocolValidationException(
+        'payload.nextPageToken',
+        '<= 512 characters',
+        value.length,
+      );
+    }
+  }
+  _boolean(payload, 'isTruncated');
+}
+
+void _validateAgentTranscriptPageControlPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{
+    'agentId',
+    'pageSize',
+    'pageToken',
+  });
+  _boundedRequiredString(payload, 'agentId', 128);
+  final size = _nonNegativeInteger(payload, 'pageSize');
+  if (size < 1 || size > 100) {
+    throw ProtocolValidationException('payload.pageSize', '1..100', size);
+  }
+  if (payload.containsKey('pageToken')) {
+    final value = payload['pageToken'];
+    if (value is! String) {
+      throw ProtocolValidationException(
+        'payload.pageToken',
+        'string token',
+        value,
+      );
+    }
+    if (value.length > 512) {
+      throw ProtocolValidationException(
+        'payload.pageToken',
+        '<= 512 characters',
+        value.length,
+      );
+    }
+  }
+}
+
+void _validateAgentSnapshotRequestPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'requestId'});
+  _uuidString(payload, 'requestId');
+}
+
+void _validateCatalogueSnapshotRequestPayload(Map<String, Object?> payload) {
+  _closedObject(payload, 'payload', const <String>{'requestId'});
+  _uuidString(payload, 'requestId');
+}
+
 void _validateWorkspaceControlPayload(
   String type,
   Map<String, Object?> payload,
@@ -2581,6 +3021,17 @@ void _validateFileReadResult(Map<String, Object?> result, String path) {
 }
 
 void _validateResponsePayload(String type, Map<String, Object?> payload) {
+  if (type == 'pi.rpc.response') {
+    _closedObject(payload, 'payload', const <String>{
+      'sessionId',
+      'requestId',
+      'response',
+    });
+    _uuidString(payload, 'sessionId');
+    _boundedRequiredString(payload, 'requestId', 128);
+    _object(payload, 'response');
+    return;
+  }
   if (type == 'process.snapshot.result') {
     _closedObject(payload, 'payload', const <String>{'items'});
     final items = _list(payload, 'items');
@@ -2600,6 +3051,15 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
   }
   if (type == 'context.snapshot.result') {
     _validateContextSnapshotPayload(payload);
+  }
+  if (type == 'agent.snapshot.result') {
+    _validateAgentSnapshotPayload(payload);
+  }
+  if (type == 'agent.transcript.page.result') {
+    _validateAgentTranscriptPageResponsePayload(payload);
+  }
+  if (type == 'catalogue.snapshot.result') {
+    _validateCatalogueSnapshotPayload(payload);
   }
   if (type == 'workspace.tree.page.result') {
     _closedObject(payload, 'payload', const <String>{

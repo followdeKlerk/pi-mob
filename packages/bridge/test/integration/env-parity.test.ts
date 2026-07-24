@@ -1,0 +1,120 @@
+/**
+ * Integration test category 1 — Environment parity.
+ *
+ * Spec requirement (PI_MOB_RAW_RPC_RECTIFICATION_PROMPT.md, "Required
+ * tests" §1): start a direct Pi RPC and a bridge-managed Pi RPC from
+ * the same workspace and assert that `get_state`, `get_commands`, and
+ * `get_available_models` return equivalent results.
+ *
+ * The two sides differ only in the transport: direct Pi uses raw
+ * `Bun.spawn` (this is the "owner-like" reference); bridge-managed Pi
+ * uses `RpcProcess` and `resolvePiLaunchConfig`. The Pi binary, the
+ * workspace, the working directory, and the captured environment are
+ * identical. We compare structurally after stripping volatile fields
+ * (paths, timestamps, session IDs) since these legitimately differ
+ * between the two subprocesses.
+ */
+
+import { describe, expect, test } from "bun:test";
+import {
+  createWorkspace,
+  normalizeForParity,
+  semanticDiff,
+  spawnBridgePi,
+  spawnDirectPi,
+} from "./harness";
+
+const envForWorkspace = (ws: string): Record<string, string> => ({
+  HOME: process.env.HOME ?? "/tmp",
+  LANG: "C.UTF-8",
+  PATH: process.env.PATH ?? "/usr/bin:/bin",
+  PI_MOB_TEST_WORKSPACE: ws,
+});
+
+describe("integration: env parity (direct vs bridge-managed Pi, same workspace)", () => {
+  test("get_state returns structurally equivalent shapes", async () => {
+    const ws = createWorkspace("pi-mob-parity-env-");
+    const direct = await spawnDirectPi({ cwd: ws, env: envForWorkspace(ws) });
+    const bridge = await spawnBridgePi({ cwd: ws, env: envForWorkspace(ws) });
+    try {
+      const [directState, bridgeState] = await Promise.all([
+        direct.request("d-state", "get_state"),
+        bridge.request("b-state", "get_state"),
+      ]);
+      expect(directState.success).toBe(true);
+      expect(bridgeState.success).toBe(true);
+      const directNorm = normalizeForParity(directState.data);
+      const bridgeNorm = normalizeForParity(bridgeState.data);
+      const diff = semanticDiff(directNorm, bridgeNorm);
+      if (diff) {
+        throw new Error(`get_state parity divergence: ${diff}\n\ndirect=${JSON.stringify(directNorm, null, 2)}\n\nbridge=${JSON.stringify(bridgeNorm, null, 2)}`);
+      }
+    } finally {
+      await direct.close();
+      await bridge.close();
+    }
+  }, 30_000);
+
+  test("get_commands returns structurally equivalent command lists", async () => {
+    const ws = createWorkspace("pi-mob-parity-cmds-");
+    const direct = await spawnDirectPi({ cwd: ws, env: envForWorkspace(ws) });
+    const bridge = await spawnBridgePi({ cwd: ws, env: envForWorkspace(ws) });
+    try {
+      const [a, b] = await Promise.all([
+        direct.request("d-cmds", "get_commands"),
+        bridge.request("b-cmds", "get_commands"),
+      ]);
+      expect(a.success).toBe(true);
+      expect(b.success).toBe(true);
+      const aList = ((a.data as { commands?: unknown }).commands ?? []) as ReadonlyArray<Record<string, unknown>>;
+      const bList = ((b.data as { commands?: unknown }).commands ?? []) as ReadonlyArray<Record<string, unknown>>;
+      expect(aList.length).toBeGreaterThan(0);
+      expect(bList.length).toBeGreaterThan(0);
+      const namesA = new Set(aList.map((c) => typeof c.name === "string" ? c.name : ""));
+      const namesB = new Set(bList.map((c) => typeof c.name === "string" ? c.name : ""));
+      expect(namesA.size).toBeGreaterThan(0);
+      expect(namesB.size).toBeGreaterThan(0);
+      for (const name of namesA) {
+        expect(namesB.has(name)).toBe(true);
+      }
+      const aNorm = normalizeForParity(aList);
+      const bNorm = normalizeForParity(bList);
+      const diff = semanticDiff(aNorm, bNorm);
+      if (diff) {
+        throw new Error(`get_commands parity divergence: ${diff}`);
+      }
+    } finally {
+      await direct.close();
+      await bridge.close();
+    }
+  }, 30_000);
+
+  test("get_available_models returns the same set of providers", async () => {
+    const ws = createWorkspace("pi-mob-parity-models-");
+    const direct = await spawnDirectPi({ cwd: ws, env: envForWorkspace(ws) });
+    const bridge = await spawnBridgePi({ cwd: ws, env: envForWorkspace(ws) });
+    try {
+      const [a, b] = await Promise.all([
+        direct.request("d-models", "get_available_models"),
+        bridge.request("b-models", "get_available_models"),
+      ]);
+      expect(a.success).toBe(true);
+      expect(b.success).toBe(true);
+      const aList = ((a.data as { models?: unknown }).models ?? []) as ReadonlyArray<Record<string, unknown>>;
+      const bList = ((b.data as { models?: unknown }).models ?? []) as ReadonlyArray<Record<string, unknown>>;
+      const providersA = new Set(aList.map((m) => typeof m.provider === "string" ? m.provider : ""));
+      const providersB = new Set(bList.map((m) => typeof m.provider === "string" ? m.provider : ""));
+      expect(providersA.size).toBeGreaterThan(0);
+      for (const provider of providersA) {
+        expect(providersB.has(provider)).toBe(true);
+      }
+      const idsA = new Set(aList.map((m) => typeof m.id === "string" ? m.id : ""));
+      const idsB = new Set(bList.map((m) => typeof m.id === "string" ? m.id : ""));
+      expect(idsA.size).toBe(idsB.size);
+      for (const id of idsA) expect(idsB.has(id)).toBe(true);
+    } finally {
+      await direct.close();
+      await bridge.close();
+    }
+  }, 30_000);
+});

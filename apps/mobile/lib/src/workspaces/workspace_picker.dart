@@ -19,27 +19,17 @@ import '../domain/mobile_state.dart';
 ///     freeform root path.
 ///   * Unavailable workspaces render an explicit reason and remain visible
 ///     but disabled.
-///   * Trust states (unapproved / fingerprint changed) surface a review panel
-///     that shows the resource manifest and the fingerprint that the user is
-///     approving. The trust review also fires when the fingerprint changes
-///     after a previous approval.
 class WorkspacePicker extends StatefulWidget {
   const WorkspacePicker({
     required this.coordinator,
     required this.onSelect,
     required this.onCancel,
-    required this.onApproveTrust,
     super.key,
   });
 
   final ConnectionCoordinator coordinator;
   final void Function(WorkspaceEntry entry) onSelect;
   final VoidCallback onCancel;
-
-  /// Invoked when the user explicitly approves a workspace's resource
-  /// manifest + fingerprint. Returns the workspace that was approved so the
-  /// picker can dismiss the review surface.
-  final Future<void> Function(WorkspaceEntry entry) onApproveTrust;
 
   @override
   State<WorkspacePicker> createState() => _WorkspacePickerState();
@@ -89,19 +79,6 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
     _searchDebounce = Timer(const Duration(milliseconds: 200), () {
       unawaited(widget.coordinator.searchWorkspaces(value));
     });
-  }
-
-  Future<void> _openTrustReview(WorkspaceEntry entry) async {
-    await showDialog<void>(
-      context: context,
-      builder: (context) => _TrustReviewDialog(
-        entry: entry,
-        onApprove: () async {
-          await widget.onApproveTrust(entry);
-          if (context.mounted) Navigator.of(context).pop();
-        },
-      ),
-    );
   }
 
   @override
@@ -170,12 +147,10 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
                   ? _RecentList(
                       coordinator: coordinator,
                       onSelect: widget.onSelect,
-                      onReviewTrust: _openTrustReview,
                     )
                   : _SearchResults(
                       coordinator: coordinator,
                       onSelect: widget.onSelect,
-                      onReviewTrust: _openTrustReview,
                     ),
             ),
           ],
@@ -189,12 +164,10 @@ class _RecentList extends StatelessWidget {
   const _RecentList({
     required this.coordinator,
     required this.onSelect,
-    required this.onReviewTrust,
   });
 
   final ConnectionCoordinator coordinator;
   final void Function(WorkspaceEntry entry) onSelect;
-  final Future<void> Function(WorkspaceEntry entry) onReviewTrust;
 
   @override
   Widget build(BuildContext context) {
@@ -215,7 +188,6 @@ class _RecentList extends StatelessWidget {
         return _WorkspaceTile(
           entry: entry,
           onSelect: onSelect,
-          onReviewTrust: onReviewTrust,
         );
       },
     );
@@ -226,12 +198,10 @@ class _SearchResults extends StatelessWidget {
   const _SearchResults({
     required this.coordinator,
     required this.onSelect,
-    required this.onReviewTrust,
   });
 
   final ConnectionCoordinator coordinator;
   final void Function(WorkspaceEntry entry) onSelect;
-  final Future<void> Function(WorkspaceEntry entry) onReviewTrust;
 
   @override
   Widget build(BuildContext context) {
@@ -281,7 +251,6 @@ class _SearchResults extends StatelessWidget {
           repositoryMarker: null,
           lastUsedAt: null,
           availability: hit.availability,
-          trustState: hit.trustState,
           fingerprint: hit.fingerprint,
           policyVersion: hit.policyVersion,
           manifest: const <WorkspaceResource>[],
@@ -289,7 +258,6 @@ class _SearchResults extends StatelessWidget {
         return _WorkspaceTile(
           entry: synthesized,
           onSelect: onSelect,
-          onReviewTrust: onReviewTrust,
         );
       },
     );
@@ -300,12 +268,10 @@ class _WorkspaceTile extends StatelessWidget {
   const _WorkspaceTile({
     required this.entry,
     required this.onSelect,
-    required this.onReviewTrust,
   });
 
   final WorkspaceEntry entry;
   final void Function(WorkspaceEntry entry) onSelect;
-  final Future<void> Function(WorkspaceEntry entry) onReviewTrust;
 
   @override
   Widget build(BuildContext context) {
@@ -316,11 +282,7 @@ class _WorkspaceTile extends StatelessWidget {
     return ListTile(
       key: Key('workspace-tile-${entry.workspaceId}'),
       enabled: canSelect || !unavailable,
-      onTap: canSelect
-          ? () => onSelect(entry)
-          : unavailable
-          ? null
-          : () => onReviewTrust(entry),
+      onTap: canSelect ? () => onSelect(entry) : null,
       title: Text(entry.displayName, style: text.bodyLarge),
       subtitle: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -336,112 +298,13 @@ class _WorkspaceTile extends StatelessWidget {
               'Unavailable on host',
               key: Key('workspace-tile-unavailable-${entry.workspaceId}'),
               style: text.bodySmall?.copyWith(color: colors.error),
-            )
-          else if (entry.trustState == WorkspaceTrustState.unapproved)
-            Text(
-              'Trust approval required',
-              key: Key('workspace-tile-unapproved-${entry.workspaceId}'),
-              style: text.bodySmall?.copyWith(color: colors.error),
-            )
-          else if (entry.trustState == WorkspaceTrustState.fingerprintChanged)
-            Text(
-              'Resource fingerprint changed — re-approve',
-              key: Key('workspace-tile-fingerprint-${entry.workspaceId}'),
-              style: text.bodySmall?.copyWith(color: colors.error),
             ),
         ],
       ),
       trailing: canSelect
           ? const Icon(Icons.chevron_right)
-          : unavailable
-          ? const Icon(Icons.do_not_disturb_on)
-          : const Icon(Icons.verified_user),
+          : const Icon(Icons.do_not_disturb_on),
     );
   }
 }
 
-/// Trust review dialog.
-///
-/// Shows the manifest and the fingerprint the user is approving, including the
-/// explicit warning that this is a guardrail rather than an OS sandbox. The
-/// dialog can only be dismissed by either approving or cancelling; there is
-/// no dismiss-on-tap-outside affordance because trust approval is a hard
-/// commitment.
-class _TrustReviewDialog extends StatelessWidget {
-  const _TrustReviewDialog({required this.entry, required this.onApprove});
-
-  final WorkspaceEntry entry;
-  final Future<void> Function() onApprove;
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = Theme.of(context).colorScheme;
-    final text = Theme.of(context).textTheme;
-    return AlertDialog(
-      key: const Key('trust-review-dialog'),
-      title: const Text('Review workspace trust'),
-      content: SingleChildScrollView(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text('Workspace: ${entry.displayName}', style: text.titleMedium),
-            Text('Root label: ${entry.rootLabel}'),
-            Text('Relative path: ${entry.relativePath}'),
-            const SizedBox(height: 8),
-            Text('Resource fingerprint', style: text.labelLarge),
-            SelectableText(
-              entry.fingerprint,
-              key: const Key('trust-review-fingerprint'),
-              style: text.bodySmall?.copyWith(fontFamily: 'monospace'),
-            ),
-            Text(
-              'Policy version: ${entry.policyVersion}',
-              key: const Key('trust-review-policy-version'),
-            ),
-            const SizedBox(height: 8),
-            Text('Resource manifest', style: text.labelLarge),
-            if (entry.manifest.isEmpty)
-              const Text('(host reported no manifest lines)')
-            else
-              for (final resource in entry.manifest)
-                Text(
-                  '${resource.kind}\t${resource.relativePath}'
-                  '${resource.sizeBytes == null ? '' : '\t${resource.sizeBytes}B'}',
-                  key: Key('trust-review-resource-${resource.relativePath}'),
-                ),
-            const SizedBox(height: 12),
-            Container(
-              key: const Key('trust-review-guardrail-note'),
-              padding: const EdgeInsets.all(PiSpacing.sm),
-              decoration: BoxDecoration(
-                color: colors.errorContainer,
-                borderRadius: BorderRadius.circular(PiRadius.sm),
-              ),
-              child: Text(
-                'This is a product guardrail enforced through Pi tool hooks. '
-                'It is not an OS sandbox. Pi may still attempt operations the '
-                'host allows at the file-system layer.',
-                style: text.bodySmall?.copyWith(color: colors.onErrorContainer),
-              ),
-            ),
-          ],
-        ),
-      ),
-      actions: [
-        TextButton(
-          key: const Key('trust-review-cancel'),
-          onPressed: () => Navigator.of(context).pop(),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          key: const Key('trust-review-approve'),
-          onPressed: () {
-            unawaited(onApprove());
-          },
-          child: const Text('Approve'),
-        ),
-      ],
-    );
-  }
-}

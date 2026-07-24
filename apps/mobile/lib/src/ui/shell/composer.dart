@@ -8,7 +8,6 @@ import '../../interaction/interaction_panel.dart';
 import '../theme/pi_theme.dart';
 import 'model_picker_sheet.dart';
 import 'motion_primitives.dart';
-import 'trust_review.dart';
 
 /// Prompt composer with delivery-mode selector, follow-up queue, extension
 /// dialog opener, and the persistent draft `TextField`.
@@ -146,21 +145,6 @@ class Composer extends StatelessWidget {
     await coordinator.updateDraft(value);
   }
 
-  Future<void> _reviewWorkspaceTrust(BuildContext context) async {
-    final workspace = coordinator.selectedWorkspace;
-    if (workspace == null) return;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => InlineTrustReview(
-        entry: workspace,
-        onApprove: () async {
-          await coordinator.approveWorkspaceTrust(workspace.workspaceId);
-          if (dialogContext.mounted) Navigator.of(dialogContext).pop();
-        },
-      ),
-    );
-  }
-
   Future<void> _handlePromptFailureAction(
     BuildContext context,
     PromptSendFailure failure,
@@ -174,7 +158,16 @@ class Composer extends StatelessWidget {
         await coordinator.reconnectForPrompt();
         return;
       case PromptFailureAction.approveWorkspace:
-        if (context.mounted) await _reviewWorkspaceTrust(context);
+        // Phase 4: bridge-owned workspace trust approval is gone.
+        // Pi's own project-resource trust system applies at the Pi
+        // layer. Surface a transient notice so the user can retry.
+        if (context.mounted) {
+          ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+            const SnackBar(
+              content: Text('Workspace trust approval is no longer required.'),
+            ),
+          );
+        }
         return;
       case PromptFailureAction.discardUncertain:
         if (context.mounted) await _discardIndeterminate(context);

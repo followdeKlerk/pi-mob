@@ -137,34 +137,6 @@
       "invalid_state",
       "idempotency_conflict"
     ],
-    "type": "workspace.trust.approve"
-  },
-  {
-    "acceptedStates": [
-      "protocol-valid",
-      "capability-supported",
-      "state-eligible"
-    ],
-    "class": "command",
-    "idempotency": "command-id-semantic-payload-sha256",
-    "journaledEffects": [
-      "command.state"
-    ],
-    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
-    "requiredCapability": "commands.v1",
-    "requiresCommandId": true,
-    "requiresLeaseId": false,
-    "scope": "host",
-    "semanticHashFields": [
-      "type",
-      "payload"
-    ],
-    "stableErrors": [
-      "invalid_message",
-      "unsupported_capability",
-      "invalid_state",
-      "idempotency_conflict"
-    ],
     "type": "notification.device.register"
   },
   {
@@ -306,34 +278,6 @@
       "idempotency_conflict"
     ],
     "type": "session.rename"
-  },
-  {
-    "acceptedStates": [
-      "protocol-valid",
-      "capability-supported",
-      "state-eligible"
-    ],
-    "class": "command",
-    "idempotency": "command-id-semantic-payload-sha256",
-    "journaledEffects": [
-      "command.state"
-    ],
-    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
-    "requiredCapability": "commands.v1",
-    "requiresCommandId": true,
-    "requiresLeaseId": true,
-    "scope": "session",
-    "semanticHashFields": [
-      "type",
-      "payload"
-    ],
-    "stableErrors": [
-      "invalid_message",
-      "unsupported_capability",
-      "invalid_state",
-      "idempotency_conflict"
-    ],
-    "type": "session.policy.set"
   },
   {
     "acceptedStates": [
@@ -1142,5 +1086,237 @@
       "git_action_failed"
     ],
     "type": "git.push.request"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "attention.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "git_unavailable",
+      "git_remote_missing",
+      "git_provider_unavailable",
+      "git_auth_missing",
+      "git_stale",
+      "git_action_failed"
+    ],
+    "type": "attention.resolve"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "git_unavailable",
+      "git_remote_missing",
+      "git_provider_unavailable",
+      "git_auth_missing",
+      "git_stale",
+      "git_action_failed"
+    ],
+    "type": "agent.steer"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "git_unavailable",
+      "git_remote_missing",
+      "git_provider_unavailable",
+      "git_auth_missing",
+      "git_stale",
+      "git_action_failed"
+    ],
+    "type": "agent.cancel"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "git_unavailable",
+      "git_remote_missing",
+      "git_provider_unavailable",
+      "git_auth_missing",
+      "git_stale",
+      "git_action_failed"
+    ],
+    "type": "agent.adopt"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "agents.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "git_unavailable",
+      "git_remote_missing",
+      "git_provider_unavailable",
+      "git_auth_missing",
+      "git_stale",
+      "git_action_failed"
+    ],
+    "type": "agent.merge"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "catalogue.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict",
+      "git_unavailable",
+      "git_remote_missing",
+      "git_provider_unavailable",
+      "git_auth_missing",
+      "git_stale",
+      "git_action_failed"
+    ],
+    "type": "catalogue.set_enabled"
+  },
+  {
+    "acceptedStates": [
+      "protocol-valid",
+      "capability-supported",
+      "state-eligible"
+    ],
+    "class": "command",
+    "idempotency": "command-id-semantic-payload-sha256",
+    "journaledEffects": [
+      "command.state"
+    ],
+    "recovery": "accepted-undispatched-dispatch-once;running-at-crash-indeterminate",
+    "requiredCapability": "commands.v1",
+    "requiresCommandId": true,
+    "requiresLeaseId": true,
+    "scope": "session",
+    "semanticHashFields": [
+      "type",
+      "payload"
+    ],
+    "stableErrors": [
+      "invalid_message",
+      "unsupported_capability",
+      "invalid_state",
+      "idempotency_conflict"
+    ],
+    "type": "pi.rpc.request"
   }
 ]

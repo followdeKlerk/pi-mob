@@ -141,6 +141,7 @@ function processErrorPayload(): Record<string, unknown> {
   return { sessionId: ids.sessionId, processId: processFixture.processId, revision: processFixture.revision, error: { code: "process_failed", message: "The supervised process exited unsuccessfully.", retryable: false, recommendedDelayMs: null } };
 }
 function commandPayload(type: string): Record<string, unknown> {
+  if (type === "pi.rpc.request") return { sessionId: ids.sessionId, requestId: "raw-request-1", command: { type: "get_state" } };
   if (type === "controller.acquire" || type === "controller.takeover" || type === "controller.release") return { scope: "session", sessionId: ids.sessionId };
   if (type === "host.display_name.set") return { displayName: "fixture host" };
   if (type === "workspace.trust.approve") return { workspaceId: ids.sessionId, fingerprint: "fixture" };
@@ -163,10 +164,13 @@ function commandPayload(type: string): Record<string, unknown> {
   if (["thinking.set"].includes(type)) return { sessionId: ids.sessionId, level: "low" };
   if (["steering_mode.set", "follow_up_mode.set", "compaction.auto.set", "retry.auto.set"].includes(type)) return { sessionId: ids.sessionId, enabled: true };
   if (type === "extension.respond") return { sessionId: ids.sessionId, dialogId: ids.sessionId, response: {} };
+  if (type === "attention.resolve") return { sessionId: ids.sessionId, attentionId: uuid("9"), expectedRevision: "attention-r1" };
+  if (["agent.steer", "agent.cancel", "agent.adopt", "agent.merge"].includes(type)) return { sessionId: ids.sessionId, agentId: "agent-fixture", expectedRevision: "agent-r1", instruction: "fixture instruction" };
+  if (type === "catalogue.set_enabled") return { sessionId: ids.sessionId, entryId: "entry-fixture", enabled: true, expectedRevision: "catalogue-r1", confirmed: true };
   return { sessionId: ids.sessionId };
 }
 function eventEnvelope(type: string, payload: Record<string, unknown>): Record<string, unknown> {
-  return { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740992", type, payload };
+  return { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload };
 }
 function recipeActivity(kind: "thinking" | "tool", extra: Record<string, unknown> = {}): Record<string, unknown> {
   const common = { kind, sessionId: ids.sessionId, turnId: "turn-fixture", activityId: "activity-fixture", ordinal: 0, status: "running", timing: { startedAt: base.sentAt }, title: "Fixture activity" };
@@ -204,6 +208,8 @@ function contextSnapshot(): Record<string, unknown> {
 }
 
 function eventPayload(type: string): Record<string, unknown> {
+  if (type === "pi.rpc.response") return { sessionId: ids.sessionId, requestId: "raw-request-1", response: { type: "response", command: "get_state", success: true, data: {} } };
+  if (type === "pi.rpc.event") return { sessionId: ids.sessionId, event: { type: "future_pi_event", detail: { retained: true } } };
   if (type === "session.summary") return { sessionId: ids.sessionId, runtimeState: "idle", queueCount: 0 };
   if (type === "recipe.unavailable") return { capability: "recipes.v1", status: capabilityStatus("unavailable") };
   if (type === "plan.snapshot") return planSnapshot();
@@ -220,6 +226,11 @@ function eventPayload(type: string): Record<string, unknown> {
   if (type === "process.error") return processErrorPayload();
   if (type === "git.summary") return gitSummary();
   if (type === "git.unavailable") return { workspaceId: ids.workspaceId, capability: "git-ci.v1", status: { state: "unavailable", reason: "Git provider is not configured", remediation: "Configure the provider and refresh" } };
+  if (type === "attention.item") return { attentionId: uuid("9"), sessionId: ids.sessionId, turnId: "turn-fixture", category: "needs_input", occurrence: base.sentAt, summary: "Fixture attention item", actionable: true, revision: "attention-r1", resolved: false, superseded: false };
+  if (type === "agent.snapshot") return { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript", "steer"], revision: "agent-r1" }] };
+  if (type === "agent.unavailable") return { capability: "agents.v1", status: { state: "unavailable", reason: "Fixture agents unavailable", remediation: "Refresh capability", source: "fixture", revision: "r1" } };
+  if (type === "catalogue.snapshot") return { revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1" }] };
+  if (type === "catalogue.unavailable") return { capability: "catalogue.v1", status: { state: "unavailable", reason: "Fixture catalogue unavailable", remediation: "Refresh capability", source: "fixture", revision: "r1" } };
 
   if (type === "controller.state") return { scope: "session", sessionId: ids.sessionId, mode: "controller", leaseId: ids.leaseId, installationId: ids.installationId, expiresAt: "2026-07-12T00:00:45.000Z", reclaimableUntil: "2026-07-12T00:01:00.000Z" };
   if (type === "command.state") return { commandId: ids.commandId, commandType: "prompt.submit", state: "accepted", errorCode: null };
@@ -229,7 +240,8 @@ function eventPayload(type: string): Record<string, unknown> {
   return { sessionId: ids.sessionId };
 }
 function responsePayload(type: string): Record<string, unknown> {
-  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1", "git-ci.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
+  if (type === "pi.rpc.response") return { sessionId: ids.sessionId, requestId: "raw-request-1", response: { type: "response", command: "get_state", success: true, data: {} } };
+  if (type === "hello.accepted") return { connectionId: ids.installationId, hostId: ids.sessionId, hostGeneration: "1", hostDisplayName: "fixture", bridgeVersion: "1", piVersion: "1", serverTime: base.sentAt, capabilities: ["streams.v1", "commands.v1", "runtime.processes.v1", "git-ci.v1", "raw_rpc.v1"], limits: { maxJsonBytes: 1048576, maxAttachmentBytes: 10485760, maxAttachmentsPerPrompt: 4, maxPromptAttachmentBytes: 26214400, maxQueuedFollowUps: 10, maxSessionPageSize: 100, maxBackgroundSessionSubscriptions: 5 } };
   if (type === "subscription.accepted") return { streams: [{ streamId: `host:${ids.sessionId}`, mode: "replay" }] };
   if (type === "stream.sync.complete") return { streamId: `session:${ids.sessionId}`, currentCursor: "1", mode: "replay" };
   if (type === "stream.snapshot.begin") return { snapshotId: ids.sessionId, streamId: `session:${ids.sessionId}`, baselineCursor: "1" };
@@ -248,6 +260,9 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "process.snapshot.result") return { items: [processSnapshot()] };
   if (type === "process.output.page.result") return processOutput();
   if (type === "git.summary.result") return gitSummary();
+  if (type === "agent.snapshot.result") return { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript", "steer"], revision: "agent-r1" }] };
+  if (type === "agent.transcript.page.result") return { agentId: "agent-fixture", items: [], isTruncated: false };
+  if (type === "catalogue.snapshot.result") return { revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1" }] };
   return { items: [] };
 }
 function controlPayload(type: string): Record<string, unknown> {
@@ -270,6 +285,9 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "git.summary.cancel") return { targetRequestId: ids.requestId };
   if (type === "model.list") return { sessionId: ids.sessionId };
   if (type === "command.current") return { commandId: ids.commandId };
+  if (type === "agent.snapshot.request") return { requestId: ids.requestId };
+  if (type === "agent.transcript.page") return { agentId: "agent-fixture", pageSize: 50 };
+  if (type === "catalogue.snapshot.request") return { requestId: ids.requestId };
   return {};
 }
 const hostEvents = new Set([
@@ -277,6 +295,11 @@ const hostEvents = new Set([
   "session.summary", "session.removed", "workspace.summary", "workspace.trust_state", "notification.capability",
   "workspace.tree.snapshot", "workspace.file.metadata", "workspace.file.stale", "workspace.file.unavailable",
   "git.summary", "git.unavailable",
+  "recipe.unavailable",
+  "plan.unavailable",
+  "agent.unavailable",
+  "catalogue.snapshot",
+  "catalogue.unavailable",
 ]);
 
 rmSync(corpus, { recursive: true, force: true });
@@ -303,6 +326,8 @@ emit("git-summary-detached-valid", "event", true, {
 });
 emit("prompt-legacy-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: commandPayload("prompt.submit") });
 emit("prompt-steer-plan-target-valid", "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "prompt.submit", payload: { ...commandPayload("prompt.submit"), deliveryMode: "steer", planTarget: { planId: "plan-fixture", stepId: "step-1", revision: "r1" } } });
+emit("response-pi-rpc-valid", "response", true, { ...base, requestId: ids.requestId, type: "pi.rpc.response", payload: responsePayload("pi.rpc.response") });
+emit("event-pi-rpc-valid", "event", true, eventEnvelope("pi.rpc.event", eventPayload("pi.rpc.event")));
 
 emit("pairing-invalid-http", "pairing", false, { kind: "pi-mob-host", version: 1, hostId: ids.sessionId, displayName: "fixture host", endpoint: "http://fixture-host.example", protocolMajor: 1 });
 emit("attachment-response-valid", "attachment", true, { attachmentId: ids.messageId, sha256: "a".repeat(64), mimeType: "image/png", bytes: 1024, expiresAt: "2026-07-13T00:00:00.000Z" });
@@ -317,6 +342,10 @@ emit("snapshot-failure", "error", true, { ...base, requestId: ids.requestId, typ
 emit("command-semantic-conflict", "error", true, { ...base, requestId: ids.requestId, commandId: ids.commandId, type: "error", payload: { code: "idempotency_conflict", message: "semantic payload changed", retryable: false, details: {} } });
 emit("command-metadata-retry", "command", true, { ...base, requestId: ids.eventId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type: "session.rename", payload: { sessionId: ids.sessionId, name: "fixture" } });
 const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
+  ["invalid-pi-rpc-request-empty-command-type", "command", commandEnvelope("pi.rpc.request", { sessionId: ids.sessionId, requestId: "raw-request-1", command: { type: "" } })],
+  ["invalid-pi-rpc-request-oversize-request-id", "command", commandEnvelope("pi.rpc.request", { sessionId: ids.sessionId, requestId: "r".repeat(129), command: { type: "get_state" } })],
+  ["invalid-pi-rpc-response-private-envelope-field", "response", { ...base, requestId: ids.requestId, type: "pi.rpc.response", payload: { ...responsePayload("pi.rpc.response"), private: true } }],
+  ["invalid-pi-rpc-event-host-stream", "event", { ...eventEnvelope("pi.rpc.event", eventPayload("pi.rpc.event")), streamId: `host:${ids.sessionId}` }],
   ["invalid-cursor-json-number", "event", { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: 9007199254740992, type: "turn.settled", payload: {} }],
   ["invalid-recipe-tool-provider-summary", "event", eventEnvelope("recipe.activity", recipeActivity("tool", { providerSummary: { kind: "provider_summary", provider: "fixture", summary: "not allowed" } }))],
   ["invalid-recipe-private-field", "event", eventEnvelope("recipe.activity", { ...recipeActivity("thinking"), private: "hidden" })],
@@ -381,6 +410,16 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-context-target-private-field", "command", commandEnvelope("context.pin", { sessionId: ids.sessionId, expectedRevision: "context-r1", target: { kind: "file", path: "src/index.ts", revision: "file-r1", private: "leak" } })],
   ["invalid-prompt-file-ref-private-field", "command", commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), fileRefs: [{ ...fileReference(), private: "leak" }] })],
   ["invalid-prompt-file-ref-missing-revision", "command", commandEnvelope("prompt.submit", { ...commandPayload("prompt.submit"), fileRefs: [(() => { const { revision: _revision, ...missing } = fileReference(); return missing; })()] })],
+  ["invalid-attention-item-category", "event", eventEnvelope("attention.item", { attentionId: uuid("9"), sessionId: ids.sessionId, turnId: "turn-fixture", category: "bogus", occurrence: base.sentAt, summary: "Fixture", actionable: true, revision: "attention-r1", resolved: false, superseded: false })],
+  ["invalid-attention-item-summary-empty", "event", eventEnvelope("attention.item", { attentionId: uuid("9"), sessionId: ids.sessionId, turnId: "turn-fixture", category: "needs_input", occurrence: base.sentAt, summary: "", actionable: true, revision: "attention-r1", resolved: false, superseded: false })],
+  ["invalid-attention-item-unknown-field", "event", eventEnvelope("attention.item", { attentionId: uuid("9"), sessionId: ids.sessionId, turnId: "turn-fixture", category: "needs_input", occurrence: base.sentAt, summary: "Fixture", actionable: true, revision: "attention-r1", resolved: false, superseded: false, private: "leak" })],
+  ["invalid-attention-resolve-bad-revision", "command", commandEnvelope("attention.resolve", { sessionId: ids.sessionId, attentionId: uuid("9"), expectedRevision: "0bad" })],
+  ["invalid-agent-record-unsupported-action", "event", eventEnvelope("agent.snapshot", { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["nuke"], revision: "agent-r1" }] })],
+  ["invalid-agent-record-bad-state", "event", eventEnvelope("agent.snapshot", { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "missing", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript"], revision: "agent-r1" }] })],
+  ["invalid-agent-record-too-many-actions", "event", eventEnvelope("agent.snapshot", { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript", "steer", "cancel", "compare", "adopt", "merge", "bogus"], revision: "agent-r1" }] })],
+  ["invalid-agent-action-private-field", "command", commandEnvelope("agent.steer", { sessionId: ids.sessionId, agentId: "agent-fixture", expectedRevision: "agent-r1", private: "leak" })],
+  ["invalid-catalogue-toggle-unconfirmed", "command", commandEnvelope("catalogue.set_enabled", { sessionId: ids.sessionId, entryId: "entry-fixture", enabled: true, expectedRevision: "catalogue-r1", confirmed: false })],
+  ["invalid-catalogue-entry-private-field", "event", eventEnvelope("catalogue.snapshot", { revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1", private: "leak" }] })],
 
   ["invalid-optional-event-type", "event", { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "1", type: "futureNotice", payload: { optional: true } }],
   ["invalid-uppercase-uuid", "command", { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", leaseId: ids.leaseId, type: "session.rename", payload: { sessionId: ids.sessionId, name: "fixture" } }],

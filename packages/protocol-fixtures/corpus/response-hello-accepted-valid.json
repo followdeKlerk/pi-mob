@@ -21,7 +21,8 @@
         "streams.v1",
         "commands.v1",
         "runtime.processes.v1",
-        "git-ci.v1"
+        "git-ci.v1",
+        "raw_rpc.v1"
       ],
       "limits": {
         "maxJsonBytes": 1048576,

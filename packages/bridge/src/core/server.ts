@@ -185,7 +185,7 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
     const identity = runtime.identity();
     if (payload.expectedHostId !== undefined && payload.expectedHostId !== identity.hostId) { sendError(ws, "host_identity_mismatch", "Host identity differs.", message.requestId); ws.close(1008, "host identity"); return; }
     const required = Array.isArray(payload.requiredCapabilities) ? payload.requiredCapabilities : [];
-    const capabilities = ["streams.v1", "commands.v1", "controller_leases.v1", ...(runtime.optionalCapabilities?.() ?? [])];
+    const capabilities = ["streams.v1", "commands.v1", "controller_leases.v1", "raw_rpc.v1", ...(runtime.optionalCapabilities?.() ?? [])];
     if (required.some((item) => typeof item !== "string" || !capabilities.includes(item))) { sendError(ws, "unsupported_capability", "A required capability is unsupported.", message.requestId); ws.close(1002, "capability"); return; }
     if (!validateFixture({ name: "live", kind: "hello", valid: true, message })) { sendError(ws, "invalid_message", "Hello does not match the protocol schema.", message.requestId); return; }
     ws.data.installationId = installationId; ws.data.hello = true;

@@ -59,6 +59,5 @@
   "unsupported_protocol",
   "workspace_not_allowed",
   "workspace_not_found",
-  "workspace_trust_required",
   "workspace_unavailable"
 ]

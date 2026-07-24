@@ -92,7 +92,7 @@ describe("OneSessionPiAdapter", () => {
     const item = listing.items[0]!;
     expect(item.workspaceId).toBe("11111111-1111-4111-8111-111111111111");
     expect(item.rootPath).toBeUndefined();
-    expect(item.trustState).toBe("trusted");
+    expect(item.trustState).toBeUndefined();
     expect(item.policyMode).toBe("full");
     expect(item.availableSince).toBe("1970-01-01T00:00:00.000Z");
     expect(item.lastSeenAt).toBe("2023-11-14T22:13:20.000Z");
@@ -302,10 +302,11 @@ describe("OneSessionPiAdapter", () => {
     expect(types).toContain("tool.started");
     expect(types).toContain("tool.completed");
     expect(types).toContain("turn.settled");
-    expect(JSON.stringify(store.listEvents(streamId))).not.toContain("/private/repo");
+    const curatedEvents = store.listEvents(streamId).filter((event) => event.type !== "pi.rpc.event");
+    expect(JSON.stringify(curatedEvents)).not.toContain("/private/repo");
   });
 
-  test("durably projects recipe activity, suppresses raw reasoning, and dedupes restart replay", async () => {
+  test("durably projects recipe activity, suppresses curated reasoning deltas, and dedupes restart replay", async () => {
     const { store, adapter, hostStream, rpc } = setup();
     await adapter.dispatch(makeCommand("create-recipe", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
     const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
@@ -340,7 +341,7 @@ describe("OneSessionPiAdapter", () => {
       kind: "tool", activityId: "tool-r1", status: "completed", output: "ok",
     });
     expect(publishedAfterCommit.every(Boolean)).toBe(true);
-    expect(JSON.stringify(events)).not.toContain("private chain of thought");
+    expect(JSON.stringify(events.filter((event) => event.type !== "pi.rpc.event"))).not.toContain("private chain of thought");
     expect(events.some((event) => event.type === "reasoning.delta")).toBe(false);
 
     const beforeRestart = recipes.length;
@@ -486,7 +487,7 @@ async function hello(client: Client): Promise<{ connectionId: string; hostId: st
 describe("M5 runtime integration", () => {
   test("workspace.list control returns the configured workspace", async () => {
     const { store, adapter } = setup();
-    const runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.80.6", hostDisplayName: "example" });
+    const runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.82.0", hostDisplayName: "example" });
     await runtime.start();
     const server = createBridgeServer({ runtime, port: 0 });
     try {
@@ -508,7 +509,7 @@ describe("M5 runtime integration", () => {
   test("workspace.list fails when adapter lacks listWorkspaces", async () => {
     const { store } = setup();
     const adapter: AdapterPort = { async dispatch() { /* noop */ } };
-    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "0", piVersion: "0.80.6", hostDisplayName: "h" });
+    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "0", piVersion: "0.82.0", hostDisplayName: "h" });
     await runtime.start();
     const server = createBridgeServer({ runtime, port: 0 });
     try {
@@ -540,7 +541,7 @@ describe("M5 runtime integration", () => {
       newSessionId: deterministicIdGenerator("sess"),
       now: () => 1_700_000_000_000,
     });
-    let runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.80.6", hostDisplayName: "example" });
+    let runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.82.0", hostDisplayName: "example" });
     await runtime.start();
     let server = createBridgeServer({ runtime, port: 0 });
     try {
@@ -624,7 +625,7 @@ describe("M5 runtime integration", () => {
       newSessionId: deterministicIdGenerator("sess"),
       now: () => 1_700_000_000_000,
     });
-    runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.80.6", hostDisplayName: "example" });
+    runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.82.0", hostDisplayName: "example" });
     await runtime.start();
     server = createBridgeServer({ runtime, port: 0 });
     try {
@@ -644,7 +645,7 @@ describe("M5 runtime integration", () => {
 
   test("unknown RPC outcome becomes indeterminate and duplicate never reruns", async () => {
     const { store, rpc, adapter, hostStream } = setup();
-    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.80.6", hostDisplayName: "h" });
+    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.82.0", hostDisplayName: "h" });
     await runtime.start();
     await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
     const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
@@ -661,7 +662,7 @@ describe("M5 runtime integration", () => {
 
   test("lost receipt prompt.submit redispatches once", async () => {
     const { store, rpc, adapter, hostStream } = setup();
-    const runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.80.6", hostDisplayName: "h" });
+    const runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.82.0", hostDisplayName: "h" });
     await runtime.start();
     // Establish a session via direct adapter dispatch (skip WebSocket for brevity).
     await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));

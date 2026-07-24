@@ -1,9 +1,9 @@
 import { ProcessSupervisor, type ManagedProcess, type ProcessLifecycleEvent, type ProcessSpawnSpec } from "../core/process-supervisor";
-import { RpcProcess, type RpcProcessOptions, type RpcRequestOptions } from "./rpc-process";
+import { RpcProcess, type RpcProcessConfiguration, type RpcRequestOptions } from "./rpc-process";
 import type { PiRpcNotificationHandler, PiRpcRequestOptions } from "./one-session-adapter";
 
 export interface SupervisedRpcClientOptions {
-  readonly rpc: RpcProcessOptions;
+  readonly rpc: RpcProcessConfiguration;
   readonly processId: string;
   readonly now?: () => number;
   readonly restartDelayMs?: number;
@@ -29,7 +29,8 @@ export class SupervisedRpcClient {
 
   constructor(private readonly options: SupervisedRpcClientOptions) {
     this.processId = options.processId;
-    this.spec = { executable: options.rpc.executable, args: options.rpc.args, cwd: options.rpc.cwd };
+    const launch = "launchConfig" in options.rpc ? options.rpc.launchConfig : options.rpc;
+    this.spec = { executable: launch.executable, args: "launchConfig" in options.rpc ? [...launch.args, ...(options.rpc.args ?? [])] : launch.args, cwd: "launchConfig" in options.rpc ? options.rpc.cwd ?? launch.cwd : launch.cwd };
     this.supervisor = new ProcessSupervisor({
       capacity: options.capacity ?? 3,
       ...(options.now ? { now: options.now } : {}),

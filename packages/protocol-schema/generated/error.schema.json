@@ -90,10 +90,6 @@
               "type": "string"
             },
             {
-              "const": "workspace_trust_required",
-              "type": "string"
-            },
-            {
               "const": "controller_required",
               "type": "string"
             },

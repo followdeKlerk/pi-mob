@@ -3,11 +3,15 @@ import 'dart:convert';
 
 import 'package:drift/drift.dart';
 import 'package:flutter/widgets.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:uuid/uuid.dart';
 
 import '../../protocol_fixture.dart';
 import '../attachments/attachment_transport.dart';
 import '../attachments/image_attachment_picker.dart';
+import '../attention/attention_domain.dart';
+import '../agents/agent_domain.dart' as wire_agents;
+import '../agents/domain/agent_supervision.dart';
 import '../data/app_database.dart' hide StreamCursor;
 import '../domain/attachments.dart';
 import '../domain/controller_lease.dart';
@@ -17,7 +21,11 @@ import '../domain/prompt_send_lifecycle.dart';
 import '../domain/process_domain.dart';
 import '../git/git_domain.dart' show GitState, reduceGit;
 import '../plans/plan_domain.dart' show PlanState, reducePlan;
-import '../context/context_domain.dart' show ContextState, reduceContext, ContextMutationTarget;
+import '../protocol/raw_rpc.dart';
+import '../search/global_search_controller.dart';
+import '../search/search_indexer.dart';
+import '../context/context_domain.dart'
+    show ContextState, reduceContext, ContextMutationTarget;
 import '../domain/session_controls.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
@@ -114,10 +122,7 @@ class _HistoryRequest {
 /// requested it. Results are consumed once so a delayed duplicate can never
 /// clear a newer projection.
 class _ProcessSnapshotRequest {
-  const _ProcessSnapshotRequest({
-    required this.sessionId,
-    required this.epoch,
-  });
+  const _ProcessSnapshotRequest({required this.sessionId, required this.epoch});
 
   final String sessionId;
   final int epoch;
@@ -128,10 +133,7 @@ class _ProcessSnapshotRequest {
 /// duplicate cannot apply a stale Git/CI surface to a new connection
 /// epoch, mirroring the D-039 process snapshot correlation.
 class _GitSummaryRequest {
-  const _GitSummaryRequest({
-    required this.workspaceId,
-    required this.epoch,
-  });
+  const _GitSummaryRequest({required this.workspaceId, required this.epoch});
 
   final String workspaceId;
   final int epoch;
@@ -156,10 +158,7 @@ class _PlanSummaryRequest {
 /// be correlated by request ID and connection epoch. Mirrors the
 /// `_PlanSummaryRequest` pattern from R2.
 class _ContextSnapshotRequest {
-  const _ContextSnapshotRequest({
-    required this.sessionId,
-    required this.epoch,
-  });
+  const _ContextSnapshotRequest({required this.sessionId, required this.epoch});
 
   final String sessionId;
   final int epoch;
@@ -232,7 +231,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     repositoryMarker: null,
     lastUsedAt: null,
     availability: WorkspaceAvailability.unavailable,
-    trustState: WorkspaceTrustState.unknown,
     fingerprint: '',
     policyVersion: '',
     manifest: const <WorkspaceResource>[],
@@ -240,6 +238,12 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   final BridgeTransport _transport;
   final AppDatabase _database;
+  late final SearchIndexer _searchIndexer = SearchIndexer(
+    database: _database,
+    coordinator: this,
+  );
+  late final GlobalSearchController _globalSearchController =
+      GlobalSearchController(coordinator: this, database: _database);
   final Uuid _uuid;
   final DateTime Function() _now;
   final OrderedEventReducer _reducer = const OrderedEventReducer();
@@ -281,6 +285,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   Completer<void>? _pairingCompleter;
   final List<WorkspaceEntry> _workspaces = [];
   final List<String> _rawEvents = [];
+  final List<PiRpcEventPayload> _rawPiEvents = [];
+  final Map<String, PiRpcResponsePayload> _rawRpcResponses = {};
+  final StreamController<PiRpcResponsePayload> _rawRpcResponseController =
+      StreamController<PiRpcResponsePayload>.broadcast();
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
   String? _deferredAutoSelectSessionId;
@@ -290,7 +298,6 @@ final class ConnectionCoordinator extends ChangeNotifier
   String? _creationSelectingSessionId;
   WorkspaceSearchState _workspaceSearch = WorkspaceSearchState.idle();
   int _workspaceSearchEpoch = 0;
-  String? _workspaceTrustRequiredFor;
   // M11 multi-session support. The set holds at most one full
   // subscription and at most five summary subscriptions; each cursor
   // advances independently so a gap on one background session cannot
@@ -304,6 +311,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, String> _lastPromptCommandBySession = {};
   bool _sendRecoveryInFlight = false;
   final Map<String, SessionAttentionState> _attention = {};
+  AttentionState _attentionItems = const AttentionState();
+  AgentSupervisionState _agents = AgentSupervisionState.empty();
   final Map<String, String> _attentionWire = {};
   final Map<String, int> _unreadCount = {};
   // Per-session draft map: the active session's draft is mirrored into
@@ -549,12 +558,10 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   List<WorkspaceInfo> get workspaces => List.unmodifiable(_workspaces);
   WorkspaceSearchState get workspaceSearch => _workspaceSearch;
-  String? get workspaceTrustRequiredFor => _workspaceTrustRequiredFor;
   SessionCreationState get sessionCreation => _sessionCreation;
 
-  /// True while the active workspace is missing an approved trust record, a
-  /// fingerprint change invalidated the previous approval, or the workspace is
-  /// marked unavailable. The composer must not send prompts while this holds.
+  /// True while the active workspace is marked unavailable on the host. The
+  /// composer must not send prompts while this holds.
   bool get requiresTrustApproval {
     final selected = selectedWorkspaceId;
     if (selected == null) return false;
@@ -564,17 +571,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
     if (entry == _missingWorkspace) return true;
     if (entry.availability != WorkspaceAvailability.available) return true;
-    return entry.trustState != WorkspaceTrustState.approved;
-  }
-
-  /// The active policy on the currently selected session. Defaults to Full
-  /// because Pi sessions are created Full unless the user explicitly demotes.
-  SessionPolicyMode get activePolicyMode {
-    final id = selectedSessionId;
-    if (id == null) return SessionPolicyMode.full;
-    final mode = _sessions[id]?.policyMode;
-    if (mode == 'read_only') return SessionPolicyMode.readOnly;
-    return SessionPolicyMode.full;
+    return false;
   }
 
   /// Selects the composer delivery mode. The selection is sticky per session
@@ -631,6 +628,8 @@ final class ConnectionCoordinator extends ChangeNotifier
       .toList(growable: false);
 
   List<SessionState> get sessions => List.unmodifiable(_activeChats);
+  GlobalSearchController get globalSearchController => _globalSearchController;
+  SearchIndexer get searchIndexer => _searchIndexer;
   List<FollowUpItem> get selectedFollowUps =>
       List.unmodifiable(_followUpsBySession[selectedSessionId] ?? const []);
   ExtensionDialogState? get selectedDialog =>
@@ -645,7 +644,13 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// before the first host handshake completes and stays an empty list
   /// while the bridge is reconnecting. The mobile UI uses null/empty to
   /// render a calm fallback that still explains the gap.
-  List<SupportedCommandData>? get supportedCommands => null;
+  List<SupportedCommandData>? _supportedCommands;
+  List<SupportedCommandData>? get supportedCommands =>
+      _supportedCommands == null
+      ? null
+      : List.unmodifiable(_supportedCommands!);
+  AttentionState get attentionItems => _attentionItems;
+  AgentSupervisionState get agents => _agents;
 
   /// Display name shown in the chat header and command palette. Falls
   /// back to the host endpoint when no display name has been published.
@@ -655,6 +660,19 @@ final class ConnectionCoordinator extends ChangeNotifier
       : (_sessionControls[selectedSessionId!] ??
             SessionControlState.empty(selectedSessionId!));
   List<String> get rawEvents => List.unmodifiable(_rawEvents);
+  List<PiRpcEventPayload> rawPiEventsForSession(String sessionId) =>
+      List.unmodifiable(
+        _rawPiEvents.where((event) => event.sessionId == sessionId),
+      );
+  PiRpcResponsePayload? rawRpcResponse(String sessionId, String requestId) =>
+      _rawRpcResponses['$sessionId:$requestId'];
+  Stream<PiRpcResponsePayload> rawRpcResponsesFor(
+    String sessionId,
+    String requestId,
+  ) => _rawRpcResponseController.stream.where(
+    (response) =>
+        response.sessionId == sessionId && response.requestId == requestId,
+  );
   Map<String, StreamViewState> get streams => Map.unmodifiable(_streams);
 
   SessionHistoryState historyFor(String sessionId) =>
@@ -670,6 +688,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   ProcessDomainState get processes => _processes;
   GitState get git => _git;
   PlanState get plans => _plans;
+
   /// R4 — The closed context-inspector projection. Exactly one of
   /// `snapshot` / `unavailable` is non-null at a time. `refreshing` is
   /// true while a `context.snapshot.request` is in flight.
@@ -691,7 +710,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       epoch: epoch,
     );
     _git = _git.copyWith(refreshing: true);
-    notifyListeners();
+    _notify();
     try {
       await _sendControl('git.summary.request', <String, Object?>{
         'workspaceId': workspaceId,
@@ -723,7 +742,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       epoch: epoch,
     );
     _plans = _plans.copyWith(refreshing: true);
-    notifyListeners();
+    _notify();
     try {
       await _sendControl('plan.summary.request', <String, Object?>{
         'sessionId': sessionId,
@@ -752,9 +771,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       await _sendControl('plan.summary.cancel', <String, Object?>{
         'targetRequestId': requestId,
       }, requestId: _id());
-    } catch (_) { /* socket may be closed; nothing to do */ }
+    } catch (_) {
+      /* socket may be closed; nothing to do */
+    }
     _plans = _plans.copyWith(refreshing: false);
-    notifyListeners();
+    _notify();
   }
 
   /// R4 — Sends a bounded `context.snapshot.request` for [sessionId] and
@@ -773,7 +794,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       epoch: epoch,
     );
     _context = _context.copyWith(refreshing: true);
-    notifyListeners();
+    _notify();
     try {
       await _sendControl('context.snapshot.request', <String, Object?>{
         'sessionId': sessionId,
@@ -807,7 +828,12 @@ final class ConnectionCoordinator extends ChangeNotifier
     required String expectedRevision,
     required ContextMutationTarget target,
   }) async {
-    await _sendContextMutation('context.pin', sessionId, expectedRevision, target);
+    await _sendContextMutation(
+      'context.pin',
+      sessionId,
+      expectedRevision,
+      target,
+    );
   }
 
   /// R4 — Sends `context.unpin`. Mirrors `pinContext`.
@@ -816,7 +842,12 @@ final class ConnectionCoordinator extends ChangeNotifier
     required String expectedRevision,
     required ContextMutationTarget target,
   }) async {
-    await _sendContextMutation('context.unpin', sessionId, expectedRevision, target);
+    await _sendContextMutation(
+      'context.unpin',
+      sessionId,
+      expectedRevision,
+      target,
+    );
   }
 
   /// R4 — Sends `context.exclude`. Mirrors `pinContext`.
@@ -825,7 +856,12 @@ final class ConnectionCoordinator extends ChangeNotifier
     required String expectedRevision,
     required ContextMutationTarget target,
   }) async {
-    await _sendContextMutation('context.exclude', sessionId, expectedRevision, target);
+    await _sendContextMutation(
+      'context.exclude',
+      sessionId,
+      expectedRevision,
+      target,
+    );
   }
 
   /// R4 — Sends `context.refresh` for the whole session. The target is
@@ -849,7 +885,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     ContextMutationTarget target,
   ) async {
     _context = _context.copyWith(refreshing: true);
-    notifyListeners();
+    _notify();
     try {
       await _sendControl(type, <String, Object?>{
         'sessionId': sessionId,
@@ -868,7 +904,11 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// in-flight request exists for the workspace.
   Future<void> cancelGitSummary(String workspaceId) async {
     final entry = _gitSummaryRequests.entries
-        .where((e) => e.value.workspaceId == workspaceId && e.value.epoch == _connectionEpoch)
+        .where(
+          (e) =>
+              e.value.workspaceId == workspaceId &&
+              e.value.epoch == _connectionEpoch,
+        )
         .toList();
     for (final e in entry) {
       _gitSummaryRequests.remove(e.key);
@@ -883,10 +923,12 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _sendControl('git.summary.cancel', <String, Object?>{
           'targetRequestId': e.key,
         }, requestId: _id());
-      } catch (_) { /* socket may be closed; nothing to do */ }
+      } catch (_) {
+        /* socket may be closed; nothing to do */
+      }
     }
     _git = _git.copyWith(refreshing: false);
-    notifyListeners();
+    _notify();
   }
 
   Future<void> requestProcessSnapshot(String sessionId) async {
@@ -1159,6 +1201,49 @@ final class ConnectionCoordinator extends ChangeNotifier
     <String, Object?>{'enabled': enabled},
   );
 
+  Future<void> sendRawRpc({
+    required String sessionId,
+    required String requestId,
+    required Map<String, Object?> command,
+  }) async {
+    if (selectedSessionId != sessionId) {
+      throw StateError('Select this chat before sending raw RPC');
+    }
+    final payload = PiRpcRequestPayload(
+      sessionId: sessionId,
+      requestId: requestId,
+      command: command,
+    );
+    await _sendCommand(
+      type: 'pi.rpc.request',
+      commandId: _id(),
+      payload: payload.toJson(),
+      requiresLease: true,
+    );
+  }
+
+  void clearRawRpcState({required String sessionId, String? requestId}) {
+    if (requestId == null) {
+      _rawRpcResponses.removeWhere(
+        (_, response) => response.sessionId == sessionId,
+      );
+    } else {
+      _rawRpcResponses.remove('$sessionId:$requestId');
+    }
+    _rawPiEvents.removeWhere((event) => event.sessionId == sessionId);
+    _rawEvents.removeWhere((encoded) {
+      try {
+        final message = jsonDecode(encoded);
+        if (message is! Map || message['type'] != 'pi.rpc.event') return false;
+        final payload = message['payload'];
+        return payload is Map && payload['sessionId'] == sessionId;
+      } on FormatException {
+        return false;
+      }
+    });
+    _notify();
+  }
+
   Future<void> _sendSessionControl(
     String type,
     Map<String, Object?> values, {
@@ -1233,6 +1318,24 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
 
     if (hostId != null) await _loadCachedStreams(hostId!);
+    if (hostId != null) {
+      for (final row in await _database.attentionItemsForHost(hostId!)) {
+        final decoded = jsonDecode(row['payloadJson'] as String);
+        if (decoded is Map) {
+          final parsed = AttentionItemData.tryParse(
+            Map<String, Object?>.from(decoded),
+            read: row['isRead'] == true,
+          );
+          if (parsed != null) {
+            _attentionItems = AttentionState(<String, AttentionItemData>{
+              ..._attentionItems.items,
+              parsed.attentionId: parsed,
+            });
+          }
+        }
+      }
+    }
+    if (hostId != null) await _searchIndexer.rebuildHost(hostId!);
     _notify();
     if (autoConnect && endpoint != null && _foreground) {
       unawaited(connect(endpoint.toString()));
@@ -1314,11 +1417,9 @@ final class ConnectionCoordinator extends ChangeNotifier
         (raw) {
           _messageTail = _messageTail
               .then((_) => _receive(raw, epoch))
-              .catchError(
-                (Object error, StackTrace stack) {
-                  return _protocolFailure(error, epoch);
-                },
-              );
+              .catchError((Object error, StackTrace stack) {
+                return _protocolFailure(error, epoch);
+              });
         },
         onError: (Object error, StackTrace stack) {
           _socketEnded(error, epoch);
@@ -1478,7 +1579,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     _workspaces.clear();
     _workspaceSearch = WorkspaceSearchState.idle();
     _workspaceSearchEpoch += 1;
-    _workspaceTrustRequiredFor = null;
     _rawEvents.clear();
     _forceSnapshot.clear();
     _syncPending.clear();
@@ -1502,9 +1602,6 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> selectWorkspace(String workspaceId) async {
     selectedWorkspaceId = workspaceId;
-    _workspaceTrustRequiredFor = _needsApproval(_workspaces, workspaceId)
-        ? workspaceId
-        : null;
     _notify();
   }
 
@@ -1619,6 +1716,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _syncPending.remove('session:$sessionId');
     _forceSnapshot.remove('session:$sessionId');
     _controllers.drop(sessionId);
+    await _searchIndexer.removeSession(sessionId);
 
     final subscriptionChanged = _subscriptionSet.contains(sessionId);
     _subscriptionSet = _subscriptionSet.remove(sessionId);
@@ -1897,56 +1995,6 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   /// Sends `workspace.trust.approve` for the given workspace. The host will
-  /// return a `workspace.trust_state` event after the new fingerprint is
-  /// recorded, which then flips the entry to approved.
-  Future<void> approveWorkspaceTrust(String workspaceId) async {
-    final entry = _workspaces.firstWhere(
-      (w) => w.workspaceId == workspaceId,
-      orElse: () => _missingWorkspace,
-    );
-    if (entry == _missingWorkspace) return;
-    if (!isReady) {
-      errorMessage = 'Cannot approve trust while offline.';
-      _notify();
-      return;
-    }
-    await _sendCommand(
-      type: 'workspace.trust.approve',
-      commandId: _id(),
-      payload: <String, Object?>{
-        'workspaceId': workspaceId,
-        'fingerprint': entry.fingerprint,
-      },
-      requiresLease: false,
-    );
-    // The durable host-stream event remains authoritative. Also refresh the
-    // advertised workspace list on the same ordered socket so the root trust
-    // banner clears even if a live event was delayed while the app transitioned.
-    await _sendControl('workspace.list', const <String, Object?>{});
-  }
-
-  /// Sends `session.policy.set` to demote the active session to Read-only.
-  /// Read-only is a product guardrail enforced through Pi tool hooks. It is
-  /// not an OS sandbox and never claims to be one in the UI.
-  Future<void> setSessionPolicy(SessionPolicyMode mode) async {
-    final sessionId = selectedSessionId;
-    if (sessionId == null) return;
-    if (!isReady) {
-      errorMessage = 'Cannot change policy while offline.';
-      _notify();
-      return;
-    }
-    await _sendCommand(
-      type: 'session.policy.set',
-      commandId: _id(),
-      payload: <String, Object?>{
-        'sessionId': sessionId,
-        'policyMode': sessionPolicyModeWire(mode),
-      },
-      requiresLease: true,
-    );
-  }
-
   /// Test-only helper: seeds the workspace list from a synthetic server
   /// payload without going through the wire. The production code path uses
   /// [_workspaceList] (driven by `workspace.list.result`).
@@ -1963,21 +2011,26 @@ final class ConnectionCoordinator extends ChangeNotifier
         !_workspaces.any((item) => item.workspaceId == selectedWorkspaceId)) {
       selectedWorkspaceId = _workspaces.first.workspaceId;
     }
-    _workspaceTrustRequiredFor =
-        _needsApproval(_workspaces, selectedWorkspaceId)
-        ? selectedWorkspaceId
-        : null;
+    final currentSession = selectedSessionId;
+    if (currentSession != null) {
+      for (final workspace in _workspaces) {
+        unawaited(
+          _searchIndexer.indexWorkspace(
+            currentSession,
+            workspaceId: workspace.workspaceId,
+            label:
+                '${workspace.displayName} ${workspace.rootLabel} ${workspace.relativePath}',
+          ),
+        );
+      }
+    }
     _notify();
   }
 
-  /// Test-only helper: selects a workspace id and recomputes the
-  /// trust-required flag without driving a UI tap.
+  /// Test-only helper: selects a workspace id without driving a UI tap.
   @visibleForTesting
   void debugSelectWorkspace(String workspaceId) {
     selectedWorkspaceId = workspaceId;
-    _workspaceTrustRequiredFor = _needsApproval(_workspaces, workspaceId)
-        ? workspaceId
-        : null;
     _notify();
   }
 
@@ -2367,11 +2420,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       message: 'Control of this chat was lost before the message was accepted.',
       action: PromptFailureAction.takeControl,
     ),
-    'workspace_trust_required' || 'workspace_not_allowed' => PromptSendFailure(
-      code: code,
-      message: 'Approve workspace trust before sending this message.',
-      action: PromptFailureAction.approveWorkspace,
-    ),
     'host_not_ready' ||
     'host_draining' ||
     'session_not_found' => PromptSendFailure(
@@ -2634,8 +2682,6 @@ final class ConnectionCoordinator extends ChangeNotifier
         _planSnapshotResult(message, payload);
       case 'context.snapshot.result':
         _contextSnapshotResult(message, payload);
-      case 'workspace.trust_state':
-        _workspaceTrustStateEvent(payload);
       case 'command.current.result':
         await _commandCurrent(payload);
       case 'command.receipt':
@@ -2710,6 +2756,8 @@ final class ConnectionCoordinator extends ChangeNotifier
       _historySyncQueue.clear();
       _historySyncLocalRevisions.clear();
       _rawEvents.clear();
+      _rawPiEvents.clear();
+      _rawRpcResponses.clear();
       _forceSnapshot.add('host:$newHostId');
     } else {
       await _loadCachedStreams(newHostId);
@@ -2938,6 +2986,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     switch (reduction.disposition) {
       case EventDisposition.applied:
         await _database.persistEvent(event);
+        _scheduleSearchIndex(event.streamId);
         _streams[streamId] = reduction.state;
         _handleEventPayload(type, payload);
         _eventsSinceAck += 1;
@@ -2963,7 +3012,17 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   void _handleEventPayload(String type, Map<String, Object?> payload) {
-    if (type == 'host.state') {
+    if (type == 'pi.rpc.response') {
+      final response = PiRpcResponsePayload.fromJson(payload);
+      _rawRpcResponses['${response.sessionId}:${response.requestId}'] = response;
+      _rawRpcResponseController.add(response);
+    } else if (type == 'pi.rpc.event') {
+      final rawEvent = PiRpcEventPayload.fromJson(payload);
+      _rawPiEvents.add(rawEvent);
+      if (_rawPiEvents.length > 200) {
+        _rawPiEvents.removeRange(0, _rawPiEvents.length - 200);
+      }
+    } else if (type == 'host.state') {
       if (payload['ready'] == false) {
         errorMessage = 'Host reported not ready';
       }
@@ -3108,8 +3167,6 @@ final class ConnectionCoordinator extends ChangeNotifier
           );
         }
       }
-    } else if (type == 'workspace.trust_state') {
-      _workspaceTrustStateEvent(payload);
     } else if (type == 'queue.snapshot' || type == 'turn.queued') {
       final id = payload['sessionId'];
       final items = payload['items'];
@@ -3155,6 +3212,68 @@ final class ConnectionCoordinator extends ChangeNotifier
         'type': type,
         'payload': payload,
       });
+    } else if (type == 'catalogue.snapshot') {
+      _applyCatalogue(payload);
+    } else if (type == 'catalogue.unavailable') {
+      _supportedCommands = null;
+    } else if (type == 'agent.snapshot') {
+      final rawItems = payload['items'];
+      if (rawItems is List) {
+        final records = <AgentAuthoritativeRecord>[];
+        for (final raw in rawItems.whereType<Map>()) {
+          final item = wire_agents.AgentRecordData.tryParse(
+            Map<String, Object?>.from(raw),
+          );
+          if (item == null) continue;
+          records.add(
+            AgentAuthoritativeRecord(
+              agentId: item.agentId,
+              task: item.task,
+              state: item.state,
+              originSessionId: item.originSessionId,
+              originTurnId: item.originTurnId,
+              revision: item.revision,
+              supportedActions: item.supportedActions,
+              model: item.model,
+              latestActivity: item.latestActivity,
+              completionSummary: item.completionSummary,
+            ),
+          );
+        }
+        _agents = reduceAuthoritativeAgentSnapshot(
+          _agents,
+          AgentAuthoritativeSnapshot(records),
+        );
+      }
+    } else if (type == 'agent.unavailable') {
+      _agents = AgentSupervisionState(
+        blockers: <AgentSupervisionBlocker>[
+          AgentSupervisionBlocker(
+            toolCallId: 'agent-supervision',
+            kind: 'agent_supervision_unavailable',
+            detail: payload['status'] is Map
+                ? ((payload['status'] as Map)['reason']?.toString() ??
+                      'The host did not advertise agent supervision.')
+                : 'The host did not advertise agent supervision.',
+          ),
+        ],
+      );
+    } else if (type == 'attention.item') {
+      _attentionItems = reduceAttention(_attentionItems, payload);
+      final currentHost = hostId;
+      if (currentHost != null &&
+          payload['attentionId'] is String &&
+          payload['sessionId'] is String) {
+        unawaited(
+          _database.upsertAttentionItem(
+            hostId: currentHost,
+            attentionId: payload['attentionId'] as String,
+            sessionId: payload['sessionId'] as String,
+            payloadJson: jsonEncode(payload),
+            updatedAt: _now(),
+          ),
+        );
+      }
     } else if (type == 'git.summary' || type == 'git.unavailable') {
       _applyGitStreamEvent(type, payload);
     } else if (type == 'plan.snapshot' || type == 'plan.unavailable') {
@@ -3281,6 +3400,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
     _sessions[id] = state;
     unawaited(_database.upsertSessionState(state));
+    unawaited(_searchIndexer.indexSessionMeta(state));
   }
 
   void _failModelListRequest(String message) {
@@ -3476,7 +3596,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final request = _gitSummaryRequests.remove(requestId);
     if (request == null || request.epoch != _connectionEpoch) return;
     _git = reduceGit(_git, 'git.summary.result', payload);
-    notifyListeners();
+    _notify();
   }
 
   /// R2 — Correlates `plan.snapshot.result` by request ID and applies the
@@ -3492,7 +3612,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final request = _planSummaryRequests.remove(requestId);
     if (request == null || request.epoch != _connectionEpoch) return;
     _plans = reducePlan(_plans, 'plan.snapshot.result', payload);
-    notifyListeners();
+    _notify();
   }
 
   /// R2 — Applies the host-stream `plan.snapshot` (session stream) and
@@ -3501,7 +3621,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// coordinator reconciles them without requiring a new request tap.
   void _applyPlanStreamEvent(String type, Map<String, Object?> payload) {
     _plans = reducePlan(_plans, type, payload);
-    notifyListeners();
+    _notify();
   }
 
   /// R4 — Correlates `context.snapshot.result` by request ID and applies
@@ -3518,7 +3638,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final request = _contextSnapshotRequests.remove(requestId);
     if (request == null || request.epoch != _connectionEpoch) return;
     _context = reduceContext(_context, 'context.snapshot.result', payload);
-    notifyListeners();
+    _notify();
   }
 
   /// R4 — Applies the host-stream `context.snapshot` (session stream) and
@@ -3527,7 +3647,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// the coordinator reconciles them without requiring a new request tap.
   void _applyContextStreamEvent(String type, Map<String, Object?> payload) {
     _context = reduceContext(_context, type, payload);
-    notifyListeners();
+    _notify();
   }
 
   /// Applies the host-stream `git.summary` and `git.unavailable` events to
@@ -3538,7 +3658,52 @@ final class ConnectionCoordinator extends ChangeNotifier
     final next = reduceGit(_git, type, payload);
     if (identical(next, _git)) return;
     _git = next;
-    notifyListeners();
+    final currentSession = selectedSessionId;
+    if (currentSession != null)
+      unawaited(_searchIndexer.indexGit(currentSession));
+    _notify();
+  }
+
+  void _applyCatalogue(Map<String, Object?> payload) {
+    final entries = payload['entries'];
+    if (entries is! List) return;
+    _supportedCommands = entries
+        .whereType<Map>()
+        .map((raw) {
+          final item = Map<String, Object?>.from(raw);
+          final kind = item['kind']?.toString();
+          final category = switch (kind) {
+            'skill' => SupportedCommandCategory.skill,
+            'template' => SupportedCommandCategory.template,
+            _ => SupportedCommandCategory.extension,
+          };
+          final availability = item['availability'];
+          final available =
+              availability is Map && availability['state'] == 'available';
+          return SupportedCommandData(
+            id: item['entryId']?.toString() ?? '',
+            title: item['name']?.toString() ?? 'Unnamed entry',
+            category: category,
+            description: item['description']?.toString(),
+            invocation: item['invocation']?.toString(),
+            enabled: available,
+            disabledReason: available
+                ? null
+                : availability is Map
+                ? availability['reason']?.toString()
+                : 'Unavailable',
+          );
+        })
+        .toList(growable: false);
+  }
+
+  void _scheduleSearchIndex(String streamId) {
+    if (_disposed || !streamId.startsWith('session:')) return;
+    final sessionId = streamId.substring('session:'.length);
+    scheduleMicrotask(() {
+      if (_disposed) return;
+      unawaited(_searchIndexer.indexSession(sessionId));
+    });
   }
 
   void _workspaceList(Map<String, Object?> payload) {
@@ -3566,10 +3731,6 @@ final class ConnectionCoordinator extends ChangeNotifier
         !_workspaces.any((item) => item.workspaceId == selectedWorkspaceId)) {
       selectedWorkspaceId = _workspaces.first.workspaceId;
     }
-    _workspaceTrustRequiredFor =
-        _needsApproval(_workspaces, selectedWorkspaceId)
-        ? selectedWorkspaceId
-        : null;
   }
 
   void _workspaceSearchResult(int epoch, Map<String, Object?> payload) {
@@ -3597,7 +3758,6 @@ final class ConnectionCoordinator extends ChangeNotifier
             relativePath: item['relativePath'] as String? ?? '/',
             rootLabel: item['rootLabel'] as String? ?? '',
             availability: _parseAvailability(item['availability'] as String?),
-            trustState: _parseTrustState(item['trustState'] as String?),
             fingerprint: item['fingerprint'] as String? ?? '',
             policyVersion: item['policyVersion'] as String? ?? '',
           );
@@ -3608,41 +3768,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       hits: hits,
       clearError: true,
     );
-    _notify();
-  }
-
-  void _workspaceTrustStateEvent(Map<String, Object?> payload) {
-    final id = payload['workspaceId'] as String?;
-    final state = _parseTrustState(payload['trustState'] as String?);
-    final fingerprint = payload['fingerprint'] as String?;
-    final policyVersion = payload['policyVersion'] as String?;
-    if (id == null) return;
-    final updated = <WorkspaceEntry>[];
-    for (final w in _workspaces) {
-      if (w.workspaceId != id) {
-        updated.add(w);
-        continue;
-      }
-      updated.add(
-        WorkspaceEntry(
-          workspaceId: w.workspaceId,
-          displayName: w.displayName,
-          rootLabel: w.rootLabel,
-          relativePath: w.relativePath,
-          repositoryMarker: w.repositoryMarker,
-          lastUsedAt: w.lastUsedAt,
-          availability: w.availability,
-          trustState: state,
-          fingerprint: fingerprint ?? w.fingerprint,
-          policyVersion: policyVersion ?? w.policyVersion,
-          manifest: w.manifest,
-        ),
-      );
-    }
-    _workspaces
-      ..clear()
-      ..addAll(updated);
-    _workspaceTrustRequiredFor = _needsApproval(_workspaces, id) ? id : null;
     _notify();
   }
 
@@ -3669,7 +3794,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       repositoryMarker: item['repositoryMarker'] as String?,
       lastUsedAt: DateTime.tryParse(item['lastUsedAt'] as String? ?? ''),
       availability: _parseAvailability(item['availability'] as String?),
-      trustState: _parseTrustState(item['trustState'] as String?),
       fingerprint: item['fingerprint'] as String? ?? '',
       policyVersion: item['policyVersion'] as String? ?? '',
       manifest: manifest,
@@ -3680,24 +3804,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       value == 'available'
       ? WorkspaceAvailability.available
       : WorkspaceAvailability.unavailable;
-
-  WorkspaceTrustState _parseTrustState(String? value) => switch (value) {
-    'approved' => WorkspaceTrustState.approved,
-    'unapproved' => WorkspaceTrustState.unapproved,
-    'fingerprint_changed' => WorkspaceTrustState.fingerprintChanged,
-    _ => WorkspaceTrustState.unknown,
-  };
-
-  bool _needsApproval(List<WorkspaceEntry> entries, String? workspaceId) {
-    if (workspaceId == null) return false;
-    for (final w in entries) {
-      if (w.workspaceId == workspaceId) {
-        return w.availability != WorkspaceAvailability.available ||
-            w.trustState != WorkspaceTrustState.approved;
-      }
-    }
-    return true;
-  }
 
   Future<void> _commandReceipt(
     Map<String, Object?> message,
@@ -3938,9 +4044,6 @@ final class ConnectionCoordinator extends ChangeNotifier
         'runtimeState': code,
       });
     }
-    if (code == 'workspace_trust_required' || code == 'workspace_not_allowed') {
-      _workspaceTrustRequiredFor = selectedWorkspaceId;
-    }
     if (code == 'stale_controller' || code == 'controller_required') {
       leaseId = null;
       _leaseTimer?.cancel();
@@ -4096,7 +4199,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     'protocol': const <String, Object?>{'major': 1, 'minor': 0},
     'messageId': _id(),
     'requestId': requestId,
-    if (includeConnection && connectionId != null) 'connectionId': connectionId,
+    if (includeConnection) 'connectionId': ?connectionId,
     'commandId': ?commandId,
     'leaseId': ?lease,
     'type': type,
@@ -4472,6 +4575,8 @@ final class ConnectionCoordinator extends ChangeNotifier
           'tool.output',
           'tool.completed',
           'tool.failed',
+          'pi.rpc.response',
+          'pi.rpc.event',
         }.contains(event.type)) {
           _handleEventPayload(event.type, payload);
         }
@@ -4682,14 +4787,25 @@ final class ConnectionCoordinator extends ChangeNotifier
     _notify();
   }
 
-  /// Coalesce mutation bursts into one listener notification while ensuring
-  /// network-only updates do not wait for an unrelated frame or pointer event.
-  /// A microtask runs after the active build/callback stack, and listener
-  /// setState calls schedule the frame that paints the new state.
+  /// Test seam for exercising the frame-coalescing notification path
+  /// without the bridge fixture. Calls [_notify] [count] times so a
+  /// single post-frame delivery must drain the burst to one listener
+  /// notification.
+  @visibleForTesting
+  void debugTriggerBurstNotify(int count) {
+    for (var i = 0; i < count; i++) {
+      _notify();
+    }
+  }
+
+  /// Coalesce mutation bursts into one listener notification per Flutter
+  /// frame. Network-only updates explicitly request a frame so delivery does
+  /// not depend on an unrelated pointer or build event.
   void _notify() {
     if (_disposed || _notifyScheduled) return;
     _notifyScheduled = true;
-    scheduleMicrotask(() {
+    SchedulerBinding.instance.ensureVisualUpdate();
+    SchedulerBinding.instance.addPostFrameCallback((_) {
       _notifyScheduled = false;
       if (!_disposed) notifyListeners();
     });
@@ -4698,6 +4814,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   @override
   void dispose() {
     _disposed = true;
+    _globalSearchController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _failSessionCreation('Chat creation was cancelled.');
     _sessionCreationTimer?.cancel();
@@ -4711,6 +4828,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _cancelReconnect();
     _ackTimer?.cancel();
     _leaseTimer?.cancel();
+    unawaited(_rawRpcResponseController.close());
     unawaited(_closeSocket());
     super.dispose();
   }
@@ -4750,6 +4868,119 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// session has not set one.
   DeliveryMode deliveryModeFor(String sessionId) =>
       _deliveryModeBySession[sessionId] ?? DeliveryMode.immediate;
+
+  Future<void> indexViewedFile({
+    required String workspaceId,
+    required String path,
+    String? content,
+    int? line,
+  }) async {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return;
+    await _searchIndexer.indexViewedFile(
+      sessionId,
+      workspaceId: workspaceId,
+      path: path,
+      content: content,
+      line: line,
+    );
+  }
+
+  Future<void> requestCatalogue() => _sendControl(
+    'catalogue.snapshot.request',
+    <String, Object?>{'requestId': _id()},
+  );
+
+  Future<void> requestAgentSnapshot() => _sendControl(
+    'agent.snapshot.request',
+    <String, Object?>{'requestId': _id()},
+  );
+
+  Future<void> sendAgentAction(
+    wire_agents.AgentRecordData agent,
+    String action, {
+    String? instruction,
+  }) {
+    if (!agent.supportedActions.contains(action) ||
+        action == 'transcript' ||
+        action == 'compare') {
+      throw StateError('$action is unavailable for this agent');
+    }
+    return _sendCommand(
+      type: 'agent.$action',
+      commandId: _id(),
+      payload: <String, Object?>{
+        'sessionId': agent.originSessionId,
+        'agentId': agent.agentId,
+        'expectedRevision': agent.revision,
+        'instruction': ?instruction,
+      },
+      requiresLease: true,
+    );
+  }
+
+  Future<void> markAttentionItemRead(String attentionId) async {
+    final item = _attentionItems.items[attentionId];
+    final currentHost = hostId;
+    if (item == null || currentHost == null) return;
+    _attentionItems = AttentionState(<String, AttentionItemData>{
+      ..._attentionItems.items,
+      attentionId: item.copyWith(read: true),
+    });
+    _notify();
+    await _database.markAttentionItemRead(currentHost, attentionId);
+  }
+
+  Future<void> resolveAttentionItem(AttentionItemData item) => _sendCommand(
+    type: 'attention.resolve',
+    commandId: _id(),
+    payload: <String, Object?>{
+      'sessionId': item.sessionId,
+      'attentionId': item.attentionId,
+      'expectedRevision': item.revision,
+    },
+    requiresLease: true,
+  );
+
+  // ---------------------------------------------------------------------
+  // R12 — Per-chat scroll position + follow mode persistence. The
+  // mobile UI ships a transcript that scrolls independently per chat;
+  // the persisted tuple records where the user left the transcript and
+  // whether they were pinned to the tail. Background events cannot move
+  // the persisted offset; only explicit user scroll commits write it
+  // back via debounced flush. The Deep-link path resets follow mode to
+  // tail, overriding the user's prior pinned position.
+  Future<({int scrollOffset, bool followMode})?> chatScrollPositionFor(
+    String sessionId,
+  ) async {
+    final currentHost = hostId;
+    if (currentHost == null) return null;
+    final row = await _database.chatScrollPositionFor(
+      hostId: currentHost,
+      sessionId: sessionId,
+    );
+    if (row == null) return null;
+    return (
+      scrollOffset: (row['scrollOffset'] as int?) ?? 0,
+      followMode: (row['followMode'] as bool?) ?? true,
+    );
+  }
+
+  Future<void> recordChatScrollPosition({
+    required String sessionId,
+    required int scrollOffset,
+    required bool followMode,
+  }) async {
+    final currentHost = hostId;
+    if (currentHost == null) return;
+    await _database.upsertChatScrollPosition(
+      hostId: currentHost,
+      sessionId: sessionId,
+      scrollOffset: scrollOffset,
+      followMode: followMode,
+      updatedAt: DateTime.now().toUtc(),
+    );
+  }
 
   /// Marks a session as carrying attention. The host may also report
   /// attention via `session.attention` events; both paths converge

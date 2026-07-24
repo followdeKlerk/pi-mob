@@ -1,5 +1,5 @@
 /**
- * Strict subprocess RPC transport for an exact Pi `0.80.6` binary.
+ * Strict subprocess RPC transport for an exact Pi `0.82.0` binary.
  *
  * The bridge talks to Pi over a one-shot `pi --mode rpc` subprocess. The
  * subprocess emits one JSON record per line on stdout (LF-terminated,
@@ -14,12 +14,10 @@
  * This module enforces five hard rules that the upstream Pi runtime
  * also relies on, and that are easy to get wrong:
  *
- *   1. **No shell, no inheritance.** The subprocess is spawned with an
- *      absolute `cmd[0]`, an explicit `cwd`, and an *allowlisted* env
- *      object. `PATH` is rebuilt from `pathDirs`; nothing from the
- *      parent process leaks in. This blocks `PATH` hijacks, hostile
- *      `LD_PRELOAD` style attacks, and shell metacharacter trickery
- *      that would otherwise be possible with `bash -c "<user input>"`.
+ *   1. **No shell.** The subprocess is spawned with an absolute `cmd[0]`,
+ *      an explicit `cwd`, and the owner-captured login-shell environment,
+ *      never an allowlist. `PATH` is whatever the owner's login shell
+ *      exported after sanitization; nothing is composed from path fragments.
  *
  *   2. **Response-ID correlation with duplication rejection.** Two
  *      in-flight requests with the same `id` would create a race; we
@@ -59,6 +57,7 @@
 import { existsSync, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import { JsonlDecoder } from "./jsonl";
+import type { PiLaunchConfig } from "./launch-config";
 
 // ---------------- Errors ----------------
 
@@ -107,6 +106,7 @@ export class RpcAbortError extends Error {
 
 // ---------------- Types ----------------
 
+/** @deprecated Prefer {@link RpcProcessLaunchOptions} with `launchConfig`. */
 export interface RpcProcessOptions {
   /** Absolute path to the executable. */
   readonly executable: string;
@@ -115,16 +115,13 @@ export interface RpcProcessOptions {
   /** Absolute working directory. */
   readonly cwd: string;
   /**
-   * Allowlisted environment variables to forward to the subprocess.
-   * Anything not in this map is dropped — we never inherit the parent
-   * environment. `PATH` (if present in `environment`) is replaced by
-   * the value composed from `pathDirs`.
+   * Environment variables to forward to the subprocess. Anything not in this
+   * map is dropped — we never inherit the parent environment.
    */
   readonly environment: Readonly<Record<string, string>>;
   /**
-   * Directory entries that compose the subprocess `PATH`, in
-   * left-to-right order. Joins with `:` (POSIX). If omitted and
-   * `environment.PATH` is empty, the subprocess receives no `PATH`.
+   * Retained only for source compatibility. It is ignored; use
+   * `environment.PATH` directly.
    */
   readonly pathDirs?: readonly string[];
   /** Bytes of stderr to retain. Default 256 KiB. */
@@ -134,6 +131,20 @@ export interface RpcProcessOptions {
   /** Grace period for `close()` before escalating to SIGKILL. Default 5 s. */
   readonly closeGracePeriodMs?: number;
 }
+
+export interface RpcProcessLaunchOptions {
+  /** Shared owner-captured launch contract. */
+  readonly launchConfig: PiLaunchConfig;
+  /** Per-process RPC arguments appended after `launchConfig.args`. */
+  readonly args?: readonly string[];
+  /** Per-session workspace override. */
+  readonly cwd?: string;
+  readonly stderrMaxBytes?: number;
+  readonly defaultRequestTimeoutMs?: number;
+  readonly closeGracePeriodMs?: number;
+}
+
+export type RpcProcessConfiguration = RpcProcessOptions | RpcProcessLaunchOptions;
 
 export interface RpcRequestOptions {
   /** Opaque correlation id. Auto-generated when omitted. */
@@ -246,26 +257,33 @@ interface RpcInternalOptions {
   readonly args: readonly string[];
   readonly cwd: string;
   readonly environment: Readonly<Record<string, string>>;
-  readonly pathDirs: readonly string[];
   readonly stderrMaxBytes: number;
   readonly defaultRequestTimeoutMs: number;
   readonly closeGracePeriodMs: number;
 }
 
-function normaliseOptions(options: RpcProcessOptions): RpcInternalOptions {
-  if (!isAbsolute(options.executable)) {
+function normaliseOptions(options: RpcProcessConfiguration): RpcInternalOptions {
+  const launch = "launchConfig" in options
+    ? {
+      executable: options.launchConfig.executable,
+      args: [...options.launchConfig.args, ...(options.args ?? [])],
+      cwd: options.cwd ?? options.launchConfig.cwd,
+      environment: options.launchConfig.env,
+    }
+    : options;
+  if (!isAbsolute(launch.executable)) {
     throw new RpcInvalidOptionsError(
       `executable must be an absolute path (got ${JSON.stringify(
-        options.executable,
+        launch.executable,
       )})`,
     );
   }
-  if (!isAbsolute(options.cwd)) {
+  if (!isAbsolute(launch.cwd)) {
     throw new RpcInvalidOptionsError(
-      `cwd must be an absolute path (got ${JSON.stringify(options.cwd)})`,
+      `cwd must be an absolute path (got ${JSON.stringify(launch.cwd)})`,
     );
   }
-  for (const arg of options.args) {
+  for (const arg of launch.args) {
     if (typeof arg !== "string") {
       throw new RpcInvalidOptionsError("args must be strings");
     }
@@ -273,7 +291,7 @@ function normaliseOptions(options: RpcProcessOptions): RpcInternalOptions {
       throw new RpcInvalidOptionsError("args may not contain NUL");
     }
   }
-  for (const k of Object.keys(options.environment)) {
+  for (const k of Object.keys(launch.environment)) {
     if (k.includes("=") || k.includes("\u0000")) {
       throw new RpcInvalidOptionsError(
         `invalid environment key: ${JSON.stringify(k)}`,
@@ -281,11 +299,10 @@ function normaliseOptions(options: RpcProcessOptions): RpcInternalOptions {
     }
   }
   return {
-    executable: options.executable,
-    args: [...options.args],
-    cwd: options.cwd,
-    environment: options.environment,
-    pathDirs: options.pathDirs ? [...options.pathDirs] : [],
+    executable: launch.executable,
+    args: [...launch.args],
+    cwd: launch.cwd,
+    environment: launch.environment,
     stderrMaxBytes: options.stderrMaxBytes ?? DEFAULT_STDERR_MAX_BYTES,
     defaultRequestTimeoutMs:
       options.defaultRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
@@ -326,6 +343,7 @@ export interface RpcProcessListeners {
  */
 export class RpcProcess {
   private readonly options: RpcInternalOptions;
+  readonly launchConfig: PiLaunchConfig | undefined;
   private proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | null = null;
   private readonly jsonl = new JsonlDecoder();
   private readonly pending = new Map<string, PendingRequest>();
@@ -346,7 +364,8 @@ export class RpcProcess {
   private readyPromise: Promise<void> | null = null;
   private readyResolve: (() => void) | null = null;
 
-  constructor(options: RpcProcessOptions) {
+  constructor(options: RpcProcessConfiguration) {
+    this.launchConfig = "launchConfig" in options ? options.launchConfig : undefined;
     this.options = normaliseOptions(options);
   }
 
@@ -441,16 +460,7 @@ export class RpcProcess {
       );
     }
 
-    const env: Record<string, string> = {};
-    for (const [k, v] of Object.entries(this.options.environment)) {
-      // Skip user-supplied PATH; we compose it from pathDirs to avoid
-      // surprises where PATH is set but pathDirs is empty.
-      if (k === "PATH") continue;
-      env[k] = v;
-    }
-    if (this.options.pathDirs.length > 0) {
-      env.PATH = this.options.pathDirs.join(":");
-    }
+    const env: Record<string, string> = { ...this.options.environment };
     // Bun's spawn requires an absolute path; we validated this above
     // but the runtime check is cheap and explicit.
     const cmd = [this.options.executable, ...this.options.args];
@@ -911,29 +921,6 @@ export class RpcProcess {
       return false;
     }
   }
-}
-
-// ---------------- Helpers used by tests / fixtures ----------------
-
-/**
- * Build the allowlisted env object the bridge should pass to the Pi
- * subprocess. Pulls only the keys named in `allowedKeys` from the
- * parent process and composes `PATH` from `pathDirs`. Exporting this
- * lets the M3 fixture scripts use exactly the same composition as
- * production code.
- */
-export function buildChildEnvironment(
-  parent: NodeJS.ProcessEnv,
-  allowedKeys: readonly string[],
-  pathDirs: readonly string[],
-): Record<string, string> {
-  const out: Record<string, string> = {};
-  for (const k of allowedKeys) {
-    const v = parent[k];
-    if (typeof v === "string" && v.length > 0) out[k] = v;
-  }
-  if (pathDirs.length > 0) out.PATH = pathDirs.join(":");
-  return out;
 }
 
 /**

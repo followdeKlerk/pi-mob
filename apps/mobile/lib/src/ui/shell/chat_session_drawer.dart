@@ -10,6 +10,7 @@ import '../../notifications/notification_controller.dart';
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
 import 'motion_primitives.dart';
+import 'raw_rpc_sheet.dart';
 
 enum _ChatAction { rename, delete }
 
@@ -107,8 +108,6 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
             coordinator: widget.coordinator,
             onSelect: (entry) => Navigator.of(sheetContext).pop(entry),
             onCancel: () => Navigator.of(sheetContext).pop(),
-            onApproveTrust: (entry) =>
-                widget.coordinator.approveWorkspaceTrust(entry.workspaceId),
           ),
         ),
       );
@@ -190,7 +189,6 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     final workspace = await _chooseFolder();
     if (workspace == null) return;
     await widget.coordinator.selectWorkspaceEntry(workspace);
-    if (widget.coordinator.requiresTrustApproval) return;
     final agent = await _chooseAgent();
     if (agent == null) return;
     try {
@@ -209,6 +207,49 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
   Future<void> _selectSession(String sessionId) async {
     Navigator.of(context).pop();
     await widget.coordinator.takeControl(sessionId);
+  }
+
+  Future<void> _changeBridgeAddress() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Change bridge address?'),
+        content: const Text(
+          'You’ll be unpaired from the current bridge. Saved chats and cached '
+          'data associated with this host may be cleared, but local drafts are '
+          'preserved. You’ll then enter and verify the new address.',
+        ),
+        actions: [
+          TextButton(
+            key: const Key('cancel-change-bridge-address'),
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('Cancel'),
+          ),
+          FilledButton(
+            key: const Key('confirm-change-bridge-address'),
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('Change address'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    Navigator.of(context).pop();
+    await widget.onForgetHost();
+  }
+
+  Future<void> _openRawRpc() async {
+    final sessionId = widget.coordinator.selectedSessionId;
+    if (sessionId == null) return;
+    Navigator.of(context).pop();
+    await WidgetsBinding.instance.endOfFrame;
+    if (!mounted) return;
+    await showRawRpcSheet(
+      context,
+      coordinator: widget.coordinator,
+      sessionId: sessionId,
+    );
   }
 
   Future<void> _openChatActions(SessionState session) async {
@@ -523,6 +564,15 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                     ),
             ),
             const Divider(height: 1),
+            ListTile(
+              key: const Key('drawer-raw-rpc'),
+              leading: const Icon(Icons.code),
+              title: const Text('Advanced · Raw RPC'),
+              enabled: coordinator.selectedSessionId != null,
+              onTap: coordinator.selectedSessionId == null
+                  ? null
+                  : () => unawaited(_openRawRpc()),
+            ),
             if (widget.notifications case final notifications?)
               ListenableBuilder(
                 listenable: notifications,
@@ -545,9 +595,9 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
               ),
             ListTile(
               key: const Key('drawer-forget-host'),
-              leading: const Icon(Icons.link_off),
-              title: const Text('Forget connection'),
-              onTap: () => unawaited(widget.onForgetHost()),
+              leading: const Icon(Icons.swap_horiz),
+              title: const Text('Change bridge address'),
+              onTap: () => unawaited(_changeBridgeAddress()),
             ),
           ],
         ),

@@ -4,7 +4,7 @@ pi-mob has three components:
 
 1. **Mobile app** — Flutter client for pairing, session control, transcript presentation, and local drafts.
 2. **Bridge** — Bun/TypeScript service that validates the protocol, persists commands/events, manages controller leases, and proxies to Pi.
-3. **Host runtime** — Pi processes, trusted workspaces, credentials, and local storage.
+3. **Host runtime** — Pi processes with the owner's captured login environment, trusted workspaces, credentials, and local storage.
 
 ```text
 Flutter app ⇄ private HTTPS/WebSocket ⇄ loopback bridge ⇄ Pi RPC ⇄ host workspace
@@ -20,4 +20,4 @@ The bridge accepts traffic only through the configured private network path and 
 - Persist command acceptance before execution.
 - Replay events deterministically after reconnect.
 - Report unavailable or indeterminate state explicitly.
-- Treat workspace trust and read-only policy as guardrails, not an OS sandbox.
+- Treat controller ownership as a transport-level concurrency mechanism; defer all behavioural policy to Pi.

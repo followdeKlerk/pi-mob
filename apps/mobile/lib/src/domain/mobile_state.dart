@@ -186,26 +186,6 @@ String sessionStateLabel(String state) => switch (state) {
 /// selectable.
 enum WorkspaceAvailability { available, unavailable }
 
-/// Trust posture for a workspace. Mirrors the host's `workspace.trust_state`
-/// event family. The mobile UI must never allow mutation while trust is not
-/// approved and must re-prompt the user when the fingerprint changes.
-enum WorkspaceTrustState { unknown, unapproved, approved, fingerprintChanged }
-
-/// Stable identifier for the active per-session policy. Both Full and
-/// Read-only are product guardrails enforced through Pi tool hooks; they are
-/// not OS-level sandboxes and the UI must never claim otherwise.
-enum SessionPolicyMode { full, readOnly }
-
-String sessionPolicyModeWire(SessionPolicyMode mode) => switch (mode) {
-  SessionPolicyMode.full => 'full',
-  SessionPolicyMode.readOnly => 'read_only',
-};
-
-String sessionPolicyModeLabel(SessionPolicyMode mode) => switch (mode) {
-  SessionPolicyMode.full => 'Full',
-  SessionPolicyMode.readOnly => 'Read-only',
-};
-
 /// Resource manifest line item reported by the host. This is display-only and
 /// is never used as a path on the mobile device.
 final class WorkspaceResource {
@@ -232,7 +212,6 @@ final class WorkspaceEntry {
     required this.repositoryMarker,
     required this.lastUsedAt,
     required this.availability,
-    required this.trustState,
     required this.fingerprint,
     required this.policyVersion,
     required this.manifest,
@@ -245,14 +224,11 @@ final class WorkspaceEntry {
   final String? repositoryMarker;
   final DateTime? lastUsedAt;
   final WorkspaceAvailability availability;
-  final WorkspaceTrustState trustState;
   final String fingerprint;
   final String policyVersion;
   final List<WorkspaceResource> manifest;
 
-  bool get isSelectable =>
-      availability == WorkspaceAvailability.available &&
-      trustState == WorkspaceTrustState.approved;
+  bool get isSelectable => availability == WorkspaceAvailability.available;
 }
 
 /// One cancellable workspace-search result row. Mobile never lets a user
@@ -264,7 +240,6 @@ final class WorkspaceSearchHit {
     required this.relativePath,
     required this.rootLabel,
     required this.availability,
-    required this.trustState,
     required this.fingerprint,
     required this.policyVersion,
   });
@@ -274,7 +249,6 @@ final class WorkspaceSearchHit {
   final String relativePath;
   final String rootLabel;
   final WorkspaceAvailability availability;
-  final WorkspaceTrustState trustState;
   final String fingerprint;
   final String policyVersion;
 }

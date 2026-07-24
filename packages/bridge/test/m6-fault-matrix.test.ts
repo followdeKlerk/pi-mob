@@ -65,7 +65,7 @@ describe("M6 deterministic fault matrix", () => {
     const store = new BridgeStore(join(mkdtempSync(join(tmpdir(), "pi-mob-fault-live-")), "bridge.sqlite"));
     let dispatches = 0;
     const adapter: AdapterPort = { async dispatch() { dispatches++; } };
-    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.80.6", hostDisplayName: "fixture" });
+    const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.82.0", hostDisplayName: "fixture" });
     await runtime.start();
     const faults = TestFaultInjector.create("test");
     faults.arm({ name: "close_after_accept" });

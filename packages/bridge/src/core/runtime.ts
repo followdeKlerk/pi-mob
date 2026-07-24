@@ -1,5 +1,4 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
-import { relative } from "node:path";
 import { COMMAND_METADATA, LIMITS, semanticCommandSha256 } from "@pi-mob/protocol-schema";
 import { ControllerLeaseService, DurableCommandService, StreamService, type AdapterPort } from "./domain";
 import type { BridgeRuntimePort, ConnectionContext, SubscriptionMessage, SubscriptionResult } from "./server";
@@ -11,26 +10,15 @@ import {
   type ProcessOutputPageRequest,
 } from "./process-projection";
 import { GitSummaryService } from "../git/summary-service";
+import { AttentionProjection } from "./attention-projection";
+import type { AgentSupervisionService } from "../agents/supervision-service";
+import type { MobileCatalogueService } from "../pi/mobile-catalogue-service";
 import { type PlanSourceService, isPlanUnavailable, boundPlanSnapshot } from "../plans/source-service";
 import { type ContextSourceService, type ContextMutationTarget, isContextUnavailable, boundContextSnapshot } from "../context/source-service";
-import {
-  type DurableTrustPolicyStore,
-  type HostPolicyService,
-  type BoundedSearchFn,
-  type HostPolicyMode,
-  type WorkspaceRootId,
-  type TrustState,
-  deriveRootId,
-  WorkspacePolicyError,
-} from "./workspace-policy";
 
 export class RuntimeProtocolError extends Error { override readonly name = "RuntimeProtocolError"; constructor(readonly code: string, message: string) { super(message); } }
 const SUMMARY_EVENT_TYPES = new Set(["session.state", "session.metadata", "controller.state", "turn.started", "turn.waiting_for_input", "turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate", "queue.snapshot", "command.state", "error.event"]);
 const SUMMARY_STATE_KEYS = new Set(["runtimeState", "attentionState", "policyMode", "modelSummary", "queueCount", "lastActivityAt", "controllerSummary"]);
-const SESSION_GATING_COMMAND_TYPES = new Set(["session.create", "session.activate", "turn.start", "prompt.submit"]) as ReadonlySet<string>;
-/** M8 commands that the runtime recognises as lease-free because they
- * happen at host-bootstrap time, before any controller can exist. */
-const M8_LEASE_FREE_COMMANDS = new Set(["workspace.trust.approve"]) as ReadonlySet<string>;
 const HISTORY_TOKEN_KIND = "session.history.page";
 interface HistoryPageToken {
   readonly version: 1;
@@ -117,44 +105,18 @@ function normaliseContextTarget(value: Record<string, unknown>): ContextMutation
   return { kind: "all" };
 }
 
-function mobileTrustState(status: TrustState["status"]): "approved" | "unapproved" | "fingerprint_changed" {
-  if (status === "trusted") return "approved";
-  if (status === "changed") return "fingerprint_changed";
-  return "unapproved";
-}
-
 /**
- * Optional M8 policy hook the runtime consumes. The runtime never
- * assumes one is installed; the existing one-session adapter therefore
- * keeps working untouched by leaving `policy` undefined.
- *
- * The runtime *only* reads `mode`, `evaluate`, `setMode`, `search`,
- * `resolveTrust`, and `currentSessionPolicyMode`. It does NOT mutate the
- * trust store directly — every approval flows through
- * {@link RuntimePolicyHandler.approve}.
+ * Runtime options. The bridge intentionally owns no policy / trust / read-only
+ * machinery — Pi's normal execution model is the default. Operational knobs
+ * stay focused on durable delivery, controller leases, and optional bounded
+ * capabilities (file browser, processes, git summary, plans, contexts).
  */
-export interface RuntimePolicyHandler {
-  readonly trustStore: DurableTrustPolicyStore;
-  readonly hostPolicy: HostPolicyService;
-  readonly search: BoundedSearchFn;
-  /** Returns the trust state for a workspace (root path is absolute). */
-  resolveTrust(rootCanonical: string, workspaceId?: WorkspaceRootId): TrustState;
-  /** Returns the seed used by the daemon (label + displayed name). */
-  rootSeed(): { id: WorkspaceRootId; canonicalPath: string; label: string };
-  /** Records a new approval for the workspace. Idempotent for the same fingerprint. */
-  approve(input: { workspaceId?: WorkspaceRootId; rootCanonical?: string; label?: string; fingerprint: string; approvedBy: string; now?: number }): { workspaceId: WorkspaceRootId; fingerprint: string; approvedAt: number; policyVersion: string };
-}
-
 export interface DurableRuntimeOptions {
   readonly store: BridgeStore;
   readonly adapter: AdapterPort;
   readonly bridgeVersion: string;
   readonly piVersion: string;
   readonly hostDisplayName: string;
-  /** M8 — install the policy handler to enable trust + host policy enforcement. */
-  readonly policy?: RuntimePolicyHandler;
-  /** M8 — override the per-session default policy mode (used by one-session compat). */
-  readonly defaultSessionPolicyMode?: HostPolicyMode;
   /** R3 — optional bounded, read-only workspace-file authority. */
   readonly workspaceFiles?: WorkspaceFileService;
   /** R5 — optional authoritative process projection registry. */
@@ -173,6 +135,9 @@ export interface DurableRuntimeOptions {
    * `context.unavailable` host-stream event so the mobile inspector
    * shows explicit unavailable UX rather than fabricated state. */
   readonly contexts?: ContextSourceService;
+  readonly attention?: AttentionProjection;
+  readonly agents?: AgentSupervisionService;
+  readonly catalogue?: MobileCatalogueService;
 }
 
 export class DurableBridgeRuntime implements BridgeRuntimePort {
@@ -182,8 +147,6 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   readonly streams: StreamService;
   readonly leases: ControllerLeaseService;
   private readonly hostDisplayName: string;
-  private readonly policy: RuntimePolicyHandler | null;
-  private readonly defaultSessionPolicyMode: HostPolicyMode;
   private readonly historyTokenSecret = randomBytes(32);
   private readonly processes: AuthoritativeProcessRegistry | null;
   private readonly git: GitSummaryService | null;
@@ -192,13 +155,13 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private readonly plans: PlanSourceService | null;
   private readonly inFlightPlanRequests = new Map<string, AbortController>();
   private readonly contexts: ContextSourceService | null;
+  private readonly attention: AttentionProjection | null;
+  private readonly agents: AgentSupervisionService | null;
+  private readonly catalogue: MobileCatalogueService | null;
   private readonly inFlightContextSnapshots = new Map<string, AbortController>();
   private readyState = false;
-  private readonly searchCandidates = new Map<WorkspaceRootId, { canonicalPath: string; label: string }>();
   constructor(readonly options: DurableRuntimeOptions) {
     this.bridgeVersion = options.bridgeVersion; this.piVersion = options.piVersion; this.hostDisplayName = options.hostDisplayName;
-    this.policy = options.policy ?? null;
-    this.defaultSessionPolicyMode = options.defaultSessionPolicyMode ?? "full";
     this.commands = new DurableCommandService(options.store, options.adapter); this.streams = new StreamService(options.store); this.leases = new ControllerLeaseService(options.store);
     const identity = options.store.identity(); options.store.ensureStream(`host:${identity.hostId}`, "host");
     this.processes = options.processes ?? null;
@@ -206,6 +169,9 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     this.resolveGitCwd = options.resolveGitCwd ?? null;
     this.plans = options.plans ?? null;
     this.contexts = options.contexts ?? null;
+    this.attention = options.attention ?? null;
+    this.agents = options.agents ?? null;
+    this.catalogue = options.catalogue ?? null;
   }
   async start(): Promise<{ resumed: number; indeterminate: number }> {
     const recovered = await this.commands.recover(); this.readyState = true; return recovered;
@@ -224,6 +190,9 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (this.git) caps.push("git.v1");
     if (this.plans) caps.push("plans.v1");
     if (this.contexts) caps.push("contexts.v1");
+    if (this.attention) caps.push("attention.v1");
+    if (this.agents) caps.push("agents.v1");
+    if (this.catalogue) caps.push("catalogue.v1");
     return caps;
   }
 
@@ -279,26 +248,12 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       return { items: this.options.adapter.listModels(typeof payload.sessionId === "string" ? payload.sessionId : undefined).items.map((item) => ({ ...item })) };
     }
     if (type === "workspace.list") {
-      if (!this.policy) {
-        // Backwards-compatible behaviour: fall back to the adapter's
-        // own listing when no policy module is installed.
-        if (typeof this.options.adapter.listWorkspaces !== "function") throw new RuntimeProtocolError("workspace_unavailable", "adapter does not expose a workspace listing");
-        const listing = this.options.adapter.listWorkspaces();
-        return { items: listing.items.map((item) => ({ ...item })) };
-      }
-      return { items: this.listWorkspaceItems() };
+      if (typeof this.options.adapter.listWorkspaces !== "function") throw new RuntimeProtocolError("workspace_unavailable", "adapter does not expose a workspace listing");
+      const listing = this.options.adapter.listWorkspaces();
+      return { items: listing.items.map((item) => ({ ...item })) };
     }
     if (type === "workspace.search") {
-      if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
-      return this.searchWorkspaces(payload);
-    }
-    if (type === "workspace.trust.approve") {
-      if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
-      return this.approveWorkspace(payload);
-    }
-    if (type === "workspace.trust_state") {
-      if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
-      return this.currentTrustState();
+      throw new RuntimeProtocolError("unsupported_capability", "workspace search is not available on this host");
     }
     if (type === "workspace.tree.page" || type === "workspace.file.search" || type === "workspace.file.content.search" || type === "workspace.file.metadata" || type === "workspace.file.read") {
       return this.workspaceFileControl(type, payload);
@@ -307,18 +262,19 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (type === "process.output.page") return this.processOutputPage(payload);
     if (type === "git.summary.request") return this.gitSummaryRequest(payload);
     if (type === "git.summary.cancel") return this.gitSummaryCancel(payload);
+    if (type === "attention.resolve") return this.attentionResolve(payload);
+    if (type === "agent.steer" || type === "agent.cancel" || type === "agent.adopt" || type === "agent.merge") return this.agentAction(type, payload);
+    if (type === "catalogue.set_enabled") return this.catalogueSetEnabled(payload);
     if (type === "plan.summary.request") return this.planSummaryRequest(payload);
     if (type === "plan.summary.cancel") return this.planSummaryCancel(payload);
     if (type === "context.snapshot.request") return this.contextSnapshotRequest(payload);
+    if (type === "agent.snapshot.request") return this.agentSnapshotRequest();
+    if (type === "catalogue.snapshot.request") return this.catalogueSnapshotRequest();
+    if (type === "agent.transcript.page") return this.agentTranscriptPage(payload);
     if (type === "context.pin") return this.contextMutation("context.pin", payload);
     if (type === "context.unpin") return this.contextMutation("context.unpin", payload);
     if (type === "context.exclude") return this.contextMutation("context.exclude", payload);
     if (type === "context.refresh") return this.contextMutation("context.refresh", payload);
-    if (type === "policy.summary") {
-      if (!this.policy) throw new RuntimeProtocolError("workspace_unavailable", "policy module is not installed");
-      const eff = this.policy.hostPolicy.effective();
-      return { mode: eff.mode, policyVersion: eff.rules.policyVersion, fingerprint: eff.rules.fingerprint };
-    }
     return {};
   }
 
@@ -353,6 +309,47 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     const output: ProcessOutput | undefined = this.processes.outputPage(request);
     if (!output) return;
     return { ...output };
+  }
+
+  private async catalogueSnapshotRequest(): Promise<Record<string, unknown>> {
+    if (!this.catalogue) throw new RuntimeProtocolError("unsupported_capability", "Catalogue unavailable");
+    return this.catalogue.snapshot();
+  }
+
+  private async catalogueSetEnabled(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.catalogue) throw new RuntimeProtocolError("unsupported_capability", "Catalogue unavailable");
+    if (payload.confirmed !== true) throw new RuntimeProtocolError("invalid_message", "catalogue toggle requires confirmation");
+    try { return await this.catalogue.setEnabled(String(payload.entryId ?? ""), payload.enabled === true, String(payload.expectedRevision ?? "")); }
+    catch (error) { throw new RuntimeProtocolError("invalid_state", error instanceof Error ? error.message : "catalogue toggle failed"); }
+  }
+
+  private async agentSnapshotRequest(): Promise<Record<string, unknown>> {
+    if (!this.agents) throw new RuntimeProtocolError("unsupported_capability", "Agent supervision unavailable");
+    return this.agents.snapshot() as Promise<Record<string, unknown>>;
+  }
+
+  private async agentTranscriptPage(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.agents) throw new RuntimeProtocolError("unsupported_capability", "Agent supervision unavailable");
+    return this.agents.transcript({ agentId: String(payload.agentId ?? ""), pageSize: Number(payload.pageSize), pageToken: typeof payload.pageToken === "string" ? payload.pageToken : null }) as Promise<Record<string, unknown>>;
+  }
+
+  private async agentAction(type: "agent.steer" | "agent.cancel" | "agent.adopt" | "agent.merge", payload: Record<string, unknown>): Promise<Record<string, unknown>> {
+    if (!this.agents) throw new RuntimeProtocolError("unsupported_capability", "Agent supervision unavailable");
+    try {
+      return await this.agents.act({ type, sessionId: String(payload.sessionId ?? ""), agentId: String(payload.agentId ?? ""), expectedRevision: String(payload.expectedRevision ?? ""), ...(typeof payload.instruction === "string" ? { instruction: payload.instruction } : {}) });
+    } catch (error) {
+      throw new RuntimeProtocolError("invalid_state", error instanceof Error ? error.message : "agent action failed");
+    }
+  }
+
+  private attentionResolve(payload: Record<string, unknown>): Record<string, unknown> {
+    if (!this.attention) throw new RuntimeProtocolError("unsupported_capability", "attention projection is unavailable on this host");
+    const sessionId = String(payload.sessionId ?? "");
+    const attentionId = String(payload.attentionId ?? "");
+    const expectedRevision = String(payload.expectedRevision ?? "");
+    if (!sessionId || !attentionId || !expectedRevision) throw new RuntimeProtocolError("invalid_message", "attention.resolve requires sessionId, attentionId, and expectedRevision");
+    try { return this.attention.resolve(sessionId, attentionId, expectedRevision) as unknown as Record<string, unknown>; }
+    catch (error) { throw new RuntimeProtocolError("invalid_state", error instanceof Error ? error.message : "attention resolution failed"); }
   }
 
   /** R6 — `git.summary.request` runs the bounded Git summary authority for
@@ -494,8 +491,19 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     try {
       const result = await this.contexts.snapshot({ sessionId, signal: controller.signal });
       if (isContextUnavailable(result)) {
+        // R4 — `context.unavailable` is session-scoped per
+        // EVENT_STREAM_OWNERSHIP (docs/PROTOCOL.md §14 / D-037); the host
+        // has no host-scoped slot for per-session context truth.
+        // `ensureSession` is idempotent and repairs the rows the
+        // session-stream foreign key expects.
+        this.options.store.ensureSession(result.sessionId, { runtimeState: "idle" });
+        this.options.store.ensureStream(
+          `session:${result.sessionId}`,
+          "session",
+          result.sessionId,
+        );
         this.options.store.appendEvent(
-          `host:${this.identity().hostId}`,
+          `session:${result.sessionId}`,
           "context.unavailable",
           { sessionId: result.sessionId, capability: result.capability, status: result.status },
         );
@@ -735,146 +743,6 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     }
   }
 
-  /** Bounded workspace listing produced by the policy module. */
-  private listWorkspaceItems(): Record<string, unknown>[] {
-    const seed = this.policy!.rootSeed();
-    const trust = this.policy!.resolveTrust(seed.canonicalPath);
-    const sessions = this.options.store.sessionStates();
-    const eff = this.policy!.hostPolicy.effective();
-    const indexed = this.policy!.search({
-      rootCanonical: seed.canonicalPath,
-      query: "*",
-      maxDepth: 2,
-      maxResults: 50,
-    });
-    const sessionCandidates = sessions.flatMap((session) =>
-      typeof session.workspaceId === "string" &&
-      typeof session.workspaceRootPath === "string" &&
-      typeof session.workspaceRelativePath === "string"
-        ? [{
-            canonicalPath: session.workspaceRootPath,
-            rootRelativePath: session.workspaceRelativePath,
-            name: typeof session.workspaceDisplayName === "string"
-              ? session.workspaceDisplayName
-              : session.workspaceRelativePath,
-            id: session.workspaceId,
-          }]
-        : [],
-    );
-    const candidateMap = new Map<string, {
-      canonicalPath: string;
-      rootRelativePath: string;
-      name: string;
-      id: string;
-    }>();
-    for (const candidate of [
-      { canonicalPath: seed.canonicalPath, rootRelativePath: ".", name: seed.label, id: seed.id },
-      ...sessionCandidates,
-      ...indexed.map((item) => ({ ...item, id: deriveRootId(item.canonicalPath) })),
-    ]) candidateMap.set(candidate.id, candidate);
-    return [...candidateMap.values()].map((candidate) => {
-      this.searchCandidates.set(candidate.id, {
-        canonicalPath: candidate.canonicalPath,
-        label: candidate.name,
-      });
-      // The configured home root is the authority boundary. Indexed child
-      // folders inherit that approval instead of requiring dozens of
-      // redundant per-folder trust prompts.
-      const candidateTrust = trust;
-      const sessionCount = sessions.filter((session) => session.workspaceId === candidate.id).length;
-      return {
-        workspaceId: candidate.id,
-        displayName: candidate.name,
-        rootLabel: seed.label,
-        relativePath: candidate.rootRelativePath,
-        availability: "available",
-        fingerprint: candidateTrust.fingerprint,
-        trustState: mobileTrustState(candidateTrust.status),
-        approved: candidateTrust.status === "trusted",
-        invalidatedReason: candidateTrust.invalidatedReason,
-        policyVersion: candidateTrust.policyVersion,
-        policyMode: eff.mode,
-        manifest: candidateTrust.manifest.resources.map((resource) => ({
-          relativePath: resource.relativePath,
-          kind: resource.kind,
-          sizeBytes: resource.size,
-          sha256: resource.sha256,
-        })),
-        availableSince: new Date().toISOString(),
-        lastSeenAt: new Date().toISOString(),
-        sessionCount,
-      };
-    });
-  }
-
-  private searchWorkspaces(payload: Record<string, unknown>): Record<string, unknown> {
-    const query = String(payload.query ?? "");
-    if (!query || query.length === 0) throw new RuntimeProtocolError("invalid_state", "search query must not be empty");
-    const seed = this.policy!.rootSeed();
-    const maxDepth = typeof payload.maxDepth === "number" ? payload.maxDepth : 4;
-    const maxResults = typeof payload.maxResults === "number" ? payload.maxResults : 50;
-    let items: readonly { canonicalPath: string; rootRelativePath: string; name: string }[];
-    try {
-      items = this.policy!.search({ rootCanonical: seed.canonicalPath, query, maxDepth, maxResults });
-    } catch (error) {
-      if (error instanceof WorkspacePolicyError && error.code === "aborted") throw new RuntimeProtocolError("aborted", "search was cancelled");
-      throw error;
-    }
-    return { items: items.map((item) => {
-      const workspaceId = deriveRootId(item.canonicalPath);
-      this.searchCandidates.set(workspaceId, { canonicalPath: item.canonicalPath, label: item.name });
-      const trust = this.policy!.resolveTrust(seed.canonicalPath, seed.id);
-      return {
-        workspaceId,
-        displayName: item.name,
-        relativePath: item.rootRelativePath,
-        rootLabel: seed.label,
-        availability: "available",
-        trustState: mobileTrustState(trust.status),
-        fingerprint: trust.fingerprint,
-        policyVersion: trust.policyVersion,
-        manifest: trust.manifest.resources.map((resource) => ({ relativePath: resource.relativePath, kind: resource.kind, sizeBytes: resource.size, sha256: resource.sha256 })),
-      };
-    }) };
-  }
-
-  private approveWorkspace(payload: Record<string, unknown>): Record<string, unknown> {
-    const workspaceId = String(payload.workspaceId ?? "");
-    const fingerprint = String(payload.fingerprint ?? "");
-    const approvedBy = String(payload.approvedBy ?? "mobile");
-    if (!workspaceId) throw new RuntimeProtocolError("invalid_state", "workspaceId is required");
-    if (!/^[0-9a-f]{64}$/.test(fingerprint)) throw new RuntimeProtocolError("invalid_state", "fingerprint must be a 64-char hex SHA-256");
-    const seed = this.policy!.rootSeed();
-    const candidate = workspaceId === seed.id
-      ? { canonicalPath: seed.canonicalPath, label: seed.label }
-      : this.searchCandidates.get(workspaceId);
-    if (!candidate) throw new RuntimeProtocolError("workspace_not_allowed", "workspace is not in the allowed roots");
-    // Reject if the fingerprint no longer matches the current manifest.
-    const trust = this.policy!.resolveTrust(candidate.canonicalPath, workspaceId);
-    if (trust.fingerprint !== fingerprint) throw new RuntimeProtocolError("workspace_trust_required", "fingerprint does not match current workspace manifest");
-    const record = this.policy!.approve({ workspaceId, rootCanonical: candidate.canonicalPath, label: candidate.label, fingerprint, approvedBy });
-    return { workspaceId: record.workspaceId, fingerprint, policyVersion: trust.policyVersion, approvedAt: record.approvedAt };
-  }
-
-  private currentTrustState(): Record<string, unknown> {
-    const seed = this.policy!.rootSeed();
-    const trust = this.policy!.resolveTrust(seed.canonicalPath);
-    return { workspaceId: seed.id, trustState: mobileTrustState(trust.status), status: trust.status, fingerprint: trust.fingerprint, policyVersion: trust.policyVersion, invalidatedReason: trust.invalidatedReason };
-  }
-
-  /** Returns the host policy evaluation result for a session-level mode
-   * request. Kept as a public field-free helper so tests can exercise
-   * the same logic without going through the full command path. */
-  evaluateSessionPolicy(requestedMode: HostPolicyMode): { allowed: boolean; reason?: string; code?: string; approvedHost?: HostPolicyMode } {
-    if (!this.policy) return { allowed: true };
-    const decision = this.policy.hostPolicy.evaluate({ requestedMode });
-    if (decision.allow) return { allowed: true };
-    if (decision.code === "escalation_required") {
-      return { allowed: false, reason: decision.message ?? "host policy escalation denied", code: "escalation_required" };
-    }
-    return { allowed: false, reason: decision.message ?? "policy denied", code: decision.code };
-  }
-
   command(connection: ConnectionContext, message: Record<string, unknown>): Record<string, unknown> {
     const type = String(message.type); const payload = message.payload as Record<string, unknown>; const commandId = String(message.commandId ?? "");
     const metadata = COMMAND_METADATA.find((item) => item.type === type); if (!metadata) throw new RuntimeProtocolError("invalid_state", "unsupported command");
@@ -898,90 +766,10 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       throw new RuntimeProtocolError("invalid_state", "indeterminate session requires explicit activation");
     }
 
-    // M8: gate session.process activation on trust state. Mobile cannot
-    // dispatch `session.create`/`session.activate` against an untrusted
-    // workspace — the user has to run `workspace.trust.approve` first.
-    // Mobile cannot escalate policy via `session.create` either; the
-    // requested mode must be allowed by the host policy.
-    if (this.policy && SESSION_GATING_COMMAND_TYPES.has(type)) {
-      const seed = this.policy.rootSeed();
-      const requestedWorkspaceId = typeof payload.workspaceId === "string"
-        ? payload.workspaceId
-        : seed.id;
-      const candidate = requestedWorkspaceId === seed.id
-        ? { canonicalPath: seed.canonicalPath, label: seed.label }
-        : this.searchCandidates.get(requestedWorkspaceId);
-      if (!candidate) {
-        throw new RuntimeProtocolError(
-          "workspace_not_allowed",
-          "workspace is not in the indexed home folders",
-        );
-      }
-      if (type === "session.create") {
-        const expectedRelativePath = relative(seed.canonicalPath, candidate.canonicalPath)
-          .split("\\").join("/") || ".";
-        const suppliedRelativePath = payload.workspaceRelativePath ??
-          (requestedWorkspaceId === seed.id ? "." : null);
-        if (suppliedRelativePath !== expectedRelativePath) {
-          throw new RuntimeProtocolError(
-            "workspace_not_allowed",
-            "workspace path does not match the indexed folder",
-          );
-        }
-      }
-      const trust = this.policy.resolveTrust(seed.canonicalPath, seed.id);
-      if (trust.status !== "trusted") {
-        throw new RuntimeProtocolError(
-          "workspace_trust_required",
-          trust.invalidatedReason ?? "workspace trust approval required",
-        );
-      }
-      const requestedMode: HostPolicyMode = (payload.policyMode === "read_only" || payload.policyMode === "full")
-        ? payload.policyMode
-        : this.defaultSessionPolicyMode;
-      const decision = this.policy.hostPolicy.evaluate({ requestedMode });
-      if (!decision.allow) {
-        throw new RuntimeProtocolError(
-          decision.code === "escalation_required" ? "escalation_required" : "policy_denied",
-          decision.message ?? "host policy denied this request",
-        );
-      }
-    }
-    // M8: enforce `session.policy.set` against the host policy +
-    // explicit escalation rules.
-    let policyMutation: { requestedMode: HostPolicyMode; approvedHost?: HostPolicyMode } | undefined;
-    if (this.policy && type === "session.policy.set") {
-      const requestedMode: HostPolicyMode | null = payload.policyMode === "read_only" || payload.policyMode === "full" ? payload.policyMode : null;
-      if (!requestedMode) throw new RuntimeProtocolError("invalid_state", "session.policy.set requires policyMode full or read_only");
-      const approvedHost: HostPolicyMode | undefined = payload.approvedHost === "full" || payload.approvedHost === "read_only" ? payload.approvedHost : undefined;
-      const decision = this.policy.hostPolicy.evaluate({ requestedMode, ...(approvedHost ? { approvedHost } : {}) });
-      if (!decision.allow) {
-        throw new RuntimeProtocolError(decision.code === "escalation_required" ? "escalation_required" : "policy_denied", decision.message ?? "host policy denied this request");
-      }
-      policyMutation = { requestedMode, ...(approvedHost ? { approvedHost } : {}) };
-    }
-
     const identity = this.identity(); const streamId = sessionId ? `session:${sessionId}` : `host:${identity.hostId}`; const scopeKey = streamId;
-    if (metadata.requiresLeaseId && !M8_LEASE_FREE_COMMANDS.has(type)) {
+    if (metadata.requiresLeaseId) {
       try { this.leases.assertController(scopeKey, String(message.leaseId ?? ""), connection.connectionId); }
       catch { throw new RuntimeProtocolError("stale_controller", "controller lease is stale"); }
-    }
-    // M8: handle workspace.trust.approve as a command that bypasses the
-    // command/replay pipeline — it is purely a store write that must
-    // happen exactly once at bootstrap. The runtime still records it on
-    // the host stream so subscribers see the trust state change.
-    if (this.policy && type === "workspace.trust.approve") {
-      const approved = this.approveWorkspace((payload ?? {}) as Record<string, unknown>);
-      this.options.store.appendEvent(`host:${this.identity().hostId}`, "workspace.trust_state", {
-        workspaceId: approved.workspaceId,
-        fingerprint: approved.fingerprint,
-        policyVersion: approved.policyVersion,
-        status: "trusted",
-        trustState: "approved",
-        approvedBy: (payload as Record<string, unknown>).approvedBy ?? "mobile",
-        approvedAt: approved.approvedAt,
-      });
-      return { state: "completed", duplicate: false, trustApproved: true, fingerprint: approved.fingerprint, approvedAt: approved.approvedAt };
     }
     const leaseMutation: LeaseMutation | undefined = type === "controller.acquire" || type === "controller.takeover"
       ? { action: type === "controller.takeover" ? "takeover" : "acquire", scopeKey, installationId: connection.installationId, connectionId: connection.connectionId }
@@ -1013,48 +801,6 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     }
 
     if (!submission.receipt.duplicate) this.options.adapter.commandAccepted?.(type, payload, commandId);
-
-    // Mutate host policy only after lease validation and durable command
-    // acceptance. A stale observer or conflicting command must have no side
-    // effects on the host-wide policy.
-    if (this.policy && policyMutation && !submission.receipt.duplicate) {
-      const result = this.policy.hostPolicy.setMode({
-        mode: policyMutation.requestedMode,
-        actor: policyMutation.approvedHost ? `client:${policyMutation.approvedHost}` : `client:connection:${connection.connectionId}`,
-      });
-      if (!result.ok) {
-        throw new RuntimeProtocolError(result.code === "escalation_required" ? "escalation_required" : "policy_denied", result.message);
-      }
-    }
-
-    // M8: snapshot policy mode/version/fingerprint at prompt start so the
-    // turn is bound to a stable policy even if the host policy changes
-    // mid-flight. The snapshot is durable: written to session state and
-    // emitted as the declared `session.policy` event on the session stream.
-    if (this.policy && sessionId && type === "prompt.submit") {
-      const snapshot = this.policy.hostPolicy.effective();
-      const trustSeed = this.policy.rootSeed();
-      const trust = this.policy.resolveTrust(trustSeed.canonicalPath);
-      const snapshottedAt = new Date(this.options.store.now()).toISOString();
-      const snapshotPayload = {
-        sessionId,
-        policyMode: snapshot.mode,
-        policyVersion: snapshot.rules.policyVersion,
-        fingerprint: trust.fingerprint,
-        manifestPolicyVersion: trust.policyVersion,
-        snapshottedAt,
-      };
-      this.options.store.appendEvent(`session:${sessionId}`, "session.policy", snapshotPayload);
-      const prior = this.options.store.sessionState(sessionId) ?? {};
-      this.options.store.updateSessionState(sessionId, {
-        ...prior,
-        policyMode: snapshot.mode,
-        policyVersion: snapshot.rules.policyVersion,
-        trustFingerprint: trust.fingerprint,
-        manifestPolicyVersion: trust.policyVersion,
-        lastPolicySnapshotAt: snapshottedAt,
-      });
-    }
     void submission.completion;
     return { state: submission.receipt.state, duplicate: submission.receipt.duplicate };
   }

@@ -1,16 +1,18 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { RpcAbortError, RpcDuplicateIdError, RpcProcess, RpcTimeoutError } from "../src/pi/rpc-process";
+import { resolvePiLaunchConfig } from "../src/pi/launch-config";
 
 const processes: RpcProcess[] = [];
 function create(): RpcProcess {
   const executable = Bun.which("bun");
   if (!executable) throw new Error("bun executable unavailable");
   const process = new RpcProcess({
-    executable,
+    launchConfig: resolvePiLaunchConfig({
+      executable,
+      cwd: new URL("../../..", import.meta.url).pathname,
+      env: { SAFE: "yes", PATH: new URL("../../../node_modules/.bin", import.meta.url).pathname },
+    }),
     args: [new URL("./fixtures/fake-pi-rpc.ts", import.meta.url).pathname],
-    cwd: new URL("../../..", import.meta.url).pathname,
-    environment: { SAFE: "yes" },
-    pathDirs: [new URL("../../../node_modules/.bin", import.meta.url).pathname],
     defaultRequestTimeoutMs: 200,
     closeGracePeriodMs: 100,
   });

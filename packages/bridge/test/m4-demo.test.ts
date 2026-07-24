@@ -30,7 +30,7 @@ async function subscribe(client: Client, connectionId: string, hostId: string, a
 test("M4 checkpoint: lost receipt resends once and replays across restart", async () => {
   const path = join(mkdtempSync(join(tmpdir(), "pi-mob-m4-demo-")), "bridge.sqlite"); let dispatches = 0;
   const adapter: AdapterPort = { async dispatch() { dispatches += 1; await Bun.sleep(5); } };
-  let store = new BridgeStore(path); let runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion:"fixture",piVersion:"0.80.6",hostDisplayName:"fixture" });
+  let store = new BridgeStore(path); let runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion:"fixture",piVersion:"0.82.0",hostDisplayName:"fixture" });
   await runtime.start();
   let server = createBridgeServer({ runtime, port:0 });
   const first = await connect(server.port!); const identity = await hello(first); await subscribe(first, identity.connectionId, identity.hostId);
@@ -39,7 +39,7 @@ test("M4 checkpoint: lost receipt resends once and replays across restart", asyn
   for (let attempts=0; dispatches===0 && attempts<100; attempts+=1) await Bun.sleep(2);
   expect(dispatches).toBe(1); await Bun.sleep(20); server.stop(true); store.close();
 
-  store = new BridgeStore(path); runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion:"fixture",piVersion:"0.80.6",hostDisplayName:"fixture" }); await runtime.start(); server = createBridgeServer({ runtime,port:0 });
+  store = new BridgeStore(path); runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion:"fixture",piVersion:"0.82.0",hostDisplayName:"fixture" }); await runtime.start(); server = createBridgeServer({ runtime,port:0 });
   const second = await connect(server.port!); const identity2 = await hello(second); const replay = await subscribe(second, identity2.connectionId, identity2.hostId, "0");
   expect(replay.filter((message) => message.type === "command.state").length).toBeGreaterThanOrEqual(2);
   send(second, { ...command, messageId:crypto.randomUUID(),requestId:crypto.randomUUID(),connectionId:identity2.connectionId });
