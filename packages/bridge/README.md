@@ -4,6 +4,8 @@ Bun/TypeScript bridge between the mobile client and Pi. It owns protocol validat
 
 > **Preview:** this is a first-pass, pre-release host distribution. It is not signed or notarized and does not yet provide a polished installer.
 
+> **Active branch incident:** on `debug/bridge-daemon-busy-loop`, the daemon can become CPU-bound in synchronous SQLite/history initialization before it binds the loopback listener. When this occurs, mobile connection failures are downstream symptoms. Read [`docs/BRIDGE_DAEMON_BUSY_LOOP.md`](../../docs/BRIDGE_DAEMON_BUSY_LOOP.md) before diagnosing pairing, Tailscale, or Flutter.
+
 ## Host prerequisites
 
 The current release bundle is for:
@@ -66,6 +68,41 @@ The existing bundle includes `bin/pi-mob-ops`, a low-level, explicit-flag operat
 
 The advanced CLI detects the Tailscale CLI in the standard macOS app, common Homebrew locations, or `PATH`. It reports guidance when Tailscale is absent, logged out, or has no MagicDNS name; it does not install Tailscale, sign you in, run `tailscale up`, or enable Funnel.
 
+## Troubleshooting startup and mobile connectivity
+
+Use this order. Do not begin with the phone when the host listener is absent.
+
+1. Check lifecycle state:
+
+   ```sh
+   ~/.pi-mob/release/bin/pi-mob status
+   ```
+
+2. Check the local readiness endpoint directly:
+
+   ```sh
+   curl --silent --show-error --fail --max-time 2 http://127.0.0.1:8788/readyz
+   ```
+
+3. Inspect the LaunchAgent without exposing environment values:
+
+   ```sh
+   launchctl print "gui/$(id -u)/com.pi-mob.bridge"
+   ```
+
+4. Inspect the owner-only bridge logs:
+
+   ```sh
+   tail -n 200 ~/.pi-mob/release/logs/bridge.out
+   tail -n 200 ~/.pi-mob/release/logs/bridge.err
+   ```
+
+If the daemon consumes CPU, the readiness endpoint is unreachable, no Pi subprocess exists, and logs remain empty, treat it as the documented pre-listener startup incident. Do not repeatedly reinstall, regenerate pairing data, or modify Tailscale routes. Work from the [incident runbook](../../docs/BRIDGE_DAEMON_BUSY_LOOP.md).
+
+A `bridge readiness timeout` currently means only that the loopback health check did not succeed within the lifecycle driver's bounded wait. It does not identify whether the daemon is still initializing, blocked in SQLite, crashed, or failed to bind. Capture process and startup-stage evidence before changing connection code.
+
+Once the loopback readiness endpoint succeeds, then verify the bridge-owned Tailscale Serve route and mobile pairing. Until then, Flutter and remote-network debugging cannot establish the root cause.
+
 ## Pair the mobile app
 
 Once the bridge is running and its private HTTPS Serve endpoint is ready, pairing material contains the host ID, display name, protocol version, and Tailscale MagicDNS URL. Scan its QR in the mobile app and verify the displayed identity before confirming.
@@ -82,6 +119,7 @@ For advanced recovery or alternate presentation, `pi-mob-ops pair` still accepts
 - The bundle manifest currently describes a single-workspace / one-session adapter.
 - Tailscale and Pi installation/login are operator prerequisites; the bridge does not provision them.
 - Release metadata currently carries an internal milestone version independently of the Git tag.
+- The active debug branch has a known pre-listener startup scalability incident with large durable histories.
 
 ## Developer commands
 
@@ -96,4 +134,4 @@ bun run build
 
 The build output is assembled under `packages/bridge/dist/release/`.
 
-See the public [architecture](../../docs/ARCHITECTURE.md), [protocol](../../docs/PROTOCOL.md), and [security policy](../../SECURITY.md).
+See the [documentation map](../../docs/README.md), [public architecture](../../docs/ARCHITECTURE.md), [protocol](../../docs/PROTOCOL.md), and [security policy](../../SECURITY.md).
