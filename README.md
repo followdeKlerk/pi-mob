@@ -11,6 +11,9 @@ pi-mob is a private mobile control surface, not a remote terminal. The Flutter a
 > [!WARNING]
 > **Preview software.** Android and the macOS bridge are available for testing, but neither is production-signed. The bridge is currently macOS x86_64-only, and iOS is not yet distributed.
 
+> [!IMPORTANT]
+> **Active debug branch:** `debug/bridge-daemon-busy-loop` contains substantial control-oriented work that is not represented by `main`. Its current blocker is a daemon startup path that can remain CPU-bound in SQLite before binding the loopback listener, causing mobile connection attempts and `pi-mob start` readiness checks to fail. Coding agents must read [`AGENTS.md`](AGENTS.md) and the [bridge daemon incident runbook](docs/BRIDGE_DAEMON_BUSY_LOOP.md) before changing this branch.
+
 ## Get started
 
 ### 1. Prepare your private network
@@ -99,6 +102,9 @@ cd apps/mobile && flutter analyze --no-fatal-infos && flutter test
 
 ## Documentation
 
+- [Documentation map](docs/README.md)
+- [Agent instructions](AGENTS.md)
+- [Active bridge daemon incident](docs/BRIDGE_DAEMON_BUSY_LOOP.md)
 - [Mobile app installation and pairing](apps/mobile/README.md)
 - [Host bridge installation and operations](packages/bridge/README.md)
 - [Architecture](docs/ARCHITECTURE.md)
