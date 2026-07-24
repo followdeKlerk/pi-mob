@@ -4,19 +4,22 @@ import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { toPiRpcCommand } from "../src/pi/commands";
 import { RpcProcess } from "../src/pi/rpc-process";
+import { resolvePiLaunchConfig } from "../src/pi/launch-config";
 
-const expectedVersion = "0.80.6";
+const expectedVersion = "0.82.0";
 const expectedCliSha256 = "af302f231437eaf6f37691bce4b34234fcb626bcb5eb3910d4fc3f6519bf78ca";
 
 function realRpc(root: string, extraEnvironment: Record<string, string> = {}): RpcProcess {
   const home = join(root, "home"); const sessions = join(root, "sessions");
   mkdirSync(home, { recursive: true }); mkdirSync(sessions, { recursive: true });
   return new RpcProcess({
-    executable: new URL("../node_modules/.bin/pi", import.meta.url).pathname,
+    launchConfig: resolvePiLaunchConfig({
+      executable: new URL("../node_modules/.bin/pi", import.meta.url).pathname,
+      cwd: root,
+      env: { HOME: home, LANG: "C.UTF-8", PATH: process.env.PATH ?? "/usr/bin:/bin", ...extraEnvironment },
+    }),
     args: ["--mode", "rpc", "--no-extensions", "--extension", new URL("./fixtures/contract-provider.ts", import.meta.url).pathname, "--session-dir", sessions, "--provider", "pi-mob-fixture", "--model", "contract"],
-    cwd: root,
-    environment: { HOME: home, LANG: "C.UTF-8", ...extraEnvironment },
-    pathDirs: ["/usr/local/bin", "/usr/bin", "/bin"], defaultRequestTimeoutMs: 10_000, closeGracePeriodMs: 1_000,
+    defaultRequestTimeoutMs: 10_000, closeGracePeriodMs: 1_000,
   });
 }
 

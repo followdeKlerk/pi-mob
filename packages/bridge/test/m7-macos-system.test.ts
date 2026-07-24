@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { LaunchAgentDriver, TailscaleCliServeDriver, atomicReplace, waitForReady, type CommandRunner } from "../src/ops/macos-system";
+import { LaunchAgentDriver, MacLifecycleDriver, TailscaleCliServeDriver, TailscaleStatusDriver, atomicReplace, waitForReady, type CommandRunner } from "../src/ops/macos-system";
+import { buildInstallPaths } from "../src/ops/install-paths";
 
 class FakeRunner implements CommandRunner {
   calls: Array<[string, readonly string[]]> = [];
@@ -22,6 +23,34 @@ describe("M7 macOS production drivers", () => {
       ["print", "gui/501/com.pi-mob.bridge"],
       ["bootout", "gui/501/com.pi-mob.bridge"],
     ]);
+  });
+
+  test("lifecycle can be constructed without an update target and stop is idempotent", async () => {
+    const runner = new FakeRunner(); runner.result = { exitCode: 1, stdout: "", stderr: "not loaded" };
+    const paths = buildInstallPaths({ installRoot: "/tmp/pi-mob-no-update-target" });
+    const lifecycle = new MacLifecycleDriver({
+      launchAgent: new LaunchAgentDriver(runner, 501),
+      serve: { async listRoutes() { return []; }, async setRoutes() {} },
+      label: paths.launchAgentLabel, plistPath: paths.plistPath, installPaths: paths,
+    });
+    expect(await lifecycle.stopConfigured()).toEqual({ alreadyStopped: true });
+    expect(runner.calls.map(([, args]) => args)).toEqual([["print", "gui/501/com.pi-mob.bridge"]]);
+  });
+
+  test("Tailscale detection is read-only and reports login plus MagicDNS truthfully", async () => {
+    const runner = new FakeRunner();
+    runner.result = { exitCode: 0, stdout: JSON.stringify({ BackendState: "Running", Self: { DNSName: "studio.tail.ts.net." } }), stderr: "" };
+    const detected = await new TailscaleStatusDriver(runner, "/usr/local/bin/tailscale").probe();
+    expect(detected).toEqual({ installed: true, loggedIn: true, magicDnsName: "studio.tail.ts.net" });
+    expect(runner.calls).toEqual([["/usr/local/bin/tailscale", ["status", "--json"]]]);
+    expect(await new TailscaleStatusDriver(runner, null).probe()).toMatchObject({ installed: false, loggedIn: false, magicDnsName: null });
+  });
+
+  test("Tailscale detection guides an installed but logged-out node", async () => {
+    const runner = new FakeRunner();
+    runner.result = { exitCode: 1, stdout: "", stderr: "not logged in" };
+    expect(await new TailscaleStatusDriver(runner, "/Applications/Tailscale.app/Contents/MacOS/Tailscale").probe()).toMatchObject({ installed: true, loggedIn: false, magicDnsName: null });
+    expect(runner.calls[0]?.[1]).not.toContain("up");
   });
 
   test("Serve driver round-trips all routes and rejects Funnel", async () => {

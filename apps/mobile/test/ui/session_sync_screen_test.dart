@@ -99,7 +99,9 @@ void main() {
     expect(find.byKey(const Key('session-sync-screen')), findsNothing);
   });
 
-  test('notification bursts coalesce and retain the latest progress', () async {
+  testWidgets('notification bursts coalesce and retain the latest progress', (
+    tester,
+  ) async {
     final fixture = await _fixture();
     addTearDown(fixture.dispose);
     var notifications = 0;
@@ -108,7 +110,7 @@ void main() {
     fixture.coordinator.debugSetHistorySyncState(completed: 1, total: 3);
     fixture.coordinator.debugSetHistorySyncState(completed: 2, total: 3);
     fixture.coordinator.debugSetHistorySyncState(completed: 3, total: 3);
-    await Future<void>.delayed(Duration.zero);
+    await tester.pump();
 
     expect(notifications, 1);
     expect(fixture.coordinator.historySyncCompleted, 3);

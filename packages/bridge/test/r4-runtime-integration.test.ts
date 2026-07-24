@@ -27,7 +27,7 @@ function runtimeFor(contexts?: ContextSourceService): DurableBridgeRuntime {
     store: new BridgeStore(path),
     adapter,
     bridgeVersion: "test",
-    piVersion: "0.80.6",
+    piVersion: "0.82.0",
     hostDisplayName: "test",
     ...(contexts ? { contexts } : {}),
   });
@@ -91,9 +91,12 @@ class FakeContextSource implements ContextSourceService {
   }
 }
 
-function lastHostEvent(runtime: DurableBridgeRuntime): { type: string; payload: unknown } | undefined {
+function lastEventForSession(
+  runtime: DurableBridgeRuntime,
+  sessionId: string,
+): { type: string; payload: unknown } | undefined {
   const store = (runtime as unknown as { options: { store: { listEvents: (streamId: string) => Array<{ streamId: string; type: string; payload: unknown }> } } }).options.store;
-  const events = store.listEvents(`host:${runtime.identity().hostId}`);
+  const events = store.listEvents(`session:${sessionId}`);
   return events[events.length - 1];
 }
 
@@ -131,13 +134,13 @@ describe("R4 runtime integration", () => {
     ).rejects.toMatchObject({ code: "unsupported_capability" });
   });
 
-  test("context.snapshot.request surfaces context.unavailable on the host stream and rejects the response", async () => {
+  test("context.snapshot.request surfaces context.unavailable on the session stream and rejects the response", async () => {
     const source = new FakeContextSource(async () => unavailable());
     const runtime = runtimeFor(source);
     await expect(
       runtime.control(connection, "context.snapshot.request", { sessionId, requestId: "req-u" }),
     ).rejects.toMatchObject({ code: "unsupported_capability" });
-    const ev = lastHostEvent(runtime);
+    const ev = lastEventForSession(runtime, sessionId);
     expect(ev).toBeDefined();
     expect(ev!.type).toBe("context.unavailable");
     const payload = ev!.payload as { sessionId: string; capability: string; status: { state: string } };
@@ -159,7 +162,14 @@ describe("R4 runtime integration", () => {
       sentAt: "2026-07-12T00:00:00.000Z",
       payload: response,
     };
-    expect(() => validateFixture("response", envelope)).not.toThrow();
+    expect(() =>
+      validateFixture({
+        name: "r4-runtime-context-snapshot-result",
+        kind: "response",
+        valid: true,
+        message: envelope,
+      }),
+    ).not.toThrow();
   });
 
   test("context.pin forwards a normalised mutation to the service and returns the new revision", async () => {

@@ -6,7 +6,7 @@
  *   - release-manifest: parse, format (canonical), verify (sha256)
  *   - install-paths: layout, absolute/traversal invariants, 0o700/0o600 modes
  *   - install-config: validation, loopback hostname, port range, owner-only read
- *   - install-environment: allowlist, forbidden keys, PATH rebuild
+ *   - install-environment: test-only fixture environment helper
  *   - launch-agent: spec validation, no shell, RunAtLoad/KeepAlive
  *   - update: deterministic plan, transactional execute, generation reset for
  *     restore_required, no migrate for binary_only
@@ -24,11 +24,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import {
-  buildEnvironment,
+  buildChildEnvironment,
   buildInstallPaths,
   defaultInstallConfig,
   ensureInstallPaths,
-  EnvironmentBuildError,
   executeRollback,
   executeUninstall,
   executeUpdate,
@@ -56,8 +55,6 @@ import {
   writePlist,
   readInstallConfig,
   ManifestError,
-  DEFAULT_ENV_ALLOWLIST,
-  FORBIDDEN_ENV_KEYS,
   DEFAULT_LAUNCH_AGENT_LABEL,
   DIRECTORY_MODE,
 } from "../src/ops";
@@ -425,7 +422,7 @@ describe("install-config", () => {
   test("defaultInstallConfig produces a valid, loopback-only config", () => {
     const config = defaultInstallConfig({
       paths: basePaths(),
-      piExecutable: "/opt/pi/0.80.6/bin/pi",
+    piExecutable: "/opt/pi/0.82.0/bin/pi",
       bridgeExecutable: "/opt/pi-mob/release/bin/bridge",
       bridgeVersion: "0.0.0-m7",
       protocolVersion: "1.0",
@@ -565,56 +562,13 @@ describe("install-config", () => {
 // ---------------------------------------------------------------------------
 
 describe("install-environment", () => {
-  test("buildEnvironment composes PATH from pathDirs and merges allowed source keys", () => {
-    const result = buildEnvironment({
-      pathDirs: ["/opt/pi-mob/bin", "/usr/bin", "/bin"],
-      source: { HOME: "/Users/test", LANG: "en_US.UTF-8", LD_PRELOAD: "/evil.so" },
-    });
-    expect(result.env.PATH).toBe("/opt/pi-mob/bin:/usr/bin:/bin");
-    expect(result.env.HOME).toBe("/Users/test");
-    expect(result.env.LANG).toBe("en_US.UTF-8");
-    expect(result.rejectedKeys).toContain("LD_PRELOAD");
-    expect(result.env.LD_PRELOAD).toBeUndefined();
-  });
-
-  test("buildEnvironment refuses forbidden keys even in extras", () => {
-    expect(() => buildEnvironment({
-      pathDirs: ["/usr/bin"],
-      extras: { LD_PRELOAD: "/evil.so" },
-    })).toThrow(EnvironmentBuildError);
-  });
-
-  test("buildEnvironment rejects empty pathDirs", () => {
-    expect(() => buildEnvironment({ pathDirs: [] })).toThrow(EnvironmentBuildError);
-  });
-
-  test("buildEnvironment rejects non-absolute pathDirs entries", () => {
-    expect(() => buildEnvironment({ pathDirs: ["relative/bin"] })).toThrow(EnvironmentBuildError);
-  });
-
-  test("buildEnvironment rejects keys containing NUL", () => {
-    expect(() => buildEnvironment({
-      pathDirs: ["/usr/bin"],
-      source: { LANG: "en\u0000US" },
-    })).toThrow(/NUL/);
-  });
-
-  test("buildEnvironment applies explicit overrides after source", () => {
-    const result = buildEnvironment({
-      pathDirs: ["/usr/bin"],
-      source: { HOME: "/old/home" },
-      home: "/new/home",
-    });
-    expect(result.env.HOME).toBe("/new/home");
-  });
-
-  test("default allow-list contains expected keys", () => {
-    for (const key of ["HOME", "LANG", "TZ", "TMPDIR"]) {
-      expect(DEFAULT_ENV_ALLOWLIST).toContain(key);
-    }
-    expect(FORBIDDEN_ENV_KEYS).toContain("LD_PRELOAD");
-    expect(FORBIDDEN_ENV_KEYS).toContain("DYLD_INSERT_LIBRARIES");
-    expect(FORBIDDEN_ENV_KEYS).toContain("NODE_OPTIONS");
+  test("buildChildEnvironment remains available only for fixtures", () => {
+    const env = buildChildEnvironment(
+      { HOME: "/Users/test", LANG: "en_US.UTF-8", LD_PRELOAD: "/evil.so" },
+      ["HOME", "LANG"],
+      ["/opt/pi-mob/bin", "/usr/bin", "/bin"],
+    );
+    expect(env).toEqual({ HOME: "/Users/test", LANG: "en_US.UTF-8", PATH: "/opt/pi-mob/bin:/usr/bin:/bin" });
   });
 });
 

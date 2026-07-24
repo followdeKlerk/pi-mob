@@ -33,6 +33,7 @@ class AgentSupervisionSheet extends StatelessWidget {
     this.now,
     this.onOpenTranscript,
     this.onOpenResult,
+    this.onAction,
     super.key,
   });
 
@@ -57,6 +58,10 @@ class AgentSupervisionSheet extends StatelessWidget {
   /// Invoked when the user taps the "Open result" action on a row.
   /// The widget passes the originating chat id (when known).
   final void Function(String? chatId)? onOpenResult;
+
+  /// Optional host action callback. Existing callers remain read-only; the
+  /// shell supplies this only after the bridge reports a supported action.
+  final void Function(AgentRun run, String action)? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -107,6 +112,7 @@ class AgentSupervisionSheet extends StatelessWidget {
                 onOpenResult: onOpenResult == null
                     ? null
                     : () => onOpenResult!(run.originChatId),
+                onAction: onAction,
               ),
               const SizedBox(height: PiSpacing.sm),
             ],
@@ -139,6 +145,7 @@ class AgentRunRow extends StatelessWidget {
     required this.now,
     this.onOpenTranscript,
     this.onOpenResult,
+    this.onAction,
     super.key,
   });
 
@@ -146,6 +153,7 @@ class AgentRunRow extends StatelessWidget {
   final DateTime now;
   final VoidCallback? onOpenTranscript;
   final VoidCallback? onOpenResult;
+  final void Function(AgentRun run, String action)? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -212,7 +220,7 @@ class AgentRunRow extends StatelessWidget {
             onOpenTranscript: onOpenTranscript,
             onOpenResult: onOpenResult,
           ),
-          _CapabilityRow(run: run),
+          _CapabilityRow(run: run, onAction: onAction),
         ],
       ),
     );
@@ -391,9 +399,10 @@ class _ActionRow extends StatelessWidget {
 }
 
 class _CapabilityRow extends StatelessWidget {
-  const _CapabilityRow({required this.run});
+  const _CapabilityRow({required this.run, this.onAction});
 
   final AgentRun run;
+  final void Function(AgentRun run, String action)? onAction;
 
   @override
   Widget build(BuildContext context) {
@@ -426,6 +435,7 @@ class _CapabilityRow extends StatelessWidget {
               label: 'Steer available',
               color: colors.primary,
               source: caps?.contractSource,
+              onTap: onAction == null ? null : () => onAction!(run, 'steer'),
             ),
           if (canCancel)
             _CapabilityPill(
@@ -433,6 +443,7 @@ class _CapabilityRow extends StatelessWidget {
               label: 'Cancel available',
               color: colors.error,
               source: caps?.contractSource,
+              onTap: onAction == null ? null : () => onAction!(run, 'cancel'),
             ),
           if (canAdopt)
             _CapabilityPill(
@@ -440,6 +451,7 @@ class _CapabilityRow extends StatelessWidget {
               label: 'Adopt available',
               color: colors.primary,
               source: caps?.contractSource,
+              onTap: onAction == null ? null : () => onAction!(run, 'adopt'),
             ),
         ],
       ),
@@ -453,12 +465,14 @@ class _CapabilityPill extends StatelessWidget {
     required this.label,
     required this.color,
     required this.source,
+    this.onTap,
   });
 
   final IconData icon;
   final String label;
   final Color color;
   final String? source;
+  final VoidCallback? onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -466,23 +480,27 @@ class _CapabilityPill extends StatelessWidget {
     final text = theme.textTheme;
     return Tooltip(
       message: source == null ? label : '$label · contract: $source',
-      child: Container(
-        padding: const EdgeInsets.symmetric(
-          horizontal: PiSpacing.sm,
-          vertical: PiSpacing.xs,
-        ),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.10),
-          borderRadius: BorderRadius.circular(PiRadius.sm),
-          border: Border.all(color: color.withValues(alpha: 0.35)),
-        ),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14, color: color),
-            const SizedBox(width: 4),
-            Text(label, style: text.labelSmall?.copyWith(color: color)),
-          ],
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(PiRadius.sm),
+        child: Container(
+          padding: const EdgeInsets.symmetric(
+            horizontal: PiSpacing.sm,
+            vertical: PiSpacing.xs,
+          ),
+          decoration: BoxDecoration(
+            color: color.withValues(alpha: 0.10),
+            borderRadius: BorderRadius.circular(PiRadius.sm),
+            border: Border.all(color: color.withValues(alpha: 0.35)),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: color),
+              const SizedBox(width: 4),
+              Text(label, style: text.labelSmall?.copyWith(color: color)),
+            ],
+          ),
         ),
       ),
     );

@@ -113,10 +113,35 @@ class _SupportedCommandListState extends State<SupportedCommandList> {
           Expanded(
             child: shown == 0
                 ? Center(
-                    child: Text(
-                      'No commands match the current search.',
-                      key: const Key('command-empty'),
-                    ),
+                    child: total == 0
+                        ? Column(
+                            key: const Key('command-catalogue-unavailable'),
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                Icons.extension_off,
+                                size: 32,
+                                color: Theme.of(
+                                  context,
+                                ).colorScheme.onSurfaceVariant,
+                              ),
+                              const SizedBox(height: 8),
+                              Text(
+                                'No skills or commands are available right now.',
+                                textAlign: TextAlign.center,
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                'The bridge has not reported a host catalogue yet.',
+                                textAlign: TextAlign.center,
+                                style: Theme.of(context).textTheme.bodySmall,
+                              ),
+                            ],
+                          )
+                        : Text(
+                            'No commands match the current search.',
+                            key: const Key('command-empty'),
+                          ),
                   )
                 : ListView(
                     key: const Key('command-list'),

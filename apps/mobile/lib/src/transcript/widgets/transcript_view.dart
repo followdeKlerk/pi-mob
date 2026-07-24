@@ -27,11 +27,32 @@ class TranscriptView extends StatefulWidget {
   const TranscriptView({
     required this.document,
     this.onEditUserMessage,
+    this.onScrollPersist,
+    this.initialScrollOffset,
+    this.initialFollowMode,
     super.key,
   });
 
   final TranscriptDocument document;
   final ValueChanged<String>? onEditUserMessage;
+
+  /// R12 — Persisted scroll observer. Invoked on every user-initiated
+  /// scroll change with the latest stable pixel offset and the resolved
+  /// follow-mode flag (true = pinned to the latest tail, false = the user
+  /// has scrolled away). Background follow ticks (auto-scroll-to-tail)
+  /// do NOT fire this observer.
+  final void Function(int offset, bool followMode)? onScrollPersist;
+
+  /// R12 — Initial scroll offset to restore when the widget mounts or the
+  /// stream identity changes. `null` means "no persisted offset; stay at
+  /// tail". Background live events then scroll back to the tail only when
+  /// `initialFollowMode` is true or unset.
+  final int? initialScrollOffset;
+
+  /// R12 — Initial follow mode for restore. `true` means the user was
+  /// pinned to the tail; `false` means the user was reading history and
+  /// we should land at `initialScrollOffset`. Defaults to `true`.
+  final bool? initialFollowMode;
 
   @override
   State<TranscriptView> createState() => _TranscriptViewState();
@@ -43,16 +64,42 @@ class _TranscriptViewState extends State<TranscriptView> {
   bool _pendingFollow = true;
   bool _initialPosition = true;
   bool _autoFollowing = false;
+  bool _restoringScroll = false;
   int _followGeneration = 0;
   int _unread = 0;
 
+  /// R12 — restore offset carried from the persisted tuple. When set,
+  /// the first frame after a non-append-only rebuild jumps here instead
+  /// of the latest tail. Cleared after the jump so subsequent live
+  /// events follow `_nearLatest` as before.
+  int? _pendingRestoreOffset;
+
+  /// R12 — follow mode carried from the persisted tuple. When false,
+  /// the user was reading history and `_nearLatest` must stay false
+  /// until they scroll back. When null we use the default (tail).
+  bool? _pendingRestoreFollow;
+
+  /// R12 — last persisted offset+followMode. Used to coalesce flushes
+  /// so the underlying database write only fires when the user has
+  /// actually moved the scroll position. Coalescing is by value
+  /// comparison only (no Timer / Future.delayed — see FIELD_GUIDE §R11):
+  /// repeated identical offsets short-circuit, but every meaningful
+  /// change flushes immediately, so the mobile-authoritative tuple is
+  /// durable by the time the user releases the scroll gesture.
+  int _lastPersistedOffset = -1;
+  bool _lastPersistedFollow = true;
+
   static const double _followThreshold = 48;
-  static const double _leaveThreshold = 96;
 
   @override
   void initState() {
     super.initState();
     _controller.addListener(_onScroll);
+    _pendingRestoreOffset = widget.initialScrollOffset;
+    _pendingRestoreFollow = widget.initialFollowMode;
+    if (_pendingRestoreFollow == false) {
+      _nearLatest = false;
+    }
   }
 
   @override
@@ -63,6 +110,15 @@ class _TranscriptViewState extends State<TranscriptView> {
       _pendingFollow = true;
       _initialPosition = true;
       _unread = 0;
+      // The persisted offset for the new stream arrives through
+      // `widget.initialScrollOffset`; capture it here so the next frame
+      // can jump there instead of the latest tail.
+      _pendingRestoreOffset = widget.initialScrollOffset;
+      _pendingRestoreFollow = widget.initialFollowMode;
+      if (_pendingRestoreFollow == false) {
+        _nearLatest = false;
+      }
+      _lastPersistedOffset = -1;
       return;
     }
     if (!_contentChanged(oldWidget.document, widget.document)) return;
@@ -100,14 +156,41 @@ class _TranscriptViewState extends State<TranscriptView> {
   void _onScroll() {
     if (!_controller.hasClients || _autoFollowing) return;
     final after = _controller.position.extentAfter;
-    final near = _nearLatest
-        ? after <= _leaveThreshold
-        : after <= _followThreshold;
-    if (near == _nearLatest && (!near || _unread == 0)) return;
+    final near = after <= _followThreshold;
+    if (near == _nearLatest && (!near || _unread == 0)) {
+      // Even when _nearLatest state didn't change, a user scroll may
+      // have shifted the offset; flush the persistence observer so the
+      // mobile-authoritative tuple stays current.
+      _maybePersist();
+      return;
+    }
     setState(() {
       _nearLatest = near;
       if (near) _unread = 0;
     });
+    _maybePersist();
+  }
+
+  /// R12 — Flush a scroll-persistence event when the offset or follow
+  /// mode has changed meaningfully. Coalescing is by value comparison
+  /// only (no Timer / Future.delayed — see FIELD_GUIDE §R11): the
+  /// callback is invoked exactly once per change and is allowed to
+  /// complete on its own Future. Background follow ticks
+  /// (`_autoFollowing`) skip the callback so a tail-stick is not
+  /// recorded as a user move.
+  void _maybePersist() {
+    final callback = widget.onScrollPersist;
+    if (callback == null) return;
+    if (!_controller.hasClients) return;
+    if (_autoFollowing) return;
+    if (_restoringScroll) return;
+    final offset = _controller.position.pixels.round();
+    if (offset == _lastPersistedOffset && _nearLatest == _lastPersistedFollow) {
+      return;
+    }
+    _lastPersistedOffset = offset;
+    _lastPersistedFollow = _nearLatest;
+    callback(offset, _nearLatest);
   }
 
   Future<void> _scrollToLatest({bool userInitiated = false}) async {
@@ -155,10 +238,34 @@ class _TranscriptViewState extends State<TranscriptView> {
 
   @override
   Widget build(BuildContext context) {
-    if (_pendingFollow) {
+    if (_pendingFollow && _pendingRestoreOffset == null) {
       _pendingFollow = false;
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted) _scrollToLatest();
+      });
+    } else if (_pendingRestoreOffset != null) {
+      // R12 — Restore the persisted offset instead of jumping to tail.
+      // Background follow ticks (live streaming) must NOT override a
+      // user's pinned history position until they manually jump back.
+      final target = _pendingRestoreOffset!;
+      _pendingRestoreOffset = null;
+      _initialPosition = false;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        if (!_controller.hasClients) return;
+        final clamped = target.clamp(
+          0,
+          _controller.position.maxScrollExtent.round(),
+        );
+        if (_pendingRestoreFollow != true) {
+          _nearLatest = false;
+        }
+        _restoringScroll = true;
+        _controller.jumpTo(clamped.toDouble());
+        _restoringScroll = false;
+        if (_pendingRestoreFollow == true) {
+          _pendingRestoreFollow = null;
+        }
       });
     }
     final turns = widget.document.turns;
@@ -230,12 +337,24 @@ class TranscriptEventView extends StatefulWidget {
     required this.streamId,
     required this.events,
     this.onEditUserMessage,
+    this.onScrollPersist,
+    this.initialScrollOffset,
+    this.initialFollowMode,
     super.key,
   });
 
   final String streamId;
   final List<StreamEventState> events;
   final ValueChanged<String>? onEditUserMessage;
+
+  /// R12 — Threaded through to the inner TranscriptView.
+  final void Function(int offset, bool followMode)? onScrollPersist;
+
+  /// R12 — Threaded through to the inner TranscriptView.
+  final int? initialScrollOffset;
+
+  /// R12 — Threaded through to the inner TranscriptView.
+  final bool? initialFollowMode;
 
   @override
   State<TranscriptEventView> createState() => _TranscriptEventViewState();
@@ -298,6 +417,9 @@ class _TranscriptEventViewState extends State<TranscriptEventView> {
   Widget build(BuildContext context) => TranscriptView(
     document: _state.document,
     onEditUserMessage: widget.onEditUserMessage,
+    onScrollPersist: widget.onScrollPersist,
+    initialScrollOffset: widget.initialScrollOffset,
+    initialFollowMode: widget.initialFollowMode,
   );
 }
 

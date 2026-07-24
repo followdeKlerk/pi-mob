@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { RpcProcess } from "../src/pi/rpc-process";
+import { resolvePiLaunchConfig } from "../src/pi/launch-config";
 
 const root = mkdtempSync(join(tmpdir(), "pi-mob-m3-contract-"));
 const home = join(root, "home"); const sessions = join(root, "sessions");
@@ -10,9 +11,9 @@ mkdirSync(home); mkdirSync(sessions); writeFileSync(join(root, "contract-input.t
 const pi = new URL("../node_modules/.bin/pi", import.meta.url).pathname;
 const cli = new URL("../node_modules/@earendil-works/pi-coding-agent/dist/cli.js", import.meta.url).pathname;
 const rpc = new RpcProcess({
-  executable: pi,
+  launchConfig: resolvePiLaunchConfig({ executable: pi, cwd: root, env: { HOME: home, LANG: "C.UTF-8", PATH: process.env.PATH ?? "/usr/bin:/bin" } }),
   args: ["--mode", "rpc", "--no-extensions", "--extension", new URL("../test/fixtures/contract-provider.ts", import.meta.url).pathname, "--session-dir", sessions, "--provider", "pi-mob-fixture", "--model", "contract"],
-  cwd: root, environment: { HOME: home, LANG: "C.UTF-8" }, pathDirs: ["/usr/local/bin", "/usr/bin", "/bin"], defaultRequestTimeoutMs: 10_000,
+  defaultRequestTimeoutMs: 10_000,
 });
 const eventTypes: string[] = [];
 let settle!: () => void;

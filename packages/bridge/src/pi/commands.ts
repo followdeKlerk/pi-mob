@@ -25,7 +25,7 @@ function requireString(value: unknown, field: string): string {
   return value;
 }
 
-/** Convert bridge-private normalized intent to the exact Pi 0.80.6 RPC command shape. */
+/** Convert bridge-private normalized intent to the exact Pi 0.82.0 RPC command shape. */
 export function toPiRpcCommand(command: NormalizedPiCommand, id?: string): PiRpcCommand {
   const allowed = ALLOWED_FIELDS[command.type];
   if (!allowed) throw new TypeError(`unsupported Pi command: ${command.type}`);

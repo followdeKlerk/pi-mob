@@ -69,7 +69,9 @@ void main() {
 
     expect(find.text('Skills'), findsOneWidget);
     expect(
-      find.textContaining('Reload Pi to refresh commands, tools, and MCP availability.'),
+      find.textContaining(
+        'Reload Pi to refresh commands, tools, and MCP availability.',
+      ),
       findsOneWidget,
     );
 

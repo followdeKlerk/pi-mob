@@ -11,6 +11,7 @@ export * from "./release-manifest";
 export * from "./install-paths";
 export * from "./install-config";
 export * from "./install-environment";
+export * from "./login-env";
 export * from "./launch-agent";
 export * from "./update";
 export * from "./rollback";

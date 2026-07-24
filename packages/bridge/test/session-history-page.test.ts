@@ -28,7 +28,7 @@ function start(): { store: BridgeStore; server: ReturnType<typeof createBridgeSe
     store,
     adapter,
     bridgeVersion: "fixture",
-    piVersion: "0.80.6",
+    piVersion: "0.82.0",
     hostDisplayName: "fixture",
   });
   runtime.setReadyForTest(true);

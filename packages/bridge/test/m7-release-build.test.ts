@@ -68,6 +68,8 @@ const PRODUCT = "pi-mob-bridge";
 const MIGRATION_CLASS = "reversible_migration";
 const ARCHITECTURE = "x64" as const;
 const EXTENSION_BUNDLE_NAME = "pi-mob-extension.js";
+const PUBLIC_CLI_NAME = "pi-mob";
+const OPS_CLI_NAME = "pi-mob-ops";
 const PLACEHOLDER_ROOT = "/opt/pi-mob";
 const PLACEHOLDER_RELEASE = `${PLACEHOLDER_ROOT}/release`;
 
@@ -179,7 +181,8 @@ let configSamplePath = "";
 let plistPath = "";
 let licensesDir = "";
 let daemonInBundle = "";
-let extensionInBundle = "";
+let publicCliInBundle = "";
+let opsCliInBundle = "";
 let manifest: ReturnType<typeof JSON.parse> = {};
 let manifestRaw = "";
 
@@ -198,7 +201,8 @@ beforeAll(() => {
   plistPath = join(RELEASE_DIR, "launch-agents", `${DEFAULT_LAUNCH_AGENT_LABEL}.plist`);
   licensesDir = join(RELEASE_DIR, "licenses");
   daemonInBundle = join(RELEASE_DIR, "bin", "bridge-daemon");
-  extensionInBundle = join(RELEASE_DIR, "extensions", EXTENSION_BUNDLE_NAME);
+  publicCliInBundle = join(RELEASE_DIR, "bin", PUBLIC_CLI_NAME);
+  opsCliInBundle = join(RELEASE_DIR, "bin", OPS_CLI_NAME);
   manifestRaw = readFileSync(manifestPath, "utf8");
   manifest = JSON.parse(manifestRaw);
   // Pin the bundle result for diagnostics on failure.
@@ -210,7 +214,6 @@ describe("release bundle: layout", () => {
     const expectedFiles: ReadonlyArray<{ path: string; mode: number }> = [
       { path: RELEASE_DIR, mode: 0o700 },
       { path: join(RELEASE_DIR, "bin"), mode: 0o700 },
-      { path: join(RELEASE_DIR, "extensions"), mode: 0o700 },
       { path: join(RELEASE_DIR, "licenses"), mode: 0o700 },
       { path: join(RELEASE_DIR, "launch-agents"), mode: 0o700 },
       { path: manifestPath, mode: 0o600 },
@@ -221,13 +224,23 @@ describe("release bundle: layout", () => {
       { path: join(licensesDir, "Apache-2.0"), mode: 0o600 },
       { path: join(licensesDir, "BSD-3-Clause"), mode: 0o600 },
       { path: daemonInBundle, mode: 0o700 },
-      { path: extensionInBundle, mode: 0o600 },
+      { path: publicCliInBundle, mode: 0o700 },
+      { path: opsCliInBundle, mode: 0o700 },
     ];
     for (const entry of expectedFiles) {
       expect(existsSync(entry.path)).toBe(true);
       const stat = statSync(entry.path);
       expect(stat.mode & 0o777).toBe(entry.mode);
     }
+  });
+
+  test("does not bundle the removed policy extension", () => {
+    const extensionsDir = join(RELEASE_DIR, "extensions");
+    expect(existsSync(extensionsDir)).toBe(false);
+    const extensionArtifact = manifest.artifacts.find(
+      (artifact: { kind: string }) => artifact.kind === "extension",
+    );
+    expect(extensionArtifact).toBeUndefined();
   });
 
   test("daemon in the bundle is byte-for-byte the compiled daemon", () => {
@@ -237,19 +250,13 @@ describe("release bundle: layout", () => {
     expect(detectMachOArch(daemonInBundle).arch).toBe("x64");
   });
 
-  test("bundles the loadable policy extension and inventories its checksum and license", () => {
-    const extensionArtifact = manifest.artifacts.find(
-      (artifact: { kind: string }) => artifact.kind === "extension",
-    );
-    expect(extensionArtifact).toBeDefined();
-    expect(extensionArtifact.name).toBe(EXTENSION_BUNDLE_NAME);
-    expect(extensionArtifact.path).toBe(`extensions/${EXTENSION_BUNDLE_NAME}`);
-    expect(extensionArtifact.sha256).toBe(sha256Of(readFileSync(extensionInBundle)));
-    expect(extensionArtifact.size).toBe(statSync(extensionInBundle).size);
-
-    const checksums = readFileSync(checksumsPath, "utf8");
-    expect(checksums).toContain(`${extensionArtifact.sha256}  ${extensionArtifact.path}\n`);
-    expect(manifest.licenses.some((license: { spdxId?: string }) => license.spdxId === "MIT")).toBe(true);
+  test("bundles the friendly and advanced lifecycle CLI names from the same executable", () => {
+    expect(readFileSync(publicCliInBundle)).toEqual(readFileSync(opsCliInBundle));
+    const lifecycleNames = manifest.artifacts
+      .filter((artifact: { kind: string }) => artifact.kind === "lifecycle-cli")
+      .map((artifact: { name: string }) => artifact.name)
+      .sort();
+    expect(lifecycleNames).toEqual([PUBLIC_CLI_NAME, OPS_CLI_NAME].sort());
   });
 
   test("manifest.json is canonical (sorted keys, no structural whitespace)", () => {
@@ -311,12 +318,14 @@ describe("release bundle: manifest fields", () => {
     expect(manifest.migrationClass).toBe(MIGRATION_CLASS);
   });
 
-  test("artifacts array carries daemon, extension, config template, and plist", () => {
+  test("artifacts array carries daemon, lifecycle CLIs, config template, and plist (no extension)", () => {
     const names = manifest.artifacts.map((a: { name: string }) => a.name).sort();
     expect(names).toContain("bridge-daemon");
-    expect(names).toContain(EXTENSION_BUNDLE_NAME);
+    expect(names).toContain(PUBLIC_CLI_NAME);
+    expect(names).toContain(OPS_CLI_NAME);
     expect(names).toContain("config.sample.toml");
     expect(names).toContain(`${DEFAULT_LAUNCH_AGENT_LABEL}.plist`);
+    expect(names).not.toContain(EXTENSION_BUNDLE_NAME);
     for (const artifact of manifest.artifacts) {
       expect(artifact.sha256).toMatch(/^[0-9a-f]{64}$/);
       expect(artifact.size).toBeGreaterThan(0);
@@ -502,7 +511,8 @@ describe("release bundle: LaunchAgent plist", () => {
     expect(xml).toContain(`<string>--config</string>\n<string>${PLACEHOLDER_RELEASE}/config.toml</string>`);
     expect(xml).toContain(`<string>--workspace</string>\n<string>${PLACEHOLDER_ROOT}/workspace</string>`);
     expect(xml).toContain(`<string>--session-dir</string>\n<string>${PLACEHOLDER_RELEASE}/sessions</string>`);
-    expect(xml).toContain(`<string>--extension</string>\n<string>${PLACEHOLDER_RELEASE}/extensions/${EXTENSION_BUNDLE_NAME}</string>`);
+    // Phase 4: no --extension flag in the LaunchAgent.
+    expect(xml).not.toContain("--extension");
     // No `bash -c` / `sh -c` wrapper anywhere in the plist.
     expect(/bash -c|sh -c|\/bin\/(ba)?sh/.test(xml)).toBe(false);
   });
@@ -533,7 +543,6 @@ describe("release bundle: LaunchAgent plist", () => {
         "--config", `${PLACEHOLDER_RELEASE}/config.toml`,
         "--workspace", `${PLACEHOLDER_ROOT}/workspace`,
         "--session-dir", `${PLACEHOLDER_RELEASE}/sessions`,
-        "--extension", `${PLACEHOLDER_RELEASE}/extensions/${EXTENSION_BUNDLE_NAME}`,
       ],
       workingDirectory: `${PLACEHOLDER_ROOT}/workspace`,
       environment: {

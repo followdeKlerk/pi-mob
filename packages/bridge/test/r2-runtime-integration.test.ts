@@ -21,7 +21,7 @@ function runtimeFor(plans?: PlanSourceService): DurableBridgeRuntime {
     store: new BridgeStore(path),
     adapter,
     bridgeVersion: "test",
-    piVersion: "0.80.6",
+    piVersion: "0.82.0",
     hostDisplayName: "test",
     ...(plans ? { plans } : {}),
   });

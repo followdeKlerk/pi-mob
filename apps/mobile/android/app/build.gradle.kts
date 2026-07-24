@@ -1,8 +1,14 @@
 plugins {
     id("com.android.application")
-    id("com.google.gms.google-services")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+}
+
+// Preview builds remain installable without a repository-owned Firebase
+// project. Push notifications are enabled only when the operator or release
+// environment supplies the non-secret Firebase Android configuration.
+if (file("google-services.json").exists()) {
+    apply(plugin = "com.google.gms.google-services")
 }
 
 android {

@@ -214,7 +214,9 @@ class BashToolArgs {
       throw const FormatException('bash `cwd` must be a string');
     }
     if (timeoutMs != null &&
-        (timeoutMs is! num || !timeoutMs.isFinite || timeoutMs.toInt() != timeoutMs)) {
+        (timeoutMs is! num ||
+            !timeoutMs.isFinite ||
+            timeoutMs.toInt() != timeoutMs)) {
       throw const FormatException('bash `timeoutMs` must be an integer');
     }
     return BashToolArgs(

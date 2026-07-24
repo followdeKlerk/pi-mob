@@ -349,7 +349,7 @@ Future<_Fixture> _readyFixture() async {
       'hostGeneration': '1',
       'hostDisplayName': 'Fixture host',
       'bridgeVersion': 'test',
-      'piVersion': '0.80.6',
+      'piVersion': '0.82.0',
       'serverTime': '2026-07-20T00:00:00.000Z',
       'capabilities': ['streams.v1', 'commands.v1', 'controller_leases.v1'],
       'limits': {
@@ -526,9 +526,11 @@ void _m16Affordances() {
       await tester.tap(find.byKey(const Key('open-commands')));
       await tester.pumpAndSettle();
 
-      expect(find.byKey(const Key('command-search')), findsOneWidget);
-      expect(find.text('Show available skills'), findsOneWidget);
-      expect(find.text('Connection status'), findsOneWidget);
+      expect(
+        find.byKey(const Key('command-catalogue-unavailable')),
+        findsOneWidget,
+      );
+      expect(find.text('Show available skills'), findsNothing);
     },
   );
 
@@ -551,6 +553,9 @@ void _m16Affordances() {
     await tester.tap(find.byKey(const Key('open-commands')));
     await tester.pumpAndSettle();
 
-    expect(find.byKey(const Key('command-search')), findsOneWidget);
+    expect(
+      find.byKey(const Key('command-catalogue-unavailable')),
+      findsOneWidget,
+    );
   });
 }

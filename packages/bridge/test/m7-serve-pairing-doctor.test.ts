@@ -209,7 +209,7 @@ function newPaths(): InstallPaths {
 function newConfig(): BridgeInstallConfig {
   return defaultInstallConfig({
     paths: newPaths(),
-    piExecutable: "/opt/pi/0.80.6/bin/pi",
+    piExecutable: "/opt/pi/0.82.0/bin/pi",
     bridgeExecutable: "/opt/pi-mob/release/bin/bridge",
     bridgeVersion: "0.0.0-m7",
     protocolVersion: "1.0",
@@ -234,14 +234,14 @@ function seededFs(): InMemoryFileSystem {
   fs.seedFile(`${paths.stateRoot}/bridge.sqlite`, 0o600, 1_700_000_000_000);
   fs.seedFile(`${paths.backupRoot}/bridge.backup`, 0o600, 1_699_900_000_000);
   // Seed the Pi executable so the Pi probe can confirm it exists.
-  fs.mkdir("/opt/pi/0.80.6/bin", { recursive: true, mode: 0o755 });
-  fs.seedFile("/opt/pi/0.80.6/bin/pi", 0o755);
+  fs.mkdir("/opt/pi/0.82.0/bin", { recursive: true, mode: 0o755 });
+  fs.seedFile("/opt/pi/0.82.0/bin/pi", 0o755);
   return fs;
 }
 
 const stubPi: PiProbe = {
-  executablePath: () => "/opt/pi/0.80.6/bin/pi",
-  versionString: () => "0.80.6",
+  executablePath: () => "/opt/pi/0.82.0/bin/pi",
+  versionString: () => "0.82.0",
   lastExitCode: () => 0,
   crashLoopDetected: () => false,
 };

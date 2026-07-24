@@ -23,7 +23,7 @@ function runtimeFor(opts: { processes?: AuthoritativeProcessRegistry; git?: GitS
     store: new BridgeStore(path),
     adapter,
     bridgeVersion: "test",
-    piVersion: "0.80.6",
+    piVersion: "0.82.0",
     hostDisplayName: "test",
     ...(opts.processes ? { processes: opts.processes } : {}),
     ...(opts.git ? { git: opts.git } : {}),

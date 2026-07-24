@@ -564,6 +564,92 @@ class AgentSupervisionState {
   );
 }
 
+/// Lowers the bridge-owned R8 snapshot into the legacy supervision projection
+/// without inferring state from tool names or transcript prose.
+AgentSupervisionState reduceAuthoritativeAgentSnapshot(
+  AgentSupervisionState previous,
+  AgentAuthoritativeSnapshot snapshot,
+) {
+  final runs = <AgentRun>[
+    for (final record in snapshot.records)
+      AgentRun(
+        toolCallId: 'agent:${record.agentId}',
+        task: record.task,
+        subagentType: null,
+        model: record.model,
+        thinkingLevel: null,
+        backgroundRequested: false,
+        status: switch (record.state) {
+          'running' => AgentRunStatus.running,
+          'cancelled' => AgentRunStatus.cancelled,
+          'failed' || 'error' => AgentRunStatus.error,
+          _ => AgentRunStatus.completed,
+        },
+        startedAt: DateTime.fromMillisecondsSinceEpoch(0, isUtc: true),
+        agentId: record.agentId,
+        originChatId: record.originSessionId,
+        originTurnId: record.originTurnId,
+        latestOutput: record.latestActivity,
+        errorMessage: record.state == 'error' ? record.completionSummary : null,
+        caps: AgentRunCapabilities(
+          canSteer: record.supportedActions.contains('steer'),
+          canCancel: record.supportedActions.contains('cancel'),
+          canAdopt: record.supportedActions.contains('adopt'),
+          contractSource: 'agents.v1:${record.revision}',
+        ),
+      ),
+  ];
+  final blockers = <AgentSupervisionBlocker>[
+    for (final record in snapshot.records)
+      for (final action in const ['steer', 'cancel', 'adopt'])
+        if (!record.supportedActions.contains(action))
+          AgentSupervisionBlocker(
+            toolCallId: 'agent:${record.agentId}',
+            kind: 'no_${action}_contract',
+            detail: 'The host did not advertise the $action action.',
+          ),
+  ];
+  return AgentSupervisionState(
+    runs: runs,
+    blockers: blockers,
+    currentChatId: previous.currentChatId,
+    currentTurnId: previous.currentTurnId,
+  );
+}
+
+/// Minimal typed input for the bridge-owned R8 snapshot.
+class AgentAuthoritativeSnapshot {
+  const AgentAuthoritativeSnapshot(this.records);
+
+  final List<AgentAuthoritativeRecord> records;
+}
+
+class AgentAuthoritativeRecord {
+  const AgentAuthoritativeRecord({
+    required this.agentId,
+    required this.task,
+    required this.state,
+    required this.originSessionId,
+    required this.originTurnId,
+    required this.revision,
+    required this.supportedActions,
+    this.model,
+    this.latestActivity,
+    this.completionSummary,
+  });
+
+  final String agentId;
+  final String task;
+  final String state;
+  final String originSessionId;
+  final String originTurnId;
+  final String revision;
+  final Set<String> supportedActions;
+  final String? model;
+  final String? latestActivity;
+  final String? completionSummary;
+}
+
 /// Sentinel used by [AgentRun.copyWith] to distinguish "leave
 /// unchanged" from "set to null". Without this, callers could not
 /// clear a value (such as `latestOutput`) by passing null.

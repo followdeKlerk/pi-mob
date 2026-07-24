@@ -354,4 +354,29 @@ void main() {
       );
     });
   });
+
+  test('authoritative snapshot lowers reported actions without inference', () {
+    final state = reduceAuthoritativeAgentSnapshot(
+      AgentSupervisionState.empty(),
+      const AgentAuthoritativeSnapshot(<AgentAuthoritativeRecord>[
+        AgentAuthoritativeRecord(
+          agentId: 'agent-1',
+          task: 'Verify protocol',
+          state: 'running',
+          originSessionId: 'session-1',
+          originTurnId: 'turn-1',
+          revision: 'rev-1',
+          supportedActions: <String>{'steer'},
+        ),
+      ]),
+    );
+
+    expect(state.runs.single.status, AgentRunStatus.running);
+    expect(state.runs.single.caps?.canSteer, isTrue);
+    expect(state.runs.single.caps?.canCancel, isFalse);
+    expect(
+      state.blockers.any((item) => item.kind == 'no_cancel_contract'),
+      isTrue,
+    );
+  });
 }
