@@ -307,4 +307,3 @@ class _WorkspaceTile extends StatelessWidget {
     );
   }
 }
-
