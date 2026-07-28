@@ -64,6 +64,7 @@ const TERMINAL = new Set<RecipeStatus>(["completed", "failed", "cancelled"]);
 export class RecipeActivityProjector {
   private readonly activities = new Map<string, RecipeActivity>();
   private readonly ordinals = new Map<string, number>();
+  private readonly dirty = new Set<string>();
   private activeTurnId: string | undefined;
   private readonly fallbackSessionId: string | undefined;
   private readonly fallbackTurnId: string | undefined;
@@ -97,13 +98,38 @@ export class RecipeActivityProjector {
     const next = previous
       ? this.merge(previous, event.type, payload, at)
       : this.create(kind, sessionId, turnId, activityId, event.type, payload, at);
-    if (next) this.activities.set(identity, next);
+    if (next) {
+      this.activities.set(identity, next);
+      // Mark the identity dirty so {@link takeDirty} callers can publish
+      // only activities that actually changed since their last drain. We
+      // use a `Set` so repeated applies for the same identity collapse
+      // to a single dirty entry, and `takeDirty` returns and clears the
+      // entire pending set in one call.
+      this.dirty.add(identity);
+    }
     return this;
   }
 
   applyAll(events: readonly ProjectableEvent[]): RecipeActivity[] {
     for (const event of events) this.apply(event);
     return this.snapshot();
+  }
+
+  /**
+   * Return and clear the identities whose activity was created or merged
+   * since the last drain. Callers can use this to publish only changed
+   * activities instead of rescanning the whole projection on every event.
+   */
+  takeDirty(): string[] {
+    if (this.dirty.size === 0) return [];
+    const identities = [...this.dirty];
+    this.dirty.clear();
+    return identities;
+  }
+
+  /** Return the activity for an identity without marking it dirty. */
+  activity(identity: string): RecipeActivity | undefined {
+    return this.activities.get(identity);
   }
 
   snapshot(): RecipeActivity[] {

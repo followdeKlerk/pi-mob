@@ -155,6 +155,10 @@ export class DurableRecipeActivityProjection {
       }
       this.apply(event);
     }
+    // Hydration rebuilds the in-memory projector from authoritative history;
+    // any dirty markers it created must not republish on the first
+    // appendChanged() call after startup.
+    this.projector.takeDirty();
   }
 
   private resetAndHydrate(): void {
@@ -212,11 +216,27 @@ export class DurableRecipeActivityProjection {
 
   private appendChanged(): number {
     let count = 0;
-    for (const activity of this.projector.snapshot()) {
+    // Publish only activities the projector reports as dirty since the
+    // previous drain. Hydration already drained its dirtied set via
+    // {@link takeDirty}; downstream callers (importExternalSessionHistory,
+    // live appends) re-drain here.
+    //
+    // Pre-fix this iterated {@link projector.snapshot} over every event,
+    // canonicalising every accumulated activity. With O(n) activities and
+    // O(m) events that was O(n*m) work, so a 5k-tool / 15k-event external
+    // session took ~555s and never finished inside the LaunchAgent
+    // watchdog. Tracking only the dirty identities (bounded by the number
+    // of distinct activities in the journal) makes this O(n) overall.
+    for (const identity of this.projector.takeDirty()) {
+      const activity = this.projector.activity(identity);
+      if (!activity) continue;
       // The F0 wire contract requires both bounded argument and output text on
       // the tool arm. A start-only projection truthfully has no output yet, so
       // keep it in the projector and publish its first snapshot only after
       // output/result arrives rather than inventing placeholder content.
+      // The activity stays in the dirty set's source map; the next apply()
+      // that fills in the missing field (e.g. tool.output) re-dirties it
+      // and we publish then.
       if (activity.kind === "tool" &&
           (!activity.arguments || !activity.output)) continue;
       const payload = recipePayload(activity);
