@@ -1099,6 +1099,17 @@ const _errorCodes = <String>{
   'git_auth_missing',
   'git_stale',
   'git_action_failed',
+  'attention_unavailable',
+  'attention_not_found',
+  'attention_stale',
+  'agent_unavailable',
+  'agent_not_found',
+  'agent_stale',
+  'agent_action_failed',
+  'catalogue_unavailable',
+  'catalogue_not_found',
+  'catalogue_stale',
+  'catalogue_action_failed',
 };
 String _nfc(String value) => unorm.nfc(value);
 void _requireEnvelope(Map<String, Object?> json) {
