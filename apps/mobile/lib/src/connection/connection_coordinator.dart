@@ -299,6 +299,14 @@ final class ConnectionCoordinator extends ChangeNotifier
   String? _creationSelectingSessionId;
   WorkspaceSearchState _workspaceSearch = WorkspaceSearchState.idle();
   int _workspaceSearchEpoch = 0;
+  // Tracks the request id of the in-flight `workspace.search` so the
+  // bridge's per-request rejection can be correlated back to the
+  // workspace search state machine. Without this, an
+  // `unsupported_capability` reply would never reach the picker, the
+  // spinner would never resolve, and a subsequent keystroke would
+  // observe a stale `phase` and surface the misleading
+  // "Offline. Reconnect to search workspaces." copy.
+  String? _workspaceSearchRequestId;
   // M11 multi-session support. The set holds at most one full
   // subscription and at most five summary subscriptions; each cursor
   // advances independently so a gap on one background session cannot
@@ -1955,6 +1963,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     final epoch = ++_workspaceSearchEpoch;
     if (trimmed.isEmpty) {
       _workspaceSearch = WorkspaceSearchState.idle();
+      _workspaceSearchRequestId = null;
       _notify();
       return;
     }
@@ -1964,6 +1973,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       hits: const <WorkspaceSearchHit>[],
       clearError: true,
     );
+    _workspaceSearchRequestId = null;
     _notify();
     if (!isReady) {
       _workspaceSearch = _workspaceSearch.copyWith(
@@ -1974,9 +1984,18 @@ final class ConnectionCoordinator extends ChangeNotifier
       return;
     }
     try {
-      await _sendControl('workspace.search', <String, Object?>{
-        'query': trimmed,
-      });
+      final requestId = await _sendControl(
+        'workspace.search',
+        <String, Object?>{'query': trimmed},
+      );
+      // Capture the request id so [_serverError] can correlate a
+      // per-request rejection back to the in-flight workspace search
+      // and surface the bridge's truthful message to the picker. The
+      // epoch guard above ensures only the latest search consumes a
+      // late error from a superseded query.
+      if (epoch == _workspaceSearchEpoch) {
+        _workspaceSearchRequestId = requestId;
+      }
     } on Object catch (error) {
       if (epoch != _workspaceSearchEpoch) return;
       _workspaceSearch = _workspaceSearch.copyWith(
@@ -4035,6 +4054,27 @@ final class ConnectionCoordinator extends ChangeNotifier
         !_hostReadinessRecoveryInFlight &&
         _socket != null &&
         connectionId != null;
+    // A per-request `unsupported_capability` rejection for a workspace
+    // search must NOT poison the connection: it is a feature-level
+    // signal from the bridge (this control is not implemented on this
+    // host), not evidence the host itself is unreachable. Correlate by
+    // request id, surface the bridge's truthful message to the picker,
+    // and return without demoting the connection. The handshake-bound
+    // `unsupported_capability` is handled separately by the server,
+    // which closes the socket and lands in [_socketEnded] →
+    // `ConnectionPhase.disconnected`.
+    if (code == 'unsupported_capability' &&
+        requestId is String &&
+        requestId == _workspaceSearchRequestId &&
+        _workspaceSearch.phase == WorkspaceSearchPhase.searching) {
+      _workspaceSearch = _workspaceSearch.copyWith(
+        phase: WorkspaceSearchPhase.error,
+        error: '$code: ${payload['message'] ?? 'Workspace search failed'}',
+      );
+      _workspaceSearchRequestId = null;
+      _notify();
+      return;
+    }
     if (code == 'host_not_ready') {
       // This is a transient command-admission race, not evidence that the
       // connected host is degraded. Re-establish the subscription once; do
@@ -4043,21 +4083,35 @@ final class ConnectionCoordinator extends ChangeNotifier
     } else {
       errorMessage = '$code: ${payload['message'] ?? 'Bridge error'}';
     }
-    phase = switch (code) {
-      'unsupported_protocol' ||
-      'unsupported_capability' ||
-      'pi_version_mismatch' => ConnectionPhase.incompatible,
-      'host_draining' => ConnectionPhase.hostDraining,
+    // Runtime `unsupported_capability` is reserved for feature-level
+    // rejections of an individual control. It must not demote the
+    // overall connection: doing so flips `isReady` to false and makes
+    // every subsequent call short-circuit with the misleading
+    // "Offline. Reconnect to …" copy even though the socket is still
+    // live and every other control still works.
+    final demotesConnection = switch (code) {
+      'unsupported_protocol' || 'pi_version_mismatch' => true,
+      'unsupported_capability' => false,
+      'host_draining' => true,
       'database_unavailable' ||
       'storage_full' ||
       'crash_loop' ||
-      'provider_interrupted' => ConnectionPhase.degraded,
-      'host_not_ready' =>
-        _syncPending.isNotEmpty || shouldRecoverHostReadiness
-            ? ConnectionPhase.synchronizing
-            : phase,
-      _ => phase,
+      'provider_interrupted' => true,
+      'host_not_ready' => _syncPending.isNotEmpty || shouldRecoverHostReadiness,
+      _ => false,
     };
+    if (demotesConnection) {
+      phase = switch (code) {
+        'unsupported_protocol' ||
+        'pi_version_mismatch' => ConnectionPhase.incompatible,
+        'host_draining' => ConnectionPhase.hostDraining,
+        'database_unavailable' ||
+        'storage_full' ||
+        'crash_loop' ||
+        'provider_interrupted' => ConnectionPhase.degraded,
+        _ => ConnectionPhase.synchronizing,
+      };
+    }
     if (shouldRecoverHostReadiness) {
       _hostReadinessRecoveryInFlight = true;
       unawaited(
