@@ -21,7 +21,7 @@
  * the post-fix path each event does O(1) hashing + a single hashset
  * insert plus, only when something changed, a single canonicalisation.
  */
-import { afterEach, describe, expect, test } from "bun:test";
+import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -170,10 +170,6 @@ function eventCounts(stream: readonly StoredEvent[], type: string): number {
   return n;
 }
 
-afterEach(() => {
-  // Best-effort cleanup of /tmp scratch dirs. Tests use unique prefixes.
-});
-
 describe("DurableRecipeActivityProjection dirty-track publishing", () => {
   test("only changed activities produce recipe.activity events", () => {
     const { store, dir, projection } = freshProjection();
@@ -302,6 +298,48 @@ describe("DurableRecipeActivityProjection dirty-track publishing", () => {
       store2.close();
       expect(recipeAfterFirst).toBeGreaterThan(0);
       expect(recipeAfterRehydrate).toBe(recipeAfterFirst);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("explicit backfill publishes the latest snapshots from a pre-R1 journal", () => {
+    const dir = mkdtempSync(join(tmpdir(), "pi-mob-busy-loop-backfill-"));
+    try {
+      const store = new BridgeStore(join(dir, "bridge.sqlite"));
+      store.ensureSession(SESSION, {});
+      store.ensureStream(`session:${SESSION}`, "session", SESSION);
+      const streamId = `session:${SESSION}`;
+      store.appendEvent(streamId, "turn.started", { turnId: TURN });
+      store.appendEvent(streamId, "tool.started", {
+        turnId: TURN,
+        toolCallId: "legacy-tool",
+        toolName: "bash",
+        arguments: { command: "echo" },
+      });
+      store.appendEvent(streamId, "tool.output", {
+        turnId: TURN,
+        toolCallId: "legacy-tool",
+        output: "ok",
+      });
+      store.appendEvent(streamId, "tool.completed", {
+        turnId: TURN,
+        toolCallId: "legacy-tool",
+        result: { output: "ok" },
+      });
+
+      const projection = new DurableRecipeActivityProjection(store, SESSION);
+      expect(store.listEvents(streamId).filter((event) => event.type === "recipe.activity")).toHaveLength(0);
+      expect(projection.backfill()).toBe(1);
+      const backfilled = store.listEvents(streamId).filter((event) => event.type === "recipe.activity");
+      expect(backfilled).toHaveLength(1);
+      expect(backfilled[0]!.payload).toMatchObject({
+        activityId: "legacy-tool",
+        status: "completed",
+        output: '{"output":"ok"}',
+      });
+      expect(projection.backfill()).toBe(0);
+      store.close();
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }

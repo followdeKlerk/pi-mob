@@ -108,6 +108,7 @@ function occurrence(event: StoredEvent): string | number {
 export class DurableRecipeActivityProjection {
   private projector: RecipeActivityProjector;
   private readonly published = new Map<string, string>();
+  private readonly backfillPending = new Set<string>();
   private readonly seen = new Set<string>();
   private readonly terminal = new Set<string>();
   private readonly toolTurns = new Map<string, string>();
@@ -141,8 +142,10 @@ export class DurableRecipeActivityProjection {
 
   /** Backfill the latest snapshots when upgrading a journal from before R1. */
   backfill(): number {
+    const pending = [...this.backfillPending];
     let count = 0;
-    this.store.transaction(() => { count = this.appendChanged(); });
+    this.store.transaction(() => { count = this.appendActivities(pending); });
+    for (const identity of pending) this.backfillPending.delete(identity);
     return count;
   }
 
@@ -155,15 +158,19 @@ export class DurableRecipeActivityProjection {
       }
       this.apply(event);
     }
-    // Hydration rebuilds the in-memory projector from authoritative history;
-    // any dirty markers it created must not republish on the first
-    // appendChanged() call after startup.
-    this.projector.takeDirty();
+    // Hydration rebuilds the in-memory projector from authoritative history.
+    // Preserve the hydrated identities for an explicit backfill(), then drain
+    // them so the first live append after startup only publishes that event's
+    // changed activity instead of rescanning the whole journal.
+    for (const identity of this.projector.takeDirty()) {
+      this.backfillPending.add(identity);
+    }
   }
 
   private resetAndHydrate(): void {
     this.projector = new RecipeActivityProjector({ sessionId: this.sessionId });
     this.published.clear();
+    this.backfillPending.clear();
     this.seen.clear();
     this.terminal.clear();
     this.toolTurns.clear();
@@ -215,11 +222,14 @@ export class DurableRecipeActivityProjection {
   }
 
   private appendChanged(): number {
+    return this.appendActivities(this.projector.takeDirty());
+  }
+
+  private appendActivities(identities: readonly string[]): number {
     let count = 0;
-    // Publish only activities the projector reports as dirty since the
-    // previous drain. Hydration already drained its dirtied set via
-    // {@link takeDirty}; downstream callers (importExternalSessionHistory,
-    // live appends) re-drain here.
+    // Publish only activities explicitly selected by the caller. Live appends
+    // drain the projector's dirty set; backfill() supplies the identities
+    // captured during hydration.
     //
     // Pre-fix this iterated {@link projector.snapshot} over every event,
     // canonicalising every accumulated activity. With O(n) activities and
@@ -227,14 +237,14 @@ export class DurableRecipeActivityProjection {
     // session took ~555s and never finished inside the LaunchAgent
     // watchdog. Tracking only the dirty identities (bounded by the number
     // of distinct activities in the journal) makes this O(n) overall.
-    for (const identity of this.projector.takeDirty()) {
+    for (const identity of identities) {
       const activity = this.projector.activity(identity);
       if (!activity) continue;
       // The F0 wire contract requires both bounded argument and output text on
       // the tool arm. A start-only projection truthfully has no output yet, so
       // keep it in the projector and publish its first snapshot only after
       // output/result arrives rather than inventing placeholder content.
-      // The activity stays in the dirty set's source map; the next apply()
+      // The activity stays in the projector's source map; the next apply()
       // that fills in the missing field (e.g. tool.output) re-dirties it
       // and we publish then.
       if (activity.kind === "tool" &&
