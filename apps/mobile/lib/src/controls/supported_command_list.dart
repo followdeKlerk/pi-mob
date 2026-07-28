@@ -31,6 +31,8 @@ class _SupportedCommandListState extends State<SupportedCommandList> {
     SupportedCommandCategory.skill,
     SupportedCommandCategory.template,
     SupportedCommandCategory.extension,
+    SupportedCommandCategory.mcpServer,
+    SupportedCommandCategory.mcpTool,
   ];
 
   Iterable<SupportedCommandData> _filtered() {
@@ -56,12 +58,16 @@ class _SupportedCommandListState extends State<SupportedCommandList> {
     SupportedCommandCategory.skill => 'Skills',
     SupportedCommandCategory.template => 'Templates',
     SupportedCommandCategory.extension => 'Extensions',
+    SupportedCommandCategory.mcpServer => 'MCP servers',
+    SupportedCommandCategory.mcpTool => 'MCP tools',
   };
 
   IconData _categoryIcon(SupportedCommandCategory c) => switch (c) {
     SupportedCommandCategory.skill => Icons.auto_awesome,
     SupportedCommandCategory.template => Icons.notes,
     SupportedCommandCategory.extension => Icons.extension,
+    SupportedCommandCategory.mcpServer => Icons.dns,
+    SupportedCommandCategory.mcpTool => Icons.build,
   };
 
   @override
@@ -132,7 +138,7 @@ class _SupportedCommandListState extends State<SupportedCommandList> {
                               ),
                               const SizedBox(height: 4),
                               Text(
-                                'The bridge has not reported a host catalogue yet.',
+                                'No host catalogue is available.',
                                 textAlign: TextAlign.center,
                                 style: Theme.of(context).textTheme.bodySmall,
                               ),
@@ -188,6 +194,7 @@ class _CommandTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final disabledCopy = command.unavailableNote ?? command.disabledReason;
     final tile = ListTile(
       key: ValueKey('command-${command.id}'),
       title: Text(command.title),
@@ -200,12 +207,22 @@ class _CommandTile extends StatelessWidget {
               command.invocation!,
               style: Theme.of(context).textTheme.bodySmall,
             ),
-          if (!command.enabled && command.disabledReason != null)
+          if (!command.enabled && disabledCopy != null)
             Text(
-              command.disabledReason!,
+              disabledCopy,
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                 color: Theme.of(context).colorScheme.error,
               ),
+            ),
+          if (command.togglingDisabled)
+            Text(
+              'This entry cannot be toggled from mobile.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+          if (command.requiresReloadAfterToggle)
+            Text(
+              'Reload Pi to apply configuration changes.',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
         ],
       ),
@@ -214,7 +231,7 @@ class _CommandTile extends StatelessWidget {
     );
     if (command.enabled) return tile;
     return Tooltip(
-      message: command.disabledReason ?? 'Command not supported here',
+      message: disabledCopy ?? 'Command not supported here',
       child: tile,
     );
   }

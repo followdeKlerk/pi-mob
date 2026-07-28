@@ -380,7 +380,62 @@
     "kind": "event"
   },
   {
+    "file": "error-agent-action-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-agent-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-agent-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-agent-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
     "file": "error-attachment-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-attention-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-attention-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-attention-unavailable-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-action-failed-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-not-found-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-stale-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-catalogue-unavailable-valid.json",
     "valid": true,
     "kind": "error"
   },

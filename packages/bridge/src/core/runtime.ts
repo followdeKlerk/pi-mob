@@ -313,7 +313,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
 
   private async catalogueSnapshotRequest(): Promise<Record<string, unknown>> {
     if (!this.catalogue) throw new RuntimeProtocolError("unsupported_capability", "Catalogue unavailable");
-    return this.catalogue.snapshot();
+    return { ...await this.catalogue.snapshot() };
   }
 
   private async catalogueSetEnabled(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
@@ -348,7 +348,9 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     const attentionId = String(payload.attentionId ?? "");
     const expectedRevision = String(payload.expectedRevision ?? "");
     if (!sessionId || !attentionId || !expectedRevision) throw new RuntimeProtocolError("invalid_message", "attention.resolve requires sessionId, attentionId, and expectedRevision");
-    try { return this.attention.resolve(sessionId, attentionId, expectedRevision) as unknown as Record<string, unknown>; }
+    try {
+      return this.attention.resolve({ sessionId, attentionId, expectedRevision }) as unknown as Record<string, unknown>;
+    }
     catch (error) { throw new RuntimeProtocolError("invalid_state", error instanceof Error ? error.message : "attention resolution failed"); }
   }
 

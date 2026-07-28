@@ -1194,6 +1194,50 @@
                     {
                       "const": "git_action_failed",
                       "type": "string"
+                    },
+                    {
+                      "const": "attention_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_action_failed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_action_failed",
+                      "type": "string"
                     }
                   ]
                 },
@@ -4512,6 +4556,50 @@
                         },
                         {
                           "const": "git_action_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "attention_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "attention_not_found",
+                          "type": "string"
+                        },
+                        {
+                          "const": "attention_stale",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_not_found",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_stale",
+                          "type": "string"
+                        },
+                        {
+                          "const": "agent_action_failed",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_unavailable",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_not_found",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_stale",
+                          "type": "string"
+                        },
+                        {
+                          "const": "catalogue_action_failed",
                           "type": "string"
                         }
                       ]
@@ -8019,6 +8107,50 @@
                     },
                     {
                       "const": "git_action_failed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "attention_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "agent_action_failed",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_unavailable",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_not_found",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_stale",
+                      "type": "string"
+                    },
+                    {
+                      "const": "catalogue_action_failed",
                       "type": "string"
                     }
                   ]

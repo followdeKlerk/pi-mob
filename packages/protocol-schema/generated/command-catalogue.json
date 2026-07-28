@@ -1112,12 +1112,9 @@
       "unsupported_capability",
       "invalid_state",
       "idempotency_conflict",
-      "git_unavailable",
-      "git_remote_missing",
-      "git_provider_unavailable",
-      "git_auth_missing",
-      "git_stale",
-      "git_action_failed"
+      "attention_unavailable",
+      "attention_not_found",
+      "attention_stale"
     ],
     "type": "attention.resolve"
   },
@@ -1146,12 +1143,10 @@
       "unsupported_capability",
       "invalid_state",
       "idempotency_conflict",
-      "git_unavailable",
-      "git_remote_missing",
-      "git_provider_unavailable",
-      "git_auth_missing",
-      "git_stale",
-      "git_action_failed"
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
     ],
     "type": "agent.steer"
   },
@@ -1180,12 +1175,10 @@
       "unsupported_capability",
       "invalid_state",
       "idempotency_conflict",
-      "git_unavailable",
-      "git_remote_missing",
-      "git_provider_unavailable",
-      "git_auth_missing",
-      "git_stale",
-      "git_action_failed"
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
     ],
     "type": "agent.cancel"
   },
@@ -1214,12 +1207,10 @@
       "unsupported_capability",
       "invalid_state",
       "idempotency_conflict",
-      "git_unavailable",
-      "git_remote_missing",
-      "git_provider_unavailable",
-      "git_auth_missing",
-      "git_stale",
-      "git_action_failed"
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
     ],
     "type": "agent.adopt"
   },
@@ -1248,12 +1239,10 @@
       "unsupported_capability",
       "invalid_state",
       "idempotency_conflict",
-      "git_unavailable",
-      "git_remote_missing",
-      "git_provider_unavailable",
-      "git_auth_missing",
-      "git_stale",
-      "git_action_failed"
+      "agent_unavailable",
+      "agent_not_found",
+      "agent_stale",
+      "agent_action_failed"
     ],
     "type": "agent.merge"
   },
@@ -1282,12 +1271,10 @@
       "unsupported_capability",
       "invalid_state",
       "idempotency_conflict",
-      "git_unavailable",
-      "git_remote_missing",
-      "git_provider_unavailable",
-      "git_auth_missing",
-      "git_stale",
-      "git_action_failed"
+      "catalogue_unavailable",
+      "catalogue_not_found",
+      "catalogue_stale",
+      "catalogue_action_failed"
     ],
     "type": "catalogue.set_enabled"
   },

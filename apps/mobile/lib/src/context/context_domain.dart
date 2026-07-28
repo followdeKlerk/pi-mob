@@ -14,7 +14,7 @@ const _maxContextSourceKindLength = 32;
 const _maxContextSourceSummary = 240;
 const _maxThinkingLevelLength = 32;
 
-const _tokenUsageDigitsPattern = '^(0|[1-9][0-9]{0,15})\$';
+const _tokenUsageDigitsPattern = r'^(0|[1-9][0-9]{0,15})$';
 final _tokenUsageDigitsRegExp = RegExp(_tokenUsageDigitsPattern);
 
 const _uuidPattern =

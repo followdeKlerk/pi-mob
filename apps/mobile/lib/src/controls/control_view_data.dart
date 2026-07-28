@@ -154,7 +154,7 @@ class CompactionCallbacks {
   final VoidCallback? onStart;
 }
 
-enum SupportedCommandCategory { skill, template, extension }
+enum SupportedCommandCategory { skill, template, extension, mcpServer, mcpTool }
 
 @immutable
 class SupportedCommandData {
@@ -166,6 +166,9 @@ class SupportedCommandData {
     this.invocation,
     this.enabled = true,
     this.disabledReason,
+    this.unavailableNote,
+    this.togglingDisabled = false,
+    this.requiresReloadAfterToggle = false,
   });
 
   final String id;
@@ -175,4 +178,17 @@ class SupportedCommandData {
   final String? invocation;
   final bool enabled;
   final String? disabledReason;
+
+  /// Host-authoritative availability copy. This takes precedence over the
+  /// legacy [disabledReason] so older callers remain source-compatible while
+  /// catalogue entries can explain why the host marked them unavailable.
+  final String? unavailableNote;
+
+  /// The entry is visible but host configuration does not permit a mobile
+  /// toggle for it.
+  final bool togglingDisabled;
+
+  /// A host configuration change for this entry only takes effect after Pi
+  /// reloads its catalogue.
+  final bool requiresReloadAfterToggle;
 }

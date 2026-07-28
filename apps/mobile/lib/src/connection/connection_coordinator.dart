@@ -2682,6 +2682,10 @@ final class ConnectionCoordinator extends ChangeNotifier
         _planSnapshotResult(message, payload);
       case 'context.snapshot.result':
         _contextSnapshotResult(message, payload);
+      case 'catalogue.snapshot.result':
+        _applyCatalogue(payload);
+      case 'agent.snapshot.result':
+        _applyAgentSnapshot(payload);
       case 'command.current.result':
         await _commandCurrent(payload);
       case 'command.receipt':
@@ -3014,7 +3018,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   void _handleEventPayload(String type, Map<String, Object?> payload) {
     if (type == 'pi.rpc.response') {
       final response = PiRpcResponsePayload.fromJson(payload);
-      _rawRpcResponses['${response.sessionId}:${response.requestId}'] = response;
+      _rawRpcResponses['${response.sessionId}:${response.requestId}'] =
+          response;
       _rawRpcResponseController.add(response);
     } else if (type == 'pi.rpc.event') {
       final rawEvent = PiRpcEventPayload.fromJson(payload);
@@ -3215,49 +3220,14 @@ final class ConnectionCoordinator extends ChangeNotifier
     } else if (type == 'catalogue.snapshot') {
       _applyCatalogue(payload);
     } else if (type == 'catalogue.unavailable') {
-      _supportedCommands = null;
+      // An empty list is the explicit unavailable state. `null` remains the
+      // pre-snapshot/loading state, so the shell never substitutes fabricated
+      // catalogue entries after the host has reported unavailability.
+      _supportedCommands = const <SupportedCommandData>[];
     } else if (type == 'agent.snapshot') {
-      final rawItems = payload['items'];
-      if (rawItems is List) {
-        final records = <AgentAuthoritativeRecord>[];
-        for (final raw in rawItems.whereType<Map>()) {
-          final item = wire_agents.AgentRecordData.tryParse(
-            Map<String, Object?>.from(raw),
-          );
-          if (item == null) continue;
-          records.add(
-            AgentAuthoritativeRecord(
-              agentId: item.agentId,
-              task: item.task,
-              state: item.state,
-              originSessionId: item.originSessionId,
-              originTurnId: item.originTurnId,
-              revision: item.revision,
-              supportedActions: item.supportedActions,
-              model: item.model,
-              latestActivity: item.latestActivity,
-              completionSummary: item.completionSummary,
-            ),
-          );
-        }
-        _agents = reduceAuthoritativeAgentSnapshot(
-          _agents,
-          AgentAuthoritativeSnapshot(records),
-        );
-      }
+      _applyAgentSnapshot(payload);
     } else if (type == 'agent.unavailable') {
-      _agents = AgentSupervisionState(
-        blockers: <AgentSupervisionBlocker>[
-          AgentSupervisionBlocker(
-            toolCallId: 'agent-supervision',
-            kind: 'agent_supervision_unavailable',
-            detail: payload['status'] is Map
-                ? ((payload['status'] as Map)['reason']?.toString() ??
-                      'The host did not advertise agent supervision.')
-                : 'The host did not advertise agent supervision.',
-          ),
-        ],
-      );
+      _applyAgentUnavailable(payload);
     } else if (type == 'attention.item') {
       _attentionItems = reduceAttention(_attentionItems, payload);
       final currentHost = hostId;
@@ -3671,15 +3641,20 @@ final class ConnectionCoordinator extends ChangeNotifier
         .whereType<Map>()
         .map((raw) {
           final item = Map<String, Object?>.from(raw);
-          final kind = item['kind']?.toString();
-          final category = switch (kind) {
+          final category = switch (item['kind']?.toString()) {
             'skill' => SupportedCommandCategory.skill,
             'template' => SupportedCommandCategory.template,
+            'mcp_server' => SupportedCommandCategory.mcpServer,
+            'mcp_tool' => SupportedCommandCategory.mcpTool,
             _ => SupportedCommandCategory.extension,
           };
           final availability = item['availability'];
           final available =
               availability is Map && availability['state'] == 'available';
+          final availabilityReason = availability is Map
+              ? availability['reason']?.toString()
+              : null;
+          final togglingDisabled = item['canToggle'] != true;
           return SupportedCommandData(
             id: item['entryId']?.toString() ?? '',
             title: item['name']?.toString() ?? 'Unnamed entry',
@@ -3689,12 +3664,58 @@ final class ConnectionCoordinator extends ChangeNotifier
             enabled: available,
             disabledReason: available
                 ? null
-                : availability is Map
-                ? availability['reason']?.toString()
-                : 'Unavailable',
+                : availabilityReason ?? 'Unavailable',
+            unavailableNote: available ? null : availabilityReason,
+            togglingDisabled: togglingDisabled,
+            requiresReloadAfterToggle: item['reloadRequired'] == true,
           );
         })
         .toList(growable: false);
+  }
+
+  void _applyAgentSnapshot(Map<String, Object?> payload) {
+    final rawItems = payload['items'];
+    if (rawItems is! List) return;
+    final records = <AgentAuthoritativeRecord>[];
+    for (final raw in rawItems.whereType<Map>()) {
+      final item = wire_agents.AgentRecordData.tryParse(
+        Map<String, Object?>.from(raw),
+      );
+      if (item == null) continue;
+      records.add(
+        AgentAuthoritativeRecord(
+          agentId: item.agentId,
+          task: item.task,
+          state: item.state,
+          originSessionId: item.originSessionId,
+          originTurnId: item.originTurnId,
+          revision: item.revision,
+          supportedActions: item.supportedActions,
+          model: item.model,
+          latestActivity: item.latestActivity,
+          completionSummary: item.completionSummary,
+        ),
+      );
+    }
+    _agents = reduceAuthoritativeAgentSnapshot(
+      _agents,
+      AgentAuthoritativeSnapshot(records),
+    );
+  }
+
+  void _applyAgentUnavailable(Map<String, Object?> payload) {
+    _agents = AgentSupervisionState(
+      blockers: <AgentSupervisionBlocker>[
+        AgentSupervisionBlocker(
+          toolCallId: 'agent-supervision',
+          kind: 'agent_supervision_unavailable',
+          detail: payload['status'] is Map
+              ? ((payload['status'] as Map)['reason']?.toString() ??
+                    'The host did not advertise agent supervision.')
+              : 'The host did not advertise agent supervision.',
+        ),
+      ],
+    );
   }
 
   void _scheduleSearchIndex(String streamId) {

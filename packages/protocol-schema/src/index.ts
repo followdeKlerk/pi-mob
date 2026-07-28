@@ -156,6 +156,7 @@ export const LIMITS = {
 	maxAgentTaskLength: 512,
 	maxAgentSummaryLength: 1024,
 	maxAgentItems: 64,
+	maxCatalogueEntries: 512,
 } as const;
 
 export const COMMAND_TYPES = [
@@ -494,6 +495,21 @@ export const ERROR_CODES = [
 	"git_auth_missing",
 	"git_stale",
 	"git_action_failed",
+	// R7/R8/R9 — typed failures for authoritative attention, agent, and
+	// catalogue surfaces. These mirror the revision-bound process/Git
+	// vocabulary so mobile can distinguish unavailable, missing, stale, and
+	// rejected actions without parsing prose.
+	"attention_unavailable",
+	"attention_not_found",
+	"attention_stale",
+	"agent_unavailable",
+	"agent_not_found",
+	"agent_stale",
+	"agent_action_failed",
+	"catalogue_unavailable",
+	"catalogue_not_found",
+	"catalogue_stale",
+	"catalogue_action_failed",
 ] as const;
 
 export type CommandType = (typeof COMMAND_TYPES)[number];
@@ -565,18 +581,9 @@ const processStableErrors = [
 // list is the additive git-specific subset of ERROR_CODES so clients can
 // render a typed failure with the same vocabulary the `git.unavailable`
 // event uses.
-const catalogueCommands = new Set<CommandType>(["catalogue.set_enabled"]);
-const agentCommands = new Set<CommandType>(["agent.steer", "agent.cancel", "agent.adopt", "agent.merge"]);
-const attentionCommands = new Set<CommandType>(["attention.resolve"]);
 const gitCommands = new Set<CommandType>([
 	"git.commit.request",
 	"git.push.request",
-	"attention.resolve",
-	"agent.steer",
-	"agent.cancel",
-	"agent.adopt",
-	"agent.merge",
-	"catalogue.set_enabled",
 ]);
 const gitStableErrors = [
 	"git_unavailable",
@@ -585,6 +592,31 @@ const gitStableErrors = [
 	"git_auth_missing",
 	"git_stale",
 	"git_action_failed",
+] as const;
+const attentionCommands = new Set<CommandType>(["attention.resolve"]);
+const attentionStableErrors = [
+	"attention_unavailable",
+	"attention_not_found",
+	"attention_stale",
+] as const;
+const agentCommands = new Set<CommandType>([
+	"agent.steer",
+	"agent.cancel",
+	"agent.adopt",
+	"agent.merge",
+]);
+const agentStableErrors = [
+	"agent_unavailable",
+	"agent_not_found",
+	"agent_stale",
+	"agent_action_failed",
+] as const;
+const catalogueCommands = new Set<CommandType>(["catalogue.set_enabled"]);
+const catalogueStableErrors = [
+	"catalogue_unavailable",
+	"catalogue_not_found",
+	"catalogue_stale",
+	"catalogue_action_failed",
 ] as const;
 const baseStableErrors = [
 	"invalid_message",
@@ -627,7 +659,13 @@ export const COMMAND_METADATA: readonly CommandMetadata[] = COMMAND_TYPES.map(
 			? [...baseStableErrors, ...processStableErrors]
 			: gitCommands.has(type)
 				? [...baseStableErrors, ...gitStableErrors]
-				: [...baseStableErrors],
+				: attentionCommands.has(type)
+					? [...baseStableErrors, ...attentionStableErrors]
+					: agentCommands.has(type)
+						? [...baseStableErrors, ...agentStableErrors]
+						: catalogueCommands.has(type)
+							? [...baseStableErrors, ...catalogueStableErrors]
+							: [...baseStableErrors],
 	}),
 );
 
@@ -2232,7 +2270,7 @@ export const CatalogueEntrySchema = Type.Object(
 	{ additionalProperties: false },
 );
 export const CatalogueSnapshotSchema = Type.Object(
-	{ revision: RevisionTokenSchema, entries: Type.Array(CatalogueEntrySchema, { maxItems: 512 }) },
+	{ revision: RevisionTokenSchema, entries: Type.Array(CatalogueEntrySchema, { maxItems: LIMITS.maxCatalogueEntries }) },
 	{ additionalProperties: false },
 );
 export const CatalogueUnavailableSchema = Type.Object(

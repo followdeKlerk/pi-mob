@@ -60,7 +60,8 @@ import {
 // Constants — kept in lock-step with scripts/build.ts.
 // ---------------------------------------------------------------------------
 
-const BRIDGE_VERSION = "0.0.0-m7";
+const DEFAULT_BRIDGE_VERSION = "0.0.0-m7";
+const BRIDGE_VERSION = process.env.PI_MOB_VERSION?.trim() || DEFAULT_BRIDGE_VERSION;
 const PROTOCOL_VERSION = "1.0";
 const BUN_MINIMUM = "1.3.14";
 const MIN_MACOS = "13.0";
@@ -482,7 +483,9 @@ describe("release bundle: secret and fault audit", () => {
       expect(contents).not.toContain(SUITE_ROOT);
       expect(contents).not.toMatch(/\/(?:Users|home)\/[A-Za-z0-9._-]+\//);
     }
-    // Installer-rewritable placeholders are present.
+    // Installer-rewritable placeholders and release-tag-consistent metadata
+    // are present.
+    expect(sample).toContain(`bridge_version = ${JSON.stringify(BRIDGE_VERSION)}`);
     expect(sample).toContain(`${PLACEHOLDER_RELEASE}/state`);
     expect(sample).toContain(`${PLACEHOLDER_RELEASE}/logs`);
   });

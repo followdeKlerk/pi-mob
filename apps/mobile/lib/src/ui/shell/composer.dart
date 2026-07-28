@@ -1,11 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../domain/prompt_send_lifecycle.dart';
 import '../../interaction/interaction_panel.dart';
 import '../theme/pi_theme.dart';
+import 'shortcut_intents.dart';
 import 'model_picker_sheet.dart';
 import 'motion_primitives.dart';
 
@@ -23,12 +25,14 @@ class Composer extends StatelessWidget {
     required this.coordinator,
     required this.draftController,
     required this.onOpenDialog,
+    this.onSubmit,
     super.key,
   });
 
   final ConnectionCoordinator coordinator;
   final TextEditingController draftController;
   final VoidCallback onOpenDialog;
+  final Future<void> Function(BuildContext context)? onSubmit;
 
   Future<void> _clearDraft() async {
     draftController.clear();
@@ -78,6 +82,27 @@ class Composer extends StatelessWidget {
         return;
       default:
         await coordinator.submitPromptWithRecovery();
+    }
+  }
+
+  bool get _isComposing {
+    final composing = draftController.value.composing;
+    return composing.isValid && !composing.isCollapsed;
+  }
+
+  void _handleSendShortcut(BuildContext context) {
+    if (_isComposing ||
+        !(HardwareKeyboard.instance.isControlPressed ||
+            HardwareKeyboard.instance.isMetaPressed)) {
+      return;
+    }
+    final submit = onSubmit;
+    if (submit != null) {
+      unawaited(submit(context));
+      return;
+    }
+    if (coordinator.canAbort || coordinator.canAttemptSend) {
+      unawaited(_submitOrRunCommand(context));
     }
   }
 
@@ -216,229 +241,260 @@ class Composer extends StatelessWidget {
         selection: TextSelection.collapsed(offset: prefill.length),
       );
     }
-    return Card(
-      key: const Key('composer-card'),
-      child: Padding(
-        padding: const EdgeInsets.all(PiSpacing.md),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (coordinator.pendingState == 'indeterminate' ||
-                coordinator.selectedRuntimeState == 'indeterminate') ...[
-              Card(
-                key: const Key('indeterminate-warning'),
-                color: Theme.of(context).colorScheme.errorContainer,
-                child: Padding(
-                  padding: const EdgeInsets.all(PiSpacing.md),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
+    return Shortcuts(
+      shortcuts: const <ShortcutActivator, Intent>{
+        SingleActivator(LogicalKeyboardKey.enter, control: true):
+            SubmitComposerIntent(),
+        SingleActivator(LogicalKeyboardKey.enter, meta: true):
+            SubmitComposerIntent(),
+      },
+      child: Actions(
+        actions: <Type, Action<Intent>>{
+          SubmitComposerIntent: CallbackAction<SubmitComposerIntent>(
+            onInvoke: (_) => _handleSendShortcut(context),
+          ),
+        },
+        child: Card(
+          key: const Key('composer-card'),
+          child: Padding(
+            padding: const EdgeInsets.all(PiSpacing.md),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (coordinator.pendingState == 'indeterminate' ||
+                    coordinator.selectedRuntimeState == 'indeterminate') ...[
+                  Card(
+                    key: const Key('indeterminate-warning'),
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    child: Padding(
+                      padding: const EdgeInsets.all(PiSpacing.md),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Completion is unknown',
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onErrorContainer,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                          const SizedBox(height: PiSpacing.xs),
+                          Text(
+                            'The previous message will not run again automatically.',
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: Theme.of(
+                                    context,
+                                  ).colorScheme.onErrorContainer,
+                                ),
+                          ),
+                          const SizedBox(height: PiSpacing.sm),
+                          Align(
+                            alignment: Alignment.centerRight,
+                            child: TextButton(
+                              key: const Key('discard-indeterminate'),
+                              onPressed: () =>
+                                  unawaited(_discardIndeterminate(context)),
+                              child: const Text('Discard and continue'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: PiSpacing.sm),
+                ],
+                if (const {
+                  PromptSendPhase.acquiringControl,
+                  PromptSendPhase.submitting,
+                  PromptSendPhase.failed,
+                }.contains(coordinator.promptSendStatus.phase)) ...[
+                  _PromptSendFeedback(
+                    status: coordinator.promptSendStatus,
+                    onAction: (failure) =>
+                        _handlePromptFailureAction(context, failure),
+                  ),
+                  const SizedBox(height: PiSpacing.sm),
+                ],
+                FollowUpQueuePanel(
+                  items: coordinator.selectedFollowUps,
+                  onRemove: (id) => unawaited(coordinator.removeFollowUp(id)),
+                  onClear: () => unawaited(coordinator.clearFollowUps()),
+                ),
+                if (coordinator.selectedFollowUps.isNotEmpty)
+                  const SizedBox(height: PiSpacing.sm),
+                if (coordinator.draftAttachments.isNotEmpty) ...[
+                  Wrap(
+                    spacing: PiSpacing.xs,
+                    runSpacing: PiSpacing.xs,
                     children: [
-                      Text(
-                        'Completion is unknown',
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onErrorContainer,
-                          fontWeight: FontWeight.w600,
+                      for (final attachment in coordinator.draftAttachments)
+                        InputChip(
+                          key: ValueKey('draft-attachment-${attachment.id}'),
+                          avatar: const Icon(Icons.image_outlined, size: 18),
+                          label: Text(attachment.filename),
+                          onDeleted: () => unawaited(
+                            coordinator.removeDraftAttachment(attachment.id),
+                          ),
                         ),
-                      ),
-                      const SizedBox(height: PiSpacing.xs),
-                      Text(
-                        'The previous message will not run again automatically.',
-                        style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                          color: Theme.of(context).colorScheme.onErrorContainer,
-                        ),
-                      ),
-                      const SizedBox(height: PiSpacing.sm),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton(
-                          key: const Key('discard-indeterminate'),
-                          onPressed: () =>
-                              unawaited(_discardIndeterminate(context)),
-                          child: const Text('Discard and continue'),
-                        ),
-                      ),
                     ],
                   ),
-                ),
-              ),
-              const SizedBox(height: PiSpacing.sm),
-            ],
-            if (const {
-              PromptSendPhase.acquiringControl,
-              PromptSendPhase.submitting,
-              PromptSendPhase.failed,
-            }.contains(coordinator.promptSendStatus.phase)) ...[
-              _PromptSendFeedback(
-                status: coordinator.promptSendStatus,
-                onAction: (failure) =>
-                    _handlePromptFailureAction(context, failure),
-              ),
-              const SizedBox(height: PiSpacing.sm),
-            ],
-            FollowUpQueuePanel(
-              items: coordinator.selectedFollowUps,
-              onRemove: (id) => unawaited(coordinator.removeFollowUp(id)),
-              onClear: () => unawaited(coordinator.clearFollowUps()),
-            ),
-            if (coordinator.selectedFollowUps.isNotEmpty)
-              const SizedBox(height: PiSpacing.sm),
-            if (coordinator.draftAttachments.isNotEmpty) ...[
-              Wrap(
-                spacing: PiSpacing.xs,
-                runSpacing: PiSpacing.xs,
-                children: [
-                  for (final attachment in coordinator.draftAttachments)
-                    InputChip(
-                      key: ValueKey('draft-attachment-${attachment.id}'),
-                      avatar: const Icon(Icons.image_outlined, size: 18),
-                      label: Text(attachment.filename),
-                      onDeleted: () => unawaited(
-                        coordinator.removeDraftAttachment(attachment.id),
-                      ),
-                    ),
+                  const SizedBox(height: PiSpacing.sm),
                 ],
-              ),
-              const SizedBox(height: PiSpacing.sm),
-            ],
-            if (coordinator.selectedDialog != null) ...[
-              FilledButton.tonalIcon(
-                key: const Key('open-extension-dialog'),
-                onPressed: onOpenDialog,
-                icon: const Icon(Icons.open_in_new),
-                label: Text(
-                  'Open ${coordinator.selectedDialog!.method.name} request',
-                ),
-              ),
-              const SizedBox(height: PiSpacing.sm),
-            ],
-            if (slashQuery != null && !slashQuery.contains(' ')) ...[
-              Builder(
-                builder: (context) {
-                  final query = slashQuery.substring(1);
-                  final matches = _slashCommands()
-                      .where(
-                        (command) =>
-                            query.isEmpty ||
-                            command.invocation.substring(1).contains(query) ||
-                            command.description.toLowerCase().contains(query) ||
-                            command.category.toLowerCase().contains(query),
-                      )
-                      .toList(growable: false);
-                  return Container(
-                    key: const Key('slash-command-list'),
-                    constraints: const BoxConstraints(maxHeight: 260),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).colorScheme.surfaceContainerLow,
-                      border: Border.all(
-                        color: Theme.of(context).colorScheme.outlineVariant,
-                      ),
-                      borderRadius: BorderRadius.circular(PiRadius.md),
+                if (coordinator.selectedDialog != null) ...[
+                  FilledButton.tonalIcon(
+                    key: const Key('open-extension-dialog'),
+                    onPressed: onOpenDialog,
+                    icon: const Icon(Icons.open_in_new),
+                    label: Text(
+                      'Open ${coordinator.selectedDialog!.method.name} request',
                     ),
-                    child: matches.isEmpty
-                        ? const Padding(
-                            padding: EdgeInsets.all(PiSpacing.md),
-                            child: Text('No matching commands'),
+                  ),
+                  const SizedBox(height: PiSpacing.sm),
+                ],
+                if (slashQuery != null && !slashQuery.contains(' ')) ...[
+                  Builder(
+                    builder: (context) {
+                      final query = slashQuery.substring(1);
+                      final matches = _slashCommands()
+                          .where(
+                            (command) =>
+                                query.isEmpty ||
+                                command.invocation
+                                    .substring(1)
+                                    .contains(query) ||
+                                command.description.toLowerCase().contains(
+                                  query,
+                                ) ||
+                                command.category.toLowerCase().contains(query),
                           )
-                        : ListView.separated(
-                            key: const Key('slash-command-results'),
-                            shrinkWrap: true,
-                            itemCount: matches.length,
-                            separatorBuilder: (_, _) =>
-                                const Divider(height: 1),
-                            itemBuilder: (context, index) {
-                              final command = matches[index];
-                              return ListTile(
-                                dense: true,
-                                title: Text(command.invocation),
-                                subtitle: Text(
-                                  '${command.category} · ${command.description}',
-                                  maxLines: 2,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                                onTap: () =>
-                                    _selectSlashCommand(context, command),
-                              );
-                            },
+                          .toList(growable: false);
+                      return Container(
+                        key: const Key('slash-command-list'),
+                        constraints: const BoxConstraints(maxHeight: 260),
+                        decoration: BoxDecoration(
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.surfaceContainerLow,
+                          border: Border.all(
+                            color: Theme.of(context).colorScheme.outlineVariant,
                           ),
-                  );
-                },
-              ),
-              const SizedBox(height: PiSpacing.sm),
-            ],
-            Row(
-              crossAxisAlignment: CrossAxisAlignment.end,
-              children: [
-                IconButton.filledTonal(
-                  key: const Key('attach-image-button'),
-                  tooltip: 'Attach image',
-                  onPressed: coordinator.isReady
-                      ? () async {
-                          try {
-                            await coordinator.pickAndUploadImage();
-                          } on Object catch (error) {
-                            if (context.mounted) {
-                              ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    'Could not attach image: $error',
-                                  ),
-                                ),
-                              );
-                            }
-                          }
-                        }
-                      : null,
-                  icon: const Icon(Icons.add_photo_alternate_outlined),
-                ),
-                const SizedBox(width: PiSpacing.sm),
-                Expanded(
-                  child: TextField(
-                    key: const Key('draft-field'),
-                    controller: draftController,
-                    minLines: 1,
-                    maxLines: 5,
-                    keyboardType: TextInputType.multiline,
-                    textInputAction: TextInputAction.newline,
-                    decoration: const InputDecoration(
-                      hintText: 'Message Pi',
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (value) =>
-                        unawaited(coordinator.updateDraft(value)),
-                  ),
-                ),
-                const SizedBox(width: PiSpacing.sm),
-                Tooltip(
-                  message: aborting ? 'Abort' : 'Send',
-                  child: Semantics(
-                    button: true,
-                    label: aborting ? 'Abort active Pi turn' : 'Send message',
-                    child: SizedBox.square(
-                      dimension: 52,
-                      child: FilledButton(
-                        key: const Key('send-button'),
-                        style: FilledButton.styleFrom(
-                          padding: EdgeInsets.zero,
-                          shape: const CircleBorder(),
+                          borderRadius: BorderRadius.circular(PiRadius.md),
                         ),
-                        onPressed: aborting || coordinator.canAttemptSend
-                            ? () => _submitOrRunCommand(context)
-                            : null,
-                        child: Icon(aborting ? Icons.stop : Icons.send),
+                        child: matches.isEmpty
+                            ? const Padding(
+                                padding: EdgeInsets.all(PiSpacing.md),
+                                child: Text('No matching commands'),
+                              )
+                            : ListView.separated(
+                                key: const Key('slash-command-results'),
+                                shrinkWrap: true,
+                                itemCount: matches.length,
+                                separatorBuilder: (_, _) =>
+                                    const Divider(height: 1),
+                                itemBuilder: (context, index) {
+                                  final command = matches[index];
+                                  return ListTile(
+                                    dense: true,
+                                    title: Text(command.invocation),
+                                    subtitle: Text(
+                                      '${command.category} · ${command.description}',
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                    onTap: () =>
+                                        _selectSlashCommand(context, command),
+                                  );
+                                },
+                              ),
+                      );
+                    },
+                  ),
+                  const SizedBox(height: PiSpacing.sm),
+                ],
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.end,
+                  children: [
+                    IconButton.filledTonal(
+                      key: const Key('attach-image-button'),
+                      tooltip: 'Attach image',
+                      onPressed: coordinator.isReady
+                          ? () async {
+                              try {
+                                await coordinator.pickAndUploadImage();
+                              } on Object catch (error) {
+                                if (context.mounted) {
+                                  ScaffoldMessenger.maybeOf(
+                                    context,
+                                  )?.showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        'Could not attach image: $error',
+                                      ),
+                                    ),
+                                  );
+                                }
+                              }
+                            }
+                          : null,
+                      icon: const Icon(Icons.add_photo_alternate_outlined),
+                    ),
+                    const SizedBox(width: PiSpacing.sm),
+                    Expanded(
+                      child: TextField(
+                        key: const Key('draft-field'),
+                        controller: draftController,
+                        minLines: 1,
+                        maxLines: 5,
+                        keyboardType: TextInputType.multiline,
+                        textInputAction: TextInputAction.newline,
+                        decoration: const InputDecoration(
+                          hintText: 'Message Pi',
+                          border: OutlineInputBorder(),
+                        ),
+                        onChanged: (value) =>
+                            unawaited(coordinator.updateDraft(value)),
                       ),
                     ),
-                  ),
+                    const SizedBox(width: PiSpacing.sm),
+                    Tooltip(
+                      message: aborting ? 'Abort' : 'Send',
+                      child: Semantics(
+                        button: true,
+                        label: aborting
+                            ? 'Abort active Pi turn'
+                            : 'Send message',
+                        child: SizedBox.square(
+                          dimension: 52,
+                          child: FilledButton(
+                            key: const Key('send-button'),
+                            style: FilledButton.styleFrom(
+                              padding: EdgeInsets.zero,
+                              shape: const CircleBorder(),
+                            ),
+                            onPressed: aborting || coordinator.canAttemptSend
+                                ? () => _submitOrRunCommand(context)
+                                : null,
+                            child: Icon(aborting ? Icons.stop : Icons.send),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+                Semantics(
+                  liveRegion: true,
+                  label: _promptSemanticLabel(coordinator.promptSendStatus),
+                  child: const SizedBox.shrink(),
                 ),
               ],
             ),
-            Semantics(
-              liveRegion: true,
-              label: _promptSemanticLabel(coordinator.promptSendStatus),
-              child: const SizedBox.shrink(),
-            ),
-          ],
+          ),
         ),
       ),
     );

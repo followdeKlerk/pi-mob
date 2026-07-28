@@ -20,6 +20,21 @@ export interface AttentionItem {
   readonly superseded: boolean;
 }
 
+export interface AttentionPublishInput {
+  readonly sessionId: string;
+  readonly turnId: string;
+  readonly category: AttentionCategory;
+  readonly occurrence: string;
+  readonly summary: string;
+  readonly actionable: boolean;
+}
+
+export interface AttentionResolveInput {
+  readonly sessionId: string;
+  readonly attentionId: string;
+  readonly expectedRevision: string;
+}
+
 const SUMMARY_CAP = 240;
 
 export class AttentionProjection {
@@ -28,14 +43,18 @@ export class AttentionProjection {
 
   constructor(private readonly store: BridgeStore) {}
 
-  publish(input: Omit<AttentionItem, "attentionId" | "revision" | "resolved" | "superseded">): AttentionItem {
+  publish(input: AttentionPublishInput): AttentionItem {
     const attentionId = crypto.randomUUID().toLowerCase();
     const revision = String((this.revisions.get(input.sessionId) ?? 0) + 1);
     this.revisions.set(input.sessionId, Number(revision));
     const item: AttentionItem = {
-      ...input,
       attentionId,
+      sessionId: input.sessionId,
+      turnId: input.turnId,
+      category: input.category,
+      occurrence: input.occurrence,
       summary: input.summary.slice(0, SUMMARY_CAP),
+      actionable: input.actionable,
       revision,
       resolved: false,
       superseded: false,
@@ -46,16 +65,28 @@ export class AttentionProjection {
     return item;
   }
 
-  resolve(sessionId: string, attentionId: string, expectedRevision: string): AttentionItem {
-    const current = this.items.get(attentionId);
-    if (!current || current.sessionId !== sessionId) throw new Error("attention item not found");
-    if (current.revision !== expectedRevision) throw new Error("attention item is stale");
-    const revision = String((this.revisions.get(sessionId) ?? Number(current.revision)) + 1);
-    this.revisions.set(sessionId, Number(revision));
-    const resolved = { ...current, revision, resolved: true };
-    this.items.set(attentionId, resolved);
-    this.store.appendEvent(`session:${sessionId}`, "attention.item", { ...resolved });
+  resolve(input: AttentionResolveInput): AttentionItem {
+    const current = this.items.get(input.attentionId);
+    if (!current || current.sessionId !== input.sessionId) {
+      throw new Error("attention item not found");
+    }
+    if (current.revision !== input.expectedRevision) {
+      throw new Error("attention item is stale");
+    }
+    const revision = String((this.revisions.get(input.sessionId) ?? Number(current.revision)) + 1);
+    this.revisions.set(input.sessionId, Number(revision));
+    const resolved: AttentionItem = { ...current, revision, resolved: true };
+    this.items.set(input.attentionId, resolved);
+    this.store.appendEvent(`session:${input.sessionId}`, "attention.item", { ...resolved });
     return resolved;
+  }
+
+  get(attentionId: string): AttentionItem | undefined {
+    return this.items.get(attentionId);
+  }
+
+  listForSession(sessionId: string): readonly AttentionItem[] {
+    return [...this.items.values()].filter((item) => item.sessionId === sessionId);
   }
 
   private ensureSession(sessionId: string): void {

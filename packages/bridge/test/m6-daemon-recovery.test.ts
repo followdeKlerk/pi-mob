@@ -25,6 +25,7 @@ function daemonOptions(root: string, stateDir: string) {
     executable: new URL("../node_modules/.bin/pi", import.meta.url).pathname,
     stateDir,
     sessionDir: sessions,
+    bridgeVersion: "v-test",
     rpcArgs: ["--no-extensions", "--extension", new URL("./fixtures/contract-provider.ts", import.meta.url).pathname, "--provider", "pi-mob-fixture", "--model", "contract"],
     environment: { HOME: root, LANG: "C.UTF-8", PATH: process.env.PATH ?? "/usr/bin:/bin" },
   };
@@ -35,6 +36,7 @@ describe("M6 daemon reboot recovery", () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-daemon-recover-")); const stateDir = join(root, "state"); seed(stateDir, "running");
     const daemon = await runDaemon(daemonOptions(root, stateDir));
     try {
+      expect(daemon.runtime.bridgeVersion).toBe("v-test");
       expect(daemon.store.sessionState(sessionId)?.runtimeState).toBe("indeterminate");
       const connection = { connectionId: "connection", installationId: "installation", subscriptions: new Set<string>() };
       const promptId = crypto.randomUUID();

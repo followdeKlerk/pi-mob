@@ -69,6 +69,8 @@ export interface DaemonOptions {
   readonly stateDir?: string;
   readonly sessionDir?: string;
   readonly displayName?: string;
+  /** Release/build version reported in hello and lifecycle output. */
+  readonly bridgeVersion?: string;
   readonly rpcArgs?: readonly string[];
   readonly environment?: Readonly<Record<string, string>>;
   readonly logger?: RedactingLogger;
@@ -547,10 +549,11 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   notificationSweepTimer.unref();
   const dialogSweepTimer=setInterval(()=>{ try{adapter.sweepExtensionDialogs();}catch{/* service outlives cleanup failure */} },30_000);
   dialogSweepTimer.unref();
+  const bridgeVersion = options.bridgeVersion?.trim() || BRIDGE_VERSION;
   const runtime = new DurableBridgeRuntime({
     store,
     adapter,
-    bridgeVersion: BRIDGE_VERSION,
+    bridgeVersion,
     piVersion: "0.82.0",
     hostDisplayName: displayName,
   });
@@ -693,6 +696,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     ...(args.stateDir ? { stateDir: args.stateDir } : installed ? { stateDir: installed.stateRoot } : {}),
     ...(args.sessionDir ? { sessionDir: args.sessionDir } : {}),
     ...(args.displayName ? { displayName: args.displayName } : {}),
+    ...(installed?.bridgeVersion ? { bridgeVersion: installed.bridgeVersion } : {}),
     ...(args.policyMode ? { policyMode: args.policyMode } : {}),
     ...(args.allowedRoots.length > 0 ? { allowedRoots: args.allowedRoots } : {}),
     ...(args.extensionPath ? { extensionPath: args.extensionPath } : {}),
@@ -701,7 +705,7 @@ export async function main(argv: readonly string[]): Promise<number> {
   });
   process.stdout.write(`${JSON.stringify({
     protocolVersion: PROTOCOL_VERSION,
-    bridgeVersion: BRIDGE_VERSION,
+    bridgeVersion: handle.runtime.bridgeVersion,
     port: handle.server.port,
     serveTarget: `http://127.0.0.1:${handle.server.port}`,
     workspace: handle.workspace,

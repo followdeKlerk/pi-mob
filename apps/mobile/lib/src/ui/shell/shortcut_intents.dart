@@ -41,13 +41,23 @@ Map<ShortcutActivator, Intent> buildChatShellShortcuts() {
   return <ShortcutActivator, Intent>{
     const SingleActivator(LogicalKeyboardKey.enter, control: true):
         const SubmitComposerIntent(),
+    const SingleActivator(LogicalKeyboardKey.enter, meta: true):
+        const SubmitComposerIntent(),
     const SingleActivator(LogicalKeyboardKey.keyK, control: true):
+        const OpenSearchIntent(),
+    const SingleActivator(LogicalKeyboardKey.keyK, meta: true):
         const OpenSearchIntent(),
     const SingleActivator(LogicalKeyboardKey.keyM, control: true):
         const OpenModelPickerIntent(),
+    const SingleActivator(LogicalKeyboardKey.keyM, meta: true):
+        const OpenModelPickerIntent(),
     const SingleActivator(LogicalKeyboardKey.keyO, control: true, shift: true):
         const OpenChatsIntent(),
+    const SingleActivator(LogicalKeyboardKey.keyO, meta: true, shift: true):
+        const OpenChatsIntent(),
     const SingleActivator(LogicalKeyboardKey.keyP, control: true, shift: true):
+        const OpenCommandsIntent(),
+    const SingleActivator(LogicalKeyboardKey.keyP, meta: true, shift: true):
         const OpenCommandsIntent(),
   };
 }

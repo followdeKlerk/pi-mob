@@ -8,6 +8,7 @@ import '../../attention/attention_inbox.dart';
 import '../../agents/widgets/agent_supervision_sheet.dart';
 import '../../agents/agent_domain.dart' as wire_agents;
 import '../../notifications/notification_controller.dart';
+import '../../controls/catalogue_unavailable_notice.dart';
 import '../../controls/control_view_data.dart';
 import '../../controls/supported_command_list.dart';
 import 'activity_destination.dart';
@@ -214,8 +215,9 @@ class _AppShellState extends State<AppShell> {
       // cannot report a catalogue.
     }
     if (!context.mounted) return;
-    final commands =
-        widget.coordinator.supportedCommands ?? <SupportedCommandData>[];
+    final publishedCommands = widget.coordinator.supportedCommands;
+    final catalogueUnavailable = publishedCommands?.isEmpty ?? false;
+    final commands = publishedCommands ?? <SupportedCommandData>[];
     await showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
@@ -227,22 +229,34 @@ class _AppShellState extends State<AppShell> {
               horizontal: PiSpacing.lg,
               vertical: PiSpacing.md,
             ),
-            child: SupportedCommandList(
-              commands: commands,
-              onInvoke: (command) {
-                final invocation = command.invocation;
-                if (invocation == null || invocation.isEmpty) return;
-                final current = widget.draftController.text;
-                final next = current.trim().isEmpty
-                    ? invocation
-                    : '$current $invocation';
-                widget.draftController.value = TextEditingValue(
-                  text: next,
-                  selection: TextSelection.collapsed(offset: next.length),
-                );
-                unawaited(widget.coordinator.updateDraft(next));
-                Navigator.of(sheetContext).pop();
-              },
+            child: SizedBox(
+              height: MediaQuery.sizeOf(sheetContext).height * .7,
+              child: Column(
+                children: [
+                  if (catalogueUnavailable) const CatalogueUnavailableNotice(),
+                  Expanded(
+                    child: SupportedCommandList(
+                      commands: commands,
+                      onInvoke: (command) {
+                        final invocation = command.invocation;
+                        if (invocation == null || invocation.isEmpty) return;
+                        final current = widget.draftController.text;
+                        final next = current.trim().isEmpty
+                            ? invocation
+                            : '$current $invocation';
+                        widget.draftController.value = TextEditingValue(
+                          text: next,
+                          selection: TextSelection.collapsed(
+                            offset: next.length,
+                          ),
+                        );
+                        unawaited(widget.coordinator.updateDraft(next));
+                        Navigator.of(sheetContext).pop();
+                      },
+                    ),
+                  ),
+                ],
+              ),
             ),
           ),
         );

@@ -7,6 +7,7 @@
 // which historically has been brittle across Flutter versions.
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/ui/shell/shortcut_intents.dart';
 
@@ -168,9 +169,9 @@ void main() {
     },
   );
 
-  test('buildChatShellShortcuts returns all five canonical pairs', () {
+  test('buildChatShellShortcuts returns Ctrl and Command variants', () {
     final shortcuts = buildChatShellShortcuts();
-    expect(shortcuts.length, 5);
+    expect(shortcuts.length, 10);
     expect(shortcuts.values.toSet(), <Intent>{
       const SubmitComposerIntent(),
       const OpenSearchIntent(),
@@ -178,5 +179,37 @@ void main() {
       const OpenChatsIntent(),
       const OpenCommandsIntent(),
     });
+    expect(
+      shortcuts[const SingleActivator(LogicalKeyboardKey.enter, control: true)],
+      const SubmitComposerIntent(),
+    );
+    expect(
+      shortcuts[const SingleActivator(LogicalKeyboardKey.enter, meta: true)],
+      const SubmitComposerIntent(),
+    );
+    expect(
+      shortcuts[const SingleActivator(LogicalKeyboardKey.keyK, control: true)],
+      const OpenSearchIntent(),
+    );
+    expect(
+      shortcuts[const SingleActivator(LogicalKeyboardKey.keyK, meta: true)],
+      const OpenSearchIntent(),
+    );
+    expect(
+      shortcuts[const SingleActivator(
+        LogicalKeyboardKey.keyO,
+        control: true,
+        shift: true,
+      )],
+      const OpenChatsIntent(),
+    );
+    expect(
+      shortcuts[const SingleActivator(
+        LogicalKeyboardKey.keyP,
+        meta: true,
+        shift: true,
+      )],
+      const OpenCommandsIntent(),
+    );
   });
 }
