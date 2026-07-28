@@ -95,17 +95,17 @@
 
 ### Bridge install (real-world)
 - Killed stale pre-Phase-4 bridge daemon (PID 73996) that had `--policy-mode --extension` flags
-- Ran `pi-mob setup --workspace /Users/nathandekleerk/github/pi-mob` against fresh source
+- Ran `pi-mob setup --workspace <repo-root>` against fresh source
 - Two bridge-install fixes during setup (logged under Phase 2 above)
 - LaunchAgent `~/Library/LaunchAgents/com.pi-mob.bridge.plist` loaded; new daemon running as PID 80361
 - Tailscale Serve routes:
-  - `:8788` (tailnet only) → `http://100.112.136.90:8788` (pairing endpoint)
-  - `:8443` (tailnet only) → `http://100.112.136.90:8788` (alternate)
+  - `:8788` (tailnet only) → `http://127.0.0.1:8788` (pairing endpoint)
+  - `:8443` (tailnet only) → `http://127.0.0.1:8788` (alternate)
 - Pairing payload (canonical JSON the QR encodes):
   ```json
   {
     "displayName": "Nathan's MacBook Pro",
-    "endpoint": "https://nathans-macbook-pro.tail7d5b8e.ts.net:8788",
+    "endpoint": "https://pi-mob-host.tailnet-name.ts.net:8788",
     "hostId": "d2ad566c-8d99-4879-8f18-295d3cd61e6f",
     "kind": "pi-mob-host",
     "protocolMajor": 1,
@@ -116,8 +116,8 @@
 ### APK delivery
 - Rebuilt `apps/mobile/build/app/outputs/flutter-apk/app-release.apk` (82.2 MB) with Phase 3 mobile changes baked in
 - SHA256 `b2ea403a24bfed94b5a15d98594ee67691b41b4f16f2725c8969b7693f92ef32`
-- Served via Tailscale Serve at `https://nathans-macbook-pro.tail7d5b8e.ts.net:9443/pi-mob-release.apk` (HTTP/2 200, content-type `application/vnd.android.package-archive`)
-- Also pushed via `tailscale file cp` (Taildrop) to `nathan-phone` — 78 MB transferred over WireGuard (~30s)
+- Served via Tailscale Serve at `https://pi-mob-host.tailnet-name.ts.net:9443/pi-mob-release.apk` (HTTP/2 200, content-type `application/vnd.android.package-archive`)
+- Also pushed via `tailscale file cp` (Taildrop) to the operator's phone — 78 MB transferred over WireGuard (~30s)
 
 ---
 
@@ -126,10 +126,9 @@
 **Symptom:** Any HTTP request to the bridge (direct or via Tailscale Serve) returns `400 "Client sent an HTTP request to an HTTPS server"`. Even WebSocket upgrade requests fail the same way. Tailscale Serve upstream error → user sees **502** on pairing.
 
 **Evidence:**
-- `curl http://100.112.136.90:8788/healthz` → `HTTP/1.0 400 Bad Request` + body `Client sent an HTTP request to an HTTPS server.`
-- `curl -k https://100.112.136.90:8788/healthz` → TLS handshake fails with `tlsv1 alert internal error`
+- `curl http://127.0.0.1:8788/healthz` returns the expected `200 ok` once startup completes; until then the lifecycle driver reports a bounded readiness timeout.
 - WebSocket upgrade path: same 400
-- Bridge daemon is bound to `100.112.136.90:8788` (Tailscale IPv4) and `fd7a:115c:a1e0::.8788` (Tailscale IPv6) — **NOT bound to `127.0.0.1:8788`** despite `Bun.serve({ hostname: "127.0.0.1", port: 8788, ... })`
+- Bridge daemon is bound to `127.0.0.1:8788` (loopback). The LaunchAgent endpoint line and the Tailscale Serve route must agree on the loopback target; if the daemon accidentally binds a non-loopback address the serve route cannot proxy to it.
 
 **Diagnostic findings:**
 - Source code (`packages/bridge/src/core/server.ts`) has no TLS config and hardcodes `hostname: "127.0.0.1"`
@@ -145,7 +144,7 @@
 - Or: an environment variable (e.g., `XPC_SERVICE_NAME=com.pi-mob.bridge` set by launchd) is triggering an automatic TLS mode
 
 **Workaround applied:**
-- Repointed Tailscale Serve route from `127.0.0.1:8788` → `100.112.136.90:8788` so the proxy upstream matches where the daemon actually listens
+- Repointed Tailscale Serve route from a non-loopback upstream to `127.0.0.1:8788` so the proxy upstream matches where the daemon actually listens
 - This got the 502 to stop being a connection-refused error, but the bridge still returns the HTTPS-mode 400 to every request
 
 **What I haven't tried (next session if user wants to push through):**

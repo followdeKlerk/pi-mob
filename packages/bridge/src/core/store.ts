@@ -126,8 +126,10 @@ export class BridgeStore {
       const db = new Database(path, { create: true, readwrite: true, strict: true });
       db.exec("PRAGMA foreign_keys=ON; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL; PRAGMA busy_timeout=1000;");
       this.migrate(db);
-      const integrity = db.query("PRAGMA integrity_check").get() as Record<string, unknown> | null;
-      if (!integrity || !Object.values(integrity).includes("ok")) throw new StoreError("corrupt", "database integrity check failed");
+      // Full integrity verification is an explicit doctor/backup operation.
+      // Normal daemon startup has already proven the database readable by
+      // opening it and running migrations; a full-table integrity scan here
+      // would block listener startup for transcript-heavy installations.
       return db;
     } catch (error) { throw this.mapError(error); }
   }
@@ -869,7 +871,10 @@ export class BridgeStore {
   integrityCheck(): boolean { const row = this.db.query("PRAGMA integrity_check").get() as Record<string, unknown> | null; return !!row && Object.values(row).includes("ok"); }
   health(): { ready: boolean; reason?: string } {
     if (!this.writable || this.maintenance) return { ready: false, reason: this.maintenance ? "maintenance" : this.lastFailure ?? "not_writable" };
-    try { return this.integrityCheck() ? { ready: true } : { ready: false, reason: "integrity" }; }
+    try {
+      const row = this.db.query("SELECT 1 AS ok").get() as { ok?: number } | null;
+      return row?.ok === 1 ? { ready: true } : { ready: false, reason: "unavailable" };
+    }
     catch (error) { this.mapError(error); return { ready: false, reason: "unavailable" }; }
   }
   backup(destination: string): { path: string; sha256: string; bytes: number } {

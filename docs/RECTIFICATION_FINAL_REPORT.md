@@ -400,8 +400,8 @@ The following verification commands were run after the integration tests were
 written. The exit status of each is `0` unless noted otherwise.
 
 ```sh
-# Spec §7 "Test 8" required commands — run from /Users/nathandekleerk/github/pi-mob
-cd /Users/nathandekleerk/github/pi-mob
+# Spec §7 "Test 8" required commands — run from /opt/pi-mob-operator/github/pi-mob
+cd <repo-root>
 bun run typecheck                                                # ok
 bun test                                                         # 528 pass / 0 fail / 8558 expect() [~84 s]
 bun run schema:check                                             # ok
@@ -442,7 +442,7 @@ no separate test was written for it.
 ## 8. Direct-versus-bridge parity results
 
 All five parity categories were exercised against a real Pi 0.82.0 binary
-(`/Users/nathandekleerk/.local/bin/pi`) with the user's actual
+(`/opt/pi-mob-operator/.local/bin/pi`) with the user's actual
 `~/.pi/agent` configuration, **not** against a mock. The mock-based tests
 are explicitly labelled and used only for the raw RPC dispatcher assertions
 where the test purpose is to verify the bridge's handling, not the upstream
@@ -646,7 +646,7 @@ the project root). The integrated test count is `528 pass / 0 fail`
 The spec required exercising a real bridge-managed Pi RPC process and
 comparing it with direct Pi RPC in the same workspace and environment.
 All five parity categories (env, provider, path, extension, raw RPC)
-were exercised against `/Users/nathandekleerk/.local/bin/pi` (the
+were exercised against `/opt/pi-mob-operator/.local/bin/pi` (the
 operator-installed Pi 0.82.0 binary). The mock-based tests are
 explicitly labelled and used only for bridge-handling assertions where a
 real subprocess would be unnecessary.
@@ -657,32 +657,32 @@ real subprocess would be unnecessary.
 
 ```sh
 # 1. Typecheck
-cd /Users/nathandekleerk/github/pi-mob
+cd <repo-root>
 bun run typecheck
 # ↳ output: typecheck ok
 
 # 2. Bun test
-cd /Users/nathandekleerk/github/pi-mob
+cd <repo-root>
 bun test
 # ↳ output: 528 pass / 0 fail / 8558 expect() calls / 71 files / 84 s
 
 # 3. Schema check
-cd /Users/nathandekleerk/github/pi-mob
+cd <repo-root>
 bun run schema:check
 # ↳ output: schema:check ok
 
 # 4. Fixtures check
-cd /Users/nathandekleerk/github/pi-mob
+cd <repo-root>
 bun run fixtures:check
 # ↳ output: fixtures:check ok
 
 # 5. Integration tests (subset)
-cd /Users/nathandekleerk/github/pi-mob
+cd <repo-root>
 bun test packages/bridge/test/integration/
 # ↳ output: 30 pass / 0 fail / 233 expect() calls / 8 files / 56 s
 
 # 6. Flutter
-cd /Users/nathandekleerk/github/pi-mob/apps/mobile
+cd <repo-root>/apps/mobile
 flutter analyze --no-fatal-infos    # 22 pre-existing info diagnostics (unchanged)
 flutter test                        # 553 pass / 0 fail (unchanged)
 ```

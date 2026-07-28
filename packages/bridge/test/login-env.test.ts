@@ -9,7 +9,7 @@ describe("login-shell environment capture", () => {
   test("captures and sanitizes a login-shell environment", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-login-shell-"));
     const shell = join(root, "login-shell");
-    writeFileSync(shell, "#!/bin/zsh\nprintf 'HOME=/Users/owner\\0PATH=/opt/homebrew/bin:/usr/bin\\0PWD=/tmp\\0OLDPWD=/old\\0SHLVL=1\\0_=env\\0'\n");
+    writeFileSync(shell, "#!/bin/zsh\nprintf 'HOME=/opt/pi-mob-owner\\0PATH=/opt/homebrew/bin:/usr/bin\\0PWD=/tmp\\0OLDPWD=/old\\0SHLVL=1\\0_=env\\0'\n");
     chmodSync(shell, 0o700);
     const env = await captureLoginEnv({ shell });
 
@@ -29,7 +29,7 @@ describe("login-shell environment capture", () => {
       shell,
       [
         "#!/bin/zsh",
-        "printf 'HOME=/Users/owner\\0'",
+        "printf 'HOME=/opt/pi-mob-owner\\0'",
         "printf 'USER=owner\\0'",
         "printf 'PATH=/opt/homebrew/bin:/usr/bin\\0'",
         "printf '__CFBundleIdentifier=com.example.pi\\0'",
@@ -44,7 +44,7 @@ describe("login-shell environment capture", () => {
         "printf 'TMUX=/private/tmp/tmux-501/default,123,0\\0'",
         "printf 'STY=12345.pts-0.host\\0'",
         "printf 'DISPLAY=:0\\0'",
-        "printf 'XAUTHORITY=/Users/owner/.Xauthority\\0'",
+        "printf 'XAUTHORITY=/opt/pi-mob-owner/.Xauthority\\0'",
         "printf 'XDG_SESSION_TYPE=wayland\\0'",
         "printf 'XDG_SESSION_DESKTOP=desktop\\0'",
         "printf 'XDG_RUNTIME_DIR=/run/user/501\\0'",
@@ -56,7 +56,7 @@ describe("login-shell environment capture", () => {
 
     const env = await captureLoginEnv({ shell });
 
-    expect(env).toMatchObject({ HOME: "/Users/owner", USER: "owner", PATH: "/opt/homebrew/bin:/usr/bin" });
+    expect(env).toMatchObject({ HOME: "/opt/pi-mob-owner", USER: "owner", PATH: "/opt/homebrew/bin:/usr/bin" });
     for (const key of [
       "__CFBundleIdentifier",
       "__CF_USER_TEXT_ENCODING",
@@ -84,7 +84,7 @@ describe("login-shell environment capture", () => {
   test("writes the captured map owner-only", () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-login-env-"));
     const path = join(root, "env");
-    writeCapturedEnv(path, { HOME: "/Users/owner", PATH: "/opt/homebrew/bin:/usr/bin" }, createNodeFileSystemPort());
+    writeCapturedEnv(path, { HOME: "/opt/pi-mob-owner", PATH: "/opt/homebrew/bin:/usr/bin" }, createNodeFileSystemPort());
 
     expect(statSync(path).mode & 0o777).toBe(0o600);
   });

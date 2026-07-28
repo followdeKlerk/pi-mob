@@ -148,6 +148,55 @@ void main() {
       await fixture.database.close();
     },
   );
+
+  testWidgets('missing agent capability renders explicit unavailable state', (
+    tester,
+  ) async {
+    final fixture = await _catalogueFixture();
+    final controllers = _ShellControllers();
+    expect(fixture.coordinator.supportsCapability('agents.v1'), isFalse);
+    await tester.pumpWidget(_shell(fixture.coordinator, controllers));
+    await tester.tap(find.byKey(const Key('open-agents')));
+    await tester.pumpAndSettle();
+
+    expect(find.text('Agent supervision unavailable'), findsOneWidget);
+    expect(
+      find.text(
+        'This host did not advertise an authoritative agent supervision provider.',
+      ),
+      findsOneWidget,
+    );
+
+    fixture.coordinator.dispose();
+    await tester.pumpWidget(const SizedBox.shrink());
+    controllers.dispose();
+    await fixture.database.close();
+  });
+
+  testWidgets(
+    'missing attention capability renders explicit unavailable state',
+    (tester) async {
+      final fixture = await _catalogueFixture();
+      final controllers = _ShellControllers();
+      expect(fixture.coordinator.supportsCapability('attention.v1'), isFalse);
+      await tester.pumpWidget(_shell(fixture.coordinator, controllers));
+      await tester.tap(find.byKey(const Key('open-attention')));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Attention inbox unavailable'), findsOneWidget);
+      expect(
+        find.text(
+          'This host did not advertise the durable attention inbox capability.',
+        ),
+        findsOneWidget,
+      );
+
+      fixture.coordinator.dispose();
+      await tester.pumpWidget(const SizedBox.shrink());
+      controllers.dispose();
+      await fixture.database.close();
+    },
+  );
 }
 
 Widget _shell(

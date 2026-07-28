@@ -291,6 +291,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       StreamController<PiRpcResponsePayload>.broadcast();
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
+  final Set<String> _capabilities = {};
   String? _deferredAutoSelectSessionId;
   SessionCreationState _sessionCreation = const SessionCreationState.idle();
   Completer<void>? _sessionCreationCompleter;
@@ -380,6 +381,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   bool get isReady => phase == ConnectionPhase.ready && _socket != null;
+  bool supportsCapability(String capability) =>
+      _capabilities.contains(capability);
   bool get historyGateComplete => _historyGateComplete;
   bool get historyGateRunning =>
       !_historyGateComplete && _historySyncCurrentSessionId != null;
@@ -1580,6 +1583,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     _workspaceSearch = WorkspaceSearchState.idle();
     _workspaceSearchEpoch += 1;
     _rawEvents.clear();
+    _capabilities.clear();
     _forceSnapshot.clear();
     _syncPending.clear();
     _deferredAutoSelectSessionId = null;
@@ -2730,6 +2734,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     hostDisplayName = payload['hostDisplayName'] as String?;
     bridgeVersion = payload['bridgeVersion'] as String?;
     piVersion = payload['piVersion'] as String?;
+    _capabilities
+      ..clear()
+      ..addAll(
+        (payload['capabilities'] as List? ?? const []).whereType<String>(),
+      );
     if (generationChanged) {
       await _database.resetHostCaches(newHostId);
       await _database.quarantinePendingCommands(newHostId);

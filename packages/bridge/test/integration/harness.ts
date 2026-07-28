@@ -31,7 +31,8 @@ import { BridgeStore } from "../../src/core/store";
  */
 
 export const PI_EXECUTABLE = process.env.PI_MOB_PI_RPC_BIN
-  ?? "/Users/nathandekleerk/.local/bin/pi";
+  ?? Bun.which("pi")
+  ?? "";
 
 const fs = createRequire(import.meta.url)("node:fs") as {
   existsSync(p: string): boolean;
@@ -46,7 +47,7 @@ export class PiBinaryMissingError extends Error {
 }
 
 export function requirePiBinary(): string {
-  if (!fs.existsSync(PI_EXECUTABLE)) {
+  if (!PI_EXECUTABLE || !fs.existsSync(PI_EXECUTABLE)) {
     throw new PiBinaryMissingError(PI_EXECUTABLE);
   }
   return PI_EXECUTABLE;

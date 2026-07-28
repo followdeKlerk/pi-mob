@@ -31,14 +31,6 @@
         "jsqr": "1.4.0",
       },
     },
-    "packages/pi-extension": {
-      "name": "@pi-mob/pi-extension",
-      "version": "0.0.0",
-      "devDependencies": {
-        "@earendil-works/pi-coding-agent": "0.82.0",
-        "@pi-mob/typescript-config": "workspace:*",
-      },
-    },
     "packages/protocol-fixtures": {
       "name": "@pi-mob/protocol-fixtures",
       "version": "0.0.0",
@@ -156,8 +148,6 @@
     "@opentelemetry/semantic-conventions": ["@opentelemetry/semantic-conventions@1.43.0", "", {}, "sha512-eSYWTm620tTk45EKSedaUL8MFYI8hW164hIXsgIHyxu3VobUB3fFCu5t0hQby6OoWRPsG1KkKUG2M5UadiLiVg=="],
 
     "@pi-mob/bridge": ["@pi-mob/bridge@workspace:packages/bridge"],
-
-    "@pi-mob/pi-extension": ["@pi-mob/pi-extension@workspace:packages/pi-extension"],
 
     "@pi-mob/protocol-fixtures": ["@pi-mob/protocol-fixtures@workspace:packages/protocol-fixtures"],
 

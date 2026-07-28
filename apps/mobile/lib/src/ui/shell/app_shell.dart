@@ -140,7 +140,39 @@ class _AppShellState extends State<AppShell> {
     unawaited(_openCommands(context));
   }
 
+  Future<void> _showUnavailableSheet(
+    BuildContext context, {
+    required String title,
+    required String message,
+  }) => showModalBottomSheet<void>(
+    context: context,
+    showDragHandle: true,
+    builder: (sheetContext) => SafeArea(
+      child: Padding(
+        padding: const EdgeInsets.all(PiSpacing.lg),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(title, style: Theme.of(sheetContext).textTheme.titleMedium),
+            const SizedBox(height: PiSpacing.sm),
+            Text(message),
+          ],
+        ),
+      ),
+    ),
+  );
+
   Future<void> _openAgents(BuildContext context) async {
+    if (!widget.coordinator.supportsCapability('agents.v1')) {
+      await _showUnavailableSheet(
+        context,
+        title: 'Agent supervision unavailable',
+        message:
+            'This host did not advertise an authoritative agent supervision provider.',
+      );
+      return;
+    }
     await widget.coordinator.requestAgentSnapshot().catchError((_) {});
     if (!context.mounted) return;
     await showModalBottomSheet<void>(
@@ -183,40 +215,54 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  Future<void> _openAttention(BuildContext context) =>
-      showModalBottomSheet<void>(
-        context: context,
-        isScrollControlled: true,
-        showDragHandle: true,
-        builder: (sheetContext) => SafeArea(
-          child: SizedBox(
-            height: MediaQuery.sizeOf(sheetContext).height * .75,
-            child: AttentionInbox(
-              state: widget.coordinator.attentionItems,
-              onOpen: (item) {
-                unawaited(
-                  widget.coordinator.markAttentionItemRead(item.attentionId),
-                );
-                unawaited(widget.coordinator.selectSession(item.sessionId));
-                Navigator.of(sheetContext).pop();
-              },
-            ),
+  Future<void> _openAttention(BuildContext context) async {
+    if (!widget.coordinator.supportsCapability('attention.v1')) {
+      await _showUnavailableSheet(
+        context,
+        title: 'Attention inbox unavailable',
+        message:
+            'This host did not advertise the durable attention inbox capability.',
+      );
+      return;
+    }
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: SizedBox(
+          height: MediaQuery.sizeOf(sheetContext).height * .75,
+          child: AttentionInbox(
+            state: widget.coordinator.attentionItems,
+            onOpen: (item) {
+              unawaited(
+                widget.coordinator.markAttentionItemRead(item.attentionId),
+              );
+              unawaited(widget.coordinator.selectSession(item.sessionId));
+              Navigator.of(sheetContext).pop();
+            },
           ),
         ),
-      );
+      ),
+    );
+  }
 
   /// Opens the authoritative host catalogue. When the bridge has not
   /// reported one, the sheet remains explicit instead of inventing entries.
   Future<void> _openCommands(BuildContext context) async {
-    try {
-      await widget.coordinator.requestCatalogue();
-    } on Object {
-      // The explicit unavailable state below remains visible when the host
-      // cannot report a catalogue.
+    if (widget.coordinator.supportsCapability('catalogue.v1')) {
+      try {
+        await widget.coordinator.requestCatalogue();
+      } on Object {
+        // The explicit unavailable state below remains visible when the host
+        // cannot report a catalogue.
+      }
     }
     if (!context.mounted) return;
     final publishedCommands = widget.coordinator.supportedCommands;
-    final catalogueUnavailable = publishedCommands?.isEmpty ?? false;
+    final catalogueUnavailable =
+        publishedCommands?.isEmpty ??
+        !widget.coordinator.supportsCapability('catalogue.v1');
     final commands = publishedCommands ?? <SupportedCommandData>[];
     await showModalBottomSheet<void>(
       context: context,
