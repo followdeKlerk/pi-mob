@@ -1,62 +1,137 @@
-# pi-mob mobile app
+# pi-mob Android app
 
-Flutter client for pi-mob. It connects to a bridge on a host you control; repositories, Pi processes, and provider credentials remain on that host.
+Flutter mobile client for pi-mob. It pairs with a private host, renders durable Pi session state, and provides focused mobile controls while repositories, provider credentials, Pi processes, and authoritative history remain on the Mac.
 
-> **Preview:** pi-mob is pre-release. The Android artifact currently uses a placeholder application identity and development/debug signing, not production signing.
+> **Status:** working private alpha. The current Android artifact uses preview application identity and development signing. See [Project status and roadmap](../../docs/PROJECT_STATUS.md).
 
-## Download the Android preview
+## Requirements
 
-Requirements:
+- Android 10 or newer (**API 29+**).
+- Tailscale installed and signed into the same tailnet as the host.
+- A running [pi-mob bridge](../../packages/bridge/README.md).
+- A private `.ts.net` HTTPS endpoint produced by bridge setup.
 
-- Android 10 or newer (**API 29+**)
-- [Tailscale](https://tailscale.com/download/android) installed and signed in to the same tailnet as the host bridge
-- A configured [pi-mob host bridge](../../packages/bridge/README.md)
+## Install the preview
 
-1. Open [GitHub Releases](https://github.com/followdeKlerk/pi-mob/releases).
-2. Choose a published preview release and download `pi-mob-android-preview-<version>.apk` and its adjacent `.sha256` file.
-3. Put both files in the same directory and verify the download:
+Download the APK and adjacent checksum from GitHub Releases.
 
-   ```sh
-   sha256sum -c pi-mob-android-preview-<version>.apk.sha256
-   ```
+```sh
+sha256sum -c pi-mob-android-preview-<version>.apk.sha256
+```
 
-   On macOS, use:
+On macOS:
 
-   ```sh
-   shasum -a 256 -c pi-mob-android-preview-<version>.apk.sha256
-   ```
+```sh
+shasum -a 256 -c pi-mob-android-preview-<version>.apk.sha256
+```
 
-4. Open the APK on the Android device. Android may ask you to allow **Install unknown apps** for the browser or file manager you used. Grant that permission only for this install, complete the prompt, and disable it again if desired.
+Open the APK on the Android device. Android may ask you to allow **Install unknown apps** for the browser or file manager used for this installation. Grant that permission only as needed and disable it afterwards if appropriate.
 
-Android may warn that this preview has an unknown developer. That is expected for the current development-signed APK. Verify the checksum and release source before proceeding. An existing build signed with a different development key may need to be uninstalled before an upgrade; uninstalling can remove local app data.
+The current artifact is not production-signed. Android may display an unknown-developer warning. Verify the checksum and release source. A build signed with a different development key may require uninstalling the existing app, which can remove local app data.
 
-## Connect to the host
+## Pair with the host
 
-Keep Tailscale connected on both devices. The app accepts only a private HTTPS Tailscale MagicDNS endpoint ending in `.ts.net`; ordinary LAN addresses, loopback addresses, plain HTTP, and public Funnel-like endpoints are rejected.
+Keep Tailscale connected on both devices.
 
-Use either first-pass pairing route:
+The app accepts a private HTTPS Tailscale MagicDNS endpoint ending in `.ts.net`. Plain HTTP, loopback addresses, ordinary LAN addresses, and public Funnel-style endpoints are rejected.
 
-- Scan the pairing QR produced by the host, then confirm its host name, MagicDNS hostname, protocol version, and host-ID suffix.
-- Choose manual entry and type or paste the host name or full URL, for example `host.tailnet-name.ts.net` or `https://host.tailnet-name.ts.net`. A missing scheme is normalized to HTTPS.
+Pair by either:
 
-After a successful handshake, the app saves the host endpoint locally and reuses it for reconnects and later launches. Pair again after deliberately forgetting the host or when its endpoint changes.
+- scanning the QR displayed by bridge setup and verifying the host name, endpoint, protocol version, and host-ID suffix; or
+- entering the displayed host name or full private HTTPS endpoint manually.
 
-## iOS status
+After a successful handshake, the app stores the endpoint and durable host identity for reconnects. Pair again after forgetting the host, changing installation identity, or deliberately moving to a different host.
 
-**iOS is not yet distributed.** There is no App Store listing, TestFlight invitation, IPA download, or supported sideload path. The iOS project remains development source only.
+## Available mobile workflow
 
-## Developer commands
+The production-wired app can:
 
-These commands build and test from source; they are separate from installing the preview APK:
+- create, open, rename, clone, stop, delete, restore, and export sessions where the corresponding host control is available;
+- view live and replayed transcript activity;
+- submit prompts, steer active work, queue follow-ups, and abort;
+- change model and thinking/session controls exposed by Pi;
+- compact a session;
+- search within a chat or across saved chats;
+- attach bounded images and share generated exports;
+- handle Pi extension select, confirm, input, and editor requests;
+- recover controller ownership;
+- present uncertain command execution as `indeterminate` without automatic resubmission;
+- display inline tool and subagent activity.
+
+## Capability-aware UI
+
+The app contains screens and models for some advanced providers. Those screens must remain gated by the host capability handshake.
+
+The default daemon does not currently advertise the providers for:
+
+- first-class agent supervision;
+- durable attention resolution;
+- host catalogue management;
+- structured plans;
+- context inspection;
+- workspace file browsing;
+- process snapshots and paged output.
+
+Inline subagent activity is available in the transcript; that does not imply the full agent-supervision provider is wired.
+
+Git integration is out of scope. Do not add or advertise Git status, commit, push, CI, or repository-action controls.
+
+## Connection and recovery behaviour
+
+- The app synchronizes durable host and session streams before sending state-changing commands.
+- Applied stream cursors are acknowledged for reconnect replay.
+- A lease prevents two mobile connections from mutating one session concurrently.
+- Reconnect does not imply that an uncertain command is safe to run again.
+- Unknown forward-compatible durable events should not destroy a healthy connection.
+- Known-event projection failures should eventually surface a bounded degraded state; this observability improvement remains planned.
+
+## Notifications
+
+The app works without Firebase configuration. Pairing, chat, and bridge control do not require push notifications.
+
+FCM notifications require both:
+
+1. Android Firebase configuration supplied at build time; and
+2. a host bridge configured with a valid FCM service account.
+
+Do not commit service-account credentials. Notification content is intended to be status-only.
+
+## Local data
+
+The app stores paired-host metadata, installation identity, local drafts, preferences, and bounded reconnectable projections. It does not store provider credentials or a repository copy.
+
+Uninstalling the preview or clearing app storage may remove pairing information, drafts, and local presentation state. Host-side durable Pi and bridge state remains on the Mac.
+
+## iOS
+
+The iOS source project is not a distributed product. There is no supported App Store, TestFlight, IPA, or sideload release.
+
+## Development
 
 ```sh
 cd apps/mobile
 flutter pub get
-flutter analyze
+flutter analyze --no-fatal-infos
 flutter test
 flutter build apk --release
 ```
 
-The current Android release build is still preview-only because production signing and final application identity are not configured. When `android/app/google-services.json` is absent, the app still builds and supports bridge control and pairing, but push notifications are unavailable. Provide the non-secret Firebase Android configuration in the build environment when testing notifications; do not commit credentials.
+The repository pins the Flutter version used by CI. A successful local release build is still a preview artifact until production identity and signing are configured.
 
-The app never stores provider credentials and is not intended to replace a terminal or editor.
+## Before calling a feature shipped
+
+A Flutter widget or protocol model is not enough. Verify that:
+
+1. the normal daemon constructs the provider;
+2. `hello.accepted` advertises its capability;
+3. the coordinator handles the real responses and durable events;
+4. a widget or integration test exercises the user path;
+5. public documentation lists the capability as production-wired.
+
+## Related documentation
+
+- [Project status and roadmap](../../docs/PROJECT_STATUS.md)
+- [Host bridge guide](../../packages/bridge/README.md)
+- [Architecture](../../docs/ARCHITECTURE.md)
+- [Protocol](../../docs/PROTOCOL.md)
+- [Privacy](../../docs/PRIVACY.md)
