@@ -1,142 +1,90 @@
-# Bridge daemon startup busy loop
+# Bridge daemon startup busy-loop — historical incident report
 
-## Status
+> **Archived:** this document records the July 2026 startup incident and the reasoning that led to the first scalability fixes. It is no longer the active project handoff. Use [Project status and roadmap](PROJECT_STATUS.md) for current work.
 
-**Active blocker on `debug/bridge-daemon-busy-loop`.**
+## Original incident
 
-The branch contains the larger control-oriented implementation that runs Pi with the owner's normal execution model. It is intentionally not equivalent to `main`: the bridge no longer depends on the host-policy extension to constrain Pi, and setup captures the owner's login environment so Pi sees the same PATH and provider configuration as a normal local session.
+On a macOS x86_64 host, the installed bridge daemon could consume approximately one CPU thread without binding the loopback listener. The recorded database contained roughly 45,833 durable events across 20 sessions. No Pi subprocess appeared, logs remained empty, and the lifecycle command ended with `bridge readiness timeout`.
 
-Do not remove or weaken those branch goals as a workaround for this incident. The current blocker is daemon startup and listener readiness.
+A process sample repeatedly entered SQLite stepping and B-tree traversal. Because no loopback listener existed, all mobile and Tailscale connection failures were downstream symptoms.
 
-## Reproduction recorded on the debug branch
+## Confirmed original startup order
 
-The WIP checkpoint commit `71ecdcb47b0ecf8ebe4b3936ea23ffe5b43e862a` recorded this host behaviour on macOS x86_64:
+At the time of the incident, startup performed synchronous durable-store and history work before `Bun.serve`:
 
-- `bridge-daemon` starts and consumes approximately one CPU thread.
-- The loopback HTTP/WebSocket listener is never bound.
-- No Pi RPC subprocess is started.
-- `bridge.out` and `bridge.err` remain empty.
-- `pi-mob start` ends with `bridge readiness timeout`.
-- A process sample repeatedly enters `sqlite3_step` and SQLite B-tree/index traversal.
-- The observed database contained 45,833 events across 20 sessions.
-- The event count did not grow while the process was spinning.
+1. open and migrate SQLite;
+2. run a full `PRAGMA integrity_check`;
+3. recover uncertain commands and session state;
+4. discover external Pi sessions;
+5. import and project changed session histories;
+6. start Pi RPC;
+7. recover the durable runtime;
+8. bind the loopback listener.
 
-The mobile application cannot connect in this state because no loopback listener exists for Tailscale Serve to proxy.
+## Root cause found
 
-## Confirmed startup ordering
+The dominant implementation problem was historical recipe projection complexity.
 
-`runDaemon()` currently completes synchronous durable-store and history work before creating the bridge server:
+For each imported source event, the projection layer rescanned and canonicalized the complete accumulated activity snapshot. Large histories therefore approached quadratic work. A representative large session could spend many minutes in projection before the daemon became reachable.
 
-1. Open `bridge.sqlite`.
-2. Configure SQLite and run migrations.
-3. Run `PRAGMA integrity_check`.
-4. Mark uncertain commands and restore session state.
-5. Discover Pi sessions.
-6. Import changed external Pi session histories.
-7. Start the primary Pi RPC supervisor.
-8. Start the durable runtime.
-9. Create the loopback server with `Bun.serve`.
+The import also used a single outer transaction and advanced the source revision marker only at the end. A terminated startup could roll back and retry the same tail on the next launch.
 
-The lifecycle command waits only 30 attempts at 100 ms each for `/readyz`, so startup receives roughly three seconds before reporting `bridge readiness timeout`.
+A full SQLite integrity check on every boot added another synchronous listener-blocking operation.
 
-## Working diagnosis
+## Fixes completed
 
-### Primary suspect: historical import/projection complexity
+- Recipe projection now tracks dirty activity identities and publishes only changed projections.
+- Regression coverage was added for idempotence and bounded large-history scaling.
+- Full SQLite integrity verification was removed from ordinary daemon startup; it belongs in explicit maintenance or recovery operations.
+- Additional session and mobile stability fixes prevent individual forward-compatible durable events from automatically poisoning an otherwise healthy connection.
 
-`importExternalSessionHistory()` constructs a `DurableRecipeActivityProjection`. Its constructor hydrates by reading every existing event for the session. During import, each source event is appended through `projection.append()`, which immediately calls `appendChanged()`.
+These changes address the observed quadratic busy loop. The old debug branch named in earlier versions of this document is no longer the canonical work location.
 
-`appendChanged()` walks the complete projector snapshot, canonical-serialises activities, compares them with prior published snapshots, and may append derived `recipe.activity` events. Repeating that full scan after every imported source event produces approximately O(source events × projected activities) work and can approach O(n²) for large histories.
+## Remaining architectural gap
 
-The import is wrapped in one outer transaction and writes the source revision marker only at the end. If startup is terminated before commit, the transaction rolls back and the next launch repeats the same import. That is consistent with high SQLite activity without visible event-count growth from another connection.
+The broader bind-first design is not complete.
 
-This is a diagnosis supported by code structure and the process sample, not yet a measured attribution. Instrumentation must identify the exact stage and elapsed time.
+The normal daemon still discovers and imports external history and starts primary Pi RPC before it creates the loopback server. Import still reads a complete JSONL file synchronously and commits the pending tail in one transaction.
 
-### Secondary suspect: full integrity check on every boot
+Consequences:
 
-`BridgeStore.open()` runs `PRAGMA integrity_check` synchronously during every normal daemon startup. This can be expensive on a transcript-heavy database and should not sit on the listener-critical path.
+- large or malformed histories can still delay host reachability;
+- readiness cannot distinguish process liveness from history initialization before the listener exists;
+- interrupted pending-tail import can restart from the beginning of that tail;
+- connected clients cannot observe progress or degraded history state during initialization.
 
-### Not currently supported as root causes
+## Current corrective design
 
-There is no present evidence that the failure originates in:
+The active roadmap requires:
 
-- Flutter pairing or WebSocket handling;
-- Tailscale Serve route configuration;
-- provider credentials or the captured login environment;
-- the removal of the host-policy extension;
-- Pi RPC itself, because the reproduction recorded no Pi subprocess.
+1. bind the loopback server after lightweight store recovery;
+2. expose explicit phases such as `starting`, `initializing_history`, and `ready`;
+3. import history in bounded batches;
+4. persist a checkpoint after each committed batch;
+5. yield between batches so health checks and clients remain responsive;
+6. preserve idempotence across interruption and restart;
+7. add end-to-end coverage using approximately 20 sessions and 50,000 events.
 
-Investigate those only after the loopback listener becomes reachable.
+Increasing the readiness timeout is not a solution.
 
-## Required diagnostic instrumentation
+## Diagnostic order
 
-Add bounded startup timing markers to stderr or the redacting logger. Every marker must include a stage name and elapsed monotonic milliseconds, but no private paths, transcript content, environment values, or credentials.
+When the mobile app cannot connect:
 
-Minimum stages:
+1. Check `pi-mob status`.
+2. Check `http://127.0.0.1:8788/healthz`.
+3. Check `http://127.0.0.1:8788/readyz`.
+4. Inspect the LaunchAgent and owner-only logs.
+5. Debug Tailscale only after the local listener exists.
+6. Debug Flutter only after the private Serve path reaches the local listener.
 
-- `store.open.begin` / `store.open.end`
-- `store.integrity.begin` / `store.integrity.end`
-- `sessions.discover.begin` / `sessions.discover.end`
-- one summary per imported session: source entries, pending entries, existing durable events, derived events, elapsed time
-- `history.import.all.end`
-- `rpc.start.begin` / `rpc.start.end`
-- `runtime.start.begin` / `runtime.start.end`
-- `server.bind.begin` / `server.bind.end`
+A timeout by itself does not prove whether startup is slow, the process crashed, or binding failed.
 
-Do not add per-event logging; that can worsen the incident and leak unnecessary metadata.
+## Preserved evidence
 
-## Corrective design
+The original checkpoint commit and dated rectification reports remain available in repository history and in:
 
-Implement the smallest safe sequence that makes listener readiness independent of historical replay:
+- [Raw RPC rectification progress snapshot](PROGRESS_SNAPSHOT.md)
+- [Raw RPC rectification final report](RECTIFICATION_FINAL_REPORT.md)
 
-1. **Bind first.** Create the loopback server before bulk history synchronisation.
-2. **Expose initialization truthfully.** `/readyz` should distinguish process liveness from full history readiness, or add a separate startup-state endpoint. Mobile may connect while the host reports `initializing`.
-3. **Batch projection.** Apply a bounded batch of source events to the projector, then emit changed derived snapshots once per batch rather than once per source event.
-4. **Checkpoint progress.** Persist a source cursor or equivalent import checkpoint after each committed batch. Do not require an entire session history to succeed atomically.
-5. **Yield between batches.** Return to the event loop so health checks and connections remain responsive.
-6. **Move full integrity verification.** Keep normal startup lightweight. Run full `integrity_check` through `pi-mob doctor`, explicit maintenance, or recovery mode.
-7. **Improve lifecycle reporting.** Replace the undifferentiated three-second timeout with bounded phase-aware readiness output. A longer timeout alone is not the fix.
-
-## Acceptance criteria
-
-The incident is resolved only when all of the following hold:
-
-- The loopback listener becomes reachable promptly with the existing 45k-event-class database.
-- The daemon reports an explicit startup phase while history synchronization continues.
-- The mobile app can establish its host connection during or immediately after initialization.
-- Imported histories remain idempotent across restart and interruption.
-- Terminating the daemon mid-import does not force replay from the beginning.
-- No duplicate source or derived events are created.
-- No Pi subprocess is orphaned.
-- The owner-captured launch environment and normal Pi execution model remain intact.
-- A regression test covers approximately 20 sessions and 50,000 durable events.
-- Relevant bridge tests, typecheck, and mobile connection tests pass.
-
-## Suggested implementation order
-
-1. Add startup stage timings and reproduce against a copy of the affected database.
-2. Confirm whether time is dominated by `integrity_check`, projection hydration, repeated `appendChanged()`, or another query.
-3. Add an early listener plus explicit initialization state.
-4. Refactor history import into bounded, checkpointed batches.
-5. Move full integrity checking out of ordinary startup.
-6. Add the large-history regression fixture and interruption/restart test.
-7. Re-run mobile pairing only after local `/readyz` and WebSocket connectivity are proven.
-
-## Files to inspect first
-
-- `packages/bridge/src/daemon.ts`
-- `packages/bridge/src/core/store.ts`
-- `packages/bridge/src/pi/external-history.ts`
-- `packages/bridge/src/pi/recipe-activity.ts`
-- `packages/bridge/src/core/server.ts`
-- `packages/bridge/src/ops/macos-system.ts`
-- `packages/bridge/src/ops/cli.ts`
-
-## Guardrails for the next agent
-
-- Work on `debug/bridge-daemon-busy-loop`; do not assume `main` represents this branch.
-- Preserve unrelated R7/R8/R9/R12 work already captured on the branch.
-- Do not delete the existing database during diagnosis; reproduce against a copy.
-- Do not treat increasing the readiness timeout as resolution.
-- Do not reintroduce the host-policy extension merely to make startup simpler.
-- Separate confirmed measurements from hypotheses in commits and documentation.
-- Commit diagnostic instrumentation separately from behavioural fixes where practical.
+Those reports contain host-specific observations and historical test counts. Treat them as evidence snapshots, not current product claims.
