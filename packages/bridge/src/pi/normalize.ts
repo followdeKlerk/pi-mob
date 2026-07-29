@@ -49,10 +49,10 @@ const PRIVATE_KEY = /path|sourceInfo|sessionFile|fullOutputPath|stack/i;
 /**
  * Bounds normalized tool progress/results without throwing away Pi's turn.
  *
- * Pi progress records are accumulated snapshots rather than deltas. The bridge
- * journals each normalized snapshot, so retained/total byte counters describe
- * the exact normalized byte stream journaled for that tool call. `begin()` and
- * `end()` scope that stream; independent/parallel calls have independent caps.
+ * Pi progress records are cumulative snapshots rather than deltas. Progress
+ * normalization therefore replaces the prior snapshot for a call, while final
+ * tool results remain genuine additional output and use the additive limiter.
+ * `begin()` and `end()` scope each call independently.
  */
 export class ToolOutputLimiter {
   readonly maxEventBytes: number;
@@ -82,9 +82,23 @@ export class ToolOutputLimiter {
     return this.limit(toolCallId, value);
   }
 
+  /** Normalize a cumulative progress snapshot, replacing the previous one. */
+  snapshot(toolCallId: string, value: unknown): LimitedToolOutput {
+    if (!this.calls.has(toolCallId)) {
+      this.calls.set(toolCallId, newToolCallOutputState());
+    }
+    const snapshotState = newToolCallOutputState();
+    const limited = this.measure(snapshotState, value);
+    return limited;
+  }
+
   limit(toolCallId: string, value: unknown): LimitedToolOutput {
     const state = this.calls.get(toolCallId) ?? newToolCallOutputState();
     this.calls.set(toolCallId, state);
+    return this.measure(state, value);
+  }
+
+  private measure(state: ToolCallOutputState, value: unknown): LimitedToolOutput {
     const allowance = Math.max(0, Math.min(
       this.maxEventBytes - TOOL_OUTPUT_METADATA_RESERVE_BYTES,
       this.maxCallBytes - state.retainedBytes,
@@ -399,7 +413,7 @@ switch (raw.type) {
   }
   case "tool_execution_update": {
     const toolCallId = identifier(raw.toolCallId);
-    const limited = (context.toolOutputLimiter ?? new ToolOutputLimiter()).limit(toolCallId, raw.partialResult);
+    const limited = (context.toolOutputLimiter ?? new ToolOutputLimiter()).snapshot(toolCallId, raw.partialResult);
     return [event("tool.output", sessionId, {
       toolCallId, output: limited.value, retainedBytes: limited.retainedBytes,
       totalBytes: limited.totalBytes, isTruncated: limited.isTruncated,

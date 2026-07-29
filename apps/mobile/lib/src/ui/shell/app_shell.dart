@@ -5,8 +5,6 @@ import 'package:flutter/material.dart';
 import '../../connection/connection_coordinator.dart';
 import '../../domain/prompt_send_lifecycle.dart';
 import '../../attention/attention_inbox.dart';
-import '../../agents/widgets/agent_supervision_sheet.dart';
-import '../../agents/agent_domain.dart' as wire_agents;
 import '../../notifications/notification_controller.dart';
 import '../../controls/catalogue_unavailable_notice.dart';
 import '../../controls/control_view_data.dart';
@@ -162,58 +160,6 @@ class _AppShellState extends State<AppShell> {
       ),
     ),
   );
-
-  Future<void> _openAgents(BuildContext context) async {
-    if (!widget.coordinator.supportsCapability('agents.v1')) {
-      await _showUnavailableSheet(
-        context,
-        title: 'Agent supervision unavailable',
-        message:
-            'This host did not advertise an authoritative agent supervision provider.',
-      );
-      return;
-    }
-    await widget.coordinator.requestAgentSnapshot().catchError((_) {});
-    if (!context.mounted) return;
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(sheetContext).height * .75,
-          child: AgentSupervisionSheet(
-            state: widget.coordinator.agents,
-            title: 'Agents',
-            onAction: (run, action) {
-              if (action == 'transcript') {
-                unawaited(
-                  widget.coordinator.selectSession(run.originChatId ?? ''),
-                );
-                Navigator.of(sheetContext).pop();
-              } else if (action != 'compare') {
-                final wireAgent = wire_agents.AgentRecordData(
-                  agentId: run.agentId ?? run.toolCallId,
-                  task: run.task,
-                  state: run.status.name,
-                  originSessionId: run.originChatId ?? '',
-                  originTurnId: run.originTurnId ?? '',
-                  supportedActions: <String>{action},
-                  revision: run.caps?.contractSource?.split(':').last ?? '',
-                  model: run.model,
-                  latestActivity: run.latestOutput,
-                  completionSummary: run.errorMessage,
-                );
-                unawaited(
-                  widget.coordinator.sendAgentAction(wireAgent, action),
-                );
-              }
-            },
-          ),
-        ),
-      ),
-    );
-  }
 
   Future<void> _openAttention(BuildContext context) async {
     if (!widget.coordinator.supportsCapability('attention.v1')) {
@@ -416,12 +362,6 @@ class _AppShellState extends State<AppShell> {
                           icon: const Icon(Icons.smart_toy_outlined),
                         );
                       },
-                    ),
-                    IconButton(
-                      key: const Key('open-agents'),
-                      tooltip: 'Agent supervision',
-                      onPressed: () => _openAgents(context),
-                      icon: const Icon(Icons.hub_outlined),
                     ),
                     IconButton(
                       key: const Key('open-attention'),

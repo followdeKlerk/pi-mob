@@ -66,6 +66,7 @@ class ParsedToolEvent {
     required this.toolName,
     this.status = TranscriptToolStatus.running,
     this.arguments = const <String, Object?>{},
+    this.outputSnapshot,
     this.outputDelta,
     this.result,
     this.errorMessage,
@@ -79,6 +80,10 @@ class ParsedToolEvent {
   final String toolName;
   final TranscriptToolStatus status;
   final Map<String, Object?> arguments;
+  /// Snapshot output replaces prior output for this tool call. Genuine deltas
+  /// are carried separately by the protocol as `delta`.
+  final String? outputSnapshot;
+  /// Genuine incremental output, appended only when explicitly marked delta.
   final String? outputDelta;
   final Map<String, Object?>? result;
   final String? errorMessage;
@@ -230,7 +235,8 @@ class TranscriptEventParser {
       throw const FormatException('tool.output requires non-empty toolCallId');
     }
     final step = _optionalString(payload['assistantStepId']) ?? '';
-    final delta = payload['output'] ?? payload['delta'];
+    final snapshot = payload['output'];
+    final delta = payload['delta'];
     final resultRaw = payload['result'];
     final result = <String, Object?>{};
     if (resultRaw is Map) {
@@ -243,6 +249,7 @@ class TranscriptEventParser {
           ? payload['toolName'] as String
           : '',
       status: TranscriptToolStatus.running,
+      outputSnapshot: snapshot is String ? snapshot : null,
       outputDelta: delta is String ? delta : null,
       result: result.isEmpty ? null : Map<String, Object?>.unmodifiable(result),
       truncation: _truncation(payload),

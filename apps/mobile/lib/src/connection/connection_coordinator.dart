@@ -361,6 +361,10 @@ final class ConnectionCoordinator extends ChangeNotifier
   bool _notifyScheduled = false;
   bool _initialized = false;
   bool _disposed = false;
+  // TEMPORARY DIAGNOSTIC: track the last values logged by _notify so we
+  // only emit when phase / errorMessage actually change.
+  ConnectionPhase? _lastLoggedPhase;
+  String? _lastLoggedErrorMessage;
 
   ConnectionPhase phase = ConnectionPhase.unpaired;
   Uri? endpoint;
@@ -1355,6 +1359,12 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   Future<void> connect(String endpointText, {bool force = false}) async {
     if (!_foreground || _disposed) return;
+    debugPrint(
+      '[pi-mob][conn] connect entry phase=${phase.name} '
+      'epoch=$_connectionEpoch '
+      'socketNonnull=${_socket != null} '
+      'reconnectTimerActive=${_reconnectTimer != null}',
+    );
     final normalized = normalizeHttpsEndpoint(endpointText);
     if (!force &&
         _socket != null &&
@@ -2629,11 +2639,31 @@ final class ConnectionCoordinator extends ChangeNotifier
       throw const FormatException('Bridge message is not an object');
     }
     final message = Map<String, Object?>.from(decoded);
-    // Reuse the executable protocol contract for correlated responses and
-    // journal events. Unsolicited sync/snapshot frames intentionally omit a
-    // requestId on the M4 wire and are validated by their handlers below.
-    if (message['requestId'] != null || message['eventId'] != null) {
+    // Correlated non-durable request/response messages and handshake
+    // semantics (for example hello.accepted) must continue to satisfy the
+    // strict executable protocol contract via ProtocolEnvelope.fromJson.
+    // Durable forward-version journal events, however, are structurally
+    // identified by the eventId/streamId/cursor triple and are intentionally
+    // NOT payload-validated against ProtocolEvent: a future or relaxed host
+    // revision must not cause the mobile client to demote a live connection
+    // and reconnect incompatibly. Their basic envelope shape (type String +
+    // payload Map) is still enforced below, the durable identity fields are
+    // still required for the journal/cursor advance, and type-specific
+    // projections remain isolated from the receive path.
+    final isDurableEvent =
+        message['eventId'] is String &&
+        message['streamId'] is String &&
+        message['cursor'] is String;
+    if (!isDurableEvent &&
+        (message['requestId'] != null || message['eventId'] != null)) {
       ProtocolEnvelope.fromJson(message);
+    }
+    if (isDurableEvent) {
+      debugPrint(
+        '[pi-mob][conn] durable event type=${message['type']} '
+        'streamId=${message['streamId']} cursor=${message['cursor']} '
+        '— skipping strict ProtocolEnvelope.fromJson payload validation',
+      );
     }
     final type = message['type'];
     final payloadValue = message['payload'];
@@ -2655,14 +2685,14 @@ final class ConnectionCoordinator extends ChangeNotifier
       // their projection BEFORE the cursor advance notifies subscribers,
       // otherwise the UI sees an out-of-order summary then unavailable.
       if (type == 'git.summary' || type == 'git.unavailable') {
-        _applyGitStreamEvent(type, payload);
+        _isolateLiveEventProjection(() => _applyGitStreamEvent(type, payload));
       }
       // R2 — both plan.unavailable (host stream capability envelope) and
       // plan.snapshot (session stream authoritative projection) must apply
       // before the cursor advance notifies subscribers so the UI sees an
       // ordered plan projection rather than out-of-order transitions.
       if (type == 'plan.unavailable' || type == 'plan.snapshot') {
-        _applyPlanStreamEvent(type, payload);
+        _isolateLiveEventProjection(() => _applyPlanStreamEvent(type, payload));
       }
       // R4 — both context.unavailable (host stream capability envelope)
       // and context.snapshot (session stream authoritative projection)
@@ -2670,7 +2700,9 @@ final class ConnectionCoordinator extends ChangeNotifier
       // UI sees an ordered context projection rather than out-of-order
       // transitions. Same discipline as R2 plans and R6 git.
       if (type == 'context.unavailable' || type == 'context.snapshot') {
-        _applyContextStreamEvent(type, payload);
+        _isolateLiveEventProjection(
+          () => _applyContextStreamEvent(type, payload),
+        );
       }
       _notify();
       return;
@@ -3020,7 +3052,9 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _database.persistEvent(event);
         _scheduleSearchIndex(event.streamId);
         _streams[streamId] = reduction.state;
-        _handleEventPayload(type, payload);
+        _isolateLiveEventProjection(
+          () => _handleEventPayload(type, payload),
+        );
         _eventsSinceAck += 1;
         if (_eventsSinceAck >= 20) await _ackCursors();
       case EventDisposition.duplicate:
@@ -3043,6 +3077,23 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
+  void _isolateLiveEventProjection(void Function() projection) {
+    // Envelope validation, hello, and transport errors remain fatal. Once
+    // hello has established a live connection, however, a single durable
+    // event's parser/projection is untrusted application data: the event has
+    // already been journaled above, so skip only this projection and keep the
+    // socket and message queue alive for subsequent events.
+    if (connectionId == null) {
+      projection();
+      return;
+    }
+    try {
+      projection();
+    } catch (_) {
+      // Deliberately do not call _protocolFailure or change phase here.
+    }
+  }
+
   void _handleEventPayload(String type, Map<String, Object?> payload) {
     if (type == 'pi.rpc.response') {
       final response = PiRpcResponsePayload.fromJson(payload);
@@ -3050,7 +3101,18 @@ final class ConnectionCoordinator extends ChangeNotifier
           response;
       _rawRpcResponseController.add(response);
     } else if (type == 'pi.rpc.event') {
-      final rawEvent = PiRpcEventPayload.fromJson(payload);
+      // Raw Pi events are an opaque pass-through. A malformed or newer
+      // extension event must not escape this projection and be treated as a
+      // protocol failure: _receive's error handler would otherwise demote
+      // the live connection and schedule a reconnect while the socket is
+      // still healthy. The durable event remains available in the journal.
+      final sessionId = payload['sessionId'];
+      final event = payload['event'];
+      if (sessionId is! String || event is! Map) return;
+      final rawEvent = PiRpcEventPayload(
+        sessionId: sessionId,
+        event: Map<String, Object?>.from(event),
+      );
       _rawPiEvents.add(rawEvent);
       if (_rawPiEvents.length > 200) {
         _rawPiEvents.removeRange(0, _rawPiEvents.length - 200);
@@ -4749,6 +4811,10 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   void _socketEnded(Object? error, int epoch) {
     if (epoch != _connectionEpoch || _disposed) return;
+    debugPrint(
+      '[pi-mob][conn] _socketEnded error=${error?.runtimeType} '
+      'epoch=$epoch currentEpoch=$_connectionEpoch',
+    );
     _failSessionCreation('The connection closed before the chat was created.');
     _failModelListRequest('The connection closed before agents were loaded.');
     ++_connectionEpoch;
@@ -4812,6 +4878,10 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   void _protocolFailure(Object error, int epoch) {
     if (epoch != _connectionEpoch) return;
+    debugPrint(
+      '[pi-mob][conn] _protocolFailure error=${error.runtimeType} '
+      'epoch=$epoch currentEpoch=$_connectionEpoch',
+    );
     _failSessionCreation('The bridge response could not be read.');
     phase = ConnectionPhase.incompatible;
     errorMessage = 'Protocol error: $error';
@@ -4888,6 +4958,19 @@ final class ConnectionCoordinator extends ChangeNotifier
   void _notify() {
     if (_disposed || _notifyScheduled) return;
     _notifyScheduled = true;
+    // TEMPORARY DIAGNOSTIC: log every actual phase / errorMessage change.
+    final phaseChanged = _lastLoggedPhase != phase;
+    final errorChanged = _lastLoggedErrorMessage != errorMessage;
+    if (phaseChanged || errorChanged) {
+      debugPrint(
+        '[pi-mob][conn] _notify phase=${phase.name}'
+        '${phaseChanged ? ' (changed)' : ''} '
+        'errorMessage=${errorMessage ?? '<null>'}'
+        '${errorChanged ? ' (changed)' : ''}',
+      );
+      _lastLoggedPhase = phase;
+      _lastLoggedErrorMessage = errorMessage;
+    }
     SchedulerBinding.instance.ensureVisualUpdate();
     SchedulerBinding.instance.addPostFrameCallback((_) {
       _notifyScheduled = false;

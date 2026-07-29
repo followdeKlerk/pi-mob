@@ -253,7 +253,10 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       return { items: listing.items.map((item) => ({ ...item })) };
     }
     if (type === "workspace.search") {
-      throw new RuntimeProtocolError("unsupported_capability", "workspace search is not available on this host");
+      if (typeof this.options.adapter.searchWorkspaces !== "function") throw new RuntimeProtocolError("workspace_unavailable", "adapter does not expose workspace search");
+      const query = String(payload.query ?? "").trim();
+      if (!query) throw new RuntimeProtocolError("invalid_state", "search query must not be empty");
+      return { items: this.options.adapter.searchWorkspaces(query).items.map((item) => ({ ...item })) };
     }
     if (type === "workspace.tree.page" || type === "workspace.file.search" || type === "workspace.file.content.search" || type === "workspace.file.metadata" || type === "workspace.file.read") {
       return this.workspaceFileControl(type, payload);

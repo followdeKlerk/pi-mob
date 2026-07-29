@@ -28,7 +28,7 @@
  *   --help                            print usage
  */
 
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, basename, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
@@ -87,6 +87,8 @@ export interface DaemonOptions {
    * accepted but ignored, kept for back-compat with persisted configs.
    */
   readonly allowedRoots?: readonly string[];
+  /** Explicit developer roots available to the shallow workspace picker. */
+  readonly searchRoots?: readonly string[];
   /**
    * Optional Pi extension path. The bridge no longer injects a default
    * policy extension; pass this when the operator wants Pi loaded with
@@ -317,6 +319,15 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   if (options.allowedRoots && options.allowedRoots.length > 0) {
     options.logger?.log({ class: "warning", event: "allowed-root-deprecated" });
   }
+  if (options.searchRoots) {
+    for (const candidate of options.searchRoots) {
+      assertAbsolute("search-root", candidate);
+      let metadata: ReturnType<typeof lstatSync>;
+      try { metadata = lstatSync(candidate); }
+      catch { throw new Error(`search-root does not exist: ${candidate}`); }
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error(`search-root must be a real directory: ${candidate}`);
+    }
+  }
   if (options.extensionPath) {
     assertAbsolute("extensionPath", options.extensionPath);
     if (!existsSync(options.extensionPath)) throw new Error(`extension does not exist: ${options.extensionPath}`);
@@ -467,6 +478,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     policyMode: "full",
     availableSince: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
+    ...(options.searchRoots && options.searchRoots.length > 0 ? { searchRoots: options.searchRoots } : {}),
   };
   const attachments = new AttachmentStore({ root: join(stateDir, "attachments") });
   attachments.sweep();
@@ -610,13 +622,14 @@ interface CliArgs {
   displayName: string | null;
   policyMode: HostPolicyMode | null;
   allowedRoots: string[];
+  searchRoots: string[];
   extensionPath: string | null;
   fcmServiceAccount: string | null;
   help: boolean;
 }
 
 export function parseCliArgs(argv: readonly string[]): CliArgs {
-  const out: CliArgs = { workspace: null, executable: null, port: null, config: null, stateDir: null, sessionDir: null, displayName: null, policyMode: null, allowedRoots: [], extensionPath: null, fcmServiceAccount: null, help: false };
+  const out: CliArgs = { workspace: null, executable: null, port: null, config: null, stateDir: null, sessionDir: null, displayName: null, policyMode: null, allowedRoots: [], searchRoots: [], extensionPath: null, fcmServiceAccount: null, help: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     switch (arg) {
@@ -651,6 +664,13 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
         out.allowedRoots.push(next);
         break;
       }
+      case "--search-root": {
+        const next = argv[++i] ?? null;
+        if (!next) throw new Error("--search-root requires a path");
+        if (!isAbsolute(next)) throw new Error(`--search-root path must be absolute: ${next}`);
+        out.searchRoots.push(next);
+        break;
+      }
       case "--help": case "-h": out.help = true; break;
       default: throw new Error(`unknown argument: ${arg}`);
     }
@@ -661,7 +681,7 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
   return out;
 }
 
-const USAGE = `usage: daemon --workspace <abs path> [--config <abs path> | --executable <abs path>] [--extension <abs path>] [--port N] [--state-dir <abs path>] [--session-dir <abs path>] [--display-name <str>] [--fcm-service-account <abs path>]`;
+const USAGE = `usage: daemon --workspace <abs path> [--config <abs path> | --executable <abs path>] [--extension <abs path>] [--port N] [--state-dir <abs path>] [--session-dir <abs path>] [--display-name <str>] [--search-root <abs path>] [--fcm-service-account <abs path>]`;
 
 export async function main(argv: readonly string[]): Promise<number> {
   let args: CliArgs;
@@ -699,6 +719,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     ...(installed?.bridgeVersion ? { bridgeVersion: installed.bridgeVersion } : {}),
     ...(args.policyMode ? { policyMode: args.policyMode } : {}),
     ...(args.allowedRoots.length > 0 ? { allowedRoots: args.allowedRoots } : {}),
+    ...(args.searchRoots.length > 0 ? { searchRoots: args.searchRoots } : {}),
     ...(args.extensionPath ? { extensionPath: args.extensionPath } : {}),
     ...(fcmConfig ? { fcm: fcmConfig } : {}),
     environment: process.env as Record<string, string>,

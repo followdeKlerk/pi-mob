@@ -8,7 +8,8 @@
  * normalise displayed relative paths. Behavioural policy lives in Pi.
  */
 
-import { isAbsolute, relative, resolve, sep } from "node:path";
+import { lstatSync, opendirSync, realpathSync } from "node:fs";
+import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 
 export type WorkspacePolicyErrorCode =
   | "not_absolute"
@@ -282,6 +283,77 @@ function containsTraversalSegment(value: string): boolean {
 
 function toPosixRelative(value: string): string {
   return value.split(sep).join("/");
+}
+
+const WORKSPACE_SEARCH_SKIPPED = new Set(["node_modules", "build", "dist"]);
+const MAX_WORKSPACE_SEARCH_ROOTS = 4;
+const MAX_WORKSPACE_SEARCH_ENTRIES = 256;
+const MAX_WORKSPACE_SEARCH_RESULTS = 20;
+
+export interface WorkspaceDirectoryMatch {
+  readonly canonicalPath: CanonicalPath;
+  readonly rootCanonicalPath: CanonicalPath;
+}
+
+/**
+ * Enumerate only each explicit developer root and its immediate children.
+ * The walk never recurses, never follows symlinks, and has fixed
+ * root/entry/result caps. Both listing and search consume this exact set.
+ */
+export function enumerateWorkspaceDirectories(
+  roots: readonly string[],
+): WorkspaceDirectoryMatch[] {
+  const matches: WorkspaceDirectoryMatch[] = [];
+  const seen = new Set<string>();
+
+  for (const root of roots.slice(0, MAX_WORKSPACE_SEARCH_ROOTS)) {
+    if (matches.length >= MAX_WORKSPACE_SEARCH_RESULTS) break;
+    let canonicalRoot: string;
+    try {
+      const metadata = lstatSync(root);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) continue;
+      canonicalRoot = realpathSync(root);
+    } catch { continue; }
+
+    const add = (canonicalPath: string): void => {
+      if (matches.length >= MAX_WORKSPACE_SEARCH_RESULTS || seen.has(canonicalPath)) return;
+      seen.add(canonicalPath);
+      matches.push({ canonicalPath, rootCanonicalPath: canonicalRoot });
+    };
+    add(canonicalRoot);
+
+    let directory: ReturnType<typeof opendirSync>;
+    try { directory = opendirSync(canonicalRoot); }
+    catch { continue; }
+    try {
+      for (let visited = 0; visited < MAX_WORKSPACE_SEARCH_ENTRIES; visited += 1) {
+        const entry = directory.readSync();
+        if (!entry || matches.length >= MAX_WORKSPACE_SEARCH_RESULTS) break;
+        if (!entry.isDirectory() || entry.isSymbolicLink() ||
+            entry.name.startsWith(".") || WORKSPACE_SEARCH_SKIPPED.has(entry.name)) continue;
+        const candidate = join(canonicalRoot, entry.name);
+        try {
+          const metadata = lstatSync(candidate);
+          if (!metadata.isDirectory() || metadata.isSymbolicLink()) continue;
+          const canonical = realpathSync(candidate);
+          if (isPathWithinRoot(canonical, canonicalRoot)) add(canonical);
+        } catch { /* entry disappeared or became unsafe */ }
+      }
+    } catch { /* root became unreadable */ }
+    finally { try { directory.closeSync(); } catch { /* already closed */ } }
+  }
+  return matches;
+}
+
+export function searchWorkspaceDirectories(
+  roots: readonly string[],
+  rawQuery: string,
+): WorkspaceDirectoryMatch[] {
+  const query = rawQuery.trim().slice(0, 64).toLowerCase();
+  if (!query) return [];
+  return enumerateWorkspaceDirectories(roots).filter((match) =>
+    basename(match.canonicalPath).toLowerCase().includes(query),
+  );
 }
 
 /**

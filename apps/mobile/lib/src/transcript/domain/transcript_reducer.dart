@@ -297,31 +297,70 @@ class TranscriptReducer {
     final parsed = _parser.parseTurnStarted(event.payload);
     final userKey = TranscriptKeys.userTurnKey(parsed.turnId);
     final assistantKey = TranscriptKeys.assistantTurnKey(parsed.turnId);
-    final nextDoc = _upsertTurn(
-      state.document,
-      UserTurn(
-        turnId: parsed.turnId,
-        commandId: parsed.commandId,
-        deliveryMode: parsed.deliveryMode,
-        status: UserTurnStatus.dispatched,
-        startedAt: event.occurredAt,
-        message: parsed.message,
-        respondingToTurnId: parsed.respondingToTurnId,
-      ),
-      userKey,
-    );
-    final assistantTurn = AssistantTurn(
-      turnId: parsed.turnId,
-      assistantStepId: '',
-      status: AssistantTurnStatus.active,
-      items: const [],
-      startedAt: event.occurredAt,
-      respondingToUserTurnId: parsed.turnId,
-    );
+    final existingUser = state.document.lastTurnWithKeyPrefix(userKey);
+    final userTurn = existingUser is UserTurn
+        ? UserTurn(
+            turnId: existingUser.turnId,
+            commandId: existingUser.commandId,
+            deliveryMode: existingUser.deliveryMode,
+            status: existingUser.isTerminal
+                ? existingUser.status
+                : UserTurnStatus.dispatched,
+            startedAt: existingUser.startedAt ?? event.occurredAt,
+            endedAt: existingUser.endedAt,
+            message: existingUser.message ?? parsed.message,
+            respondingToTurnId:
+                existingUser.respondingToTurnId ?? parsed.respondingToTurnId,
+          )
+        : UserTurn(
+            turnId: parsed.turnId,
+            commandId: parsed.commandId,
+            deliveryMode: parsed.deliveryMode,
+            status: UserTurnStatus.dispatched,
+            startedAt: event.occurredAt,
+            message: parsed.message,
+            respondingToTurnId: parsed.respondingToTurnId,
+          );
+    final nextDoc = _upsertTurn(state.document, userTurn, userKey);
+    final existingAssistant = nextDoc.lastTurnWithKeyPrefix(assistantKey);
+    final isExistingTurn = existingAssistant is AssistantTurn;
+    final incomingAssistantStepId = event.payload['assistantStepId'];
+    final assistantStepId = incomingAssistantStepId is String &&
+            incomingAssistantStepId.isNotEmpty
+        ? incomingAssistantStepId
+        : '';
+    final assistantTurn = existingAssistant is AssistantTurn
+        ? AssistantTurn(
+            turnId: existingAssistant.turnId,
+            assistantStepId: existingAssistant.assistantStepId.isEmpty
+                ? assistantStepId
+                : existingAssistant.assistantStepId,
+            status: existingAssistant.status,
+            items: existingAssistant.items,
+            startedAt: existingAssistant.startedAt ?? event.occurredAt,
+            endedAt: existingAssistant.endedAt,
+            respondingToUserTurnId:
+                existingAssistant.respondingToUserTurnId ?? parsed.turnId,
+            errorCode: existingAssistant.errorCode,
+            errorMessage: existingAssistant.errorMessage,
+          )
+        : AssistantTurn(
+            turnId: parsed.turnId,
+            assistantStepId: '',
+            status: AssistantTurnStatus.active,
+            items: const [],
+            startedAt: event.occurredAt,
+            respondingToUserTurnId: parsed.turnId,
+          );
     final finalDoc = _upsertTurn(nextDoc, assistantTurn, assistantKey);
+    if (isExistingTurn) {
+      // Replayed/resumed starts for one durable turn must not discard content
+      // items or the transient builders that are still receiving deltas.
+      return state.copyWith(document: finalDoc);
+    }
     // Pi content-block indexes commonly restart from zero for every prompt.
-    // A turn boundary must therefore discard transient builders from the
-    // preceding turn instead of allowing an identical block id to continue.
+    // A genuinely new turn must discard builders from the preceding turn
+    // instead of allowing an identical block id to continue.
     return TranscriptReducerState(document: finalDoc);
   }
 
@@ -738,18 +777,24 @@ class TranscriptReducer {
         assistantStepId: step,
         toolName: toolName,
         status: TranscriptToolStatus.running,
-        outputBuffer: _capString(parsed.outputDelta ?? '', _kToolOutputByteCap),
+        outputBuffer: _capString(
+          (parsed.outputSnapshot ?? '') + (parsed.outputDelta ?? ''),
+          _kToolOutputByteCap,
+        ),
         result: parsed.result,
         truncation: parsed.truncation,
       );
     } else {
-      final combined = existing.outputBuffer + (parsed.outputDelta ?? '');
       builders[parsed.toolCallId] = _ToolBuilder(
         assistantStepId: existing.assistantStepId,
         toolName: existing.toolName,
         status: existing.status,
         arguments: existing.arguments,
-        outputBuffer: _capString(combined, _kToolOutputByteCap),
+        outputBuffer: _capString(
+          (parsed.outputSnapshot ?? existing.outputBuffer) +
+              (parsed.outputDelta ?? ''),
+          _kToolOutputByteCap,
+        ),
         result: parsed.result ?? existing.result,
         errorMessage: existing.errorMessage,
         truncation: parsed.truncation ?? existing.truncation,

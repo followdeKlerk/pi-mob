@@ -257,6 +257,8 @@ class _ToolCardState extends State<ToolCard> {
 
   Widget _renderArgs() {
     switch (_data.toolName) {
+      case 'subagent':
+        return _renderSubagentArgs();
       case 'Agent':
         return _kv([
           if (_data.arguments['description'] != null)
@@ -361,6 +363,66 @@ class _ToolCardState extends State<ToolCard> {
       default:
         return _jsonBlock(_data.arguments, label: 'Raw arguments');
     }
+  }
+
+  Widget _renderSubagentArgs() {
+    final args = _data.arguments;
+    final action = args['action'];
+    if (action == 'list' || action == 'models') {
+      return _kv([MapEntry('management', action as Object)]);
+    }
+    final rows = <MapEntry<String, Object>>[];
+    void addWorker(Map worker, String prefix) {
+      final agent = worker['agent'];
+      final model = worker['model'];
+      final task = worker['task'];
+      final count = worker['count'];
+      final details = <String>[
+        if (agent is String && agent.isNotEmpty) 'agent $agent',
+        if (model is String && model.isNotEmpty) 'model $model',
+        if (task is String && task.isNotEmpty) 'task $task',
+        if (count is int && count > 1) 'count $count',
+      ];
+      rows.add(
+        MapEntry(
+          prefix,
+          details.isEmpty ? 'details unavailable' : details.join(' · '),
+        ),
+      );
+    }
+
+    final tasks = args['tasks'];
+    if (tasks is List) {
+      for (var index = 0; index < tasks.length; index++) {
+        final item = tasks[index];
+        if (item is Map) addWorker(item, 'worker ${index + 1}');
+      }
+    }
+    final chain = args['chain'];
+    if (chain is List) {
+      for (var index = 0; index < chain.length; index++) {
+        final step = chain[index];
+        if (step is! Map) continue;
+        final parallel = step['parallel'];
+        if (parallel is List) {
+          for (var branch = 0; branch < parallel.length; branch++) {
+            final worker = parallel[branch];
+            if (worker is Map) {
+              addWorker(worker, 'step ${index + 1}, worker ${branch + 1}');
+            }
+          }
+        } else {
+          addWorker(step, 'step ${index + 1}');
+        }
+      }
+    }
+    if (rows.isEmpty &&
+        (args['agent'] is String || args['task'] is String)) {
+      addWorker(args, 'worker 1');
+    }
+    return rows.isEmpty
+        ? _notice('Subagent execution details unavailable.')
+        : _kv(rows);
   }
 
   Widget _renderResult() {
@@ -671,8 +733,45 @@ class _ToolCardState extends State<ToolCard> {
     ),
   );
 
+  static int _subagentCount(Map<String, Object?> arguments) {
+    int countWorkers(Object? value) {
+      if (value is! List) return 0;
+      var count = 0;
+      for (final item in value) {
+        if (item is Map) {
+          final repeat = item['count'];
+          count += repeat is int && repeat > 0 ? repeat : 1;
+        }
+      }
+      return count;
+    }
+
+    final tasks = countWorkers(arguments['tasks']);
+    if (tasks > 0) return tasks;
+    final chain = arguments['chain'];
+    if (chain is List) {
+      var count = 0;
+      for (final step in chain) {
+        if (step is! Map) continue;
+        count += step['parallel'] is List
+            ? countWorkers(step['parallel'])
+            : ((step['count'] is int && (step['count'] as int) > 0)
+                  ? step['count'] as int
+                  : 1);
+      }
+      if (count > 0) return count;
+    }
+    return 1;
+  }
+
   static String _toolLabel(String toolName, Map<String, Object?> arguments) {
     if (BuiltInToolName.isBuiltIn(toolName)) return toolName;
+    if (toolName == 'subagent') {
+      final action = arguments['action'];
+      if (action == 'list' || action == 'models') return 'Subagent setup';
+      final count = _subagentCount(arguments);
+      return '$count subagent${count == 1 ? '' : 's'}';
+    }
     return switch (toolName) {
       'Agent' =>
         arguments['description'] is String

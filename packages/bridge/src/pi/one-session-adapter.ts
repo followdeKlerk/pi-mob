@@ -26,12 +26,13 @@
  */
 
 import { createHash } from "node:crypto";
-import { mkdirSync, readFileSync, realpathSync } from "node:fs";
-import { basename, isAbsolute, relative, resolve } from "node:path";
+import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import type { StoredCommand } from "../core/store";
 import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
 import type { AttachmentStore } from "../core/attachments";
+import { canonicalizeOrThrow, deriveRootId, enumerateWorkspaceDirectories, searchWorkspaceDirectories } from "../core/workspace-policy";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
 import { handleRawRpcRequest } from "./raw-rpc";
 import { DurableRecipeActivityProjection } from "./external-history";
@@ -92,11 +93,21 @@ export interface WorkspaceListingItem {
   readonly [key: string]: unknown;
   readonly workspaceId: string;
   readonly displayName: string;
+  readonly rootLabel: string;
+  readonly relativePath: string;
+  readonly availability: "available" | "unavailable";
   readonly fingerprint: string;
+  readonly policyVersion: string;
   readonly policyMode: WorkspacePolicyMode;
   readonly availableSince: string;
   readonly lastSeenAt: string;
   readonly sessionCount: number;
+  readonly manifest: ReadonlyArray<{
+    readonly relativePath: string;
+    readonly kind: string;
+    readonly sizeBytes: number;
+    readonly sha256: string;
+  }>;
 }
 
 export interface WorkspaceListing {
@@ -113,6 +124,8 @@ export interface OneSessionWorkspaceConfig {
   readonly policyMode: WorkspacePolicyMode;
   readonly availableSince?: string;
   readonly lastSeenAt?: string;
+  /** Search only these explicit developer roots and their direct children. */
+  readonly searchRoots?: readonly string[];
 }
 
 /** Thrown when the host has reached its concurrent process capacity. */
@@ -346,21 +359,62 @@ export class OneSessionPiAdapter {
     this.sessions.clear();
   }
 
-  /** Returns the configured workspace plus the count of durable sessions. */
+  /** Lists the same bounded explicit-root candidates exposed by search. */
   listWorkspaces(): WorkspaceListing {
-    return {
-      items: [
-        {
-          workspaceId: this.workspace.workspaceId,
-          displayName: this.workspace.displayName,
-          fingerprint: this.workspace.fingerprint,
-          policyMode: this.workspace.policyMode,
-          availableSince: this.workspace.availableSince ?? new Date(0).toISOString(),
-          lastSeenAt: this.workspace.lastSeenAt ?? new Date(this.now()).toISOString(),
-          sessionCount: this.store.sessionStates().length,
-        },
-      ],
-    };
+    const roots = this.resolvedSearchRoots();
+    if (roots.length === 0) roots.push(canonicalizeOrThrow(this.workspace.rootPath));
+    return { items: this.workspaceItems(enumerateWorkspaceDirectories(roots)) };
+  }
+
+  searchWorkspaces(query: string): WorkspaceListing {
+    return { items: this.workspaceItems(searchWorkspaceDirectories(this.listingRoots(), query)) };
+  }
+
+  private workspaceItems(matches: readonly { canonicalPath: string; rootCanonicalPath: string }[]): WorkspaceListingItem[] {
+    const at = new Date(this.now()).toISOString();
+    return matches.map((match) => ({
+      workspaceId: deriveRootId(match.canonicalPath),
+      displayName: basename(match.canonicalPath) || match.canonicalPath,
+      rootLabel: basename(match.rootCanonicalPath) || match.rootCanonicalPath,
+      relativePath: match.canonicalPath,
+      availability: "available" as const,
+      fingerprint: createHash("sha256").update(`workspace:${match.canonicalPath}`).digest("hex").slice(0, 32),
+      policyVersion: "",
+      policyMode: this.workspace.policyMode,
+      availableSince: at,
+      lastSeenAt: at,
+      sessionCount: 0,
+      manifest: [],
+    }));
+  }
+
+  private listingRoots(): string[] {
+    const roots = this.resolvedSearchRoots();
+    if (roots.length === 0) roots.push(canonicalizeOrThrow(this.workspace.rootPath));
+    return roots;
+  }
+
+  private resolvedSearchRoots(): string[] {
+    const roots: string[] = [];
+    for (const candidate of this.workspace.searchRoots ?? []) {
+      try {
+        const metadata = lstatSync(candidate);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) continue;
+        const canonical = canonicalizeOrThrow(candidate);
+        if (!roots.includes(canonical)) roots.push(canonical);
+      } catch { /* stale roots are not searchable */ }
+    }
+    return roots;
+  }
+
+  private searchRootFor(canonicalPath: string): string | null {
+    const roots = [canonicalizeOrThrow(this.workspace.rootPath), ...this.resolvedSearchRoots()];
+    return roots
+      .filter((root) => {
+        const rel = relative(root, canonicalPath);
+        return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+      })
+      .sort((left, right) => right.length - left.length)[0] ?? null;
   }
 
   /** Dispatch a single command. Implements the AdapterPort contract. */
@@ -673,7 +727,7 @@ export class OneSessionPiAdapter {
       modelId?: string;
       provider?: string;
     };
-    const workspaceId = typeof payload.workspaceId === "string" && payload.workspaceId.length > 0
+    let workspaceId = typeof payload.workspaceId === "string" && payload.workspaceId.length > 0
       ? payload.workspaceId
       : this.workspace.workspaceId;
     const baseMode: WorkspacePolicyMode = this.workspace.policyMode;
@@ -682,16 +736,30 @@ export class OneSessionPiAdapter {
     let workspaceDisplayName = this.workspace.displayName;
     if (typeof payload.workspaceRelativePath === "string") {
       const workspaceRoot = realpathSync(this.workspace.rootPath);
-      sessionRoot = realpathSync(resolve(workspaceRoot, payload.workspaceRelativePath));
-      const containedRelativePath = relative(workspaceRoot, sessionRoot);
-      if (containedRelativePath.startsWith("..") || isAbsolute(containedRelativePath)) {
-        throw new Error("workspace_not_allowed");
-      }
+      const candidate = payload.workspaceRelativePath;
+      // An absolute candidate is taken verbatim; a relative candidate is
+      // resolved against the workspace root. The bridge then verifies the
+      // resolved path lives inside one of the configured search roots so a
+      // picker hit cannot smuggle in an arbitrary host directory.
+      const resolvedAbsolute = isAbsolute(candidate)
+        ? resolve(candidate)
+        : resolve(workspaceRoot, candidate);
+      let canonical: string;
+      try {
+        const metadata = lstatSync(resolvedAbsolute);
+        if (!metadata.isDirectory() || metadata.isSymbolicLink()) throw new Error();
+        canonical = realpathSync(resolvedAbsolute);
+      } catch { throw new Error("workspace_not_allowed"); }
+      const containingRoot = this.searchRootFor(canonical);
+      if (!containingRoot) throw new Error("workspace_not_allowed");
+      sessionRoot = canonical;
+      workspaceId = deriveRootId(canonical);
+      const containedRelativePath = relative(containingRoot, canonical);
       workspaceRelativePath = containedRelativePath.length === 0
         ? "."
         : containedRelativePath.split("\\").join("/");
       workspaceDisplayName = workspaceRelativePath === "."
-        ? this.workspace.displayName
+        ? (containingRoot === workspaceRoot ? this.workspace.displayName : basename(containingRoot))
         : basename(sessionRoot);
     }
 
