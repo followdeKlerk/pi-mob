@@ -33,7 +33,7 @@ import { isAbsolute, basename, join, relative, resolve } from "node:path";
 import { tmpdir } from "node:os";
 import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
 import { resolvePiLaunchConfig, type PiLaunchConfig } from "./pi/launch-config";
-import { importExternalSessionHistory } from "./pi/external-history";
+import { importExternalSessionHistory, reconcileSessionHistoryTail } from "./pi/external-history";
 import { OneSessionPiAdapter, type OneSessionWorkspaceConfig } from "./pi/one-session-adapter";
 import { BridgeStore } from "./core/store";
 import { DurableBridgeRuntime } from "./core/runtime";
@@ -349,32 +349,6 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const fingerprint = hashFingerprint(canonicalWorkspacePath);
   const hostStream = `host:${store.identity().hostId}`;
   store.ensureStream(hostStream, "host");
-  const uncertainAtStartup = store.markUncertainIndeterminate();
-  const restoredSession = store.sessionStates()[0] as Record<string, unknown> | undefined;
-  if (restoredSession && typeof restoredSession.sessionId === "string" &&
-      uncertainAtStartup.some((command) => command.scopeKey === `session:${restoredSession.sessionId}`)) {
-    store.updateSessionState(restoredSession.sessionId, {
-      ...restoredSession,
-      runtimeState: "indeterminate",
-      attentionState: "needs_attention",
-    });
-  }
-  const refreshedSession = store.sessionStates()[0] as Record<string, unknown> | undefined;
-  const restoredRuntime = typeof refreshedSession?.runtimeState === "string"
-    ? refreshedSession.runtimeState
-    : "stopped";
-  if (refreshedSession && typeof refreshedSession.sessionId === "string" &&
-      ["running", "waiting_for_input", "compacting", "retry_wait"].includes(restoredRuntime)) {
-    store.updateSessionState(refreshedSession.sessionId, {
-      ...refreshedSession,
-      runtimeState: "indeterminate",
-      attentionState: "needs_attention",
-    });
-    store.appendEvent(`session:${refreshedSession.sessionId}`, "turn.indeterminate", {
-      sessionId: refreshedSession.sessionId,
-      reason: "bridge_restart",
-    });
-  }
 
   // One owner-captured launch contract is shared by model discovery and every
   // primary or per-session Pi RPC. Per-session arguments/cwds are explicit
@@ -417,21 +391,117 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     store.ensureSession(session.sessionId, state);
     store.ensureStream(`session:${session.sessionId}`, "session", session.sessionId);
   }
+  const extensionArgs: string[] = options.extensionPath ? ["--extension", options.extensionPath] : [];
+  const reconcile = (sessionId: string, liveProcess: boolean) => {
+    const state = store.sessionState(sessionId);
+    if (!state || typeof state.piSessionPath !== "string") {
+      return { authoritativeTerminal: false, turnOutcome: { kind: "live", imported: 0 } as const };
+    }
+    return reconcileSessionHistoryTail(store, sessionId, state.piSessionPath, { liveProcess });
+  };
+
+  /** Map a `ReconciledTurnOutcome` to the canonical adapter runtimeState/
+   *  attentionState pair for a historical, terminalised turn. This mirrors
+   *  the live-adapter mapping in `one-session-adapter.ts` so a session
+   *  reconciled at startup converges with the state it would have reached
+   *  through the live RPC. */
+  const canonicalHistoricalState = (outcome: ReturnType<typeof reconcile>["turnOutcome"]): { runtimeState: string; attentionState: string } | null => {
+    if (outcome.kind === "idle") {
+      // settled / aborted / failed all converge to idle/ready per the
+      // canonical adapter mapping; provider_interrupted is a Pi-specific
+      // variant that only the live path can produce.
+      return { runtimeState: "idle", attentionState: "ready" };
+    }
+    if (outcome.kind === "indeterminate") {
+      return { runtimeState: "indeterminate", attentionState: "needs_attention" };
+    }
+    // live owner: do not mutate the persisted runtime state. A healthy
+    // owner may continue; the live adapter will publish its own boundary.
+    return null;
+  };
+
+  // Reconcile bridge-owned sessions before crash recovery. Pi's JSONL is the
+  // authority for a live session: a terminal tool result/final answer must
+  // win over the bridge's stale persisted `running` state. External sessions
+  // retain their import-only startup behaviour.
+  //
+  // The reconciler returns the precise lifecycle outcome for the
+  // reconciled active turn. Mapping that outcome (not the whole history)
+  // to runtimeState/attentionState is what keeps a session whose JSONL
+  // genuinely settled out of a stale "Running" presentation, while still
+  // leaving a healthy live owner's persisted state untouched.
+  const reconciledAtStartup = new Set<string>();
   for (const state of store.sessionStates()) {
-    if (state.externalSession !== true || typeof state.sessionId !== "string" ||
-        typeof state.piSessionPath !== "string") continue;
+    if (typeof state.sessionId !== "string" || typeof state.piSessionPath !== "string") continue;
     try {
-      importExternalSessionHistory(store, state.sessionId, state.piSessionPath);
+      if (state.externalSession === true) {
+        importExternalSessionHistory(store, state.sessionId, state.piSessionPath);
+        continue;
+      }
+      if (!existsSync(state.piSessionPath)) continue;
+      const result = reconcile(state.sessionId, false);
+      reconciledAtStartup.add(state.sessionId);
+      const canonical = canonicalHistoricalState(result.turnOutcome);
+      if (canonical) {
+        const current = store.sessionState(state.sessionId) ?? state;
+        const nextState = {
+          ...current,
+          runtimeState: canonical.runtimeState,
+          attentionState: canonical.attentionState,
+          lastActivityAt: new Date().toISOString(),
+        };
+        // Persist the row update.
+        store.updateSessionState(state.sessionId, nextState);
+        // Emit a host-stream `session.summary` so connected/replaying
+        // mobile clients learn the new terminal state. `changeSessionSummary`
+        // appends `changedKeys` describing exactly which fields moved.
+        store.changeSessionSummary(state.sessionId, {
+          runtimeState: canonical.runtimeState,
+          attentionState: canonical.attentionState,
+        });
+      }
     } catch {
       // Corrupt or concurrently-written TUI history must not prevent the host
       // from starting; the next daemon launch retries because no marker moved.
     }
   }
 
-  const extensionArgs: string[] = options.extensionPath ? ["--extension", options.extensionPath] : [];
+  const uncertainAtStartup = store.markUncertainIndeterminate();
+  // Recovery is per durable session. Never let insertion order select the
+  // session whose commands or open turn become indeterminate.
+  for (const session of store.sessionStates()) {
+    const sessionId = typeof session.sessionId === "string" ? session.sessionId : null;
+    if (!sessionId) continue;
+    if (uncertainAtStartup.some((command) => command.scopeKey === `session:${sessionId}`)) {
+      store.updateSessionState(sessionId, {
+        ...session,
+        runtimeState: "indeterminate",
+        attentionState: "needs_attention",
+      });
+    }
+    if (reconciledAtStartup.has(sessionId)) continue;
+    const runtimeState = typeof session.runtimeState === "string" ? session.runtimeState : "stopped";
+    if (!["running", "waiting_for_input", "compacting", "retry_wait"].includes(runtimeState)) continue;
+    store.updateSessionState(sessionId, {
+      ...(store.sessionState(sessionId) ?? session),
+      runtimeState: "indeterminate",
+      attentionState: "needs_attention",
+    });
+    store.appendEvent(`session:${sessionId}`, "turn.indeterminate", {
+      sessionId,
+      reason: "bridge_restart",
+    });
+  }
+  // The legacy primary client may be assigned to one session by the factory
+  // below. Its exit callback must use that explicit binding, never an
+  // arbitrary sessionStates()[0] lookup.
+  let primaryRpcOwner: string | null = null;
   const rpc = new SupervisedRpcClient({
+    beforeUnexpectedExit: () => primaryRpcOwner
+      ? reconcile(primaryRpcOwner, false)
+      : { authoritativeTerminal: false },
     processId: workspaceId,
-    initialState: restoredRuntime === "crash_loop" ? "crash_loop" : "stopped",
+    initialState: store.sessionStates().some((session) => session.runtimeState === "crash_loop") ? "crash_loop" : "stopped",
     rpc: {
       launchConfig: piLaunchConfig,
       args: ["--mode", "rpc", "--session-dir", sessionDir, ...extensionArgs, ...(options.rpcArgs ?? [])],
@@ -443,9 +513,10 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
         store.appendEvent(hostStream, event.type, event.payload);
         return;
       }
-      const session = store.sessionStates()[0] as Record<string, unknown> | undefined;
-      if (!session || typeof session.sessionId !== "string") return;
-      const sessionId = session.sessionId;
+      const sessionId = primaryRpcOwner;
+      if (!sessionId) return;
+      const session = store.sessionState(sessionId) as Record<string, unknown> | undefined;
+      if (!session) return;
       const payload: Record<string, unknown> = { ...event.payload, sessionId };
       store.appendEvent(`session:${sessionId}`, event.type, payload);
       if (event.type === "turn.indeterminate") {
@@ -466,7 +537,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     },
   });
   let rpcStarted = false;
-  if (restoredRuntime !== "crash_loop") {
+  if (!store.sessionStates().some((session) => session.runtimeState === "crash_loop")) {
     await rpc.start();
     rpcStarted = true;
   }
@@ -517,8 +588,15 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     const externalSessionPath = typeof state.piSessionPath === "string"
       ? state.piSessionPath
       : null;
-    if (cwd === options.workspace && !externalSessionPath) return rpc;
+    // Keep the pre-existing primary client as an explicit single-session
+    // compatibility binding. Every other session gets its own supervised
+    // client, so one process exit cannot reconcile a different session.
+    if (!externalSessionPath && primaryRpcOwner === null) {
+      primaryRpcOwner = sessionId;
+      return rpc;
+    }
     const client = new SupervisedRpcClient({
+      beforeUnexpectedExit: () => reconcile(sessionId, false),
       processId: sessionId,
       initialState: "stopped",
       rpc: {
@@ -555,7 +633,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     return client;
   };
   const hostModels = discoverHostModels(piLaunchConfig);
-  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, attachmentStore: attachments, exportRegistry: exports, hostModels, ...(notificationService ? {notificationService} : {}) });
+  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, attachmentStore: attachments, exportRegistry: exports, hostModels, reconcileHistory: (sessionId, liveProcess) => reconcile(sessionId, liveProcess), ...(notificationService ? {notificationService} : {}) });
   if(notificationService && capabilityProviders) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:[...capabilityProviders],bestEffort:true});
   const notificationSweepTimer=setInterval(()=>{ try{notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
   notificationSweepTimer.unref();
@@ -568,6 +646,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     bridgeVersion,
     piVersion: "0.82.0",
     hostDisplayName: displayName,
+    ...(notificationService ? { notifications: notificationService } : {}),
   });
   await runtime.start();
 

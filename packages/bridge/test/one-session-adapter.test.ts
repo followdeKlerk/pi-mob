@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -26,7 +26,9 @@ import {
 import {
   DurableRecipeActivityProjection,
   importExternalSessionHistory,
+  reconcileSessionHistoryTail,
 } from "../src/pi/external-history";
+import { canonicalizeOrThrow, deriveRootId } from "../src/core/workspace-policy";
 
 class FakeRpc implements PiRpcClient {
   readonly requests: PiRpcRequestOptions[] = [];
@@ -55,13 +57,24 @@ class FakeRpc implements PiRpcClient {
   reset(): void { this.requests.length = 0; this.responses.clear(); this.failWith = null; this.requestAttempts = 0; }
 }
 
-function setup(opts: { workspace?: Partial<ConstructorParameters<typeof OneSessionPiAdapter>[0]["workspace"]> } = {}): {
+const trackedTempDirs = new Set<string>();
+
+function trackedTempDir(prefix: string): string {
+  const dir = mkdtempSync(join(tmpdir(), prefix));
+  trackedTempDirs.add(dir);
+  return dir;
+}
+
+function setup(opts: {
+  workspace?: Partial<ConstructorParameters<typeof OneSessionPiAdapter>[0]["workspace"]>;
+  reconcileHistory?: ConstructorParameters<typeof OneSessionPiAdapter>[0]["reconcileHistory"];
+} = {}): {
   store: BridgeStore;
   rpc: FakeRpc;
   adapter: OneSessionPiAdapter;
   hostStream: string;
 } {
-  const store = new BridgeStore(join(mkdtempSync(join(tmpdir(), "pi-mob-m5-")), "bridge.sqlite"));
+  const store = new BridgeStore(join(trackedTempDir("pi-mob-m5-"), "bridge.sqlite"));
   const identity = store.identity();
   store.ensureStream(`host:${identity.hostId}`, "host");
   const rpc = new FakeRpc();
@@ -70,7 +83,7 @@ function setup(opts: { workspace?: Partial<ConstructorParameters<typeof OneSessi
     rpc,
     workspace: {
       workspaceId: "11111111-1111-4111-8111-111111111111",
-      rootPath: "/private/example/repo",
+      rootPath: opts.workspace?.rootPath ?? trackedTempDir("pi-mob-workspaces-"),
       displayName: "example",
       fingerprint: "fingerprint-fixture",
       policyMode: "full",
@@ -78,24 +91,68 @@ function setup(opts: { workspace?: Partial<ConstructorParameters<typeof OneSessi
     },
     newSessionId: deterministicIdGenerator("sess"),
     now: () => 1_700_000_000_000,
+    ...(opts.reconcileHistory ? { reconcileHistory: opts.reconcileHistory } : {}),
   });
   return { store, rpc, adapter, hostStream: `host:${identity.hostId}` };
 }
 
-afterEach(() => { /* FakeRpc + BridgeStore are short-lived per test. */ });
+afterEach(() => {
+  for (const dir of trackedTempDirs) rmSync(dir, { recursive: true, force: true });
+  trackedTempDirs.clear();
+});
 
 describe("OneSessionPiAdapter", () => {
   test("lists the configured workspace", () => {
-    const { adapter } = setup();
+    const rootPath = trackedTempDir("pi-mob-workspaces-");
+    const { adapter } = setup({ workspace: { rootPath } });
     const listing = adapter.listWorkspaces();
     expect(listing.items).toHaveLength(1);
     const item = listing.items[0]!;
-    expect(item.workspaceId).toBe("11111111-1111-4111-8111-111111111111");
+    expect(item.workspaceId).toBe(deriveRootId(canonicalizeOrThrow(rootPath)));
     expect(item.rootPath).toBeUndefined();
     expect(item.trustState).toBeUndefined();
     expect(item.policyMode).toBe("full");
-    expect(item.availableSince).toBe("1970-01-01T00:00:00.000Z");
+    expect(item.availableSince).toBe("2023-11-14T22:13:20.000Z");
     expect(item.lastSeenAt).toBe("2023-11-14T22:13:20.000Z");
+  });
+
+  test("session.create captures Pi get_state sessionFile and restore recovers its missed terminal tail", async () => {
+    const directory = mkdtempSync(join(tmpdir(), "pi-mob-rpc-session-file-"));
+    const sessionPath = join(directory, "authoritative.jsonl");
+    writeFileSync(sessionPath, JSON.stringify({ type: "session", id: "pi-session", version: 1 }) + "\n");
+    const calls: Array<{ sessionId: string; liveProcess: boolean }> = [];
+    const { store, rpc, adapter, hostStream } = setup({
+      reconcileHistory: (sessionId, liveProcess) => {
+        calls.push({ sessionId, liveProcess });
+        return reconcileSessionHistoryTail(store, sessionId, sessionPath, { liveProcess });
+      },
+    });
+    rpc.responses.set("get_state:", { data: { sessionFile: sessionPath, model: "fixture" } });
+    await adapter.dispatch(makeCommand("rpc-session-create", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const sessionId = store.sessionStates()[0]!.sessionId as string;
+    expect(store.sessionState(sessionId)?.piSessionPath).toBe(sessionPath);
+    expect(store.sessionState(sessionId)?.externalSession).not.toBe(true);
+    expect(store.listEvents(`session:${sessionId}`).some((event) => JSON.stringify(event.payload).includes(sessionPath))).toBe(false);
+
+    store.appendEvent(`session:${sessionId}`, "turn.started", { sessionId, turnId: "turn-rpc", commandId: "rpc-session-create", deliveryMode: "immediate" });
+    store.appendEvent(`session:${sessionId}`, "tool.started", { sessionId, turnId: "turn-rpc", toolCallId: "tool-rpc", toolName: "bash", arguments: { command: "fixture" } });
+    writeFileSync(sessionPath, [
+      { type: "session", id: "pi-session", version: 1 },
+      { type: "message", id: "user-rpc", parentId: null, message: { role: "user", content: [{ type: "text", text: "run" }] } },
+      { type: "message", id: "assistant-rpc", parentId: "user-rpc", message: { role: "assistant", content: [{ type: "toolCall", id: "tool-rpc", name: "bash", arguments: { command: "fixture" } }] } },
+      { type: "message", id: "result-rpc", parentId: "assistant-rpc", message: { role: "toolResult", toolCallId: "tool-rpc", toolName: "bash", isError: false, content: [{ type: "text", text: "done" }] } },
+      { type: "message", id: "final-rpc", parentId: "result-rpc", message: { role: "assistant", content: [{ type: "text", text: "finished" }] } },
+    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
+    store.updateSessionState(sessionId, { ...(store.sessionState(sessionId) ?? {}), runtimeState: "stopped" });
+    await adapter.dispatch(makeCommand("rpc-session-restore", "session.activate", `session:${sessionId}`, `session:${sessionId}`, { sessionId }));
+    const events = store.listEvents(`session:${sessionId}`);
+    expect(events.filter((event) => event.type === "tool.completed" && event.payload.toolCallId === "tool-rpc")).toHaveLength(1);
+    expect(events.filter((event) => event.type === "turn.settled")).toHaveLength(1);
+    expect(events.some((event) => event.type === "turn.indeterminate")).toBe(false);
+    expect(calls).toContainEqual({ sessionId, liveProcess: true });
+    adapter.close();
+    store.close();
+    rmSync(directory, { recursive: true, force: true });
   });
 
   test("session.create creates a UUID session, registers a stream, and emits host + session metadata", async () => {
@@ -149,7 +206,7 @@ describe("OneSessionPiAdapter", () => {
   });
 
   test("session.create binds indexed folder context and a useful default name", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-mob-workspaces-"));
+    const root = trackedTempDir("pi-mob-workspaces-");
     const folder = join(root, "github", "pi-mob");
     mkdirSync(folder, { recursive: true });
     const { store, adapter, hostStream } = setup({
@@ -486,7 +543,8 @@ async function hello(client: Client): Promise<{ connectionId: string; hostId: st
 
 describe("M5 runtime integration", () => {
   test("workspace.list control returns the configured workspace", async () => {
-    const { store, adapter } = setup();
+    const rootPath = trackedTempDir("pi-mob-workspaces-");
+    const { store, adapter } = setup({ workspace: { rootPath } });
     const runtime = new DurableBridgeRuntime({ store, adapter: adapter as unknown as AdapterPort, bridgeVersion: "0", piVersion: "0.82.0", hostDisplayName: "example" });
     await runtime.start();
     const server = createBridgeServer({ runtime, port: 0 });
@@ -500,7 +558,7 @@ describe("M5 runtime integration", () => {
       expect((message.requestId as string)).toBe(requestId);
       const items = ((message.payload as Record<string, unknown>).items as Array<Record<string, unknown>>);
       expect(items).toHaveLength(1);
-      expect(items[0]!.workspaceId).toBe("11111111-1111-4111-8111-111111111111");
+      expect(items[0]!.workspaceId).toBe(deriveRootId(canonicalizeOrThrow(rootPath)));
       expect(items[0]!.rootPath).toBeUndefined();
       client.ws.close();
     } finally { server.stop(true); }
@@ -525,15 +583,18 @@ describe("M5 runtime integration", () => {
   });
 
   test("full M5 happy path: workspace.list, session.create, prompt.submit, replay after restart, turn.abort", async () => {
-    const path = join(mkdtempSync(join(tmpdir(), "pi-mob-m5-runtime-")), "bridge.sqlite");
+    const stateRoot = mkdtempSync(join(tmpdir(), "pi-mob-m5-runtime-"));
+    const workspaceRoot = mkdtempSync(join(tmpdir(), "pi-mob-m5-runtime-ws-"));
+    const path = join(stateRoot, "bridge.sqlite");
+    const workspaceId = deriveRootId(canonicalizeOrThrow(workspaceRoot));
     // Build adapter + runtime + server (fresh state)
     let store = new BridgeStore(path);
     let rpc = new FakeRpc();
     let adapter = new OneSessionPiAdapter({
       store, rpc,
       workspace: {
-        workspaceId: "11111111-1111-4111-8111-111111111111",
-        rootPath: "/private/example/repo",
+        workspaceId,
+        rootPath: workspaceRoot,
         displayName: "example",
         fingerprint: "fp",
         policyMode: "full",
@@ -562,7 +623,7 @@ describe("M5 runtime integration", () => {
       client.ws.send(JSON.stringify({
         protocol: { major: 1, minor: 0 }, messageId: crypto.randomUUID(), requestId: crypto.randomUUID(),
         connectionId, commandId: createId, type: "session.create", sentAt: new Date().toISOString(),
-        payload: { workspaceId: "11111111-1111-4111-8111-111111111111", policyMode: "full", name: "diagnostic" },
+        payload: { workspaceId, policyMode: "full", name: "diagnostic" },
       }));
       // Wait for receipt and the host-stream session.summary
       let sessionId: string | null = null;
@@ -616,8 +677,8 @@ describe("M5 runtime integration", () => {
     adapter = new OneSessionPiAdapter({
       store, rpc,
       workspace: {
-        workspaceId: "11111111-1111-4111-8111-111111111111",
-        rootPath: "/private/example/repo",
+        workspaceId,
+        rootPath: workspaceRoot,
         displayName: "example",
         fingerprint: "fp",
         policyMode: "full",
@@ -640,7 +701,11 @@ describe("M5 runtime integration", () => {
       }
       expect(seen).toContain("session.summary");
       replay.ws.close();
-    } finally { server.stop(true); adapter.close(); store.close(); await rpc_fail_silent(rpc); }
+    } finally {
+      server.stop(true); adapter.close(); store.close(); await rpc_fail_silent(rpc);
+      rmSync(stateRoot, { recursive: true, force: true });
+      rmSync(workspaceRoot, { recursive: true, force: true });
+    }
   }, 30_000);
 
   test("unknown RPC outcome becomes indeterminate and duplicate never reruns", async () => {

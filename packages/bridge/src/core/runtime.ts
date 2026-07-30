@@ -15,6 +15,7 @@ import type { AgentSupervisionService } from "../agents/supervision-service";
 import type { MobileCatalogueService } from "../pi/mobile-catalogue-service";
 import { type PlanSourceService, isPlanUnavailable, boundPlanSnapshot } from "../plans/source-service";
 import { type ContextSourceService, type ContextMutationTarget, isContextUnavailable, boundContextSnapshot } from "../context/source-service";
+import type { NotificationService } from "../notifications";
 
 export class RuntimeProtocolError extends Error { override readonly name = "RuntimeProtocolError"; constructor(readonly code: string, message: string) { super(message); } }
 const SUMMARY_EVENT_TYPES = new Set(["session.state", "session.metadata", "controller.state", "turn.started", "turn.waiting_for_input", "turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate", "queue.snapshot", "command.state", "error.event"]);
@@ -138,6 +139,11 @@ export interface DurableRuntimeOptions {
   readonly attention?: AttentionProjection;
   readonly agents?: AgentSupervisionService;
   readonly catalogue?: MobileCatalogueService;
+  /** M15 — host-side notification service. When present, the bridge
+   * advertises `notifications.v1` in the handshake so capability-aware
+   * clients can discover push; otherwise the capability is omitted and
+   * the truthful "Notifications unavailable" state is presented. */
+  readonly notifications?: NotificationService;
 }
 
 export class DurableBridgeRuntime implements BridgeRuntimePort {
@@ -158,6 +164,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private readonly attention: AttentionProjection | null;
   private readonly agents: AgentSupervisionService | null;
   private readonly catalogue: MobileCatalogueService | null;
+  private readonly notifications: NotificationService | null;
   private readonly inFlightContextSnapshots = new Map<string, AbortController>();
   private readyState = false;
   constructor(readonly options: DurableRuntimeOptions) {
@@ -172,6 +179,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     this.attention = options.attention ?? null;
     this.agents = options.agents ?? null;
     this.catalogue = options.catalogue ?? null;
+    this.notifications = options.notifications ?? null;
   }
   async start(): Promise<{ resumed: number; indeterminate: number }> {
     const recovered = await this.commands.recover(); this.readyState = true; return recovered;
@@ -193,6 +201,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (this.attention) caps.push("attention.v1");
     if (this.agents) caps.push("agents.v1");
     if (this.catalogue) caps.push("catalogue.v1");
+    if (this.notifications) caps.push("notifications.v1");
     return caps;
   }
 

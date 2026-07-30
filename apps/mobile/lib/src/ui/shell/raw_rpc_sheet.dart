@@ -41,9 +41,9 @@ class RawRpcSheet extends StatefulWidget {
 
 class _RawRpcSheetState extends State<RawRpcSheet> {
   final TextEditingController _command = TextEditingController(
-    text: const JsonEncoder.withIndent('  ').convert(<String, Object?>{
-      'type': 'get_state',
-    }),
+    text: const JsonEncoder.withIndent(
+      '  ',
+    ).convert(<String, Object?>{'type': 'get_state'}),
   );
   final TextEditingController _response = TextEditingController();
   final TextEditingController _events = TextEditingController();
@@ -82,7 +82,8 @@ class _RawRpcSheetState extends State<RawRpcSheet> {
     setState(() => _error = null);
     try {
       final decoded = jsonDecode(_command.text);
-      if (decoded is! Map) throw const FormatException('Command must be a JSON object');
+      if (decoded is! Map)
+        throw const FormatException('Command must be a JSON object');
       final command = Map<String, Object?>.from(decoded);
       if (command['type'] is! String || (command['type'] as String).isEmpty) {
         throw const FormatException('Command requires a non-empty type');
@@ -162,7 +163,10 @@ class _RawRpcSheetState extends State<RawRpcSheet> {
           if (_error case final error?)
             Padding(
               padding: const EdgeInsets.only(top: PiSpacing.sm),
-              child: Text(error, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+              child: Text(
+                error,
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
             ),
           const SizedBox(height: 16),
           TextField(

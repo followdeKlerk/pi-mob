@@ -325,8 +325,8 @@ class TranscriptReducer {
     final existingAssistant = nextDoc.lastTurnWithKeyPrefix(assistantKey);
     final isExistingTurn = existingAssistant is AssistantTurn;
     final incomingAssistantStepId = event.payload['assistantStepId'];
-    final assistantStepId = incomingAssistantStepId is String &&
-            incomingAssistantStepId.isNotEmpty
+    final assistantStepId =
+        incomingAssistantStepId is String && incomingAssistantStepId.isNotEmpty
         ? incomingAssistantStepId
         : '';
     final assistantTurn = existingAssistant is AssistantTurn

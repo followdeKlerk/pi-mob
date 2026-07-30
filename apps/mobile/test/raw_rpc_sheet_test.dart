@@ -9,7 +9,9 @@ import 'package:pi_mob/src/ui/shell/raw_rpc_sheet.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('JSON editor sends raw RPC and displays the response', (tester) async {
+  testWidgets('JSON editor sends raw RPC and displays the response', (
+    tester,
+  ) async {
     final database = AppDatabase.withExecutor(NativeDatabase.memory());
     final coordinator = ConnectionCoordinator(
       transport: const _OfflineTransport(),

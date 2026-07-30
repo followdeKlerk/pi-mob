@@ -195,6 +195,8 @@ export interface OneSessionAdapterOptions {
   readonly notificationService?: NotificationService;
   /** Host-wide configured catalogue discovered without starting a session. */
   readonly hostModels?: ReadonlyArray<Record<string, unknown>>;
+  /** Reconcile Pi-owned JSONL at authoritative session lifecycle boundaries. */
+  readonly reconcileHistory?: (sessionId: string, liveProcess: boolean) => { readonly authoritativeTerminal: boolean };
 }
 
 // ---------------- Adapter ----------------
@@ -259,6 +261,7 @@ export class OneSessionPiAdapter {
   private readonly attachmentStore: AttachmentStore | null;
   private readonly notificationService: NotificationService | null;
   private readonly hostModels: ReadonlyArray<Record<string, unknown>>;
+  private readonly reconcileHistory: ((sessionId: string, liveProcess: boolean) => { readonly authoritativeTerminal: boolean }) | null;
 
   constructor(options: OneSessionAdapterOptions) {
     this.store = options.store;
@@ -273,6 +276,7 @@ export class OneSessionPiAdapter {
     this.attachmentStore = options.attachmentStore ?? null;
     this.notificationService = options.notificationService ?? null;
     this.hostModels = (options.hostModels ?? []).map((model) => ({ ...model }));
+    this.reconcileHistory = options.reconcileHistory ?? null;
     // Production injects a registry rooted in the bridge state directory.
     // Keeping this optional avoids filesystem side effects for adapters that
     // do not advertise export support (including read-only test fixtures).
@@ -319,8 +323,14 @@ export class OneSessionPiAdapter {
       const id = typeof record.sessionId === "string" ? record.sessionId : null;
       if (!id) continue;
       this.supervisor.register(id, "stopped");
-      this.resolveRpc(id);
+      const rpc = this.resolveRpc(id);
       this.bindSession(id);
+      // A restored adapter may already be attached to a live RPC process.
+      // Only synthesize orphan terminal state when no live owner exists.
+      const rpcState = rpc.lifecycleState?.();
+      const liveProcess = rpcState !== undefined &&
+        ["idle", "running", "waiting_for_input", "compacting"].includes(rpcState);
+      this.reconcileHistory?.(id, liveProcess);
       this.recipeProjection(id).backfill();
     }
   }
@@ -599,12 +609,19 @@ export class OneSessionPiAdapter {
     if (!rpc) throw new Error(`rawRpc: no RPC available for session ${sessionId}`);
     await this.ensureRpcStarted(rpc);
     const hasParams = Object.keys(params).length > 0;
-    return rpc.request({
+    const response = await rpc.request({
       ...(opts?.commandId ? { id: opts.commandId } : {}),
       method,
       ...(hasParams ? { params } : {}),
       ...(opts?.timeoutMs ? { timeoutMs: opts.timeoutMs } : {}),
     });
+    // These Pi commands can rebind the runtime to a different persisted
+    // session file. Ask Pi for its authoritative state immediately; the
+    // response is scoped to this bridge session and never matched by scan.
+    if (method === "new_session" || method === "switch_session") {
+      await this.refreshSessionCapabilities(sessionId);
+    }
+    return response;
   }
 
   private bindSession(sessionId: string): SessionEntry {
@@ -929,6 +946,9 @@ export class OneSessionPiAdapter {
     }
     const rpc = this.sessions.get(sessionId)!.rpc;
     await this.ensureRpcStarted(rpc);
+    // Reconcile after the process is live: an open JSONL turn is not orphaned
+    // merely because the bridge is restoring its connection.
+    this.reconcileHistory?.(sessionId, true);
     if (rpc.manualRetry &&
         (!rpc.lifecycleState || rpc.lifecycleState() !== "idle")) {
       await rpc.manualRetry();
@@ -1017,6 +1037,15 @@ export class OneSessionPiAdapter {
       ? forkValue.filter((item) => item && typeof item === "object").slice(0, 500).map((item) => boundTree(item))
       : [];
     const prior = this.store.sessionState(sessionId) ?? {};
+    // Pi's authoritative RPC state response names the JSONL file `sessionFile`.
+    // Persist it only against the session whose RPC produced this response;
+    // never infer ownership from a filesystem scan or a Pi session id.
+    const reportedSessionFile = typeof stateObject.sessionFile === "string" && stateObject.sessionFile.length > 0
+      ? stateObject.sessionFile
+      : null;
+    if (reportedSessionFile && prior.externalSession !== true) {
+      this.store.updateSessionState(sessionId, { ...prior, piSessionPath: reportedSessionFile });
+    }
     const stateModel = stateObject.model && typeof stateObject.model === "object"
       ? stateObject.model as Record<string, unknown>
       : null;
@@ -1036,7 +1065,10 @@ export class OneSessionPiAdapter {
       eligibleForkMessages,
       latestStats: normalizedStats,
     };
-    this.store.updateSessionState(sessionId, { ...prior, ...patch });
+    // Keep the private authoritative path durable but out of mobile-facing
+    // state/model events. Mobile receives the normalized capability patch only.
+    const current = this.store.sessionState(sessionId) ?? prior;
+    this.store.updateSessionState(sessionId, { ...current, ...patch });
     this.store.appendEvent(`session:${sessionId}`, "session.tree", { sessionId, tree: sessionTree, eligibleForkMessages });
     this.store.appendEvent(`session:${sessionId}`, "model.state", { sessionId, ...patch });
     this.store.appendEvent(`session:${sessionId}`, "context.state", { sessionId, ...normalizedStats });
@@ -1333,6 +1365,9 @@ export class OneSessionPiAdapter {
       queueCount: 0,
       createdAt,
       lastActivityAt: createdAt,
+      ...(response && typeof response === "object" && typeof (response as Record<string, unknown>).sessionFile === "string"
+        ? { piSessionPath: (response as Record<string, unknown>).sessionFile }
+        : {}),
       forkResult: response ?? null,
     });
     this.writeLineage(childSessionId, lineage);
@@ -1393,6 +1428,9 @@ export class OneSessionPiAdapter {
       queueCount: 0,
       createdAt,
       lastActivityAt: createdAt,
+      ...(response && typeof response === "object" && typeof (response as Record<string, unknown>).sessionFile === "string"
+        ? { piSessionPath: (response as Record<string, unknown>).sessionFile }
+        : {}),
       cloneResult: response ?? null,
     });
     this.writeLineage(childSessionId, lineage);

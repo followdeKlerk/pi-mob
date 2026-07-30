@@ -25,7 +25,7 @@ void main() {
           generation: '1',
           connectionState: 'offline',
           bridgeVersion: const Value('m5'),
-    piVersion: const Value('0.82.0'),
+          piVersion: const Value('0.82.0'),
           protocolVersion: const Value('1.0'),
           capabilitiesJson: '[]',
         ),

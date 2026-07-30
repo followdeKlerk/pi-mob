@@ -26,6 +26,13 @@ function hasTests(dir: string): boolean {
   );
 }
 
+function bridgeIntegrationTests(dir: string): string[] {
+  return readdirSync(join(dir, "test", "integration"))
+    .filter((f) => f.endsWith(".test.ts"))
+    .sort((a, b) => a.localeCompare(b))
+    .map((file) => join(dir, "test", "integration", file));
+}
+
 function run(
   label: string,
   cmd: readonly string[],
@@ -46,13 +53,30 @@ function run(
   return result.status ?? 1;
 }
 
+function runPackageTests(dir: string): number {
+  if (dir === join(ROOT, "packages", "bridge")) {
+    const nonIntegration = run(
+      `bun test (${dir} without integration)`,
+      ["bun", "test", "--path-ignore-patterns=test/integration/**"],
+      dir,
+    );
+    if (nonIntegration !== 0) return nonIntegration;
+    for (const file of bridgeIntegrationTests(dir)) {
+      const code = run(`bun test (${file})`, ["bun", "test", file], dir);
+      if (code !== 0) return code;
+    }
+    return 0;
+  }
+  return run(`bun test (${dir})`, ["bun", "test"], dir);
+}
+
 function main(): number {
   for (const dir of packageTestDirs()) {
     if (!hasTests(dir)) {
       process.stdout.write(`==> skip ${dir} (no test files)\n`);
       continue;
     }
-    const code = run(`bun test (${dir})`, ["bun", "test"], dir);
+    const code = runPackageTests(dir);
     if (code !== 0) return code;
   }
   const scriptsTestDir = join(ROOT, "scripts", "test");

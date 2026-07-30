@@ -13,6 +13,8 @@ export interface SupervisedRpcClientOptions {
   readonly emit?: (event: ProcessLifecycleEvent) => void;
   /** Synchronous final admission check invoked immediately before Bun.spawn. */
   readonly beforeSpawn?: () => void;
+  /** Reconcile Pi JSONL before converting an exit into indeterminate state. */
+  readonly beforeUnexpectedExit?: () => { readonly authoritativeTerminal: boolean };
 }
 
 /** Restartable Pi RPC proxy used by the daemon. The adapter keeps one stable
@@ -127,7 +129,9 @@ export class SupervisedRpcClient {
   private unexpectedExit(): void {
     if (this.closing) return;
     const running = ["running", "waiting_for_input", "compacting"].includes(this.supervisor.state(this.processId));
-    void this.supervisor.unexpectedExit(this.processId, { runningAction: running }).then(() => {
+    let authoritativeTerminal = false;
+    try { authoritativeTerminal = this.options.beforeUnexpectedExit?.().authoritativeTerminal ?? false; } catch { /* reconciliation retries on restart */ }
+    void this.supervisor.unexpectedExit(this.processId, { runningAction: running && !authoritativeTerminal }).then(() => {
       if (this.supervisor.state(this.processId) !== "retry_wait") return;
       this.restartTimer = setTimeout(() => {
         this.restartTimer = null;

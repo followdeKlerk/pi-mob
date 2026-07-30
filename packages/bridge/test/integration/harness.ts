@@ -1,6 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { RpcProcess } from "../../src/pi/rpc-process";
 import { resolvePiLaunchConfig } from "../../src/pi/launch-config";
@@ -30,14 +31,21 @@ import { BridgeStore } from "../../src/core/store";
  * can compare without conditional code.
  */
 
-export const PI_EXECUTABLE = process.env.PI_MOB_PI_RPC_BIN
-  ?? Bun.which("pi")
-  ?? "";
-
 const fs = createRequire(import.meta.url)("node:fs") as {
   existsSync(p: string): boolean;
   mkdirSync(p: string, opts?: { recursive?: boolean }): void;
 };
+
+const PINNED_PI = resolve(dirname(fileURLToPath(import.meta.url)), "../../node_modules/.bin/pi");
+
+function resolvePinnedPi(): string | null {
+  return fs.existsSync(PINNED_PI) ? PINNED_PI : null;
+}
+
+export const PI_EXECUTABLE = process.env.PI_MOB_PI_RPC_BIN
+  ?? resolvePinnedPi()
+  ?? Bun.which("pi")
+  ?? "";
 
 export class PiBinaryMissingError extends Error {
   override readonly name = "PiBinaryMissingError";
@@ -61,6 +69,30 @@ export function createSessionDir(workspace: string): string {
   const dir = join(workspace, "sessions");
   fs.mkdirSync(dir, { recursive: true });
   return dir;
+}
+
+const DIRECT_PI_STDERR_LIMIT = 8_192;
+
+function redactDiagnostic(value: string): string {
+  return value
+    .replace(/sk-[A-Za-z0-9-]+|ghp_[A-Za-z0-9]+|xox[baprs]-[A-Za-z0-9-]+|Bearer\s+\S+/g, "redacted")
+    .replace(/-----BEGIN [A-Z ]+PRIVATE KEY-----[\s\S]*?-----END [A-Z ]+PRIVATE KEY-----/g, "redacted")
+    .replace(/\/(?:Users|home|private|tmp|var\/folders)\/[^\s"'<>`]+/g, "<path>");
+}
+
+function summarizeStderr(value: string): string {
+  const redacted = redactDiagnostic(value.replace(/\r\n/g, "\n").trim());
+  if (!redacted) return "no stderr";
+  return redacted.replace(/\s+/g, " ").slice(-1_000);
+}
+
+function formatExitDiagnostic(exitCode: number | null, signal: string | null, stderrText: string): string {
+  const status = exitCode !== null
+    ? `exit code ${exitCode}`
+    : signal !== null
+      ? `signal ${signal}`
+      : "unknown exit status";
+  return `Pi subprocess exited (${status}): ${summarizeStderr(stderrText)}`;
 }
 
 export interface PiResponse {
@@ -111,21 +143,23 @@ export async function spawnDirectPi(opts: {
     reject: (reason: Error) => void;
     timer: ReturnType<typeof setTimeout> | null;
   }>();
+  const stdoutReader = proc.stdout.getReader();
+  const stderrReader = proc.stderr.getReader();
+  const textDecoder = new TextDecoder("utf-8", { fatal: false });
+  let stderrText = "";
 
-  const settlePending = (): void => {
-    const err = new Error("Pi subprocess exited before responding");
+  const rejectPending = (reason: Error): void => {
     for (const entry of pending.values()) {
       if (entry.timer) clearTimeout(entry.timer);
-      entry.reject(err);
+      entry.reject(reason);
     }
     pending.clear();
   };
 
-  const reader = proc.stdout.getReader();
-  const decoderLoop = (async () => {
+  const stdoutDone = (async () => {
     try {
       while (true) {
-        const { done, value } = await reader.read();
+        const { done, value } = await stdoutReader.read();
         if (done) break;
         for (const rec of decoder.push(value)) {
           const record = rec.value as Record<string, unknown>;
@@ -146,17 +180,51 @@ export async function spawnDirectPi(opts: {
         }
       }
     } catch {
-      // pump failure is handled by the settled rejection path
+      // A stream failure is handled by the exit path.
     } finally {
-      settlePending();
+      stdoutReader.releaseLock();
     }
-  })();
+  })().catch(() => undefined);
+
+  const stderrDone = (async () => {
+    try {
+      while (true) {
+        const { done, value } = await stderrReader.read();
+        if (done) break;
+        stderrText = (stderrText + textDecoder.decode(value, { stream: true })).slice(-DIRECT_PI_STDERR_LIMIT);
+      }
+      stderrText = (stderrText + textDecoder.decode()).slice(-DIRECT_PI_STDERR_LIMIT);
+    } catch {
+      // stderr is best-effort diagnostics only.
+    } finally {
+      stderrReader.releaseLock();
+    }
+  })().catch(() => undefined);
+
+  const exitWatcher = proc.exited
+    .then(async (code) => {
+      await Promise.allSettled([stdoutDone, stderrDone]);
+      if (pending.size > 0) {
+        const signal = typeof proc.signalCode === "string" ? proc.signalCode : null;
+        rejectPending(new Error(formatExitDiagnostic(code, signal, stderrText)));
+      }
+    })
+    .catch(async () => {
+      await Promise.allSettled([stdoutDone, stderrDone]);
+      if (pending.size > 0) {
+        const signal = typeof proc.signalCode === "string" ? proc.signalCode : null;
+        rejectPending(new Error(formatExitDiagnostic(proc.exitCode, signal, stderrText)));
+      }
+    });
 
   return {
     pid: proc.pid,
     bridgeEvents: events,
     async request(id: string, method: string, params?: Record<string, unknown>, timeoutMs?: number) {
       const timeout = timeoutMs ?? opts.timeoutMs ?? 20_000;
+      if (proc.exitCode !== null) {
+        throw new Error(formatExitDiagnostic(proc.exitCode, typeof proc.signalCode === "string" ? proc.signalCode : null, stderrText));
+      }
       return new Promise<PiResponse>((resolve, reject) => {
         const timer = setTimeout(() => {
           pending.delete(id);
@@ -192,12 +260,12 @@ export async function spawnDirectPi(opts: {
       try { proc.kill("SIGTERM"); } catch { /* already exited */ }
       try {
         await Promise.race([
-          proc.exited,
+          exitWatcher,
           new Promise<void>((r) => setTimeout(r, 1_000)),
         ]);
       } catch { /* ignore */ }
       try { if (proc.exitCode === null) proc.kill("SIGKILL"); } catch { /* ignore */ }
-      await decoderLoop.catch(() => undefined);
+      await Promise.allSettled([exitWatcher, stdoutDone, stderrDone]);
     },
   };
 }

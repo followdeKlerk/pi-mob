@@ -12,6 +12,9 @@ for await (const chunk of Bun.stdin.stream()) {
     const command = JSON.parse(line) as { id?: string; type: string; delayMs?: number };
     if (command.type === "hang") continue;
     if (command.delayMs) await Bun.sleep(command.delayMs);
-    process.stdout.write(`${JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data: { echoed: command.type, hostile: process.env.HOSTILE ?? null } })}\n`);
+    const data = { echoed: command.type, hostile: process.env.HOSTILE ?? null,
+      ...(command.type === "get_state" && process.env.PI_FIXTURE_SESSION_FILE
+        ? { sessionFile: process.env.PI_FIXTURE_SESSION_FILE } : {}) };
+    process.stdout.write(`${JSON.stringify({ type: "response", id: command.id, command: command.type, success: true, data })}\n`);
   }
 }

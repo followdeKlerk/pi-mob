@@ -274,6 +274,12 @@ function recipePayload(activity: RecipeActivity): Record<string, unknown> {
  * Project the active branch of an imported Pi JSONL session into the bridge's
  * durable transcript stream. The source remains read-only. A size/mtime marker
  * makes startup replay idempotent for unchanged files.
+ *
+ * Restricted to sessions with `externalSession: true` — the legacy
+ * TUI-import path used at daemon startup. Live RPC sessions owned by the
+ * bridge use {@link importSessionHistoryTail} instead, which does not
+ * require that flag and works for any session whose `piSessionPath` points
+ * at the authoritative JSONL.
  */
 export function importExternalSessionHistory(
   store: BridgeStore,
@@ -282,7 +288,281 @@ export function importExternalSessionHistory(
 ): number {
   const prior = store.sessionState(sessionId);
   if (!prior || prior.externalSession !== true) return 0;
-  const stats = statSync(sourcePath);
+  return importSessionHistoryInternal(store, sessionId, sourcePath, prior);
+}
+
+/** Build a snapshot of the durable tool ids already journaled for `sessionId`.
+ *  Used by {@link inferOverlapAnchor} to choose the latest safe overlap
+ *  between the authoritative JSONL active branch and the durable journal. */
+function durableToolFingerprints(store: BridgeStore, sessionId: string): {
+  readonly started: Set<string>;
+  readonly terminal: Set<string>;
+  readonly durableEventCount: number;
+} {
+  const started = new Set<string>();
+  const terminal = new Set<string>();
+  let durableEventCount = 0;
+  for (const event of store.listEvents(`session:${sessionId}`)) {
+    durableEventCount += 1;
+    const id = event.payload.toolCallId;
+    if (typeof id !== "string") continue;
+    if (event.type === "tool.started") started.add(id);
+    else if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled") terminal.add(id);
+  }
+  return { started, terminal, durableEventCount };
+}
+
+/** Walk the JSONL active branch and return the index of the latest safe
+ *  overlap entry against the durable journal. The branch is scanned in
+ *  order; each candidate advances the anchor. A toolResult whose toolCallId
+ *  is already durable terminal is a *stronger* anchor than an assistant
+ *  toolCall whose toolCallId is already durable started, so a `terminal`
+ *  candidate only wins when it sits at or after the current `started`
+ *  anchor.
+ *
+ *  Returns -1 when the journal has no overlap with the branch, which the
+ *  caller treats as "do not import" for live bridge-owned sessions (we
+ *  must never blindly replay a full JSONL over a non-empty durable stream
+ *  we cannot align). Returns -1 also for empty journals, which the caller
+ *  resolves against the legacy `externalSession` flag (full-branch import
+ *  preserved for genuinely new TUI imports). */
+function inferOverlapAnchor(
+  branch: readonly SessionEntry[],
+  durable: { readonly started: Set<string>; readonly terminal: Set<string> },
+): number {
+  if (durable.started.size === 0 && durable.terminal.size === 0) return -1;
+  let startedAnchor = -1;
+  let terminalAnchor = -1;
+  for (let i = 0; i < branch.length; i += 1) {
+    const entry = branch[i]!;
+    if (entry.type !== "message") continue;
+    const message = (entry as SessionMessageEntry).message as unknown as Record<string, unknown>;
+    if (message.role === "assistant") {
+      const content = Array.isArray(message.content) ? message.content : [];
+      for (const part of content) {
+        if (!part || typeof part !== "object") continue;
+        const p = part as Record<string, unknown>;
+        if (p.type === "toolCall" && typeof p.id === "string" && durable.started.has(p.id)) {
+          startedAnchor = i;
+          break;
+        }
+      }
+      continue;
+    }
+    if (message.role === "toolResult" && typeof message.toolCallId === "string" &&
+        durable.terminal.has(message.toolCallId)) {
+      // Only advance the terminal anchor past the started anchor if it sits
+      // at or after the started anchor. A toolResult earlier in the branch
+      // than the tool.started we already durable-recorded cannot be the
+      // safe overlap: that would mean the journal and the JSONL are out of
+      // phase and we must refuse to import.
+      if (i >= startedAnchor || startedAnchor === -1) terminalAnchor = i;
+    }
+  }
+  // The terminal anchor is strictly stronger when it sits at or after the
+  // latest started anchor: it proves both the start and the result already
+  // exist, so importing entries strictly after it cannot duplicate earlier
+  // tool/turn events. If the durable terminal id appears earlier than the
+  // latest durable-started id we cannot rely on it as the alignment
+  // boundary, because the journal and the JSONL may be out of phase — fall
+  // back to the latest started anchor instead.
+  if (terminalAnchor >= startedAnchor && terminalAnchor >= 0) return terminalAnchor;
+  return startedAnchor;
+}
+
+/**
+ * Re-import the JSONL tail for any session whose authoritative on-disk file
+ * is `sourcePath`. Works for both legacy `externalSession: true` sessions
+ * (TUI imports) and live RPC sessions (bridge-owned RPC subprocess).
+ *
+ * Idempotent: a second call against an unchanged file is a no-op. When the
+ * file grows between calls (Pi appended new toolResults while the bridge
+ * RPC was disconnected, for example) only the new tail is projected.
+ *
+ * Returns the number of events appended to the session stream. The caller
+ * is expected to invoke this on:
+ *
+ *   - bridge daemon startup (so the durable journal converges with the
+ *     authoritative on-disk Pi file before the listener binds);
+ *   - bridge RPC subprocess reconnect/restart (so a missed
+ *     `tool_execution_end` notification that Pi did write to the JSONL
+ *     still produces a `tool.completed`/`tool.failed` event);
+ *   - any periodic reconciliation tick the operator configures.
+ *
+ * The function refuses to project anything for a session that has never
+ * been recorded; the caller is expected to call
+ * {@link BridgeStore.ensureSession} first.
+ */
+export function importSessionHistoryTail(
+  store: BridgeStore,
+  sessionId: string,
+  sourcePath: string,
+): number {
+  const prior = store.sessionState(sessionId);
+  if (!prior) return 0;
+  return importSessionHistoryInternal(store, sessionId, sourcePath, prior);
+}
+
+/**
+ * The precise lifecycle outcome produced by a single reconciliation call,
+ * scoped to the reconciled active turn. The reconciler returns this so
+ * the caller can derive the canonical session row state without scanning
+ * the entire history for unrelated older terminal events.
+ */
+export type ReconciledTurnOutcome =
+  | { readonly kind: "live"; readonly imported: number }
+  | { readonly kind: "idle"; readonly turnId: string; readonly imported: number; readonly terminalType: "turn.settled" | "turn.aborted" | "turn.failed" }
+  | { readonly kind: "indeterminate"; readonly turnId: string; readonly imported: number; readonly reason: string };
+
+/**
+ * Reconcile a lifecycle boundary, rather than merely exposing the importer.
+ * `liveProcess` is deliberately explicit: an open JSONL turn is only made
+ * indeterminate after the owner has observed that no Pi process owns it.
+ *
+ * The returned `turnOutcome` describes the lifecycle of the *reconciled
+ * active turn* only:
+ *   - `live`           — a healthy Pi process owns the session; nothing
+ *                        was terminalised by this call.
+ *   - `idle`           — the reconciled active turn ended in a visible
+ *                        assistant text and was durable-settled (settled/
+ *                        aborted/failed). Caller maps to `runtimeState =
+ *                        "idle"`, `attentionState = "ready"`.
+ *   - `indeterminate`  — the reconciled active turn was left open by the
+ *                        JSONL and the caller passed `liveProcess: false`.
+ *                        Caller maps to `runtimeState = "indeterminate"`,
+ *                        `attentionState = "needs_attention"`.
+ *
+ * Older terminal events from a previous run are deliberately ignored so
+ * the caller cannot be fooled into settling a session based on stale
+ * transcript.
+ */
+export function reconcileSessionHistoryTail(
+  store: BridgeStore,
+  sessionId: string,
+  sourcePath: string,
+  options: { readonly liveProcess: boolean },
+): { readonly imported: number; readonly authoritativeTerminal: boolean; readonly turnOutcome: ReconciledTurnOutcome } {
+  const imported = importSessionHistoryTail(store, sessionId, sourcePath);
+  const events = store.listEvents(`session:${sessionId}`);
+  const terminalTools = new Set(events
+    .filter((event) => ["tool.completed", "tool.failed", "tool.cancelled"].includes(event.type))
+    .map((event) => event.payload.toolCallId)
+    .filter((id): id is string => typeof id === "string"));
+  const startedTools = new Map<string, Record<string, unknown>>();
+  for (const event of events) {
+    if (event.type === "tool.started" && typeof event.payload.toolCallId === "string") {
+      startedTools.set(event.payload.toolCallId, event.payload);
+    }
+  }
+  const openTools = [...startedTools.entries()].filter(([id]) => !terminalTools.has(id));
+  const terminalTurns = new Set(events
+    .filter((event) => ["turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate"].includes(event.type))
+    .map((event) => event.payload.turnId)
+    .filter((id): id is string => typeof id === "string"));
+  const openTurns = new Set(events
+    .filter((event) => event.type === "turn.started")
+    .map((event) => event.payload.turnId)
+    .filter((id): id is string => typeof id === "string" && !terminalTurns.has(id)));
+  // Resolve the reconciled active turn: the *latest* durable turn.started
+  // turnId whose pair did NOT come from a previous run's older terminal.
+  // For sessions with no live owner we must rely on the turn the importer
+  // either left open (openTurns.first) or that was already settled earlier
+  // (any durable terminal whose turnId matches a known turn.started).
+  const authoritativeTerminal = imported > 0 && (
+    events.some((event) => ["tool.completed", "tool.failed", "turn.settled", "turn.failed"].includes(event.type) && event.payload.historical === true)
+  );
+  if (options.liveProcess) {
+    // Live owner: import lands but no boundary is synthesised. The session
+    // runtimeState must NOT be flipped to idle from a prior stale "running"
+    // purely because the importer ran — that decision belongs to the live
+    // RPC subprocess.
+    return { imported, authoritativeTerminal, turnOutcome: { kind: "live", imported } };
+  }
+  if (openTools.length === 0 && openTurns.size === 0) {
+    // Nothing open. Was there a turn this reconciliation produced that we
+    // should map? Only the latest durable terminal turn matters; older
+    // events from previous runs are intentionally ignored so a session
+    // whose persisted runtimeState is already correct is not re-asserted.
+    const latestTerminalTurn = latestTerminalTurnEvent(events);
+    if (!latestTerminalTurn) {
+      return { imported, authoritativeTerminal, turnOutcome: { kind: "live", imported } };
+    }
+    return { imported, authoritativeTerminal, turnOutcome: idleOutcome(latestTerminalTurn, imported) };
+  }
+  // No-live owner, with at least one open tool or open turn. Synthesise the
+  // orphan boundary and report indeterminate.
+  const projection = new DurableRecipeActivityProjection(store, sessionId);
+  store.transaction(() => {
+    for (const [toolCallId, started] of openTools) {
+      const turnId = typeof started.turnId === "string" ? started.turnId : undefined;
+      projection.append("tool.failed", {
+        sessionId, ...(turnId ? { turnId } : {}), toolCallId,
+        toolName: typeof started.toolName === "string" ? started.toolName : "tool",
+        output: "No live Pi owner remained before a terminal tool result was observed.",
+        result: "indeterminate",
+        isError: true,
+        errorInfo: { code: "indeterminate", message: "No live Pi owner remained before the tool result was observed.", retryable: false },
+        historical: true,
+      });
+    }
+    for (const turnId of openTurns) {
+      store.appendEvent(`session:${sessionId}`, "turn.indeterminate", {
+        sessionId, turnId, reason: "no_live_rpc", historical: true,
+      });
+    }
+  });
+  // The synthesized boundary is now the authoritative terminal lifecycle;
+  // callers must not add a second generic exit/indeterminate event.
+  const reconciledTurnId = [...openTurns][0] ?? [...terminalTurns][0] ?? null;
+  return {
+    imported,
+    authoritativeTerminal: true,
+    turnOutcome: { kind: "indeterminate", turnId: reconciledTurnId ?? "", imported, reason: "no_live_rpc" },
+  };
+}
+
+/** Resolve the latest durable turn terminal event scoped to the reconciled
+ *  active turn. We pair each terminal turn event with its preceding
+ *  turn.started by turnId and keep the one with the largest cursor, so an
+ *  unrelated old historical terminal event from a previous run cannot be
+ *  mistaken for the reconciled active turn. */
+function latestTerminalTurnEvent(events: ReadonlyArray<{ readonly type: string; readonly cursor: string; readonly payload: Record<string, unknown> }>): { readonly terminalType: "turn.settled" | "turn.aborted" | "turn.failed" | "turn.indeterminate"; readonly turnId: string; readonly cursor: string } | null {
+  let best: { readonly terminalType: "turn.settled" | "turn.aborted" | "turn.failed" | "turn.indeterminate"; readonly turnId: string; readonly cursor: string } | null = null;
+  for (const event of events) {
+    if (event.type !== "turn.settled" && event.type !== "turn.aborted" && event.type !== "turn.failed" && event.type !== "turn.indeterminate") continue;
+    const turnId = typeof event.payload.turnId === "string" ? event.payload.turnId : null;
+    if (!turnId) continue;
+    if (best === null || event.cursor > best.cursor) {
+      best = { terminalType: event.type, turnId, cursor: event.cursor };
+    }
+  }
+  return best;
+}
+
+/** Map the latest terminal turn to the canonical ReconciledTurnOutcome.
+ *  `turn.indeterminate` is reported as indeterminate; settled/aborted/
+ *  failed are reported as idle for the caller to map to runtimeState. */
+function idleOutcome(latest: { readonly terminalType: "turn.settled" | "turn.aborted" | "turn.failed" | "turn.indeterminate"; readonly turnId: string; readonly cursor: string }, imported: number, reason = "no_live_rpc"): ReconciledTurnOutcome {
+  if (latest.terminalType === "turn.indeterminate") {
+    return { kind: "indeterminate", turnId: latest.turnId, imported, reason };
+  }
+  return { kind: "idle", turnId: latest.turnId, imported, terminalType: latest.terminalType };
+}
+
+function importSessionHistoryInternal(
+  store: BridgeStore,
+  sessionId: string,
+  sourcePath: string,
+  prior: Record<string, unknown>,
+): number {
+  let stats;
+  try {
+    stats = statSync(sourcePath);
+  } catch {
+    // Source file missing: a live RPC subprocess has not produced its
+    // session file yet, or it was cleaned up. Nothing to project.
+    return 0;
+  }
   const sourceRevision = `${stats.size}:${stats.mtimeMs}`;
   if (prior.externalHistorySourceRevision === sourceRevision) return 0;
 
@@ -295,21 +575,88 @@ export function importExternalSessionHistory(
   const previousIndex = previousLeaf
     ? branch.findIndex((entry) => entry.id === previousLeaf)
     : -1;
-  // If the TUI merely appended to the same branch, import only the new tail.
-  // If it switched branches, retain the already-journaled transcript and add
-  // the new active branch rather than duplicating every old event.
-  const pending = previousIndex >= 0 ? branch.slice(previousIndex + 1) :
-    previousLeaf ? [] : branch;
+  // Three sources of "where to start the import":
+  //   1. explicit `externalHistoryLeafId` marker (legacy/external sessions
+  //      that recorded their leaf on every import);
+  //   2. an inferred overlap anchor against the durable journal (a
+  //      tool.started or tool.completed toolCallId present in both);
+  //   3. fall through to the full branch for the empty legacy import.
+  //
+  // For a bridge-owned live session whose journal already has events but no
+  // explicit leaf marker (typical for sessions restored from before this
+  // reconciliation fix), case 2 prevents replaying the entire JSONL over
+  // durable events that already match. With an empty durable journal case 2
+  // is skipped, preserving the legacy TUI-import behaviour for genuinely
+  // new sessions.
+  const inferredAnchor = previousLeaf
+    ? -1
+    : inferOverlapAnchor(branch, durableToolFingerprints(store, sessionId));
+  let pending: SessionEntry[];
+  if (previousIndex >= 0) {
+    pending = branch.slice(previousIndex + 1);
+  } else if (previousLeaf) {
+    pending = [];
+  } else if (inferredAnchor >= 0) {
+    // Anchor inclusive: the matched toolCall/result entry itself is
+    // already durable, so we resume strictly *after* it. Importing the
+    // anchor entry would duplicate the already-journaled assistant and
+    // tool events.
+    pending = branch.slice(inferredAnchor + 1);
+  } else if (prior.externalSession === true || durableToolFingerprints(store, sessionId).durableEventCount === 0) {
+    // Legacy TUI import path: with no leaf marker, no inferred anchor,
+    // AND an empty durable journal, fall through to the original
+    // full-branch behaviour so a genuinely new external session still
+    // imports its entire active branch.
+    pending = branch;
+  } else {
+    // Bridge-owned live session with a non-empty durable journal and no
+    // safe overlap: refuse to replay the full JSONL over an unrelated
+    // transcript. The caller can fall back to
+    // {@link reconcileSessionHistoryTail} which will synthesize an
+    // explicit indeterminate boundary for any orphan tool/turn rather
+    // than silently duplicating an unrelated history.
+    pending = [];
+  }
   const projection = new DurableRecipeActivityProjection(store, sessionId);
-  let currentTurnId: string | null = null;
+  const existingToolTurns = new Map<string, string>();
+  const durableOpenTurns = new Set<string>();
+  let latestDurableOpenTurnId: string | null = null;
+  for (const event of store.listEvents(`session:${sessionId}`)) {
+    if (event.type === "tool.started" && typeof event.payload.toolCallId === "string" && typeof event.payload.turnId === "string") {
+      existingToolTurns.set(event.payload.toolCallId, event.payload.turnId);
+    }
+    if (event.type === "turn.started" && typeof event.payload.turnId === "string") {
+      latestDurableOpenTurnId = event.payload.turnId;
+      durableOpenTurns.add(event.payload.turnId);
+    }
+    if ((event.type === "turn.settled" || event.type === "turn.aborted" || event.type === "turn.failed" || event.type === "turn.indeterminate") &&
+        typeof event.payload.turnId === "string") {
+      durableOpenTurns.delete(event.payload.turnId);
+      latestDurableOpenTurnId = event.payload.turnId;
+    }
+  }
+  // When the import resumes from an inferred anchor (no `externalHistoryLeafId`),
+  // the most recent durable open turn is the one to which the resumed slice
+  // belongs. Seed `currentTurnId` so a trailing assistant message does not
+  // synthesise a fresh `historical-…` turnId over an already-durable turn.
+  let currentTurnId: string | null = inferredAnchor >= 0 ? latestDurableOpenTurnId : null;
+  let lastRole: unknown = null;
+  let lastAssistantHadText = false;
   let count = 0;
   const append = (type: string, payload: Record<string, unknown>) => {
+    const existingTurn = typeof payload.toolCallId === "string"
+      ? existingToolTurns.get(payload.toolCallId)
+      : undefined;
+    const turnId = existingTurn ?? currentTurnId;
     projection.append(type, {
       sessionId,
       historical: true,
-      ...(currentTurnId ? { turnId: currentTurnId } : {}),
+      ...(turnId ? { turnId } : {}),
       ...payload,
     });
+    if (type === "tool.started" && typeof payload.toolCallId === "string" && turnId) {
+      existingToolTurns.set(payload.toolCallId, turnId);
+    }
     count += 1;
   };
   const settleTurn = () => {
@@ -326,6 +673,9 @@ export function importExternalSessionHistory(
       if (entry.type !== "message") continue;
       const message = (entry as SessionMessageEntry).message as unknown as Record<string, unknown>;
       const role = message.role;
+      lastRole = role;
+      lastAssistantHadText = role === "assistant" && Array.isArray(message.content) && message.content.some((part) =>
+        Boolean(part && typeof part === "object" && (part as Record<string, unknown>).type === "text"));
       const at = timestamp(message.timestamp ?? entry.timestamp);
       if (role === "user") {
         settleTurn();
@@ -341,6 +691,10 @@ export function importExternalSessionHistory(
       }
       if (role === "assistant") {
         if (!currentTurnId) {
+          // The anchor-resumed slice carries the durable open turn forward.
+          // Only synthesise a fresh `historical-…` turn when we are
+          // importing from the very start of the branch (no anchor), which
+          // preserves the legacy full-import behaviour for empty journals.
           currentTurnId = `historical-${entry.id}`;
           append("turn.started", {
             turnId: currentTurnId,
@@ -349,6 +703,10 @@ export function importExternalSessionHistory(
             ...(at ? { timestamp: at } : {}),
           });
         }
+        // If `currentTurnId` points at an already-durable turn (anchor
+        // resume), do NOT emit a new turn.started and do NOT reset the id;
+        // the resumed slice belongs to the same turn until a `user` role or
+        // a `settleTurn` boundary moves it on.
         const content = Array.isArray(message.content) ? message.content : [];
         for (let index = 0; index < content.length; index += 1) {
           const raw = content[index];
@@ -405,6 +763,7 @@ export function importExternalSessionHistory(
           toolCallId: message.toolCallId,
           toolName: typeof message.toolName === "string" ? message.toolName : "tool",
           result: output || {},
+          isError: message.isError === true,
           ...metadata,
           ...(message.isError === true ? {
             errorInfo: {
@@ -416,14 +775,28 @@ export function importExternalSessionHistory(
         });
       }
     }
-    settleTurn();
+    // A trailing toolResult only terminalizes the tool, NOT the parent
+    // assistant turn: Pi normally continues with more reasoning or further
+    // toolCalls after a toolResult. Closing the turn here would mask a
+    // half-formed answer as a settled one. The authoritative branch ends
+    // in a settled turn only when it ends in a visible assistant text
+    // block; if the JSONL ends in `toolResult` without a following
+    // assistant text, the turn stays open and the caller
+    // (reconcileSessionHistoryTail) decides how to boundary it based on
+    // live ownership.
+    if (lastRole === "assistant" && lastAssistantHadText) settleTurn();
     const leaf = branch.at(-1)?.id ?? null;
-    store.updateSessionState(sessionId, {
-      ...prior,
-      externalHistorySourceRevision: sourceRevision,
-      externalHistoryLeafId: leaf,
-      externalHistoryImportedAt: new Date().toISOString(),
-    });
+    // Only record the source-revision marker when at least one event was
+    // imported. A no-overlap refusal must not lock the file away from a
+    // later reconciliation that produces a safe anchor.
+    if (count > 0) {
+      store.updateSessionState(sessionId, {
+        ...prior,
+        externalHistorySourceRevision: sourceRevision,
+        externalHistoryLeafId: leaf,
+        externalHistoryImportedAt: new Date().toISOString(),
+      });
+    }
   });
   return count;
 }

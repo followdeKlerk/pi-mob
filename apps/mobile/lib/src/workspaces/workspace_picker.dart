@@ -161,10 +161,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
 }
 
 class _RecentList extends StatelessWidget {
-  const _RecentList({
-    required this.coordinator,
-    required this.onSelect,
-  });
+  const _RecentList({required this.coordinator, required this.onSelect});
 
   final ConnectionCoordinator coordinator;
   final void Function(WorkspaceEntry entry) onSelect;
@@ -185,20 +182,14 @@ class _RecentList extends StatelessWidget {
       separatorBuilder: (_, _) => const Divider(height: 1),
       itemBuilder: (context, index) {
         final entry = entries[index];
-        return _WorkspaceTile(
-          entry: entry,
-          onSelect: onSelect,
-        );
+        return _WorkspaceTile(entry: entry, onSelect: onSelect);
       },
     );
   }
 }
 
 class _SearchResults extends StatelessWidget {
-  const _SearchResults({
-    required this.coordinator,
-    required this.onSelect,
-  });
+  const _SearchResults({required this.coordinator, required this.onSelect});
 
   final ConnectionCoordinator coordinator;
   final void Function(WorkspaceEntry entry) onSelect;
@@ -255,20 +246,14 @@ class _SearchResults extends StatelessWidget {
           policyVersion: hit.policyVersion,
           manifest: const <WorkspaceResource>[],
         );
-        return _WorkspaceTile(
-          entry: synthesized,
-          onSelect: onSelect,
-        );
+        return _WorkspaceTile(entry: synthesized, onSelect: onSelect);
       },
     );
   }
 }
 
 class _WorkspaceTile extends StatelessWidget {
-  const _WorkspaceTile({
-    required this.entry,
-    required this.onSelect,
-  });
+  const _WorkspaceTile({required this.entry, required this.onSelect});
 
   final WorkspaceEntry entry;
   final void Function(WorkspaceEntry entry) onSelect;

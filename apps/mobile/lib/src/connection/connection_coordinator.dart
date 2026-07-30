@@ -3052,9 +3052,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         await _database.persistEvent(event);
         _scheduleSearchIndex(event.streamId);
         _streams[streamId] = reduction.state;
-        _isolateLiveEventProjection(
-          () => _handleEventPayload(type, payload),
-        );
+        _isolateLiveEventProjection(() => _handleEventPayload(type, payload));
         _eventsSinceAck += 1;
         if (_eventsSinceAck >= 20) await _ackCursors();
       case EventDisposition.duplicate:

@@ -416,8 +416,7 @@ class _ToolCardState extends State<ToolCard> {
         }
       }
     }
-    if (rows.isEmpty &&
-        (args['agent'] is String || args['task'] is String)) {
+    if (rows.isEmpty && (args['agent'] is String || args['task'] is String)) {
       addWorker(args, 'worker 1');
     }
     return rows.isEmpty

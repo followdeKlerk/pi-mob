@@ -80,9 +80,11 @@ class ParsedToolEvent {
   final String toolName;
   final TranscriptToolStatus status;
   final Map<String, Object?> arguments;
+
   /// Snapshot output replaces prior output for this tool call. Genuine deltas
   /// are carried separately by the protocol as `delta`.
   final String? outputSnapshot;
+
   /// Genuine incremental output, appended only when explicitly marked delta.
   final String? outputDelta;
   final Map<String, Object?>? result;

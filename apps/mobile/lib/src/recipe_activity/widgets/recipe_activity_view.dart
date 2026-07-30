@@ -282,7 +282,8 @@ void _appendOutputSummary(Object? value, List<String> lines) {
     }
   }
   final result = value['result'];
-  if (lines.length < 8 && (result is Map || result is List || result is String)) {
+  if (lines.length < 8 &&
+      (result is Map || result is List || result is String)) {
     _appendOutputSummary(result, lines);
   }
 }
@@ -297,7 +298,8 @@ String? _outputField(Map value, List<String> keys) {
 
 String? _childSummary(Object? child) {
   if (child is! Map) return child is String ? _shorten(child.trim()) : null;
-  final agent = _text(child['agent']) ??
+  final agent =
+      _text(child['agent']) ??
       _text(child['subagent_type']) ??
       _text(child['name']);
   final status = _outputField(child, const ['status', 'state', 'phase']);
@@ -349,7 +351,8 @@ int _subagentCount(Map<String, Object?> args, int readableWorkers) {
 }
 
 String _workerLine(Map item, {required String prefix}) {
-  final agent = _text(item['agent']) ??
+  final agent =
+      _text(item['agent']) ??
       _text(item['subagent_type']) ??
       _text(item['name']);
   final model = _text(item['model']);
@@ -362,9 +365,8 @@ String _workerLine(Map item, {required String prefix}) {
   return '$prefix${fields.isEmpty ? '' : ': ${fields.join(' · ')}'}';
 }
 
-String? _text(Object? value) => value is String && value.trim().isNotEmpty
-    ? _shorten(value.trim())
-    : null;
+String? _text(Object? value) =>
+    value is String && value.trim().isNotEmpty ? _shorten(value.trim()) : null;
 
 String _shorten(String value) =>
     value.length <= 120 ? value : '${value.substring(0, 117)}…';

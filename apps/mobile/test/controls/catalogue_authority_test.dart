@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:pi_mob/src/agents/agent_domain.dart';
 import 'package:pi_mob/src/controls/control_view_data.dart';
 import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
@@ -154,18 +155,27 @@ void main() {
   ) async {
     final fixture = await _catalogueFixture();
     final controllers = _ShellControllers();
+    // The bridge never advertises `agents.v1` in the default daemon
+    // construction, so the truthful product contract is "unavailable".
     expect(fixture.coordinator.supportsCapability('agents.v1'), isFalse);
     await tester.pumpWidget(_shell(fixture.coordinator, controllers));
-    await tester.tap(find.byKey(const Key('open-agents')));
     await tester.pumpAndSettle();
 
-    expect(find.text('Agent supervision unavailable'), findsOneWidget);
-    expect(
-      find.text(
-        'This host did not advertise an authoritative agent supervision provider.',
-      ),
-      findsOneWidget,
+    // The shell intentionally exposes no `open-agents` affordance while the
+    // capability is unavailable; tapping a missing key would be a lie. The
+    // truthful shell must not present any entry point to a missing surface.
+    expect(find.byKey(const Key('open-agents')), findsNothing);
+
+    // Domain coverage: the reducer must still surface the canonical
+    // unavailable reason so any caller (notifications, transcripts, debug
+    // tooling) reports a truthful "Agent supervision unavailable" rather
+    // than fabricating a fallback.
+    final reduced = reduceAgents(
+      const AgentSupervisionState(),
+      'agent.unavailable',
+      const {'status': <String, Object?>{}},
     );
+    expect(reduced.unavailableReason, 'Agent supervision unavailable');
 
     fixture.coordinator.dispose();
     await tester.pumpWidget(const SizedBox.shrink());
