@@ -2,71 +2,89 @@
 
 ## Read this first
 
-This repository branch is an active integration and incident-debugging branch, not a small patch over `main`.
+The canonical project status is [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md). Read it before proposing features, changing capability claims, or treating an isolated provider implementation as shipped behaviour.
 
-Before changing code, read in this order:
+Recommended order:
 
-1. `docs/BRIDGE_DAEMON_BUSY_LOOP.md`
-2. `packages/bridge/README.md`
-3. `docs/ARCHITECTURE.md`
-4. `docs/PROTOCOL.md`
-5. the implementation files named in the incident document
+1. `docs/PROJECT_STATUS.md`
+2. `docs/ARCHITECTURE.md`
+3. `docs/PROTOCOL.md`
+4. `packages/bridge/README.md`
+5. `apps/mobile/README.md`
+6. the implementation and tests for the path being changed
 
-## Current branch objective
+The dated rectification and daemon-incident reports under `docs/` are historical evidence snapshots. They are not current branch instructions.
 
-`debug/bridge-daemon-busy-loop` contains substantial control-oriented work intended to expose and supervise Pi from the mobile application while preserving Pi's normal execution model.
+## Current objective
 
-The intended host contract on this branch is:
+Move pi-mob from a working private alpha to a trustworthy beta by strengthening the production path rather than adding broad new surface area.
 
-- setup captures a sanitized owner login environment;
-- Pi receives the owner's usable PATH and provider configuration;
-- the bridge does not inject the previous host-policy extension by default;
-- the mobile app remains a reconnectable control surface rather than the authority for repositories, credentials, or durable sessions.
+Priority order:
 
-Do not revert these goals as a shortcut around the current failure.
+1. Prove the capabilities advertised by the normal daemon through a real production-wiring integration test.
+2. Bind the loopback listener before bulk external-history synchronization.
+3. Add explicit initialization phases, bounded history batches, durable checkpoints, and interruption/restart coverage.
+4. Make tolerated event-projection failures observable without disconnecting healthy clients.
+5. Wire the mobile-native providers that matter, one at a time, with end-to-end proof.
+6. Align release identity, signing, versioning, supported platforms, and upgrade documentation.
 
-## Active blocker
+## Product boundaries
 
-The installed bridge daemon can enter a CPU-bound SQLite startup path before it binds `127.0.0.1`. In the recorded reproduction, no Pi subprocess or loopback listener appears and `pi-mob start` reports `bridge readiness timeout`.
+- The host owns repositories, provider credentials, Pi processes, and durable session state.
+- The Android app is a reconnectable mobile control and presentation surface.
+- The bridge owns durable delivery, controller leases, bounded host operations, and process supervision.
+- Pi retains its normal execution model; the bridge does not impose a default host policy extension.
+- Private Tailscale Serve exposure is supported. Public listeners and Funnel are not.
+- Multi-user tenancy is not part of the product.
 
-The strongest current diagnosis is pathological historical-session import/projection complexity, potentially compounded by a synchronous full SQLite integrity check. This diagnosis must be measured with startup-stage instrumentation before broad refactoring.
+### Git is out of scope
 
-The mobile connection failure is downstream of the missing listener. Prove local listener and WebSocket readiness before debugging Flutter or Tailscale.
+Do not implement, wire, advertise, or add roadmap work for Git status, commit, push, CI summaries, or repository actions.
 
-## Required working method
+Experimental Git-related modules may be removed in a focused cleanup after confirming that shared protocol and test dependencies are unaffected. Do not expand them.
 
-1. Inspect the branch and existing changes before editing.
-2. Preserve unrelated R7/R8/R9/R12 work.
-3. Reproduce against a copy of the affected database; never destroy the original diagnostic state.
-4. Add bounded, redacted stage timings first.
-5. Keep confirmed evidence, inference, and proposed design clearly separated.
-6. Prefer small commits: instrumentation, behavioural fix, regression tests, documentation.
-7. Run focused tests after each change, then the full bridge checks.
+## Capability discipline
 
-## Definition of done for the incident
+Use these terms precisely:
 
-A longer timeout is insufficient. Completion requires:
+- **Production-wired:** constructed by the normal daemon and reachable from the released mobile path.
+- **Implemented, not production-wired:** code or UI exists, but the default daemon does not supply the provider required to advertise it.
+- **Planned:** accepted remaining work.
+- **Out of scope:** intentionally not planned.
 
-- prompt loopback listener availability on a 45k-event-class database;
-- truthful initialization state while background history synchronization runs;
-- bounded, checkpointed, interruption-safe history import;
-- idempotent source and derived event projection;
-- mobile host connectivity after local readiness is established;
-- preservation of the owner-captured Pi launch contract;
-- regression coverage for approximately 20 sessions and 50,000 events.
+A schema, service class, widget, or isolated test does not prove a production feature. For a capability to be called shipped, verify all of the following:
 
-## Verification commands
+1. the normal daemon constructs its provider;
+2. `hello.accepted` advertises it;
+3. the mobile app exercises it;
+4. an integration test covers the actual construction path;
+5. documentation and release metadata claim no more than that test proves.
 
-Use the pinned toolchain documented by the repository. At minimum:
+## Working method
+
+1. Inspect the current implementation before editing.
+2. Separate confirmed behaviour, inference, and proposed design.
+3. Prefer small, reviewable changes with focused tests.
+4. Preserve durable command, replay, lease, and indeterminate-state guarantees.
+5. Keep private paths, environment values, credentials, transcripts, and tool output out of logs and fixtures.
+6. Do not solve listener-readiness problems by merely increasing a timeout.
+7. Do not silently swallow a newly introduced degraded state; make it bounded and observable.
+8. Update `docs/PROJECT_STATUS.md` whenever production wiring or accepted roadmap scope changes.
+
+## Validation
+
+Run the pinned toolchain documented by CI. At minimum for bridge or protocol work:
 
 ```sh
 bun install --frozen-lockfile
-bun run --filter '@pi-mob/bridge' typecheck
-bun run --filter '@pi-mob/bridge' test
+bun run typecheck
+bun run schema:check
+bun run fixtures:check
+bun test
 bun run build
 ```
 
-For mobile-facing protocol or connection changes:
+For mobile-facing changes:
 
 ```sh
 cd apps/mobile
@@ -74,4 +92,10 @@ flutter analyze --no-fatal-infos
 flutter test
 ```
 
-Record any unavailable toolchain or host-only validation explicitly; do not invent successful output.
+For documentation-only changes:
+
+```sh
+bun run docs:check
+```
+
+Record any unavailable toolchain or host-only validation explicitly. Never invent successful output.
