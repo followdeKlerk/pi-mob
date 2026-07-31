@@ -1,5 +1,8 @@
 # Pi Mob
 
+> [!WARNING]
+> This application was built with an AI coding agent. Expect some slop, dead code, and rough edges. It is in working condition and under active development. Contributions are welcome in all forms, including bug reports, testing, documentation, design, cleanup, and code.
+
 Pi Mob is the mobile control surface for a local Pi coding host. A small bridge daemon runs on your computer and exposes it to a connected Android phone over a private Tailscale network. The phone becomes a fast, low-friction way to supervise running Pi sessions, including while the phone is locked or the app is backgrounded.
 
 This repository hosts:
