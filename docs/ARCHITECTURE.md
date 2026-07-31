@@ -1,137 +1,70 @@
 # Architecture
 
-pi-mob is a private, host-authoritative mobile control system for Pi coding-agent sessions.
+Pi Mob has three components: a host, a bridge, and a mobile client. Each one has a single, well-defined responsibility.
 
-## Components
-
-1. **Android application** — Flutter client for pairing, chat selection, transcript presentation, local drafts, and mobile controls.
-2. **Bridge daemon** — Bun/TypeScript service that validates the protocol, persists commands and events, manages controller leases, supervises Pi processes, and serves the loopback HTTP/WebSocket endpoint.
-3. **Pi runtime** — one or more Pi RPC processes launched with the owner's captured login environment and explicit per-session working directories.
-4. **Tailscale** — private network transport between the phone and the host. The bridge itself remains loopback-only.
-
-```text
-Android app
-    ⇅ private Tailscale HTTPS / WebSocket
-loopback bridge
-    ⇅ Pi RPC
-Pi processes
-    ⇅
-host repositories, tools, credentials, and session files
+```
+┌──────────────────────────────┐    ┌──────────────────────────────┐
+│ Host (your computer)         │    │ Mobile (Android phone)       │
+│  ┌───────────────┐           │    │  ┌────────────────────────┐  │
+│  │ Pi processes  │◄──────────┼────┼──┤ Flutter app            │  │
+│  │  (one per     │  durable  │    │  │  (Pi Mob)              │  │
+│  │   mobile      │  control  │    │  └────────────────────────┘  │
+│  │   session)    │  plane    │    │                              │
+│  └───────────────┘           │    │                              │
+│         ▲                    │    │                              │
+│         │  supervises         │    │                              │
+│  ┌──────┴────────────────┐   │    │                              │
+│  │ Bridge daemon          │◄──┼────┤ private tailnet (Tailscale) │
+│  │  (Bun distributable)   │   │    │                              │
+│  └────────────────────────┘   │    │                              │
+└──────────────────────────────┘    └──────────────────────────────┘
 ```
 
-## Ownership
+The bridge is the only component that holds durable state outside Pi itself. The mobile app holds no business state other than local cache copies of streams and the user’s drafts.
 
-### Host owns
+## Bridge
 
-- repositories and working directories;
-- provider credentials and usable login environment;
-- Pi processes and Pi-owned session files;
-- durable bridge commands, events, cursors, queues, leases, exports, and attachment bytes;
-- process-capacity and lifecycle decisions.
+The bridge is a long-running TypeScript daemon. It is launched under `launchd` (macOS) or `systemd` (Linux) and exposes a single HTTPS endpoint on a private Tailscale address. Public exposure is not supported.
 
-### Mobile owns
+Responsibilities:
 
-- paired-host connection metadata;
-- local prompt drafts and mobile presentation state;
-- cached projections needed to render reconnectable views;
-- user intent sent through the bridge protocol.
+- serve the mobile protocol over a single WebSocket;
+- own durable streams, command journal, and controller-lease book;
+- supervise one Pi process per mobile session and persist that session path so reconnects resume immediately;
+- persist tokenized cursors per stream so the mobile app can replay missed events after a network blip;
+- deliver notifications by sending data-only FCM messages to the registered device for the targeted session;
+- surface explicit unavailable states when host capabilities are not advertised rather than fabricating entries.
 
-The phone is never authoritative for whether a command executed.
+The bridge runs on the loopback interface. It is bound to the loopback listener before any bulk external history synchronization. The mobile client only ever reaches the bridge through Tailscale.
 
-## Durable control path
+## Host
 
-State-changing requests use a client-generated command ID.
+The host is the computer running the bridge. It owns the Pi processes, the workspaces, the credentials, and the notification service account.
 
-1. The server validates the envelope and payload.
-2. The durable command record commits before dispatch.
-3. A controller lease is checked when the command requires exclusive mutation rights.
-4. The adapter dispatches the operation to Pi or a bridge-owned service.
-5. Command and session events are appended to replayable streams.
-6. The mobile app acknowledges cursors after applying durable events.
+- Workspaces are discovered under a configured search root. The bridge exposes a bounded workspace search capability.
+- Pi processes are spawned, supervised, and recycled by the bridge. Each mobile session has a stable `--session-id` so reconnect can resume the same process.
+- The notification service account is read once at startup; the bridge never logs the credential contents.
 
-Reusing a command ID with the same semantic payload returns the existing command state. Reusing it with different semantics is rejected. If execution cannot be proven after a crash or disconnect, the command becomes `indeterminate` and is not automatically repeated.
+## Mobile
 
-## Raw and curated Pi surfaces
+The mobile app is a Flutter Android client. It is a single-screen chat shell with a drawer for saved chats and a search affordance, plus a settings surface for the bridge address, notification setup, and forget-host.
 
-The production bridge exposes two complementary paths:
+Responsibilities:
 
-- **Raw RPC** passes a bounded Pi command through without a method allowlist and journals its correlated response and events.
-- **Curated controls** provide mobile-native flows for common operations such as prompt, steer, follow-up, abort, model selection, compaction, clone, export, and session lifecycle.
+- paint an immediate splash card on cold launch so the user is never staring at a blank surface while the database is read and the bridge is contacted;
+- validate the bridge handshake and subscribe to the durable streams the user has access to;
+- gate sensitive actions (such as starting a chat) on bridge readiness and the durable history gate;
+- surface the per-chat progress while history sync is in flight, including current chat, remaining chats, elapsed time, ETA, and throughput;
+- keep controller leases session-scoped so navigating between chats does not destroy valid leases;
+- request notification permission once per process, register the FCM token automatically, and fire a real notification when a reply arrives while the app is backgrounded;
+- reconcile notifications back to the correct chat via the existing deep-link path.
 
-Raw RPC preserves forward access to Pi. Curated controls provide safer, clearer mobile UX. Curated support must not silently discard unknown Pi events.
+The mobile app does not run a web server. It does not cache credentials. It does not advertise services to other apps.
 
-## Multi-session host model
+## Why this shape
 
-The production adapter supports multiple durable sessions. Each session can resolve to its own Pi RPC client and working directory. A host process supervisor applies a bounded concurrency limit and lifecycle policy.
-
-The class name `OneSessionPiAdapter` is retained for compatibility, but its current role is multi-session.
-
-## Capability-provider model
-
-The handshake advertises the durable core and `raw_rpc.v1` directly. Other capabilities are advertised only when `DurableBridgeRuntime` receives the corresponding provider.
-
-### Production-wired core
-
-- streams;
-- commands;
-- controller leases;
-- raw RPC;
-- session and workspace controls supplied by the Pi adapter.
-
-### Implemented but not wired by the normal daemon
-
-- attention projection;
-- first-class agent supervision;
-- command and skill catalogue management;
-- structured plans;
-- context inspection and mutation;
-- workspace file browsing;
-- process snapshots and paged output.
-
-A service implementation, schema, test fixture, or Flutter widget is not sufficient to call a capability shipped. The normal daemon must construct the provider, the handshake must advertise it, the app must exercise it, and a production-wiring integration test must prove the path.
-
-## Git boundary
-
-Git integration is intentionally outside the architecture. pi-mob will not production-wire Git summaries, commit, push, CI status, or repository actions. Experimental Git-related modules are not product capabilities and should not shape the roadmap.
-
-## Startup path
-
-Current startup performs:
-
-1. state-directory creation and SQLite open/migrations;
-2. uncertain-command recovery and session-state recovery;
-3. Pi login-environment resolution;
-4. external Pi-session discovery;
-5. changed-history import and projection;
-6. primary Pi RPC startup;
-7. durable runtime recovery;
-8. loopback server binding.
-
-The former full SQLite integrity scan was removed from ordinary startup and the historical recipe projection was changed from repeated full scans to dirty-identity updates. The remaining architectural weakness is that history work and Pi startup still occur before listener binding.
-
-The beta design should bind after lightweight durable recovery, expose an explicit initialization phase, and perform history synchronization in bounded checkpointed batches while the service remains reachable.
-
-## Trust and security boundaries
-
-- The production server rejects non-loopback bind addresses.
-- Remote access is intended only through a private Tailscale Serve route.
-- Public listeners and Tailscale Funnel are unsupported.
-- The bridge verifies protocol shape, host identity expectations, installation identity, command semantics, lease ownership, and bounded payloads.
-- Pi runs with the owner's normal execution model. The bridge does not inject a default policy or read-only extension.
-- pi-mob is designed for one owner, not multi-user tenancy.
-
-## Failure model
-
-- Transport loss triggers reconnect and replay rather than blind re-execution.
-- Slow consumers are disconnected once bounded outbound buffering is exceeded.
-- Store failures block new durable commands.
-- Unknown forward-compatible durable events should not poison a healthy connection.
-- Malformed known-event projections should be isolated but also recorded as bounded, redacted degradation; this observability work remains planned.
-
-## Source of truth
-
-- Current product boundary: [`PROJECT_STATUS.md`](PROJECT_STATUS.md)
-- Executable wire contract: `packages/protocol-schema`
-- Production construction: `packages/bridge/src/daemon.ts`
-- Bridge runtime capability advertisement: `packages/bridge/src/core/runtime.ts`
-- HTTP/WebSocket behaviour: `packages/bridge/src/core/server.ts`
+- **Local-first**: no cloud side, no analytics, no background upload.
+- **Tailnet-only**: the bridge is reachable only through Tailscale, never from the public internet.
+- **Process-stable**: each mobile session maps to a long-lived Pi process with a stable `--session-id`, so reconnects and app restarts resume instantly.
+- **Durable**: streams, commands, and leases are journaled on the host; the phone is a thin cache.
+- **Just enough notifications**: the only host-to-phone push path is a per-session FCM delivery tied to a real reply, not a chat-noise ping.
