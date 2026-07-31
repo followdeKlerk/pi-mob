@@ -8,6 +8,21 @@ This repository hosts:
 - `apps/mobile/` — the Flutter Android client.
 - `docs/` — architecture, protocol, privacy, and project status.
 
+## Documentation
+
+| Document | Description |
+| --- | --- |
+| [docs/README.md](docs/README.md) | Documentation index. |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | How the bridge, host, and mobile client fit together. |
+| [docs/PROTOCOL.md](docs/PROTOCOL.md) | The wire protocol between the bridge and the mobile client. |
+| [docs/PROJECT_STATUS.md](docs/PROJECT_STATUS.md) | Production-wired, planned, and out-of-scope capabilities. |
+| [docs/PRIVACY.md](docs/PRIVACY.md) | What data Pi Mob handles, where it lives, and how it is exposed. |
+| [docs/QUICKSTART.md](docs/QUICKSTART.md) | End-to-end host and phone setup. |
+| [docs/RELEASE.md](docs/RELEASE.md) | How releases are cut, signed, and published. |
+| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Per-version summaries of shipped work. |
+| [apps/mobile/README.md](apps/mobile/README.md) | Flutter Android client. |
+| [packages/bridge/README.md](packages/bridge/README.md) | Bridge daemon. |
+
 The Android app is published as a pre-release `v0.0.1-alpha.1` APK. The bridge is published as a macOS binary tarball. iOS is not distributed in this preview.
 
 ## What Pi Mob is
