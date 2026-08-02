@@ -7,7 +7,7 @@ Pi Mob is the mobile control surface for a local Pi coding host. A small bridge 
 
 This repository hosts:
 
-- `packages/bridge/` — the host-side bridge daemon (TypeScript, Bun distributable + source).
+- `packages/bridge/` — the host-side bridge daemon (TypeScript, Bun distributable + source). The released bridge is built and packaged for macOS x64 only.
 - `apps/mobile/` — the Flutter Android client.
 - `docs/` — architecture, protocol, privacy, and project status.
 
@@ -26,7 +26,7 @@ This repository hosts:
 | [apps/mobile/README.md](apps/mobile/README.md) | Flutter Android client. |
 | [packages/bridge/README.md](packages/bridge/README.md) | Bridge daemon. |
 
-The Android app is published as a pre-release `v0.0.1-alpha.1` APK. The bridge is published as a macOS binary tarball. iOS is not distributed in this preview.
+The Android app uses the stable preview identity `com.example.pi_mob` and is published as a pre-release `v0.0.1-alpha.1` APK. Release builds use an external non-debug signer. The bridge is published as a macOS binary tarball. iOS is not distributed in this preview.
 
 ## What Pi Mob is
 
@@ -34,14 +34,14 @@ Pi Mob is a thin, durable, reconnectable phone surface for one local Pi host. It
 
 The bridge:
 
-- runs on your Mac or Linux box where Pi itself runs;
+- runs on your Mac where Pi itself runs;
 - exposes a single private HTTPS endpoint on your tailnet;
 - mediates durable streams, controller leases, command routing, and notification delivery between Pi and the phone;
 - supervises one Pi process per mobile session and persists session paths so reconnects resume immediately.
 
 The Android app:
 
-- pairs once with the bridge via a QR code;
+- pairs once with the bridge using an HTTPS endpoint and one-time passcode;
 - downloads only the chat history you can see;
 - mirrors the Pi sessions as native chat surfaces;
 - fires system notifications when replies arrive while the app is backgrounded;
@@ -51,6 +51,7 @@ The Android app:
 
 Verified end-to-end on a real phone and a real host:
 
+- **Application-layer authentication** — every install binds a 256-bit credential during enrollment; `hello`, `POST /v1/attachments`, `GET /v1/exports/<id>`, and `device.register` all enforce it with constant-time hash verification and host-side revocation.
 - **Streams** — durable `host:` and `session:*` streams with cursor persistence and live replay.
 - **Commands** — typed commands with controller leases, idempotency, and terminal-state projection.
 - **Controller leases** — session-scoped leases that survive navigation and reopen quickly.
@@ -58,9 +59,8 @@ Verified end-to-end on a real phone and a real host:
 - **Sessions** — paginated session list, rename, create, delete, and runtime attention state.
 - **History sync** — full chat history imported on first connect and on each reconnect, with bounded batches, durable checkpoints, and restart coverage.
 - **Synchronization UI** — a splash card immediately on cold launch, then a per-chat progress card with current chat, remaining count, elapsed time, ETA, and throughput.
-- **Notifications** — capability-gated automatic enrollment, FCM token registration, foreground and background delivery, and tap routing back to the correct chat.
-- **Catalogue** — authoritative host command catalogue with explicit unavailable states when not advertised.
-- **Model picker** — host-supplied model selection persisted per session.
+- **Notifications** — after the user grants OS permission, FCM token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone. Foreground posting is wired but tap routing and dedupe are not yet proven on a physical device.
+- **Model control** — use the normal `/model` command in the composer; no separate model picker control is shown.
 - **Search** — per-chat transcript search and global cross-chat search.
 - **Workspace search** — bounded workspace discovery, list, and search rooted under the configured search root.
 - **Reconnectable shell** — restores the most recent chat, the in-flight draft, and attachments after reconnect or relaunch.
@@ -75,14 +75,15 @@ The following are intentionally not part of Pi Mob in this preview:
 - Cloud-hosted bridge. The bridge runs on your hardware.
 - Git status, commit, push, or other repository actions.
 - Biometric unlock, device-side encryption, or secret-management on the phone.
-- Code-signed, notarized, or App Store distribution.
+- Code-signed, notarized, or App Store distribution. Android preview release APKs use an operator-supplied non-debug keystore outside the repository.
+- Non-macOS install paths. The released bridge is macOS x64 only; the build pipeline produces no other host artefact today.
 
 ## Quick start
 
 A printable quick-start ships in `docs/QUICKSTART.md`. The short version:
 
-1. Install the bridge on your host machine and start it under `launchd` or `systemd`.
-2. Pair the Android app with the bridge by scanning the QR code shown by the bridge.
+1. Install the bridge on your macOS host and start it under `launchd` (the released bridge is macOS x64 only).
+2. Run `pi-mob pair` after setup to print a fresh HTTPS endpoint, six-digit passcode, and expiry. Enter those values in the Android app.
 3. Send a prompt, lock the phone, and verify a notification appears with the reply.
 
 ## Repository layout
@@ -99,4 +100,4 @@ Pi Mob is local-first. The bridge exposes its API only on a private Tailscale ta
 
 ## Status
 
-This is a `0.0.1-alpha.1` preview. The mobile app is signed for development only. The bridge tarball is not code-signed or notarized. See `docs/PROJECT_STATUS.md` for the accurate picture of production-wired, planned, and out-of-scope work.
+This is a `0.0.1-alpha.1` preview. Android release builds are signed with an external non-debug keystore and fail closed without it. The bridge tarball is not code-signed or notarized. See `docs/PROJECT_STATUS.md` for the accurate picture of production-wired, planned, and out-of-scope work.

@@ -1,10 +1,14 @@
-// R12 — Focused tests for the chat-shell keyboard shortcut surface
-// described in docs/REMAINING_UX_PLAN.md §5 R12. These tests pin the
-// Shortcuts/Actions wiring by invoking each intent directly through
-// `Actions.invoke` (the same dispatch path that the framework uses for
-// a physical key press). Dispatching through the intent keeps the
-// assertions independent of the test framework's key-event plumbing,
-// which historically has been brittle across Flutter versions.
+// R12 — Focused tests for the chat-shell keyboard shortcut surface.
+// These tests pin the Shortcuts/Actions wiring by invoking each intent
+// directly through `Actions.invoke` (the same dispatch path that the
+// framework uses for a physical key press). Dispatching through the
+// intent keeps the assertions independent of the test framework's
+// key-event plumbing, which historically has been brittle across
+// Flutter versions.
+//
+// The catalogue/commands intent is intentionally absent: the catalogue
+// capability is not produced by the normal daemon, so the released
+// shell does not expose a commands/catalogue entry point.
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -73,24 +77,6 @@ void main() {
     expect(searchCount, 1, reason: 'Search intent must invoke exactly once');
   });
 
-  testWidgets('OpenModelPickerIntent fires when dispatched', (tester) async {
-    var modelCount = 0;
-    await pumpShell(tester, <Type, Action<Intent>>{
-      OpenModelPickerIntent: CallbackAction<OpenModelPickerIntent>(
-        onInvoke: (_) {
-          modelCount++;
-          return null;
-        },
-      ),
-    });
-    final context = tester.element(
-      find.byKey(const Key('shortcut-harness-focus')),
-    );
-    Actions.invoke(context, const OpenModelPickerIntent());
-    await tester.pump();
-    expect(modelCount, 1, reason: 'Model intent must invoke exactly once');
-  });
-
   testWidgets('OpenChatsIntent fires when dispatched', (tester) async {
     var chatsCount = 0;
     await pumpShell(tester, <Type, Action<Intent>>{
@@ -109,25 +95,18 @@ void main() {
     expect(chatsCount, 1, reason: 'Chats intent must invoke exactly once');
   });
 
-  testWidgets('OpenCommandsIntent fires when dispatched', (tester) async {
-    var commandsCount = 0;
-    await pumpShell(tester, <Type, Action<Intent>>{
-      OpenCommandsIntent: CallbackAction<OpenCommandsIntent>(
-        onInvoke: (_) {
-          commandsCount++;
-          return null;
-        },
-      ),
-    });
-    final context = tester.element(
-      find.byKey(const Key('shortcut-harness-focus')),
-    );
-    Actions.invoke(context, const OpenCommandsIntent());
-    await tester.pump();
+  testWidgets('OpenCommandsIntent is intentionally absent', (tester) async {
+    // The chat-shell surface intentionally exposes no commands/catalogue
+    // intent because the normal daemon does not produce a catalogue
+    // provider. The intent const must therefore not be in the package
+    // and the shortcut map must not reference one.
+    final shortcuts = buildChatShellShortcuts();
     expect(
-      commandsCount,
-      1,
-      reason: 'Commands intent must invoke exactly once',
+      shortcuts.values.any(
+        (intent) => intent.runtimeType.toString() == 'OpenCommandsIntent',
+      ),
+      isFalse,
+      reason: 'Released shell must not advertise a commands/catalogue intent',
     );
   });
 
@@ -171,13 +150,11 @@ void main() {
 
   test('buildChatShellShortcuts returns Ctrl and Command variants', () {
     final shortcuts = buildChatShellShortcuts();
-    expect(shortcuts.length, 10);
+    expect(shortcuts.length, 6);
     expect(shortcuts.values.toSet(), <Intent>{
       const SubmitComposerIntent(),
       const OpenSearchIntent(),
-      const OpenModelPickerIntent(),
       const OpenChatsIntent(),
-      const OpenCommandsIntent(),
     });
     expect(
       shortcuts[const SingleActivator(LogicalKeyboardKey.enter, control: true)],
@@ -202,14 +179,6 @@ void main() {
         shift: true,
       )],
       const OpenChatsIntent(),
-    );
-    expect(
-      shortcuts[const SingleActivator(
-        LogicalKeyboardKey.keyP,
-        meta: true,
-        shift: true,
-      )],
-      const OpenCommandsIntent(),
     );
   });
 }

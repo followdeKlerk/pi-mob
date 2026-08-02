@@ -34,6 +34,11 @@
                 <category android:name="android.intent.category.BROWSABLE"/>
                 <data android:scheme="pi-mob" android:host="session"/>
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.example.pi_mob.NOTIFICATION_TAP"/>
+                <action android:name="FLUTTER_NOTIFICATION_CLICK"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+            </intent-filter>
         </activity>
         <service
             android:name=".PiMobForegroundService"

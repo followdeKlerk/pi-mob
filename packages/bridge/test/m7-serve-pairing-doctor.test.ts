@@ -8,9 +8,6 @@
  *     LAN, plain HTTP, wildcard, Funnel, IP literals, and credential URIs.
  *   - tailscale-serve: route application preserves unrelated routes; removal
  *     removes only owned routes; Funnel is never added by the bridge.
- *   - pairing: exact payload shape `pi-mob-host/version1/UUID/displayName/
- *     endpoint/protocolMajor`; canonical JSON; deterministic terminal QR;
- *     tamper rejection of unknown kinds/versions/protocols.
  *   - doctor: ten required probes (versions, config, serve, db, backup,
  *     pi, env, process, storage, push) emit allowlisted redacted reports
  *     that never carry credentials, env values, transcript bytes, or raw
@@ -47,24 +44,6 @@ import {
   ServeRouteError,
 } from "../src/ops/tailscale-serve";
 
-import {
-  buildPairingPayload,
-  encodePairingPayload,
-  formatPairingPayload,
-  getQrEncoder,
-  PAIRING_PAYLOAD_KIND,
-  PAIRING_PAYLOAD_VERSION,
-  PAIRING_PROTOCOL_MAJOR,
-  PAIRING_QR_ERROR_CORRECTION,
-  parsePairingPayload,
-  PairingPayloadError,
-  renderPairingMatrix,
-  renderPairingSvg,
-  renderPairingTerminal,
-  setQrEncoder,
-  type QrEncoderPort,
-  type QrMatrix,
-} from "../src/ops/pairing";
 
 import {
   DOCTOR_PROBE_NAMES,
@@ -79,7 +58,6 @@ import type { InstallPaths } from "../src/ops/install-paths";
 import type { BridgeInstallConfig } from "../src/ops/install-config";
 import type { ClockPort } from "../src/ops/ports";
 
-import jsQR from "jsqr";
 
 // ---------------------------------------------------------------------------
 // In-memory FileSystemPort
@@ -255,7 +233,7 @@ beforeEach(() => {
 // ---------------------------------------------------------------------------
 
 describe("endpoint-guard", () => {
-  test("accepts a HTTPS .ts.net endpoint with the canonical QR origin", () => {
+  test("accepts a HTTPS .ts.net endpoint with the canonical pairing origin", () => {
     const endpoint = validateBridgeEndpoint(ENDPOINT);
     expect(endpoint.scheme).toBe("https");
     expect(endpoint.host).toBe("host.tailnet-name.ts.net");
@@ -419,293 +397,6 @@ describe("tailscale-serve", () => {
 
 // ---------------------------------------------------------------------------
 // pairing
-// ---------------------------------------------------------------------------
-
-describe("pairing", () => {
-  test("buildPairingPayload returns the exact required shape", () => {
-    const payload = buildPairingPayload({
-      hostId: HOST_UUID,
-      displayName: "Mac mini",
-      endpoint: ENDPOINT,
-    });
-    expect(payload.kind).toBe(PAIRING_PAYLOAD_KIND);
-    expect(payload.version).toBe(PAIRING_PAYLOAD_VERSION);
-    expect(payload.hostId).toBe(HOST_UUID);
-    expect(payload.displayName).toBe("Mac mini");
-    expect(payload.endpoint).toBe(ENDPOINT);
-    expect(payload.protocolMajor).toBe(PAIRING_PROTOCOL_MAJOR);
-  });
-
-  test("formatPairingPayload emits canonical key-sorted JSON", () => {
-    const a = encodePairingPayload({ hostId: HOST_UUID, displayName: "Mac-mini", endpoint: ENDPOINT });
-    const b = encodePairingPayload({ hostId: HOST_UUID, displayName: "Mac-mini", endpoint: ENDPOINT });
-    expect(a).toBe(b);
-    expect(a.includes("\n")).toBe(false);
-    // No structural whitespace: separators only appear between key/value/colons/commas.
-    expect(/[ \t]{2,}/.test(a)).toBe(false);
-    // Keys appear in alphabetical order.
-    expect(a.indexOf('"displayName"')).toBeLessThan(a.indexOf('"endpoint"'));
-    expect(a.indexOf('"endpoint"')).toBeLessThan(a.indexOf('"hostId"'));
-    expect(a.indexOf('"hostId"')).toBeLessThan(a.indexOf('"kind"'));
-    expect(a.indexOf('"kind"')).toBeLessThan(a.indexOf('"protocolMajor"'));
-    expect(a.indexOf('"protocolMajor"')).toBeLessThan(a.indexOf('"version"'));
-  });
-
-  test("encodePairingPayload round-trips through parsePairingPayload", () => {
-    const encoded = encodePairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const parsed = parsePairingPayload(encoded);
-    expect(parsed.displayName).toBe("Studio");
-    expect(parsed.endpoint).toBe(ENDPOINT);
-    expect(parsed.hostId).toBe(HOST_UUID);
-  });
-
-  test("parsePairingPayload rejects an unknown kind", () => {
-    const tampered = `{${formatPairingPayload(buildPairingPayload({ hostId: HOST_UUID, displayName: "x", endpoint: ENDPOINT })).slice(1).replace(/"pi-mob-host"/, '"other-kind"')}`;
-    expect(() => parsePairingPayload(tampered)).toThrow(PairingPayloadError);
-  });
-
-  test("parsePairingPayload rejects an unknown protocolMajor", () => {
-    const encoded = encodePairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const tampered = encoded.replace(`"protocolMajor":1`, `"protocolMajor":2`);
-    expect(() => parsePairingPayload(tampered)).toThrow(/protocolMajor/);
-  });
-
-  test("parsePairingPayload rejects a tampered Funnel endpoint", () => {
-    const encoded = encodePairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const parsed = JSON.parse(encoded) as Record<string, unknown>;
-    parsed["endpoint"] = "https://funnel-bridge.tail.ts.net";
-    expect(() => parsePairingPayload(JSON.stringify(parsed))).toThrow(/funnel/);
-  });
-
-  test("parsePairingPayload rejects a plain HTTP endpoint", () => {
-    const encoded = encodePairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const parsed = JSON.parse(encoded) as Record<string, unknown>;
-    parsed["endpoint"] = "http://host.tail.ts.net";
-    expect(() => parsePairingPayload(JSON.stringify(parsed))).toThrow(/https/);
-  });
-
-  test("buildPairingPayload strips control characters and length-caps displayName", () => {
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "  My\u0007 Host\u0000  ", endpoint: ENDPOINT });
-    expect(payload.displayName).toBe("My Host");
-    expect(() => buildPairingPayload({ hostId: HOST_UUID, displayName: "x".repeat(200), endpoint: ENDPOINT })).toThrow(PairingPayloadError);
-    expect(() => buildPairingPayload({ hostId: HOST_UUID, displayName: "", endpoint: ENDPOINT })).toThrow(PairingPayloadError);
-  });
-
-  test("renderPairingTerminal is deterministic and uses ANSI QR rendering", () => {
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const a = renderPairingTerminal(payload);
-    const b = renderPairingTerminal(payload);
-    expect(a).toBe(b);
-    // Real QR output uses ANSI background-colour escapes for dark/light
-    // modules; the terminal renderer must contain both.
-    expect(a.includes("\u001b[47m")).toBe(true); // white background for a dark module
-    expect(a.includes("\u001b[40m")).toBe(true); // black background for a light module
-    // The grid must be rectangular (every line the same width).
-    const lines = a.split("\n");
-    const width = lines[0]!.length;
-    expect(lines.every((line) => line.length === width)).toBe(true);
-    expect(lines.length).toBeGreaterThan(10);
-    // Each module is rendered as 2 spaces wrapped in ANSI background and
-    // reset escapes (5 + 2 + 4 = 11 chars). Width must be a clean multiple
-    // of that module size.
-    const moduleWidth = 11;
-    expect(width % moduleWidth).toBe(0);
-    const moduleCount = width / moduleWidth;
-    expect(lines.length).toBe(moduleCount);
-    // The number of modules per line must match the QR symbol's intrinsic
-    // size (version-2/3/.../10 symbols for the canonical payload).
-    expect(moduleCount).toBeGreaterThan(20);
-    expect(moduleCount).toBeLessThan(80);
-  });
-
-  test("renderPairingTerminal rejects invalid options", () => {
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    expect(() => renderPairingTerminal(payload, { modules: 7 })).toThrow(PairingPayloadError);
-    expect(() => renderPairingTerminal(payload, { modules: 99 })).toThrow(PairingPayloadError);
-    expect(() => renderPairingTerminal(payload, { quietZone: -1 })).toThrow(PairingPayloadError);
-    expect(() => renderPairingTerminal(payload, { quietZone: 9 })).toThrow(PairingPayloadError);
-  });
-
-  test("renderPairingMatrix is deterministic and carries finder patterns", () => {
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const a = renderPairingMatrix(payload, { quietZone: 0 });
-    const b = renderPairingMatrix(payload, { quietZone: 0 });
-    expect(a).toEqual(b);
-    const size = a.length;
-    expect(size).toBeGreaterThan(20);
-    expect(size).toBeLessThan(80);
-    expect(a.every((row) => row.length === size)).toBe(true);
-    // Three finder patterns in the corners, each a 7x7 dark square with a
-    // 3x3 dark inner block and a 1-module light ring around it.
-    expect(finderPatternPresent(a)).toBe(true);
-  });
-
-  test("renderPairingMatrix honours quietZone padding and invert option", () => {
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const padded = renderPairingMatrix(payload, { quietZone: 4 });
-    const base = renderPairingMatrix(payload, { quietZone: 0 });
-    expect(padded.length).toBe(base.length + 8);
-    // The added quiet-zone rows are all-light (white).
-    for (let y = 0; y < 4; y += 1) {
-      expect(padded[y]!.every((cell) => cell === false)).toBe(true);
-    }
-    // Invert option flips every module.
-    const inverted = renderPairingMatrix(payload, { quietZone: 0, invert: true });
-    expect(inverted.length).toBe(base.length);
-    for (let y = 0; y < base.length; y += 1) {
-      for (let x = 0; x < base.length; x += 1) {
-        expect(inverted[y]![x]).toBe(!base[y]![x]);
-      }
-    }
-  });
-
-  test("renderPairingSvg is a self-contained SVG document", () => {
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const svg = renderPairingSvg(payload);
-    expect(svg.startsWith('<?xml version="1.0"')).toBe(true);
-    expect(svg.includes('<svg')).toBe(true);
-    expect(svg.includes('</svg>')).toBe(true);
-    // The SVG must carry a white background rectangle so it prints on
-    // light surfaces and the dark-module rectangles so the symbol is
-    // scannable.
-    expect(svg.includes('fill="#ffffff"')).toBe(true);
-    expect(svg.includes('fill="#000000"')).toBe(true);
-  });
-
-  test("encodePairingPayload round-trips through real QR (matrix + jsqr)", () => {
-    // Build a payload, render the matrix, rasterize it into an RGBA buffer
-    // that jsqr can decode, and assert the decoded text equals the
-    // canonical JSON of the payload.
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const canonical = formatPairingPayload(payload);
-    const matrix = renderPairingMatrix(payload, { quietZone: 0 });
-    const decoded = decodeMatrixWithJsQR(matrix);
-    expect(decoded).toBe(canonical);
-  });
-
-  test("encodePairingPayload round-trips through real QR (terminal + jsqr)", () => {
-    // The terminal renderer is intended for humans, not machines; verify
-    // that the underlying matrix it represents decodes back to the
-    // original canonical JSON when fed into a real QR decoder.
-    const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-    const canonical = formatPairingPayload(payload);
-    const matrix = renderPairingMatrix(payload, { quietZone: 0 });
-    expect(decodeMatrixWithJsQR(matrix)).toBe(canonical);
-  });
-
-  test("QR encoder advertises error-correction level M", () => {
-    expect(PAIRING_QR_ERROR_CORRECTION).toBe("M");
-    expect(getQrEncoder().errorCorrectionLevel).toBe("M");
-  });
-
-  test("setQrEncoder substitutes a deterministic stub for tests", () => {
-    const previous = getQrEncoder();
-    const stub: QrEncoderPort = {
-      errorCorrectionLevel: "M",
-      renderTerminal: () => "STUB-TERMINAL",
-      renderSvg: () => "<svg>STUB</svg>",
-      renderMatrix: () => ({ size: 1, matrix: [[true]] }),
-    };
-    setQrEncoder(stub);
-    try {
-      const payload = buildPairingPayload({ hostId: HOST_UUID, displayName: "Studio", endpoint: ENDPOINT });
-      expect(renderPairingTerminal(payload)).toBe("STUB-TERMINAL");
-      expect(renderPairingSvg(payload)).toBe("<svg>STUB</svg>");
-      expect(renderPairingMatrix(payload, { quietZone: 0 })).toEqual([[true]]);
-    } finally {
-      setQrEncoder(previous);
-    }
-  });
-
-  test("setQrEncoder(null) restores a real encoder", () => {
-    const stub: QrEncoderPort = {
-      errorCorrectionLevel: "M",
-      renderTerminal: () => "STUB",
-      renderSvg: () => "<svg>STUB</svg>",
-      renderMatrix: () => ({ size: 1, matrix: [[false]] }),
-    };
-    setQrEncoder(stub);
-    expect(getQrEncoder()).toBe(stub);
-    setQrEncoder(null);
-    // setQrEncoder(null) constructs a fresh RealQrEncoder; identity is
-    // not preserved, but the returned encoder must be a real encoder.
-    expect(getQrEncoder()).not.toBe(stub);
-    expect(getQrEncoder().errorCorrectionLevel).toBe("M");
-    expect(typeof getQrEncoder().renderMatrix).toBe("function");
-  });
-});
-
-/**
- * Rasterizes a `boolean[][]` QR matrix into an RGBA buffer (4 bytes per
- * pixel) that {@link jsQR} can decode. Each module becomes an 8x8 pixel
- * block so jsQR's finder-pattern detection has enough resolution.
- */
-function decodeMatrixWithJsQR(matrix: QrMatrix): string {
-  const scale = 8;
-  const size = matrix.length;
-  const width = size * scale;
-  const height = size * scale;
-  const rgba = new Uint8ClampedArray(width * height * 4);
-  for (let y = 0; y < height; y += 1) {
-    for (let x = 0; x < width; x += 1) {
-      const module = matrix[Math.floor(y / scale)]![Math.floor(x / scale)]!;
-      const idx = (y * width + x) * 4;
-      const value = module ? 0 : 255;
-      rgba[idx] = value;
-      rgba[idx + 1] = value;
-      rgba[idx + 2] = value;
-      rgba[idx + 3] = 255;
-    }
-  }
-  const result = jsQR(rgba, width, height);
-  if (result === null) {
-    throw new Error("jsQR failed to decode the rendered matrix");
-  }
-  return result.data;
-}
-
-/**
- * Returns true when a 7x7 finder pattern (dark border, light inner ring,
- * dark 3x3 centre) appears at the requested corner of the matrix. ISO/IEC
- * 18004 requires exactly three finder patterns in a QR symbol.
- */
-function finderPatternPresent(matrix: QrMatrix): boolean {
-  const size = matrix.length;
-  const corners: readonly (readonly [number, number])[] = [
-    [0, 0],
-    [size - 7, 0],
-    [0, size - 7],
-  ];
-  for (const [fx, fy] of corners) {
-    let isBorder = true;
-    for (let i = 0; i < 7; i += 1) {
-      if (!matrix[fy]![fx + i]) isBorder = false;
-      if (!matrix[fy + 6]![fx + i]) isBorder = false;
-      if (!matrix[fy + i]![fx]) isBorder = false;
-      if (!matrix[fy + i]![fx + 6]) isBorder = false;
-    }
-    if (!isBorder) return false;
-    let isCentre = true;
-    for (let dy = 2; dy <= 4; dy += 1) {
-      for (let dx = 2; dx <= 4; dx += 1) {
-        if (!matrix[fy + dy]![fx + dx]) isCentre = false;
-      }
-    }
-    if (!isCentre) return false;
-    let isInnerRingLight = true;
-    for (let i = 1; i <= 5; i += 1) {
-      if (matrix[fy + 1]![fx + i]) isInnerRingLight = false;
-      if (matrix[fy + 5]![fx + i]) isInnerRingLight = false;
-      if (matrix[fy + i]![fx + 1]) isInnerRingLight = false;
-      if (matrix[fy + i]![fx + 5]) isInnerRingLight = false;
-    }
-    if (!isInnerRingLight) return false;
-  }
-  return true;
-}
-
-// ---------------------------------------------------------------------------
-// doctor
 // ---------------------------------------------------------------------------
 
 describe("doctor", () => {

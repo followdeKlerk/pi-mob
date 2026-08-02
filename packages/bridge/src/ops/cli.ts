@@ -6,8 +6,8 @@
  * operations are driven from the outside. It is intentionally:
  *
  *   - **Flag-driven only.** Every command line is parsed into an explicit
- *     map of flags. There is no interactive shell, no REPL, no TTY
- *     detection; the same argv always produces the same dispatch.
+ *     map of flags. There is no interactive shell or REPL; TTY state only
+ *     selects human versus machine output for the pairing command.
  *   - **Dependency-injected.** `process.argv`, `process.env`, `launchctl`,
  *     the real filesystem, the real Tailscale Serve CLI, and `console.*`
  *     are never called from this module. Every dependency is supplied via
@@ -30,7 +30,6 @@
  */
 
 import { validateBridgeEndpoint } from "./endpoint-guard";
-import { buildPairingPayload, encodePairingPayload, parsePairingPayload, renderPairingTerminal, type PairingPayload } from "./pairing";
 import { captureLoginEnv, writeCapturedEnv } from "./login-env";
 import {
   buildInstallPaths,
@@ -128,7 +127,7 @@ export const CLI_HELP = [
   "  status      compact lifecycle, Serve, and pairing readiness",
   "  install     low-level install paths, config, LaunchAgent, and env file",
   "  serve       apply the owned Tailscale Serve route for the install",
-  "  pair        emit canonical pairing payload + optional terminal QR",
+  "  pair        emit a fresh HTTPS endpoint and one-time passcode (use --json for diagnostics)",
   "  doctor      run every probe and emit a redacted report",
   "  report      alias of doctor that prints only the typed JSON report",
   "  update      transactional update with explicit mode + confirmation",
@@ -203,10 +202,14 @@ export interface CliDeps {
   readonly setupDefaults?: SetupDefaults;
   /** Reads the daemon-created canonical host identity after setup readiness. */
   readonly hostIdentity?: (databasePath: string) => { readonly hostId: string };
+  /** Issues a one-time enrollment challenge after the bridge store exists. */
+  readonly enrollmentChallenge?: (databasePath: string) => { readonly passcode: string; readonly expiresAt: number };
   /** Optional Pi integration; if absent, the doctor Pi probe reports warn. */
   readonly piProbe?: PiProbe;
   /** Optional push integration; if absent, the doctor push probe reports warn. */
   readonly pushProbe?: PushProbe;
+  /** True when stdout is an interactive terminal; omitted means machine mode. */
+  readonly interactive?: boolean;
   /** stdout sink; receives complete lines (the CLI appends a trailing `\n`). */
   readonly stdout: (chunk: string) => void;
   /** stderr sink; receives complete lines (the CLI appends a trailing `\n`). */
@@ -258,9 +261,6 @@ export interface SetupResult {
   readonly installed: boolean;
   readonly install: InstallResult | null;
   readonly manualEndpoint: string | null;
-  readonly pairingAvailable: boolean;
-  readonly pairingPayload: PairingPayload | null;
-  readonly pairingTerminal: string | null;
   readonly nextActions: readonly string[];
   readonly timestamp: string;
 }
@@ -302,9 +302,9 @@ export interface ServeResult {
 }
 
 export interface PairResult {
-  readonly payload: PairingPayload;
-  readonly canonicalJson: string;
-  readonly terminal: string | null;
+  readonly endpoint: string;
+  readonly passcode: string;
+  readonly expiresAt: string;
   readonly timestamp: string;
 }
 
@@ -592,7 +592,7 @@ export async function handleSetup(args: ParsedCommand, deps: CliDeps): Promise<S
     nextActions.push("Enable MagicDNS in the Tailscale admin console, confirm `tailscale status --json` shows Self.DNSName, then rerun setup.");
   }
   if (nextActions.length > 0) {
-    return { ready: false, tailscale, installed: false, install: null, manualEndpoint: null, pairingAvailable: false, pairingPayload: null, pairingTerminal: null, nextActions, timestamp: deps.clock.iso() };
+    return { ready: false, tailscale, installed: false, install: null, manualEndpoint: null, nextActions, timestamp: deps.clock.iso() };
   }
   if (!deps.setupDefaults) throw new CliArgsError("setup_defaults_unavailable", "setup defaults are unavailable in this build");
   const sourceCliExecutable = requireAbsolute("source-cli-executable", deps.setupDefaults.sourceCliExecutable);
@@ -605,26 +605,8 @@ export async function handleSetup(args: ParsedCommand, deps: CliDeps): Promise<S
   const port = Number(getFlagStringRequired(installArgs, "port"));
   const portSuffix = port === 443 ? "" : `:${port}`;
   const manualEndpoint = `https://${tailscale.magicDnsName}${portSuffix}`;
-  const displayName = getFlagStringRequired(installArgs, "workspace").split("/").filter(Boolean).at(-1) ?? "pi-mob host";
-  let pairingPayload: PairingPayload | null = null;
-  let pairingTerminal: string | null = null;
-  if (deps.hostIdentity) {
-    try {
-      const identity = deps.hostIdentity(`${install.paths.stateRoot}/bridge.sqlite`);
-      pairingPayload = buildPairingPayload({ hostId: identity.hostId, displayName, endpoint: manualEndpoint });
-      pairingTerminal = renderPairingTerminal(pairingPayload);
-      const pairingPath = `${install.paths.secretsRoot}/pairing.json`;
-      deps.fs.writeFile(pairingPath, `${JSON.stringify({ payload: pairingPayload })}\n`, FILE_MODE);
-      deps.fs.chmod(pairingPath, FILE_MODE);
-      nextActions.push("Scan the pairing QR shown below in the pi-mob app, then verify the displayed host identity.");
-    } catch (error) {
-      nextActions.push(`The bridge is running, but automatic pairing could not be created: ${error instanceof Error ? error.message : String(error)}. Use the manual address below.`);
-    }
-  } else {
-    nextActions.push("This build cannot read the bridge host identity automatically. Use the manual address below.");
-  }
-  nextActions.push(`Manual fallback: on your phone, enter ${manualEndpoint}. The app verifies and saves it after connecting.`);
-  return { ready: true, tailscale, installed: true, install, manualEndpoint, pairingAvailable: pairingPayload !== null, pairingPayload, pairingTerminal, nextActions, timestamp: deps.clock.iso() };
+  nextActions.push(`Run \`pi-mob pair\` after setup to display the endpoint and one-time passcode. Manual endpoint: ${manualEndpoint}.`);
+  return { ready: true, tailscale, installed: true, install, manualEndpoint, nextActions, timestamp: deps.clock.iso() };
 }
 
 export async function handleStart(args: ParsedCommand, deps: CliDeps): Promise<StartResult> {
@@ -644,17 +626,10 @@ export async function handleStop(args: ParsedCommand, deps: CliDeps): Promise<St
   return { stopped: true, alreadyStopped: result.alreadyStopped, timestamp: deps.clock.iso() };
 }
 
-function pairingSnapshot(paths: InstallPaths, deps: CliDeps): { available: boolean; endpoint: string | null; hostId: string | null } {
-  const path = `${paths.secretsRoot}/pairing.json`;
-  if (!deps.fs.exists(path)) return { available: false, endpoint: null, hostId: null };
-  try {
-    const value = JSON.parse(deps.fs.readFile(path).toString("utf8")) as { payload?: unknown } | unknown;
-    const candidate = typeof value === "object" && value !== null && "payload" in value ? (value as { payload: unknown }).payload : value;
-    const payload = parsePairingPayload(JSON.stringify(candidate));
-    return { available: true, endpoint: payload.endpoint, hostId: payload.hostId };
-  } catch {
-    return { available: false, endpoint: null, hostId: null };
-  }
+function pairingSnapshot(_paths: InstallPaths, _deps: CliDeps): { available: boolean; endpoint: string | null; hostId: string | null } {
+  // Pairing is intentionally ephemeral. `pi-mob pair` stores only the hashed
+  // challenge in the bridge database and never writes a pairing wrapper file.
+  return { available: false, endpoint: null, hostId: null };
 }
 
 export async function handleStatus(args: ParsedCommand, deps: CliDeps): Promise<StatusResult> {
@@ -672,7 +647,7 @@ export async function handleStatus(args: ParsedCommand, deps: CliDeps): Promise<
   catch { remediation.push("Open Tailscale, sign in, and rerun status."); }
   const pairing = pairingSnapshot(paths, deps);
   if (!state.launchAgentLoaded || !state.listenerReady || ownedServePort !== config.port) remediation.push("Run `pi-mob start`.");
-  if (!pairing.available) remediation.push("Create pairing with `pi-mob-ops pair` after obtaining a canonical host UUID and MagicDNS HTTPS endpoint.");
+  if (!pairing.available) remediation.push("Run `pi-mob pair` to display a fresh endpoint and one-time passcode.");
   return { installed: deps.fs.exists(paths.plistPath), launchAgentLoaded: state.launchAgentLoaded, listenerReady: state.listenerReady, ownedServePresent: ownedServePort === config.port, ownedServePort, pairingAvailable: pairing.available, pairingEndpoint: pairing.endpoint, pairingHostId: pairing.hostId, remediation, timestamp: deps.clock.iso() };
 }
 
@@ -754,7 +729,7 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
       "--session-dir", piSessionDir,
     ],
     workingDirectory: workspaceRoot,
-    environment: { ...capturedEnv, PI_MOB_PAIRING_FILE: `${paths.secretsRoot}/pairing.json` },
+    environment: capturedEnv,
     stdoutPath: `${paths.logRoot}/bridge.out`,
     stderrPath: `${paths.logRoot}/bridge.err`,
   };
@@ -881,56 +856,63 @@ export interface PairArgs extends ParsedCommand {
 
 /**
  * Builds the canonical pairing payload and optionally renders the terminal
- * QR-style grid. The handler is pure: it does not consult `console` and
- * never spawns a UI subprocess.
+ * endpoint and passcode. The handler is pure: it does not consult `console`
+ * and never spawns a UI subprocess.
  */
-export function handlePair(args: ParsedCommand, deps: CliDeps): PairResult {
+export async function handlePair(args: ParsedCommand, deps: CliDeps): Promise<PairResult> {
   assertCommand(args, "pair");
-  const hostId = getFlagStringRequired(args, "host-id");
-  const displayName = getFlagStringRequired(args, "display-name");
-  const endpoint = getFlagStringRequired(args, "endpoint");
-  // Validate the endpoint up-front so a tampered or malformed value fails
-  // the CLI before any payload is emitted.
+  const { paths, config } = configForLifecycle(args, deps);
+  if (!config.tailscaleServe) {
+    throw new CliArgsError("serve_unavailable", "pair requires tailscale Serve to be enabled in the installed config");
+  }
+  if (!deps.tailscaleProbe) {
+    throw new CliArgsError("tailscale_probe_unavailable", "pair requires Tailscale status support");
+  }
+  const tailscale = await deps.tailscaleProbe();
+  if (!tailscale.installed || !tailscale.loggedIn || !tailscale.magicDnsName) {
+    throw new CliArgsError("serve_unavailable", "pair requires a signed-in Tailscale node with MagicDNS enabled");
+  }
+  if (!deps.processProbe) {
+    throw new CliArgsError("listener_unavailable", "pair requires production listener readiness support");
+  }
+  const process = deps.processProbe(config.port);
+  if (!process.loaded || !process.listenerReady) {
+    throw new CliArgsError("listener_unavailable", `pair requires a ready bridge listener on port ${config.port}`);
+  }
+  const serve = await inspectServeRoutes({ driver: deps.serveDriver });
+  const route = serve.ownedRoute;
+  const hasForward = route?.handlers.some((handler) =>
+    (handler.kind === "forward" || handler.kind === "https") &&
+    handler.address === `http://127.0.0.1:${config.port}`,
+  ) === true;
+  const hasFunnel = route?.handlers.some((handler) => handler.kind === "funnel") === true;
+  if (!route || route.source.tcp?.port !== config.port || !hasForward || hasFunnel) {
+    throw new CliArgsError("serve_unavailable", "pair requires the configured bridge Tailscale Serve route");
+  }
+  if (!deps.enrollmentChallenge) {
+    throw new CliArgsError("pairing_unavailable", "pair requires installed enrollment support");
+  }
+
+  const databasePath = `${paths.stateRoot}/bridge.sqlite`;
+  const challenge = deps.enrollmentChallenge(databasePath);
+  if (!/^\d{6}$/.test(challenge.passcode) || challenge.expiresAt <= deps.clock.now()) {
+    throw new CliArgsError("pairing_unavailable", "pair passcode is unavailable or expired");
+  }
+  const endpoint = getFlagString(args, "endpoint") ?? `https://${tailscale.magicDnsName}:${config.port}`;
   validateBridgeEndpoint(endpoint);
-
-  const payload = buildPairingPayload({ hostId, displayName, endpoint });
-  const canonicalJson = encodePairingPayload({ hostId, displayName, endpoint });
-
-  const wantTerminal = args.flags.get("terminal") === true;
-  const modules = parseIntegerOr(args, "modules", 21);
-  const quietZone = parseIntegerOr(args, "quiet-zone", 2);
-  const invert = args.flags.get("invert") === true;
-  const terminal = wantTerminal
-    ? renderPairingTerminal(payload, { modules, quietZone, invert })
-    : null;
+  const result: PairResult = {
+    endpoint,
+    passcode: challenge.passcode,
+    expiresAt: new Date(challenge.expiresAt).toISOString(),
+    timestamp: deps.clock.iso(),
+  };
   const output = getFlagString(args, "output");
   if (output !== undefined) {
     const outputPath = requireAbsolute("output", output);
-    deps.fs.writeFile(outputPath, `${JSON.stringify({ payload, terminal: terminal ?? renderPairingTerminal(payload) })}\n`, FILE_MODE);
+    deps.fs.writeFile(outputPath, `${JSON.stringify(result)}\n`, FILE_MODE);
     deps.fs.chmod(outputPath, FILE_MODE);
   }
-
-  return { payload, canonicalJson, terminal, timestamp: deps.clock.iso() };
-}
-
-/** Parses an integer flag with a fallback default. */
-function parseIntegerOr(args: ParsedCommand, key: string, fallback: number): number {
-  const raw = args.flags.get(key);
-  if (raw === undefined) return fallback;
-  if (typeof raw === "boolean") {
-    throw new CliArgsError("flag_invalid", `--${key} must be an integer (got boolean)`);
-  }
-  if (typeof raw !== "string") {
-    throw new CliArgsError(
-      "flag_invalid",
-      `--${key} must not be repeated`,
-    );
-  }
-  const n = Number.parseInt(raw, 10);
-  if (!Number.isInteger(n)) {
-    throw new CliArgsError("flag_invalid", `--${key} must be an integer (got ${JSON.stringify(raw)})`);
-  }
-  return n;
+  return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -1222,6 +1204,15 @@ function envelope(command: CliCommand, data: unknown, timestamp: string): string
   return JSON.stringify(payload);
 }
 
+function humanPairOutput(result: PairResult): string {
+  return [
+    `Endpoint: ${result.endpoint}`,
+    `Passcode: ${result.passcode}`,
+    `Expires: ${result.expiresAt}`,
+    "",
+  ].join("\n");
+}
+
 /**
  * Top-level entry point. Parses argv, dispatches, prints the typed result
  * to stdout (JSON envelope) and any diagnostic to stderr, then optionally
@@ -1270,7 +1261,12 @@ export async function runCli(deps: CliDeps): Promise<CliRunResult> {
   let data: unknown = null;
   try {
     data = await dispatch(parsed, deps);
-    captureStdout(`${envelope(parsed.command, data, deps.clock.iso())}\n`);
+    const jsonMode = getFlagBoolean(parsed, "json", false);
+    if (parsed.command === "pair" && deps.interactive === true && !jsonMode) {
+      captureStdout(`${humanPairOutput(data as PairResult)}\n`);
+    } else {
+      captureStdout(`${envelope(parsed.command, data, deps.clock.iso())}\n`);
+    }
   } catch (error) {
     exitCode = 1;
     const err = error as Error;
@@ -1278,7 +1274,10 @@ export async function runCli(deps: CliDeps): Promise<CliRunResult> {
     data = {
       error: { name: err.name, message: err.message, code: (err as { code?: unknown }).code ?? null },
     };
-    captureStdout(`${envelope(parsed.command, data, deps.clock.iso())}\n`);
+    const jsonMode = getFlagBoolean(parsed, "json", false);
+    if (!(parsed.command === "pair" && deps.interactive === true && !jsonMode)) {
+      captureStdout(`${envelope(parsed.command, data, deps.clock.iso())}\n`);
+    }
   }
 
   if (exitCode !== 0) deps.exit?.(exitCode);

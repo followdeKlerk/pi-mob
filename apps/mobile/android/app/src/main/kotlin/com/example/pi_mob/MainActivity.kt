@@ -9,6 +9,7 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
@@ -20,6 +21,7 @@ class MainActivity : FlutterActivity() {
   private val channelName = "pi-mob/notifications"
   private var tapSink:EventChannel.EventSink?=null
   private var tokenSink:EventChannel.EventSink?=null
+  private var pendingPermissionResult:MethodChannel.Result?=null
   private val tokenReceiver=object:BroadcastReceiver(){override fun onReceive(context:Context?,intent:Intent?){intent?.getStringExtra("token")?.let{tokenSink?.success(it)}}}
   override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
     super.configureFlutterEngine(flutterEngine)
@@ -37,10 +39,15 @@ class MainActivity : FlutterActivity() {
       when(call.method) {
         "permissionStatus" -> result.success(permissionStatus())
         "requestPermission" -> {
-          if(Build.VERSION.SDK_INT >= 33 && permissionStatus() == "notDetermined") ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1501)
-          result.success(permissionStatus())
+          if(Build.VERSION.SDK_INT >= 33 && permissionStatus() == "notDetermined") {
+            pendingPermissionResult = result
+            ActivityCompat.requestPermissions(this, arrayOf(Manifest.permission.POST_NOTIFICATIONS), 1501)
+          } else {
+            result.success(permissionStatus())
+          }
         }
         "currentToken" -> result.success(getSharedPreferences("pi_mob_notifications",MODE_PRIVATE).getString("fcm_token",null))
+        "openNotificationSettings" -> { openNotificationSettings(); result.success(null) }
         "setForegroundService" -> {
           val enabled=call.argument<Boolean>("enabled") ?: false
           val visible=call.argument<Boolean>("appVisible") ?: false
@@ -52,7 +59,18 @@ class MainActivity : FlutterActivity() {
       }
     }
   }
+  override fun onRequestPermissionsResult(requestCode:Int, permissions:Array<out String>, grantResults:IntArray){
+    super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+    if(requestCode == 1501) {
+      pendingPermissionResult?.success(permissionStatus())
+      pendingPermissionResult = null
+    }
+  }
   override fun onNewIntent(intent:Intent){super.onNewIntent(intent);setIntent(intent);deepLink(intent)?.let{tapSink?.success(it)}}
+  private fun openNotificationSettings(){
+    val intent=Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS).apply{putExtra(Settings.EXTRA_APP_PACKAGE,packageName)}
+    try{startActivity(intent)}catch(_:Exception){startActivity(Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply{data=android.net.Uri.parse("package:$packageName")})}
+  }
   private fun deepLink(intent:Intent?):String?=intent?.dataString ?: intent?.getStringExtra("deepLink")
   override fun onDestroy(){try{unregisterReceiver(tokenReceiver)}catch(_:IllegalArgumentException){};super.onDestroy()}
   private fun permissionStatus():String = if(Build.VERSION.SDK_INT < 33 || ContextCompat.checkSelfPermission(this,Manifest.permission.POST_NOTIFICATIONS)==PackageManager.PERMISSION_GRANTED) "authorized" else if(ActivityCompat.shouldShowRequestPermissionRationale(this,Manifest.permission.POST_NOTIFICATIONS)) "denied" else "notDetermined"

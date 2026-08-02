@@ -52,6 +52,7 @@ import {
 } from "../packages/bridge/src/ops/release-manifest";
 import { renderPlist } from "../packages/bridge/src/ops/launch-agent";
 import { DEFAULT_LAUNCH_AGENT_LABEL } from "../packages/bridge/src/ops/install-paths";
+import { BRIDGE_VERSION as CANONICAL_BRIDGE_VERSION } from "../packages/bridge/src/version";
 
 const ROOT = new URL("..", import.meta.url).pathname;
 const DIST = join(ROOT, "packages/bridge/dist");
@@ -69,15 +70,21 @@ const INSTALL_PLACEHOLDER_ROOT = "/opt/pi-mob";
 const INSTALL_PLACEHOLDER_RELEASE = `${INSTALL_PLACEHOLDER_ROOT}/release`;
 
 // ---------------------------------------------------------------------------
-// M7 release metadata constants.
+// Release metadata constants.
 //
 // These are the facts the release manifest carries. They are kept in one
 // place so the build script, the test, and any downstream install/rollback
 // flow stay in lock-step.
+//
+// Phase 2: `BRIDGE_VERSION` is sourced from the generated bridge module
+// (`packages/bridge/src/version.ts`) which mirrors the root `VERSION`
+// file. The release build refuses any other value: release bundles must
+// not drift from the canonical semver. Developers can still override
+// for ad-hoc smoke builds by setting `PI_MOB_VERSION` so the dev loop
+// remains unblocked, but the build script emits a clear warning.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BRIDGE_VERSION = "0.0.0-m7";
-const BRIDGE_VERSION = process.env.PI_MOB_VERSION?.trim() || DEFAULT_BRIDGE_VERSION;
+const BRIDGE_VERSION = process.env.PI_MOB_VERSION?.trim() || CANONICAL_BRIDGE_VERSION;
 const PROTOCOL_VERSION = "1.0";
 const BUN_MINIMUM = "1.3.14";
 const MIN_MACOS = "13.0";

@@ -1,59 +1,5 @@
 import 'package:flutter/foundation.dart';
 
-/// Host-configured model exposed to the mobile control surface.
-@immutable
-class ModelOptionData {
-  const ModelOptionData({
-    required this.id,
-    required this.label,
-    required this.provider,
-    this.thinkingLevels = const <String>[],
-  });
-
-  final String id;
-  final String label;
-  final String provider;
-  final List<String> thinkingLevels;
-}
-
-/// Coordinator-free state for model and thinking selection.
-@immutable
-class ModelThinkingViewData {
-  const ModelThinkingViewData({
-    required this.models,
-    this.selectedModelId,
-    this.selectedThinkingLevel,
-    this.unavailableRestoredModel,
-    this.enabled = true,
-    this.disabledReason,
-  });
-
-  final List<ModelOptionData> models;
-  final String? selectedModelId;
-  final String? selectedThinkingLevel;
-
-  /// Display name from restored Pi state when that model is no longer in the
-  /// configured host model list. It is deliberately not treated as selected.
-  final String? unavailableRestoredModel;
-  final bool enabled;
-  final String? disabledReason;
-
-  ModelOptionData? get selectedModel {
-    for (final model in models) {
-      if (model.id == selectedModelId) return model;
-    }
-    return null;
-  }
-}
-
-@immutable
-class ModelThinkingCallbacks {
-  const ModelThinkingCallbacks({this.onModelSelected, this.onThinkingSelected});
-
-  final ValueChanged<String>? onModelSelected;
-  final ValueChanged<String>? onThinkingSelected;
-}
-
 /// Advisory session statistics. Null means the host did not report the value;
 /// it never means zero.
 @immutable

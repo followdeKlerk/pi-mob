@@ -27,11 +27,13 @@ import '../search/search_indexer.dart';
 import '../context/context_domain.dart'
     show ContextState, reduceContext, ContextMutationTarget;
 import '../domain/session_controls.dart';
+import '../controls/control_view_data.dart';
 import '../domain/session_directory.dart';
 import '../domain/session_subscriptions.dart';
-import '../controls/control_view_data.dart';
 import '../domain/session_tree.dart';
+import '../security/secure_credential_store.dart';
 import '../sync/event_reducer.dart';
+import '../version.dart';
 import 'bridge_transport.dart';
 
 enum ConnectionPhase {
@@ -47,6 +49,11 @@ enum ConnectionPhase {
   incompatible,
   hostDraining,
   background,
+
+  /// Phase 4 — the bridge returned `invalid_auth` or `re_pair_required`.
+  /// The UI must show the re-pair card and stop reconnecting until the
+  /// user re-pairs.
+  rePairRequired,
 }
 
 enum SessionCreationPhase { idle, creating, created, failed }
@@ -201,6 +208,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     required AppDatabase database,
     Uuid uuid = const Uuid(),
     DateTime Function()? now,
+    SecureCredentialStore? secureCredentialStore,
+    void Function(String)? onAuthRejection,
   }) : // Public parameter names keep this boundary ergonomic while these
        // assignments retain private fields.
        // ignore: prefer_initializing_formals
@@ -209,7 +218,9 @@ final class ConnectionCoordinator extends ChangeNotifier
        _database = database,
        // ignore: prefer_initializing_formals
        _uuid = uuid,
-       _now = now ?? (() => DateTime.now().toUtc());
+       _now = now ?? (() => DateTime.now().toUtc()),
+       _secureCredentialStore = secureCredentialStore,
+       _onAuthRejection = onAuthRejection;
 
   String installationId = '';
   static const _acceptedOrLater = <String>{
@@ -246,6 +257,12 @@ final class ConnectionCoordinator extends ChangeNotifier
       GlobalSearchController(coordinator: this, database: _database);
   final Uuid _uuid;
   final DateTime Function() _now;
+  final SecureCredentialStore? _secureCredentialStore;
+
+  /// Pairing enrollment uses the same secure backend as authenticated hello.
+  SecureCredentialStore? get secureCredentialStore => _secureCredentialStore;
+  final void Function(String)? _onAuthRejection;
+  bool _authRevokedSeen = false;
   final OrderedEventReducer _reducer = const OrderedEventReducer();
   final Map<String, StreamViewState> _streams = {};
   final Map<String, SnapshotAssembler> _snapshots = {};
@@ -280,6 +297,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   String? _historySyncCurrentSessionId;
   int _historySyncTotal = 0;
   int _historySyncCompleted = 0;
+  // M14 — live ETA/throughput bookkeeping for the history-gate UI.
+  DateTime? _historySyncStartedAt;
+  int _historySyncEventsAtStart = 0;
+  double _historySyncEventsPerSecond = 0;
+  DateTime? _historySyncLastSampleAt;
+  int _historySyncEventsAtLastSample = 0;
   bool _historyGateComplete = false;
   String? _historyGateError;
   Completer<void>? _pairingCompleter;
@@ -314,6 +337,8 @@ final class ConnectionCoordinator extends ChangeNotifier
   SessionSubscriptionSet _subscriptionSet = SessionSubscriptionSet.empty();
   final ControllerBook _controllers = ControllerBook();
   final Map<String, Completer<void>> _controllerWaiters = {};
+  final Map<String, ({String sessionId, int epoch})> _controllerAcquireEpochs =
+      {};
   final Map<String, _PendingPrompt> _pendingPromptsBySession = {};
   final Map<String, String> _pendingCurrentRequestCommand = {};
   final Map<String, PromptSendStatus> _promptSendBySession = {};
@@ -354,6 +379,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   Timer? _leaseTimer;
   Future<void> _messageTail = Future.value();
   int _connectionEpoch = 0;
+  int _selectionEpoch = 0;
   int _eventsSinceAck = 0;
   bool _foreground = true;
   bool _carryDraftAfterGeneration = false;
@@ -368,6 +394,12 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   ConnectionPhase phase = ConnectionPhase.unpaired;
   Uri? endpoint;
+
+  /// The most recently observed non-null endpoint, preserved across
+  /// `forgetHost()` so the connection/setup screen can still prefill the
+  /// URL the user typed when they tap "Change bridge address". Survives
+  /// forget/connect cycles until a new endpoint overwrites it.
+  Uri? lastKnownEndpoint;
   EndpointProbe? readiness;
   String? errorMessage;
   String? connectionId;
@@ -402,9 +434,57 @@ final class ConnectionCoordinator extends ChangeNotifier
   int get historySyncTotal => _historySyncTotal;
   int get historySyncCompleted => _historySyncCompleted;
   String? get historySyncCurrentSessionId => _historySyncCurrentSessionId;
+
+  /// Friendly label for [_historySyncCurrentSessionId], falling back
+  /// to the truncated id when no display name is known. `null` when
+  /// no chat is being synced.
+  String? get historySyncCurrentSessionName {
+    final id = _historySyncCurrentSessionId;
+    if (id == null) return null;
+    final session = _sessions[id];
+    final name = session?.name;
+    final fallback = id.length >= 8 ? id.substring(0, 8) : id;
+    if (name != null &&
+        name.isNotEmpty &&
+        name != 'Session #${id.substring(0, 6)}') {
+      return name;
+    }
+    return fallback;
+  }
+
   double get historySyncProgress => _historySyncTotal == 0
       ? (_historyGateComplete ? 1 : 0)
       : _historySyncCompleted / _historySyncTotal;
+
+  /// Events-per-second throughput estimated from the last completed
+  /// page. `0` while no events have been measured yet.
+  double get historySyncEventsPerSecond => _historySyncEventsPerSecond;
+
+  /// Remaining chats based on completed counter, never negative.
+  int get historySyncRemaining =>
+      (_historySyncTotal - _historySyncCompleted).clamp(0, _historySyncTotal);
+
+  /// Seconds of wall-clock time spent syncing so far, rounded down.
+  Duration get historySyncElapsed {
+    final start = _historySyncStartedAt;
+    if (start == null) return Duration.zero;
+    return _now().difference(start);
+  }
+
+  /// ETA based on average completion so far. `null` when there are
+  /// still no completed chats to average over, when sync is already
+  /// done, or when the remaining chat count is zero.
+  Duration? get historySyncEta {
+    if (_historySyncTotal == 0) return null;
+    if (_historyGateComplete) return null;
+    final elapsed = historySyncElapsed;
+    if (elapsed.inMilliseconds <= 0) return null;
+    if (_historySyncCompleted <= 0) return null;
+    final avgMs = elapsed.inMilliseconds / _historySyncCompleted;
+    final remaining = historySyncRemaining;
+    if (remaining <= 0) return Duration.zero;
+    return Duration(milliseconds: (avgMs * remaining).round());
+  }
 
   /// Stream identifiers still awaiting an authoritative sync-complete frame.
   /// Exposed for Host diagnostics; callers receive an immutable snapshot.
@@ -1012,10 +1092,45 @@ final class ConnectionCoordinator extends ChangeNotifier
     return state == null || state.hasOlder;
   }
 
+  int _countAllKnownHistoryEvents() {
+    var total = 0;
+    for (final entry in _history.values) {
+      total += entry.items.length;
+    }
+    return total;
+  }
+
+  /// Updates the rolling throughput estimate after a history page
+  /// merges into local state. Uses the wall-clock delta since the
+  /// previous sample and a short EMA so the UI shows a stable
+  /// rate instead of jittering every page.
+  void _sampleHistoryThroughput() {
+    final now = _now();
+    final last = _historySyncLastSampleAt;
+    if (_historySyncStartedAt == null || last == null) return;
+    final eventsNow = _countAllKnownHistoryEvents();
+    final deltaEvents = eventsNow - _historySyncEventsAtLastSample;
+    final deltaMs = now.difference(last).inMilliseconds;
+    if (deltaMs > 0 && deltaEvents >= 0) {
+      final instant = deltaEvents * 1000.0 / deltaMs;
+      final updated = _historySyncEventsPerSecond == 0
+          ? instant
+          : (_historySyncEventsPerSecond * 0.6) + (instant * 0.4);
+      _historySyncEventsPerSecond = updated;
+    }
+    _historySyncEventsAtLastSample = eventsNow;
+    _historySyncLastSampleAt = now;
+  }
+
   Future<void> retryHistoryGate() async {
     if (!isReady) return;
     _historyGateComplete = false;
     _historyGateError = null;
+    _historySyncStartedAt = null;
+    _historySyncEventsAtStart = 0;
+    _historySyncEventsPerSecond = 0;
+    _historySyncLastSampleAt = null;
+    _historySyncEventsAtLastSample = 0;
     await _startHistoryGate();
   }
 
@@ -1032,6 +1147,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       ..addAll(activeIds);
     _historySyncTotal = _historySyncQueue.length;
     _historySyncCompleted = 0;
+    _historySyncEventsAtStart = _countAllKnownHistoryEvents();
+    _historySyncEventsPerSecond = 0;
+    _historySyncLastSampleAt = _now();
+    _historySyncEventsAtLastSample = _historySyncEventsAtStart;
+    _historySyncStartedAt = _now();
     _historySyncLocalRevisions.clear();
     final selected = selectedSessionId;
     _deferredAutoSelectSessionId = selected != null && _isActiveChat(selected)
@@ -1057,6 +1177,11 @@ final class ConnectionCoordinator extends ChangeNotifier
       _historySyncCurrentSessionId = null;
       _historyGateComplete = true;
       _historyGateError = null;
+      _historySyncStartedAt = null;
+      _historySyncEventsAtStart = 0;
+      _historySyncEventsPerSecond = 0;
+      _historySyncLastSampleAt = null;
+      _historySyncEventsAtLastSample = 0;
       final deferredSessionId = _deferredAutoSelectSessionId;
       _deferredAutoSelectSessionId = null;
       if (deferredSessionId != null && _isActiveChat(deferredSessionId)) {
@@ -1295,6 +1420,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         return aSeen.isAfter(bSeen) ? a : b;
       });
       endpoint = Uri.tryParse(host.endpoint);
+      lastKnownEndpoint = endpoint;
       hostId = host.hostId;
       hostGeneration = host.generation;
       hostDisplayName = host.displayName;
@@ -1413,6 +1539,10 @@ final class ConnectionCoordinator extends ChangeNotifier
 
     try {
       endpoint = normalized;
+      // Record the most recent non-null endpoint so the connection/setup
+      // screen can prefill after a deliberate forget (Change bridge
+      // address). Cleared only by `debugSetEndpoint(null)` for tests.
+      lastKnownEndpoint = normalized;
       phase = ConnectionPhase.probing;
       _notify();
       final probe = await _transport.probe(endpoint!);
@@ -1452,14 +1582,16 @@ final class ConnectionCoordinator extends ChangeNotifier
       );
       phase = ConnectionPhase.handshaking;
       _notify();
+      final credential = await _secureCredentialStore?.read();
       await socket.send(
         _envelope(
           'hello',
           <String, Object?>{
             if (hostId != null) 'expectedHostId': hostId,
-            'mobileVersion': '0.0.0',
+            'mobileVersion': kMobileAppVersion,
             'platform': 'mobile',
             'installationId': installationId,
+            if (credential != null) 'installationCredential': credential,
             'requiredCapabilities': const [
               'streams.v1',
               'commands.v1',
@@ -1543,6 +1675,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     final String? previousHostId = hostId;
     ++_connectionEpoch;
     _cancelReconnect();
+    _authRevokedSeen = false;
+    unawaited(_secureCredentialStore?.clear() ?? Future<void>.value());
     await _closeSocket();
     _ackTimer?.cancel();
     _ackTimer = null;
@@ -1866,9 +2000,15 @@ final class ConnectionCoordinator extends ChangeNotifier
         latestExportState != 'completed') {
       throw StateError('No completed export is available');
     }
+    final credential = await _secureCredentialStore?.read();
+    if (credential == null || credential.isEmpty) {
+      throw StateError('Re-pair your phone with the bridge to continue.');
+    }
     return PrivateBinaryTransport().downloadExport(
       hostOrigin: origin,
       exportId: exportId,
+      installationId: await _database.installationIdentifier(),
+      installationCredential: credential,
     );
   }
 
@@ -2067,14 +2207,28 @@ final class ConnectionCoordinator extends ChangeNotifier
     _notify();
   }
 
-  Future<void> selectSession(String sessionId) async {
+  Future<void> selectSession(String sessionId) {
+    final epoch = ++_selectionEpoch;
+    return _selectSession(sessionId, epoch);
+  }
+
+  bool _isCurrentSelection(String sessionId, int epoch) =>
+      epoch == _selectionEpoch && selectedSessionId == sessionId;
+
+  Future<void> _selectSession(String sessionId, int epoch) async {
     if (!_historyGateComplete || !_isActiveChat(sessionId)) return;
-    if (selectedSessionId == sessionId && isReady) return;
     selectedSessionId = sessionId;
-    leaseId = null;
+    final controller = _controllers.forSession(sessionId);
+    leaseId = controller.hasLease ? controller.leaseId : null;
+    if (leaseId != null) {
+      _startLeaseRenewal();
+    } else {
+      _leaseTimer?.cancel();
+    }
     final saved = hostId == null
         ? null
         : await _database.draft(hostId!, sessionId);
+    if (!_isCurrentSelection(sessionId, epoch)) return;
     if (saved == null) {
       if (!_carryDraftAfterGeneration) {
         draft = '';
@@ -2090,6 +2244,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       if (_carryDraftAfterGeneration) {
         _carryDraftAfterGeneration = false;
         await _persistDraft();
+        if (!_isCurrentSelection(sessionId, epoch)) return;
       }
     } else {
       _restorePendingPrompt(saved);
@@ -2098,10 +2253,15 @@ final class ConnectionCoordinator extends ChangeNotifier
         hostId: hostId!,
         sessionId: sessionId,
       );
+      if (!_isCurrentSelection(sessionId, epoch)) return;
       _attachmentsBySession[sessionId] = List<AttachmentRef>.of(stored);
     }
+    if (!_isCurrentSelection(sessionId, epoch)) return;
     _notify();
-    if (_socket != null && connectionId != null) await _subscribe();
+    if (_socket != null && connectionId != null) {
+      await _subscribe();
+      if (!_isCurrentSelection(sessionId, epoch)) return;
+    }
   }
 
   Future<void> updateDraft(String value) async {
@@ -3586,6 +3746,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       isLoading: false,
       error: null,
     );
+    _sampleHistoryThroughput();
     if (_historySyncCurrentSessionId == request.sessionId &&
         nextPageToken != null) {
       unawaited(
@@ -3617,6 +3778,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
       _historySyncCompleted += 1;
       _historySyncCurrentSessionId = null;
+      _sampleHistoryThroughput();
       _notify();
       unawaited(
         Future<void>.delayed(
@@ -4049,6 +4211,25 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> payload,
   ) async {
     final code = payload['code']?.toString() ?? 'unknown';
+    // Phase 4 — `invalid_auth` / `re_pair_required` are surfaced as a
+    // dedicated phase so the UI can render the re-pair card and stop
+    // reconnecting. We do not auto-clear credentials: the operator's
+    // forget-host flow remains the only path that wipes Keystore.
+    if ((code == 'invalid_auth' || code == 're_pair_required') &&
+        !_authRevokedSeen) {
+      _authRevokedSeen = true;
+      final reason = code == 're_pair_required'
+          ? 'Re-pair your phone with the bridge to continue.'
+          : payload['message']?.toString() ?? 'Credential is not valid.';
+      _onAuthRejection?.call(reason);
+      if (!phase.name.endsWith('paired') && phase != ConnectionPhase.ready) {
+        errorMessage = reason;
+        phase = ConnectionPhase.rePairRequired;
+        _notify();
+      }
+      _cancelReconnect();
+      return;
+    }
     final creationCommandId = message['commandId'];
     if (_sessionCreation.isCreating &&
         creationCommandId == _sessionCreation.commandId) {
@@ -4076,9 +4257,15 @@ final class ConnectionCoordinator extends ChangeNotifier
     final reconciledCommandId = requestId is String
         ? _pendingCurrentRequestCommand.remove(requestId)
         : null;
-    final prompt = _pendingForCommand(
-      message['commandId'] ?? reconciledCommandId,
-    );
+    final commandId = message['commandId'];
+    final acquire = commandId is String
+        ? _controllerAcquireEpochs.remove(commandId)
+        : null;
+    if (acquire != null &&
+        !_isCurrentSelection(acquire.sessionId, acquire.epoch)) {
+      return;
+    }
+    final prompt = _pendingForCommand(commandId ?? reconciledCommandId);
     final historyRequest = requestId is String
         ? _historyRequests.remove(requestId)
         : null;
@@ -4246,16 +4433,24 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   Future<void> _acquireController() async {
-    if (selectedSessionId == null || !isReady) return;
-    await _sendCommand(
-      type: 'controller.acquire',
-      commandId: _id(),
-      payload: <String, Object?>{
-        'scope': 'session',
-        'sessionId': selectedSessionId!,
-      },
-      requiresLease: false,
+    final sessionId = selectedSessionId;
+    if (sessionId == null || !isReady) return;
+    final commandId = _id();
+    _controllerAcquireEpochs[commandId] = (
+      sessionId: sessionId,
+      epoch: _selectionEpoch,
     );
+    try {
+      await _sendCommand(
+        type: 'controller.acquire',
+        commandId: commandId,
+        payload: <String, Object?>{'scope': 'session', 'sessionId': sessionId},
+        requiresLease: false,
+      );
+    } on Object {
+      _controllerAcquireEpochs.remove(commandId);
+      rethrow;
+    }
   }
 
   void _startLeaseRenewal() {
@@ -4535,6 +4730,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       clientUploadId: _uuid.v4(),
       image: image,
       intendedSessionId: sessionId,
+      installationCredential: await _secureCredentialStore?.read(),
     );
     final ref = AttachmentRef(
       id: uploaded.attachmentId,
@@ -4740,6 +4936,17 @@ final class ConnectionCoordinator extends ChangeNotifier
         _forceSnapshot.add(event.streamId);
       }
     }
+    // A durable cursor can outlive the locally retained event rows (for
+    // example after cache compaction). Seed the in-memory reducer from that
+    // cursor so the next contiguous replay event is not misclassified as a
+    // gap merely because no cached host row remained.
+    for (final entry in cursorByStream.entries) {
+      if (_streams.containsKey(entry.key)) continue;
+      _streams[entry.key] = StreamViewState.initial(
+        entry.key,
+        cursor: StreamCursor.parse(entry.value),
+      );
+    }
     for (final entry in cachedHistory.entries) {
       entry.value.sort((a, b) => a.cursor.compareTo(b.cursor));
       final streamId = 'session:${entry.key}';
@@ -4866,9 +5073,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     unawaited(_closeSocket());
     connectionId = null;
     leaseId = null;
-    phase = _foreground
-        ? ConnectionPhase.disconnected
-        : ConnectionPhase.background;
+    if (phase != ConnectionPhase.rePairRequired) {
+      phase = _foreground
+          ? ConnectionPhase.disconnected
+          : ConnectionPhase.background;
+    }
     if (error != null) errorMessage = error.toString();
     _notify();
     _scheduleReconnect();
@@ -4878,6 +5087,8 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (epoch != _connectionEpoch) return;
     debugPrint(
       '[pi-mob][conn] _protocolFailure error=${error.runtimeType} '
+      'sanitizedMessage=${sanitizeErrorMessage(error.toString())} '
+      'endpoint=${sanitizedEndpointLabel(endpoint)} '
       'epoch=$epoch currentEpoch=$_connectionEpoch',
     );
     _failSessionCreation('The bridge response could not be read.');
@@ -4924,6 +5135,50 @@ final class ConnectionCoordinator extends ChangeNotifier
 
   String _id() => _uuid.v4().toLowerCase();
 
+  /// Redact credential-shaped tokens, query strings, and pairing-key
+  /// placeholders from a free-form error message before it is surfaced
+  /// to the UI or the device log. The bridge never sends tokens, but a
+  /// misconfigured host might, and the alpha must never display them.
+  /// Patterns:
+  ///   - `Bearer …` / `token=…` / `key=…` / `secret=…`
+  ///   - URL query/fragment portions (`?x=y&z=w`, `#frag`)
+  /// The result keeps the surrounding sentence intact so the user can
+  /// still read what went wrong. This is also the canonical helper the
+  /// UI uses to render the value, so the secret-redaction contract is
+  /// shared with the device log.
+  static String sanitizeErrorMessage(String? input) {
+    if (input == null || input.isEmpty) return '';
+    var out = input;
+    // Strip URL query strings and fragments first: anything from a `?`
+    // through the next whitespace is a payload we never want to display.
+    out = out.replaceAll(RegExp(r'\?[^\s]*'), '?[redacted]');
+    out = out.replaceAll(RegExp(r'#[^\s]*'), '#[redacted]');
+    out = out.replaceAll(
+      RegExp(
+        r'bearer\s+[A-Za-z0-9.\-]+|token=[^\s&]+|key=[^\s&]+|secret=[^\s&]+|password=[^\s&]+|query=[^\s&]+',
+        caseSensitive: false,
+      ),
+      '[redacted]',
+    );
+    // Belt-and-braces: catch query/fragment-style payloads that did not
+    // start with a literal `?` (e.g. mid-sentence URLs with leading
+    // whitespace stripped). Whitespace is the natural delimiter.
+    out = out.replaceAll(RegExp(r'[?][^ ]+'), '[redacted]');
+    out = out.replaceAll(RegExp(r'#[^ ]+'), '[redacted]');
+    return out;
+  }
+
+  /// Short, log-safe view of the currently configured endpoint. Emits
+  /// `host:port` only; the path, query, fragment, and any userinfo are
+  /// dropped so an accidental inclusion in a debug print never leaks
+  /// the URL a user typed into the endpoint field.
+  static String sanitizedEndpointLabel(Uri? value) {
+    if (value == null) return 'unset';
+    final host = value.host.isEmpty ? 'unknown-host' : value.host;
+    final port = value.hasPort ? ':${value.port}' : '';
+    return '$host$port';
+  }
+
   /// Test seam for exercising progress rendering without a bridge fixture.
   @visibleForTesting
   void debugSetHistorySyncState({
@@ -4936,6 +5191,34 @@ final class ConnectionCoordinator extends ChangeNotifier
     _historySyncTotal = total;
     _historyGateComplete = complete;
     _historyGateError = error;
+    _notify();
+  }
+
+  /// Test seam for forcing the connection phase without running the
+  /// bridge. Use sparingly: this is meant for widget tests that need to
+  /// exercise recovery affordances for off-rail phases (incompatible,
+  /// hostUnreachable, etc.) without a real bridge fixture.
+  @visibleForTesting
+  void debugForcePhase(ConnectionPhase next) {
+    phase = next;
+    _notify();
+  }
+
+  /// Test seam for setting the diagnostic errorMessage without routing
+  /// through a real failure. UI tests use this to assert that the
+  /// surfaced value matches the coordinator's recorded value.
+  @visibleForTesting
+  void debugSetErrorMessage(String? message) {
+    errorMessage = message;
+    _notify();
+  }
+
+  /// Test seam for setting the currently configured bridge endpoint
+  /// without connecting. Mirrors [initialize]'s host-load path so widget
+  /// tests can verify the prefill contract.
+  @visibleForTesting
+  void debugSetEndpoint(Uri? value) {
+    endpoint = value;
     _notify();
   }
 
@@ -4963,8 +5246,9 @@ final class ConnectionCoordinator extends ChangeNotifier
       debugPrint(
         '[pi-mob][conn] _notify phase=${phase.name}'
         '${phaseChanged ? ' (changed)' : ''} '
-        'errorMessage=${errorMessage ?? '<null>'}'
-        '${errorChanged ? ' (changed)' : ''}',
+        'errorMessage=${sanitizeErrorMessage(errorMessage)}'
+        '${errorChanged ? ' (changed)' : ''} '
+        'endpoint=${sanitizedEndpointLabel(endpoint)}',
       );
       _lastLoggedPhase = phase;
       _lastLoggedErrorMessage = errorMessage;
@@ -5219,12 +5503,22 @@ final class ConnectionCoordinator extends ChangeNotifier
         'Controller can only be acquired for the foreground session',
       );
     }
-    await _sendCommand(
-      type: 'controller.acquire',
-      commandId: _id(),
-      payload: <String, Object?>{'sessionId': sessionId},
-      requiresLease: false,
+    final commandId = _id();
+    _controllerAcquireEpochs[commandId] = (
+      sessionId: sessionId,
+      epoch: _selectionEpoch,
     );
+    try {
+      await _sendCommand(
+        type: 'controller.acquire',
+        commandId: commandId,
+        payload: <String, Object?>{'sessionId': sessionId},
+        requiresLease: false,
+      );
+    } on Object {
+      _controllerAcquireEpochs.remove(commandId);
+      rethrow;
+    }
   }
 
   /// Explicit controller release. Mobile stops being the controller
@@ -5277,8 +5571,10 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (_historyGateComplete && !_isActiveChat(sessionId)) {
       throw StateError('Cannot select a chat that is not active.');
     }
+    final epoch = ++_selectionEpoch;
+    selectedSessionId = sessionId;
     if (_subscriptionSet.isFull(sessionId)) {
-      await selectSession(sessionId);
+      await _selectSession(sessionId, epoch);
       return;
     }
     final previousFull = _subscriptionSet.full?.sessionId;
@@ -5297,9 +5593,11 @@ final class ConnectionCoordinator extends ChangeNotifier
         );
       }
     }
+    if (!_isCurrentSelection(sessionId, epoch)) return;
     _subscriptionSet = next;
     await _persistSubscriptionSet();
-    await selectSession(sessionId);
+    if (!_isCurrentSelection(sessionId, epoch)) return;
+    await _selectSession(sessionId, epoch);
   }
 
   /// Adds `sessionId` as a summary subscription. Throws when the cap
@@ -5368,6 +5666,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (id == null) return;
     final mode = controllerModeFromWire(payload['mode']);
     final lease = payload['leaseId'] as String?;
+    _controllerAcquireEpochs.removeWhere((_, value) => value.sessionId == id);
     final controller = _controllers.forSession(id);
     switch (mode) {
       case ControllerMode.primary:

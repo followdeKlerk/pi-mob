@@ -29,6 +29,14 @@ class ConnectionPanel extends StatelessWidget {
     final probe = coordinator.readiness;
     final theme = Theme.of(context);
     final text = theme.textTheme;
+    // Prefill the endpoint field whenever the caller has not already
+    // typed something. This is the path "Change bridge address" relies on
+    // after `forgetHost()` clears `endpoint`: `lastKnownEndpoint` retains
+    // the most recent URL the user typed.
+    final prefill = coordinator.endpoint ?? coordinator.lastKnownEndpoint;
+    if (prefill != null && endpointController.text.isEmpty) {
+      endpointController.text = prefill.toString();
+    }
     return Card(
       key: const Key('host-connection-card'),
       child: Padding(
@@ -111,7 +119,9 @@ class ConnectionPanel extends StatelessWidget {
             if (coordinator.errorMessage != null) ...[
               const SizedBox(height: PiSpacing.sm),
               SelectableText(
-                coordinator.errorMessage!,
+                ConnectionCoordinator.sanitizeErrorMessage(
+                  coordinator.errorMessage,
+                ),
                 key: const Key('connection-error'),
                 style: TextStyle(color: theme.colorScheme.error),
               ),

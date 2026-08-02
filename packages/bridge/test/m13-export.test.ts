@@ -61,13 +61,14 @@ describe("M13 opaque HTML exports", () => {
     writeFileSync(reserved.storagePath, body);
     registry.markCompleted(reserved.metadata.exportId, { bytes: body.length, sha256: createHash("sha256").update(body).digest("hex") });
     const attachments = new AttachmentStore({ root: join(root, "attachments") });
-    const handler = createBinaryHttpHandler({ attachments, exports: { getExport: (id) => registry.get(id), exportFile: (id) => registry.file(id) } });
-    const response = await handler(new Request(`https://private.ts.net/v1/exports/${reserved.metadata.exportId}`));
+    const handler = createBinaryHttpHandler({ attachments, exports: { getExport: (id) => registry.get(id), exportFile: (id) => registry.file(id) }, credentials: { verify: () => ({ kind: "valid", installationId: "00000000-0000-4000-8000-000000000000" }) } });
+    const response = await handler(new Request(`https://private.ts.net/v1/exports/${reserved.metadata.exportId}`, { headers: { "X-Installation-Id": "00000000-0000-4000-8000-000000000000", "X-Installation-Credential": "x" } }));
     expect(response!.status).toBe(200);
     expect(response!.headers.get("content-disposition")).toMatch(/^attachment; filename="pi-session-/);
     expect(response!.headers.get("cache-control")).toBe("private, no-store");
     now += 60_001;
-    expect((await handler(new Request(`https://private.ts.net/v1/exports/${reserved.metadata.exportId}`)))!.status).toBe(404);
+    const expired = await handler(new Request(`https://private.ts.net/v1/exports/${reserved.metadata.exportId}`, { headers: { "X-Installation-Id": "00000000-0000-4000-8000-000000000000", "X-Installation-Credential": "x" } }));
+    expect(expired!.status).toBe(404);
     attachments.close();
   });
 

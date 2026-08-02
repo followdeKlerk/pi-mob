@@ -3,7 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createNodeFileSystemPort, type ClockPort } from "../src/ops/ports";
-import { handleInstall, handleSetup, handleStart, handleStatus, handleStop, handleUninstall, parseArgs, runCli, type CliDeps, type LifecycleDriver, type SetupDefaults } from "../src/ops/cli";
+import { handleInstall, handlePair, handleSetup, handleStart, handleStatus, handleStop, handleUninstall, parseArgs, runCli, type CliDeps, type LifecycleDriver, type SetupDefaults } from "../src/ops/cli";
 import type { ServeDriver } from "../src/ops/tailscale-serve";
 
 const clock: ClockPort = { now: () => 1, iso: () => "2026-07-13T00:00:00.000Z" };
@@ -96,14 +96,8 @@ describe("M7 operations CLI", () => {
     expect(installedPlist).not.toContain(defaults.sourceBridgeExecutable);
     expect(installedPlist).not.toContain("--extension");
     expect(result.manualEndpoint).toBe("https://studio.tail.ts.net:9443");
-    expect(result.pairingAvailable).toBe(true);
-    expect(result.pairingPayload).toMatchObject({ hostId: "6a7c0845-069f-4fe3-bf67-a9fccf43e754", displayName: "pi-mob-m7-workspace", endpoint: "https://studio.tail.ts.net:9443" });
-    expect(result.pairingTerminal).toContain("\u001b[40m");
-    const pairingFile = join(result.install!.paths.secretsRoot, "pairing.json");
-    expect(JSON.parse(createNodeFileSystemPort().readFile(pairingFile).toString("utf8")).payload).toEqual(result.pairingPayload);
-    expect(createNodeFileSystemPort().stat(pairingFile).mode & 0o777).toBe(0o600);
-    expect(result.nextActions.join(" ")).toContain("Scan the pairing QR");
-    expect(result.nextActions.join(" ")).toContain("Manual fallback");
+    expect(result.nextActions.join(" ")).toContain("pi-mob pair");
+    expect(result.nextActions.join(" ")).toContain("Manual endpoint");
     expect(calls).toEqual(["install"]);
   });
 
@@ -133,11 +127,10 @@ describe("M7 operations CLI", () => {
     for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
     mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
     const lifecycle = fakeLifecycle([]);
-    const installed = await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], lifecycle));
-    writeFileSync(join(installed.paths.secretsRoot, "pairing.json"), JSON.stringify({ payload: { kind: "pi-mob-host", version: 1, hostId: "6a7c0845-069f-4fe3-bf67-a9fccf43e754", displayName: "Studio", endpoint: "https://studio.tail.ts.net", protocolMajor: 1 } }), { mode: 0o600 });
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], lifecycle));
     const ownedServe: ServeDriver = { async listRoutes() { return [{ source: { tcp: { port: 9443 } }, handlers: [{ kind: "forward", address: "http://127.0.0.1:9443" }], annotations: { "pi-mob.bridge/owner": "pi-mob-bridge" } }]; }, async setRoutes() {} };
     const result = await handleStatus(parseArgs(["status", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot]), { ...deps([], lifecycle), serveDriver: ownedServe });
-    expect(result).toMatchObject({ installed: true, launchAgentLoaded: true, listenerReady: true, ownedServePresent: true, ownedServePort: 9443, pairingAvailable: true, pairingEndpoint: "https://studio.tail.ts.net" });
+    expect(result).toMatchObject({ installed: true, launchAgentLoaded: true, listenerReady: true, ownedServePresent: true, ownedServePort: 9443, pairingAvailable: false, pairingEndpoint: null });
   });
 
   test("public command parsing and help expose setup/start/stop/status", async () => {
@@ -146,6 +139,89 @@ describe("M7 operations CLI", () => {
     const result = await runCli({ ...deps(["--help"]), stdout(chunk) { output += chunk; } });
     expect(result.exitCode).toBe(0);
     for (const command of ["setup", "start", "stop", "status"]) expect(output).toContain(command);
+  });
+
+  test("pair uses the installed config, live Serve route, identity, and fresh enrollment challenge", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-cli-"));
+    const defaults = setupDefaults(root);
+    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    const passcode = "123456";
+    const result = await handlePair(parseArgs(["pair", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot]), {
+      ...deps([]),
+      tailscaleProbe: async () => ({ installed: true, loggedIn: true, magicDnsName: "studio.tail.ts.net" }),
+      processProbe: () => ({ loaded: true, listenerReady: true }),
+      serveDriver: { async listRoutes() { return [{ source: { tcp: { port: 9443 } }, handlers: [{ kind: "https", address: "http://127.0.0.1:9443" }], annotations: { "pi-mob.bridge/owner": "pi-mob-bridge" } }]; }, async setRoutes() {} },
+      enrollmentChallenge: () => ({ passcode, expiresAt: Date.now() + 300_000 }),
+    });
+    expect(result).toMatchObject({ endpoint: "https://studio.tail.ts.net:9443", passcode });
+    expect(result.expiresAt).toContain("T");
+  });
+
+  test("pair emits only endpoint, passcode, and expiry on an interactive terminal", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-human-"));
+    const defaults = setupDefaults(root);
+    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    const result = await runCli({
+      ...deps(["pair", "--install-root", defaults.installRoot]),
+      interactive: true,
+      tailscaleProbe: async () => ({ installed: true, loggedIn: true, magicDnsName: "studio.tail.ts.net" }),
+      processProbe: () => ({ loaded: true, listenerReady: true }),
+      serveDriver: { async listRoutes() { return [{ source: { tcp: { port: 9443 } }, handlers: [{ kind: "https", address: "http://127.0.0.1:9443" }], annotations: { "pi-mob.bridge/owner": "pi-mob-bridge" } }]; }, async setRoutes() {} },
+      hostIdentity: () => ({ hostId: "6a7c0845-069f-4fe3-bf67-a9fccf43e754" }),
+      enrollmentChallenge: () => ({ passcode: "123456", expiresAt: Date.now() + 300_000 }),
+    } as CliDeps & { interactive: boolean });
+    expect(result.exitCode).toBe(0);
+    expect(result.stdout).toContain("https://studio.tail.ts.net:9443");
+    expect(result.stdout).toContain("Passcode: 123456");
+    expect(result.stdout).toContain("Expires:");
+    expect(result.stdout).not.toContain("\u001b");
+    expect(result.stdout).not.toContain("enrollmentSecret");
+    expect(result.stdout).not.toContain("pairing.json");
+  });
+
+  test("pair keeps structured JSON output when stdout is not a TTY or --json is used", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-json-"));
+    const defaults = setupDefaults(root);
+    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    const base = {
+      ...deps(["pair", "--install-root", defaults.installRoot, "--json"]),
+      tailscaleProbe: async () => ({ installed: true, loggedIn: true, magicDnsName: "studio.tail.ts.net" }),
+      processProbe: () => ({ loaded: true, listenerReady: true }),
+      serveDriver: { async listRoutes() { return [{ source: { tcp: { port: 9443 } }, handlers: [{ kind: "https", address: "http://127.0.0.1:9443" }], annotations: { "pi-mob.bridge/owner": "pi-mob-bridge" } }]; }, async setRoutes() {} },
+      hostIdentity: () => ({ hostId: "6a7c0845-069f-4fe3-bf67-a9fccf43e754" }),
+      enrollmentChallenge: () => ({ passcode: "654321", expiresAt: Date.now() + 300_000 }),
+    } as CliDeps;
+    const result = await runCli(base);
+    expect(result.exitCode).toBe(0);
+    expect(() => JSON.parse(result.stdout)).not.toThrow();
+    const json = JSON.parse(result.stdout) as { data: { endpoint: string; passcode: string } };
+    expect(json.data.endpoint).toBe("https://studio.tail.ts.net:9443");
+    expect(json.data.passcode).toBe("654321");
+    expect(result.stdout).not.toContain("enrollmentSecret");
+  });
+
+  test("pair refuses without a ready listener and owned Serve route", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-unready-"));
+    const defaults = setupDefaults(root);
+    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    let issued = false;
+    await expect(handlePair(parseArgs(["pair", "--install-root", defaults.installRoot]), {
+      ...deps([]),
+      tailscaleProbe: async () => ({ installed: true, loggedIn: true, magicDnsName: "studio.tail.ts.net" }),
+      processProbe: () => ({ loaded: true, listenerReady: false }),
+      serveDriver: serve,
+      hostIdentity: () => ({ hostId: "6a7c0845-069f-4fe3-bf67-a9fccf43e754" }),
+      enrollmentChallenge: () => { issued = true; return { passcode: "111111", expiresAt: Date.now() + 300_000 }; },
+    })).rejects.toThrow(/listener|Serve/i);
+    expect(issued).toBe(false);
   });
 
   test("destructive lifecycle commands fail closed without a production driver", async () => {

@@ -66,19 +66,7 @@ void main() {
 
       final controllers = _ShellControllers();
       await tester.pumpWidget(_shell(fixture.coordinator, controllers));
-      await tester.tap(find.byKey(const Key('open-commands')));
-      await tester.pumpAndSettle();
-
-      expect(
-        find.byKey(const Key('catalogue-unavailable-notice')),
-        findsOneWidget,
-      );
-      expect(find.text('Catalogue unavailable'), findsOneWidget);
-      expect(
-        find.byKey(const Key('command-catalogue-unavailable')),
-        findsOneWidget,
-      );
-      expect(find.text('Show available skills'), findsNothing);
+      expect(find.byKey(const Key('open-commands')), findsNothing);
 
       fixture.coordinator.dispose();
       await tester.pumpWidget(const SizedBox.shrink());
@@ -134,14 +122,7 @@ void main() {
 
       final controllers = _ShellControllers();
       await tester.pumpWidget(_shell(fixture.coordinator, controllers));
-      await tester.tap(find.byKey(const Key('open-commands')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Foo skill'), findsOneWidget);
-      expect(find.text('/foo'), findsOneWidget);
-      expect(find.text('GitHub MCP'), findsOneWidget);
-      expect(find.text('MCP unavailable'), findsOneWidget);
-      expect(find.byIcon(Icons.dns), findsOneWidget);
+      expect(find.byKey(const Key('open-commands')), findsNothing);
 
       fixture.coordinator.dispose();
       await tester.pumpWidget(const SizedBox.shrink());
@@ -190,16 +171,7 @@ void main() {
       final controllers = _ShellControllers();
       expect(fixture.coordinator.supportsCapability('attention.v1'), isFalse);
       await tester.pumpWidget(_shell(fixture.coordinator, controllers));
-      await tester.tap(find.byKey(const Key('open-attention')));
-      await tester.pumpAndSettle();
-
-      expect(find.text('Attention inbox unavailable'), findsOneWidget);
-      expect(
-        find.text(
-          'This host did not advertise the durable attention inbox capability.',
-        ),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('open-attention')), findsNothing);
 
       fixture.coordinator.dispose();
       await tester.pumpWidget(const SizedBox.shrink());

@@ -445,6 +445,13 @@ export const ERROR_CODES = [
 	"pi_version_mismatch",
 	"provider_interrupted",
 	"permission_denied",
+	// Phase 4 — application-layer authentication. `invalid_auth` covers
+	// every credential rejection mode (missing / wrong / revoked /
+	// expired). `re_pair_required` is returned only for legacy /
+	// not-bound clients so the mobile UI can render a distinct
+	// actionable message.
+	"invalid_auth",
+	"re_pair_required",
 	"crash_loop",
 	"database_unavailable",
 	"storage_full",
@@ -2910,6 +2917,7 @@ export const HelloSchema = Type.Object(
 				mobileVersion: Type.String({ minLength: 1 }),
 				platform: Type.String({ minLength: 1 }),
 				installationId: Uuid,
+				installationCredential: Type.String({ minLength: 1 }),
 				requiredCapabilities: Type.Array(CapabilitySchema),
 				optionalCapabilities: Type.Array(Type.String()),
 			},

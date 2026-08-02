@@ -1073,6 +1073,8 @@ const _errorCodes = <String>{
   'pi_version_mismatch',
   'provider_interrupted',
   'permission_denied',
+  'invalid_auth',
+  're_pair_required',
   'crash_loop',
   'database_unavailable',
   'storage_full',

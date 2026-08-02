@@ -6,6 +6,10 @@ import 'motion_primitives.dart';
 
 /// Compact synchronization gate. Session names, identifiers, and actions stay
 /// hidden until every durable chat history is ready for local-first browsing.
+///
+/// M14 — the card now also reports which chat is syncing right now, the
+/// running throughput in events/second, and a derived ETA so the user has a
+/// truthful view of progress when chats are larger than usual.
 class SessionSyncScreen extends StatelessWidget {
   const SessionSyncScreen({required this.coordinator, super.key});
 
@@ -19,6 +23,12 @@ class SessionSyncScreen extends StatelessWidget {
     final error = coordinator.historyGateError;
     final total = coordinator.historySyncTotal;
     final completed = coordinator.historySyncCompleted;
+    final currentName = coordinator.historySyncCurrentSessionName;
+    final remaining = coordinator.historySyncRemaining;
+    final elapsed = coordinator.historySyncElapsed;
+    final eta = coordinator.historySyncEta;
+    final throughput = coordinator.historySyncEventsPerSecond;
+    final connectionPhase = coordinator.phase;
 
     return SafeArea(
       child: Center(
@@ -36,10 +46,10 @@ class SessionSyncScreen extends StatelessWidget {
                   label: error != null
                       ? 'Chat synchronization failed'
                       : ready
-                      ? 'Chats are ready'
-                      : total == 0
-                      ? 'Syncing chats'
-                      : 'Syncing chats, $completed of $total complete',
+                          ? 'Chats are ready'
+                          : total == 0
+                              ? 'Syncing chats'
+                              : 'Syncing chats, $completed of $total complete',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
@@ -48,8 +58,8 @@ class SessionSyncScreen extends StatelessWidget {
                         error != null
                             ? Icons.sync_problem
                             : ready
-                            ? Icons.check_circle_outline
-                            : Icons.sync,
+                                ? Icons.check_circle_outline
+                                : Icons.sync,
                         size: 36,
                         color: error != null ? colors.error : colors.primary,
                       ),
@@ -66,9 +76,8 @@ class SessionSyncScreen extends StatelessWidget {
                         error != null
                             ? 'Sync paused. Your existing local data is safe.'
                             : ready
-                            ? 'Your local chat history is ready.'
-                            : 'Preparing your chat history so opening a chat '
-                                  'is immediate and works through reconnects.',
+                                ? 'Your local chat history is ready.'
+                                : _bootMessage(connectionPhase),
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: colors.onSurfaceVariant,
@@ -93,6 +102,14 @@ class SessionSyncScreen extends StatelessWidget {
                           style: theme.textTheme.labelMedium?.copyWith(
                             color: colors.onSurfaceVariant,
                           ),
+                        ),
+                        const SizedBox(height: PiSpacing.xs),
+                        _SyncMetricsRow(
+                          currentName: currentName,
+                          remaining: remaining,
+                          elapsed: elapsed,
+                          eta: eta,
+                          throughput: throughput,
                         ),
                       ],
                       if (error != null)
@@ -133,5 +150,110 @@ class SessionSyncScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  static String _bootMessage(ConnectionPhase phase) {
+    switch (phase) {
+      case ConnectionPhase.unpaired:
+      case ConnectionPhase.probing:
+      case ConnectionPhase.connecting:
+      case ConnectionPhase.handshaking:
+        return 'Connecting to the bridge so your chat history can sync…';
+      case ConnectionPhase.synchronizing:
+      case ConnectionPhase.ready:
+      case ConnectionPhase.degraded:
+      case ConnectionPhase.disconnected:
+      case ConnectionPhase.hostUnreachable:
+      case ConnectionPhase.incompatible:
+      case ConnectionPhase.hostDraining:
+      case ConnectionPhase.background:
+      case ConnectionPhase.rePairRequired:
+        return 'Preparing your chat history so opening a chat '
+            'is immediate and works through reconnects.';
+    }
+  }
+}
+
+/// Truthful throughput + ETA strip below the progress bar.
+class _SyncMetricsRow extends StatelessWidget {
+  const _SyncMetricsRow({
+    required this.currentName,
+    required this.remaining,
+    required this.elapsed,
+    required this.eta,
+    required this.throughput,
+  });
+
+  final String? currentName;
+  final int remaining;
+  final Duration elapsed;
+  final Duration? eta;
+  final double throughput;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    final chatLine = currentName == null
+        ? 'Preparing the next chat…'
+        : 'Now syncing: $currentName';
+    final remainingLine = remaining <= 0
+        ? 'Last chat'
+        : '$remaining chat${remaining == 1 ? '' : 's'} remaining';
+    final elapsedLabel = _formatDuration(elapsed);
+    final etaLabel = eta == null ? 'calculating…' : '~${_formatDuration(eta!)}';
+    final rateLabel = throughput <= 0
+        ? '— events/s'
+        : '${throughput.toStringAsFixed(1)} events/s';
+    return DefaultTextStyle.merge(
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: colors.onSurfaceVariant,
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            chatLine,
+            key: const Key('chat-sync-current-chat'),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+          const SizedBox(height: 4),
+          Wrap(
+            spacing: PiSpacing.md,
+            runSpacing: 2,
+            children: [
+              Text(
+                remainingLine,
+                key: const Key('chat-sync-remaining'),
+              ),
+              Text(
+                'Elapsed $elapsedLabel',
+                key: const Key('chat-sync-elapsed'),
+              ),
+              Text(
+                'ETA $etaLabel',
+                key: const Key('chat-sync-eta'),
+              ),
+              Text(
+                rateLabel,
+                key: const Key('chat-sync-throughput'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatDuration(Duration value) {
+    if (value.inSeconds < 1) return '${value.inMilliseconds} ms';
+    final minutes = value.inMinutes;
+    final seconds = value.inSeconds % 60;
+    if (minutes == 0) return '${value.inSeconds}s';
+    if (minutes < 60) return '${minutes}m ${seconds}s';
+    final hours = minutes ~/ 60;
+    final remMinutes = minutes % 60;
+    return '${hours}h ${remMinutes}m';
   }
 }

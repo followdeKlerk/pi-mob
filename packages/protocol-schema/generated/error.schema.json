@@ -158,6 +158,14 @@
               "type": "string"
             },
             {
+              "const": "invalid_auth",
+              "type": "string"
+            },
+            {
+              "const": "re_pair_required",
+              "type": "string"
+            },
+            {
               "const": "crash_loop",
               "type": "string"
             },

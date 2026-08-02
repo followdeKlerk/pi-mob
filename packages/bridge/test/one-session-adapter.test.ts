@@ -29,6 +29,7 @@ import {
   reconcileSessionHistoryTail,
 } from "../src/pi/external-history";
 import { canonicalizeOrThrow, deriveRootId } from "../src/core/workspace-policy";
+import { generateInstallationCredential, hashCredential } from "../src/auth/credentials";
 
 class FakeRpc implements PiRpcClient {
   readonly requests: PiRpcRequestOptions[] = [];
@@ -55,6 +56,18 @@ class FakeRpc implements PiRpcClient {
     for (const fn of this.notifications) fn(raw);
   }
   reset(): void { this.requests.length = 0; this.responses.clear(); this.failWith = null; this.requestAttempts = 0; }
+}
+
+class StoppedLegacyRpc extends FakeRpc {
+  lifecycleState(): string { return "stopped"; }
+}
+
+class SessionScopedFakeRpc extends FakeRpc {
+  state = "stopped";
+  starts = 0;
+  constructor(readonly sessionPath: string) { super(); }
+  async start(): Promise<void> { this.starts += 1; this.state = "idle"; }
+  lifecycleState(): string { return this.state; }
 }
 
 const trackedTempDirs = new Set<string>();
@@ -320,6 +333,61 @@ describe("OneSessionPiAdapter", () => {
     expect(rpc.requests[1]!.id).toBe("cmd-abort");
   });
 
+  test("prompt.submit lazily restores the stopped session owner and dispatches once", async () => {
+    const store = new BridgeStore(join(trackedTempDir("pi-mob-lazy-restore-"), "bridge.sqlite"));
+    const identity = store.identity();
+    const hostStream = `host:${identity.hostId}`;
+    const sessionId = "4a87582e-1111-4111-8111-111111111111";
+    const sessionPath = join(trackedTempDir("pi-mob-session-path-"), "session.jsonl");
+    store.ensureStream(hostStream, "host");
+    const legacy = new StoppedLegacyRpc();
+    const scoped = new SessionScopedFakeRpc(sessionPath);
+    const createdFor: string[] = [];
+    const adapter = new OneSessionPiAdapter({
+      store,
+      rpc: legacy,
+      createRpc: (requestedSessionId) => {
+        createdFor.push(requestedSessionId);
+        return scoped;
+      },
+      workspace: {
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        rootPath: trackedTempDir("pi-mob-workspaces-"),
+        displayName: "example",
+        fingerprint: "fingerprint-fixture",
+        policyMode: "full",
+      },
+      now: () => 1_700_000_000_000,
+    });
+    // The adapter starts after this durable stopped session was recorded.
+    // This models a historical owner that has no live session binding.
+    store.ensureSession(sessionId, {
+      sessionId,
+      workspaceId: "ws",
+      runtimeState: "stopped",
+      attentionState: "none",
+      piSessionPath: sessionPath,
+    });
+    store.ensureStream(`session:${sessionId}`, "session", sessionId);
+
+    await adapter.dispatch(makeCommand("prompt-lazy", "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, {
+      sessionId,
+      deliveryMode: "immediate",
+      message: "restore this chat",
+      attachmentIds: [],
+    }));
+
+    expect(createdFor).toEqual([sessionId]);
+    expect(scoped.starts).toBe(1);
+    expect(scoped.sessionPath).toBe(sessionPath);
+    expect(scoped.requests.map((request) => request.method)).toEqual(["prompt"]);
+    expect(scoped.requests[0]?.id).toBe("prompt-lazy");
+    expect(legacy.requests).toEqual([]);
+    expect(store.sessionState(sessionId)?.piSessionPath).toBe(sessionPath);
+    adapter.close();
+    store.close();
+  });
+
   test("prompt.submit steer dispatches while follow_up remains bridge-owned", async () => {
     const { store, rpc, adapter, hostStream } = setup();
     await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
@@ -531,9 +599,19 @@ async function connect(port: number): Promise<Client> {
 function envelope(type: string, payload: Record<string, unknown>, extra: Record<string, unknown> = {}): Record<string, unknown> {
   return { protocol: { major: 1, minor: 0 }, messageId: crypto.randomUUID(), requestId: crypto.randomUUID(), sentAt: new Date().toISOString(), type, payload, ...extra };
 }
-async function hello(client: Client): Promise<{ connectionId: string; hostId: string }> {
+async function hello(client: Client, store: BridgeStore): Promise<{ connectionId: string; hostId: string }> {
+  const installationId = crypto.randomUUID();
+  const installationCredential = generateInstallationCredential();
+  store.upsertInstallationCredential({
+    installationId,
+    credentialHash: hashCredential(installationCredential),
+    enrollmentSecretHash: "f".repeat(64),
+    enrollmentSource: "seed",
+    createdAt: Date.now(),
+    lastSeenAt: Date.now(),
+  });
   client.ws.send(JSON.stringify(envelope("hello", {
-    mobileVersion: "1", platform: "ios", installationId: crypto.randomUUID(),
+    mobileVersion: "1", platform: "ios", installationId, installationCredential,
     requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [],
   })));
   const response = await client.next();
@@ -550,7 +628,7 @@ describe("M5 runtime integration", () => {
     const server = createBridgeServer({ runtime, port: 0 });
     try {
       const client = await connect(server.port!);
-      const { connectionId } = await hello(client);
+      const { connectionId } = await hello(client, store);
       const requestId = crypto.randomUUID();
       client.ws.send(JSON.stringify(envelope("workspace.list", {}, { connectionId, requestId })));
       const message = await client.next();
@@ -572,7 +650,7 @@ describe("M5 runtime integration", () => {
     const server = createBridgeServer({ runtime, port: 0 });
     try {
       const client = await connect(server.port!);
-      const { connectionId } = await hello(client);
+      const { connectionId } = await hello(client, store);
       const requestId = crypto.randomUUID();
       client.ws.send(JSON.stringify(envelope("workspace.list", {}, { connectionId, requestId })));
       const message = await client.next();
@@ -607,7 +685,7 @@ describe("M5 runtime integration", () => {
     let server = createBridgeServer({ runtime, port: 0 });
     try {
       const client = await connect(server.port!);
-      const { connectionId, hostId } = await hello(client);
+      const { connectionId, hostId } = await hello(client, store);
 
       // workspace.list
       client.ws.send(JSON.stringify(envelope("workspace.list", {}, { connectionId, requestId: crypto.randomUUID() })));
@@ -691,7 +769,7 @@ describe("M5 runtime integration", () => {
     server = createBridgeServer({ runtime, port: 0 });
     try {
       const replay = await connect(server.port!);
-      const { connectionId, hostId } = await hello(replay);
+      const { connectionId, hostId } = await hello(replay, store);
       replay.ws.send(JSON.stringify(envelope("subscription.set", { streams: [{ streamId: `host:${hostId}`, detail: "full", afterCursor: "0" }] }, { connectionId })));
       const seen: string[] = [];
       while (true) {

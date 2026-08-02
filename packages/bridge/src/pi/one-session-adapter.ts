@@ -1,7 +1,10 @@
 /**
- * Multi-session Pi adapter for the M11 bridge.
+ * Production multi-session Pi adapter.
  *
- * Wires a single bridge store to one or more independent Pi RPC
+ * `runDaemon` constructs this adapter and returns it from `DaemonHandle`; the
+ * normal daemon therefore uses this class for session ownership, durable
+ * history reconciliation, command dispatch, and notification routing.
+ * It wires a single bridge store to one or more independent Pi RPC
  * subprocesses. Each session is a durable entity that the mobile app
  * can run, stop, list, and restore without interfering with any other
  * session. Capacity is enforced through the existing
@@ -26,7 +29,7 @@
  */
 
 import { createHash } from "node:crypto";
-import { lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
 import type { StoredCommand } from "../core/store";
 import type { BridgeStore } from "../core/store";
@@ -581,11 +584,14 @@ export class OneSessionPiAdapter {
   }
 
   private async ensureRpcStarted(rpc: PiRpcClient): Promise<void> {
-    if (!this.createRpc || !rpc.start || this.startedRpcs.has(rpc)) return;
-    if (rpc.lifecycleState && rpc.lifecycleState() !== "stopped") {
+    if (!this.createRpc || !rpc.start) return;
+    const lifecycle = rpc.lifecycleState?.();
+    if (lifecycle !== "stopped" && this.startedRpcs.has(rpc)) return;
+    if (lifecycle !== undefined && lifecycle !== "stopped") {
       this.startedRpcs.add(rpc);
       return;
     }
+    this.startedRpcs.delete(rpc);
     this.startedRpcs.add(rpc);
     try {
       await rpc.start();
@@ -946,6 +952,10 @@ export class OneSessionPiAdapter {
     }
     const rpc = this.sessions.get(sessionId)!.rpc;
     await this.ensureRpcStarted(rpc);
+    const lifecycle = rpc.lifecycleState?.();
+    if (lifecycle !== undefined && !["idle", "running", "waiting_for_input", "compacting"].includes(lifecycle)) {
+      throw new Error("Pi process unavailable; session owner did not activate");
+    }
     // Reconcile after the process is live: an open JSONL turn is not orphaned
     // merely because the bridge is restoring its connection.
     this.reconcileHistory?.(sessionId, true);
@@ -1044,7 +1054,15 @@ export class OneSessionPiAdapter {
       ? stateObject.sessionFile
       : null;
     if (reportedSessionFile && prior.externalSession !== true) {
-      this.store.updateSessionState(sessionId, { ...prior, piSessionPath: reportedSessionFile });
+      const existingSessionFile = typeof prior.piSessionPath === "string" && prior.piSessionPath.length > 0
+        ? prior.piSessionPath
+        : null;
+      // A restarted Pi process without a stable identity can report a fresh
+      // candidate path before it has materialised. Never replace a valid
+      // resumable path with that nonexistent candidate.
+      if (!existingSessionFile || existingSessionFile === reportedSessionFile || existsSync(reportedSessionFile) || !existsSync(existingSessionFile)) {
+        this.store.updateSessionState(sessionId, { ...prior, piSessionPath: reportedSessionFile });
+      }
     }
     const stateModel = stateObject.model && typeof stateObject.model === "object"
       ? stateObject.model as Record<string, unknown>
@@ -1156,9 +1174,16 @@ export class OneSessionPiAdapter {
     if (typeof payload.message !== "string" || payload.message.length === 0) throw new Error("prompt.submit requires message");
     if (!this.store.sessionExists(payload.sessionId)) throw new Error("prompt.submit session not found");
     this.lastUsedSessionId = payload.sessionId;
-    const rpc = this.sessions.get(payload.sessionId)?.rpc ?? this.rpc;
-    if (!rpc) throw new Error("prompt.submit no RPC available");
+    const rpc = this.resolveRpc(payload.sessionId);
+    const entry = this.bindSession(payload.sessionId);
+    if (entry.rpc !== rpc) throw new Error("prompt.submit session owner changed");
     await this.ensureRpcStarted(rpc);
+    const owner = this.sessions.get(payload.sessionId)?.rpc;
+    if (owner !== rpc) throw new Error("prompt.submit session owner changed");
+    const lifecycle = rpc.lifecycleState?.();
+    if (lifecycle !== undefined && !["idle", "running", "waiting_for_input", "compacting"].includes(lifecycle)) {
+      throw new Error("Pi process unavailable; activate the session first");
+    }
     rpc.markDispatchStart?.();
     const method: "prompt" | "steer" | "follow_up" =
       payload.deliveryMode === "steer" ? "steer" :

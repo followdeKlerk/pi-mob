@@ -24,7 +24,7 @@ The bridge is the only component that holds durable state outside Pi itself. The
 
 ## Bridge
 
-The bridge is a long-running TypeScript daemon. It is launched under `launchd` (macOS) or `systemd` (Linux) and exposes a single HTTPS endpoint on a private Tailscale address. Public exposure is not supported.
+The bridge is a long-running TypeScript daemon. The released build target is macOS x64 only; it is launched under `launchd` on the host and exposes a single HTTPS endpoint on a private Tailscale address. Public exposure is not supported. Non-macOS install paths are not produced by the release pipeline in this preview.
 
 Responsibilities:
 
@@ -32,10 +32,11 @@ Responsibilities:
 - own durable streams, command journal, and controller-lease book;
 - supervise one Pi process per mobile session and persist that session path so reconnects resume immediately;
 - persist tokenized cursors per stream so the mobile app can replay missed events after a network blip;
-- deliver notifications by sending data-only FCM messages to the registered device for the targeted session;
+- deliver notifications by sending data-only FCM messages to the registered device for the targeted session, using a host-supplied service account;
+- expose a companion binary HTTP API at `POST /v1/attachments` (image uploads, 10 MiB cap, JPEG/PNG decode, bounded retention) and `GET /v1/exports/<id>` (generated HTML sessions). Both endpoints require the per-installation `X-Installation-Id` and `X-Installation-Credential` headers; the multipart `installationId` field is downgraded to a hint. Per-installation rate / quota and aggregate byte ceiling are checked before allocation;
 - surface explicit unavailable states when host capabilities are not advertised rather than fabricating entries.
 
-The bridge runs on the loopback interface. It is bound to the loopback listener before any bulk external history synchronization. The mobile client only ever reaches the bridge through Tailscale.
+The bridge runs on the loopback interface. **Listener-binding order is a known gap.** Today `runDaemon` calls `runtime.start()` (which runs `commands.recover()` and bulk external-history reconciliation) before `createBridgeServer()` invokes `Bun.serve()`. The loopback listener is therefore bound after the bulk reconciliation work, not before. This remains planned operational hardening. The mobile client only ever reaches the bridge through Tailscale.
 
 ## Host
 
@@ -60,6 +61,16 @@ Responsibilities:
 - reconcile notifications back to the correct chat via the existing deep-link path.
 
 The mobile app does not run a web server. It does not cache credentials. It does not advertise services to other apps.
+
+## Trust boundary
+
+Pairing pins the bridge endpoint and the host identity. The phone authorises itself with a per-installation bearer credential minted at enrollment:
+
+- `hello` MUST carry the credential or the handshake is closed with `invalid_auth` / `re_pair_required`.
+- `POST /v1/attachments` and `GET /v1/exports/<id>` MUST carry `X-Installation-Id` and `X-Installation-Credential`; the multipart `installationId` is a hint only.
+- The credential never lives in SQLite, logs, crash dumps, fixtures, or generated reports. It lives only as a SHA-256 hash on the bridge and in Android Keystore-backed secure storage on the phone.
+
+Tailscale remains the supported network boundary; do not expose the bridge to a wider network than your tailnet's ACLs already protect.
 
 ## Why this shape
 

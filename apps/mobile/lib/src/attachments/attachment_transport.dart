@@ -38,6 +38,7 @@ class PrivateBinaryTransport {
     required String clientUploadId,
     required SanitizedPickedImage image,
     String? intendedSessionId,
+    String? installationCredential,
     void Function(int sent, int total)? onProgress,
   }) async {
     _requirePrivateOrigin(hostOrigin);
@@ -70,6 +71,10 @@ class PrivateBinaryTransport {
       'form-data',
       parameters: {'boundary': boundary},
     );
+    if (installationCredential != null && installationCredential.isNotEmpty) {
+      request.headers.set('x-installation-id', installationId);
+      request.headers.set('x-installation-credential', installationCredential);
+    }
     request.contentLength = total;
     var sent = 0;
     void add(List<int> chunk) {
@@ -109,6 +114,8 @@ class PrivateBinaryTransport {
   Future<String> downloadExport({
     required Uri hostOrigin,
     required String exportId,
+    String? installationId,
+    String? installationCredential,
     void Function(int received, int? total)? onProgress,
   }) async {
     _requirePrivateOrigin(hostOrigin);
@@ -118,6 +125,10 @@ class PrivateBinaryTransport {
     final request = await _client.getUrl(
       hostOrigin.resolve('/v1/exports/$exportId'),
     );
+    if (installationId != null && installationCredential != null) {
+      request.headers.set('x-installation-id', installationId);
+      request.headers.set('x-installation-credential', installationCredential);
+    }
     final response = await request.close();
     if (response.statusCode != 200) {
       throw HttpException('Export unavailable (${response.statusCode})');

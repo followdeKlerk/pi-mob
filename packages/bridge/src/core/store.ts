@@ -43,6 +43,23 @@ export interface StoredHostPolicyState {
   readonly updatedAt: number;
   readonly updatedBy?: string;
 }
+
+/**
+ * Phase 4 — durable installation credential row. The bridge stores the
+ * SHA-256 hash of the plaintext credential plus metadata; the plaintext
+ * lives only in mobile Keystore-backed secure storage.
+ */
+export interface StoredInstallationCredential {
+  readonly installationId: string;
+  readonly credentialHash: string;
+  readonly enrollmentSecretHash: string;
+  readonly enrollmentSource: "qr" | "manual" | "cli" | "seed";
+  readonly createdAt: number;
+  readonly lastSeenAt: number;
+  readonly expiresAt?: number;
+  readonly revokedAt?: number;
+  readonly revokedReason?: string;
+}
 export type LeaseMutation =
   | { readonly action: "acquire" | "takeover"; readonly scopeKey: string; readonly installationId: string; readonly connectionId: string; readonly now?: number }
   | { readonly action: "release"; readonly scopeKey: string; readonly installationId: string; readonly connectionId: string; readonly now?: number };
@@ -101,6 +118,45 @@ CREATE TABLE IF NOT EXISTS notification_dedup(source_event_id TEXT PRIMARY KEY, 
 CREATE INDEX IF NOT EXISTS notification_dedup_age ON notification_dedup(created_at);
 `;
 const MIGRATION_V4_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2 + MIGRATION_V3 + MIGRATION_V4).digest("hex");
+/**
+ * v5 additions (Phase 4). The `installation_credentials` table is the
+ * durable registry of mobile installs authorised to speak on a Tailscale
+ * tailnet through the bridge. The `enrollment_secrets` table is the set
+ * of single-use, expiring pair-payload secrets issued during `pi-mob
+ * setup`. Both tables are keyed by hashed values — the bridge never
+ * persists plaintext credentials or enrollment secrets.
+ *
+ * Indexes:
+ *   - installation_credentials_credential_hash_lookup supports the
+ *     constant-time `findInstallationCredentialByHash` path used for
+ *     lookups when only the credential is in hand.
+ *   - enrollment_secrets_unique_secret_hash enforces the single-use
+ *     semantics; a replayed hash collides and the enroll endpoint
+ *     rejects with `enrollment_secret_replayed`.
+ */
+const MIGRATION_V5 = `
+CREATE TABLE IF NOT EXISTS installation_credentials(
+  installation_id TEXT PRIMARY KEY,
+  credential_hash TEXT NOT NULL,
+  enrollment_secret_hash TEXT NOT NULL,
+  enrollment_source TEXT NOT NULL CHECK(enrollment_source IN ('qr','manual','cli','seed')),
+  created_at INTEGER NOT NULL,
+  last_seen_at INTEGER NOT NULL,
+  expires_at INTEGER,
+  revoked_at INTEGER,
+  revoked_reason TEXT
+);
+CREATE UNIQUE INDEX IF NOT EXISTS installation_credentials_credential_hash ON installation_credentials(credential_hash);
+CREATE INDEX IF NOT EXISTS installation_credentials_last_seen ON installation_credentials(last_seen_at);
+CREATE TABLE IF NOT EXISTS enrollment_secrets(
+  secret_hash TEXT PRIMARY KEY,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  used_at INTEGER,
+  used_by_installation_id TEXT
+);
+`;
+const MIGRATION_V5_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2 + MIGRATION_V3 + MIGRATION_V4 + MIGRATION_V5).digest("hex");
 
 function canonicalCursor(value: string): bigint {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) throw new StoreError("conflict", "cursor is not canonical");
@@ -168,6 +224,110 @@ export class BridgeStore {
         db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(4,?,?)").run(MIGRATION_V4_CHECKSUM, this.now());
       });
     }
+    const existingV5 = db.query("SELECT checksum FROM schema_migrations WHERE version=5").get() as { checksum: string } | null;
+    if (existingV5 && existingV5.checksum !== MIGRATION_V5_CHECKSUM) throw new StoreError("corrupt", "migration checksum mismatch (v5)");
+    if (!existingV5) {
+      this.transactionOn(db, () => {
+        db.exec(MIGRATION_V5);
+        db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(5,?,?)").run(MIGRATION_V5_CHECKSUM, this.now());
+      });
+    }
+  }
+
+  /** Returns the list of applied migration versions. Diagnostic only. */
+  migrationsApplied(): number[] {
+    return (this.db.query("SELECT version FROM schema_migrations ORDER BY version").all() as Array<{ version: number }>).map((row) => row.version);
+  }
+
+  /** Phase 4 — Upsert an installation credential row. Plaintext is never stored;
+   * the caller supplies the SHA-256 hex hash. The (installationId, source)
+   * pair is the durable identity, and `lastSeenAt` is bumped on every
+   * successful match. */
+  upsertInstallationCredential(input: {
+    readonly installationId: string;
+    readonly credentialHash: string;
+    readonly enrollmentSecretHash: string;
+    readonly enrollmentSource: "qr" | "manual" | "cli" | "seed";
+    readonly createdAt: number;
+    readonly lastSeenAt: number;
+    readonly expiresAt?: number;
+  }): StoredInstallationCredential {
+    return this.transaction(() => {
+      const existing = this.db.query("SELECT 1 present FROM installation_credentials WHERE installation_id=?").get(input.installationId);
+      if (existing) {
+        this.db.query(
+          "UPDATE installation_credentials SET credential_hash=?, enrollment_secret_hash=?, enrollment_source=?, created_at=?, last_seen_at=?, expires_at=? WHERE installation_id=?",
+        ).run(input.credentialHash, input.enrollmentSecretHash, input.enrollmentSource, input.createdAt, input.lastSeenAt, input.expiresAt ?? null, input.installationId);
+      } else {
+        this.db.query(
+          "INSERT INTO installation_credentials(installation_id,credential_hash,enrollment_secret_hash,enrollment_source,created_at,last_seen_at,expires_at,revoked_at,revoked_reason) VALUES(?,?,?,?,?,?,?,NULL,NULL)",
+        ).run(input.installationId, input.credentialHash, input.enrollmentSecretHash, input.enrollmentSource, input.createdAt, input.lastSeenAt, input.expiresAt ?? null);
+      }
+      return this.findInstallationCredential(input.installationId) ?? (() => { throw new StoreError("io", "credential row missing after upsert"); })();
+    });
+  }
+
+  /** Phase 4 — Find an installation credential row by installationId. */
+  findInstallationCredential(installationId: string): StoredInstallationCredential | null {
+    const row = this.db.query(
+      "SELECT installation_id AS installationId, credential_hash AS credentialHash, enrollment_secret_hash AS enrollmentSecretHash, enrollment_source AS enrollmentSource, created_at AS createdAt, last_seen_at AS lastSeenAt, expires_at AS expiresAt, revoked_at AS revokedAt, revoked_reason AS revokedReason FROM installation_credentials WHERE installation_id=?",
+    ).get(installationId) as (Omit<StoredInstallationCredential, "expiresAt" | "revokedAt" | "revokedReason"> & { expiresAt: number | null; revokedAt: number | null; revokedReason: string | null }) | null;
+    if (!row) return null;
+    const { expiresAt, revokedAt, revokedReason, ...rest } = row;
+    return {
+      ...rest,
+      ...(expiresAt !== null ? { expiresAt } : {}),
+      ...(revokedAt !== null && revokedReason !== null ? { revokedAt, revokedReason } : {}),
+    } satisfies StoredInstallationCredential;
+  }
+
+  /** Phase 4 — Touch `last_seen_at` after a successful hello. */
+  touchInstallationCredential(installationId: string, at: number): void {
+    this.transaction(() => this.db.query("UPDATE installation_credentials SET last_seen_at=? WHERE installation_id=?").run(at, installationId));
+  }
+
+  /** Phase 4 — Mark an installation credential revoked. Idempotent. */
+  revokeInstallationCredential(installationId: string, reason: string, at: number): boolean {
+    return this.transaction(() => {
+      const existing = this.db.query("SELECT revoked_at AS revokedAt FROM installation_credentials WHERE installation_id=?").get(installationId) as { revokedAt: number | null } | null;
+      if (!existing) return false;
+      if (existing.revokedAt !== null) return true;
+      this.db.query("UPDATE installation_credentials SET revoked_at=?, revoked_reason=? WHERE installation_id=?").run(at, reason.slice(0, 200), installationId);
+      return true;
+    });
+  }
+
+  /** Phase 4 — Create a pending enrollment secret (single-use, expiring). */
+  createEnrollmentSecret(input: { readonly secretHash: string; readonly createdAt: number; readonly expiresAt: number; readonly usedAt?: number | null }): void {
+    this.transaction(() => this.db.query("INSERT OR REPLACE INTO enrollment_secrets(secret_hash,created_at,expires_at,used_at,used_by_installation_id) VALUES(?,?,?,?,NULL)").run(input.secretHash, input.createdAt, input.expiresAt, input.usedAt ?? null));
+  }
+
+  /** Phase 4 — Atomically consume an enrollment secret. */
+  consumeEnrollmentSecret(secretHash: string, at: number, installationId?: string):
+    | { readonly kind: "consumed" }
+    | { readonly kind: "already_used" }
+    | { readonly kind: "expired" }
+    | { readonly kind: "unknown" } {
+    return this.transaction(() => {
+      const row = this.db.query("SELECT expires_at AS expiresAt, used_at AS usedAt FROM enrollment_secrets WHERE secret_hash=?").get(secretHash) as { expiresAt: number; usedAt: number | null } | null;
+      if (!row) return { kind: "unknown" };
+      if (row.usedAt !== null) return { kind: "already_used" };
+      if (row.expiresAt <= at) return { kind: "expired" };
+      const result = this.db.query("UPDATE enrollment_secrets SET used_at=?, used_by_installation_id=? WHERE secret_hash=? AND used_at IS NULL").run(at, installationId ?? null, secretHash);
+      if (result.changes !== 1) return { kind: "already_used" };
+      return { kind: "consumed" };
+    });
+  }
+
+  /** Phase 4 — Read an enrollment secret's current state without mutating. */
+  findEnrollmentSecret(secretHash: string): { readonly createdAt: number; readonly expiresAt: number; readonly usedAt: number | null; readonly usedByInstallationId: string | null } | null {
+    const row = this.db.query("SELECT created_at AS createdAt, expires_at AS expiresAt, used_at AS usedAt, used_by_installation_id AS usedByInstallationId FROM enrollment_secrets WHERE secret_hash=?").get(secretHash) as { createdAt: number; expiresAt: number; usedAt: number | null; usedByInstallationId: string | null } | null;
+    return row;
+  }
+
+  /** Phase 4 — Enumerate every stored `installationId`. Diagnostic only. */
+  aggregateRetainedInstallationIds(): readonly string[] {
+    return (this.db.query("SELECT installation_id AS installationId FROM installation_credentials ORDER BY created_at").all() as Array<{ installationId: string }>).map((row) => row.installationId);
   }
 
   private mapError(error: unknown): StoreError {

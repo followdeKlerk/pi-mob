@@ -5,9 +5,11 @@ import { Database } from "bun:sqlite";
 import { buildInstallPaths } from "./ops/install-paths";
 import { captureLoginEnv } from "./ops/login-env";
 import { createNodeFileSystemPort, systemClock } from "./ops/ports";
-import { runCli, type LifecycleDriver, type SetupDefaults, type SetupResult } from "./ops/cli";
+import { runCli, type LifecycleDriver, type SetupDefaults } from "./ops/cli";
 import { BridgeStore } from "./core/store";
+import { issuePendingEnrollment } from "./auth/enrollment";
 import { BunCommandRunner, LaunchAgentDriver, MacLifecycleDriver, TailscaleCliServeDriver, TailscaleStatusDriver } from "./ops/macos-system";
+import { BRIDGE_VERSION } from "./version";
 
 function flag(argv: readonly string[], name: string): string | undefined {
   const exact = `--${name}`;
@@ -40,7 +42,7 @@ function tailscaleExecutable(): string | null {
 }
 
 function publicCommand(command: string | undefined): boolean {
-  return command === "setup" || command === "start" || command === "stop" || command === "status";
+  return command === "setup" || command === "start" || command === "stop" || command === "status" || command === "pair";
 }
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -85,7 +87,7 @@ export async function main(argv: readonly string[]): Promise<number> {
       sourceCliExecutable: process.execPath,
       sourceBridgeExecutable: join(executableDir, "bridge-daemon"),
       piSessionDir: join(paths.installRoot, "release", "sessions"),
-      bridgeVersion: process.env.PI_MOB_BRIDGE_VERSION ?? "0.0.0",
+      bridgeVersion: process.env.PI_MOB_BRIDGE_VERSION ?? BRIDGE_VERSION,
       protocolVersion: "1.0",
       port: 8788,
     };
@@ -95,6 +97,7 @@ export async function main(argv: readonly string[]): Promise<number> {
     fs: createNodeFileSystemPort(),
     clock: systemClock(),
     serveDriver: serve,
+    interactive: process.stdout.isTTY === true,
     stdout: (chunk) => process.stdout.write(chunk),
     stderr: (chunk) => process.stderr.write(chunk),
     argv: withPublicPathDefaults(argv, installRoot, launchAgentsRoot),
@@ -103,6 +106,13 @@ export async function main(argv: readonly string[]): Promise<number> {
     hostIdentity: (databasePath: string) => {
       const store = new BridgeStore(databasePath);
       try { return store.identity(); } finally { store.close(); }
+    },
+    enrollmentChallenge: (databasePath: string) => {
+      const store = new BridgeStore(databasePath);
+      try {
+        const challenge = issuePendingEnrollment({ store });
+        return { passcode: challenge.plaintext, expiresAt: challenge.expiresAt };
+      } finally { store.close(); }
     },
     ...(setupDefaults ? { setupDefaults } : {}),
     ...(paths ? {
@@ -123,12 +133,6 @@ export async function main(argv: readonly string[]): Promise<number> {
     } : {}),
     ...(lifecycle ? { lifecycle } : {}),
   });
-  if (result.command === "setup" && result.exitCode === 0 && process.stderr.isTTY) {
-    const setup = result.data as SetupResult;
-    if (setup.pairingTerminal) {
-      process.stderr.write(`\nScan this QR with pi-mob:\n\n${setup.pairingTerminal}\n\nManual fallback: ${setup.manualEndpoint}\n`);
-    }
-  }
   return result.exitCode;
 }
 

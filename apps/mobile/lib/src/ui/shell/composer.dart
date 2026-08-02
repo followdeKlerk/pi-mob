@@ -8,7 +8,6 @@ import '../../domain/prompt_send_lifecycle.dart';
 import '../../interaction/interaction_panel.dart';
 import '../theme/pi_theme.dart';
 import 'shortcut_intents.dart';
-import 'model_picker_sheet.dart';
 import 'motion_primitives.dart';
 
 /// Prompt composer with delivery-mode selector, follow-up queue, extension
@@ -46,10 +45,6 @@ class Composer extends StatelessWidget {
     }
     final command = coordinator.draft.trim().toLowerCase();
     switch (command) {
-      case '/model':
-        await _clearDraft();
-        if (context.mounted) await showModelPickerSheet(context, coordinator);
-        return;
       case '/compact':
         await _clearDraft();
         await coordinator.compactNow();
@@ -110,7 +105,7 @@ class Composer extends StatelessWidget {
     final commands = <_SlashCommand>[
       const _SlashCommand(
         '/model',
-        'Choose the model and thinking level',
+        'Change the model using Pi command syntax',
         'Control',
       ),
       const _SlashCommand(
@@ -157,11 +152,6 @@ class Composer extends StatelessWidget {
     BuildContext context,
     _SlashCommand command,
   ) async {
-    if (command.invocation == '/model') {
-      await _clearDraft();
-      if (context.mounted) await showModelPickerSheet(context, coordinator);
-      return;
-    }
     final value = '${command.invocation}${command.requiresInput ? ' ' : ''}';
     draftController.value = TextEditingValue(
       text: value,
@@ -230,6 +220,13 @@ class Composer extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    return ListenableBuilder(
+      listenable: Listenable.merge(<Listenable>[coordinator, draftController]),
+      builder: (context, _) => _build(context),
+    );
+  }
+
+  Widget _build(BuildContext context) {
     final prefill = coordinator.editorPrefill;
     final aborting = coordinator.canAbort && coordinator.draft.trim().isEmpty;
     final slashQuery = coordinator.draft.startsWith('/')
@@ -399,16 +396,19 @@ class Composer extends StatelessWidget {
                                     const Divider(height: 1),
                                 itemBuilder: (context, index) {
                                   final command = matches[index];
-                                  return ListTile(
-                                    dense: true,
-                                    title: Text(command.invocation),
-                                    subtitle: Text(
-                                      '${command.category} · ${command.description}',
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
+                                  return Material(
+                                    color: Colors.transparent,
+                                    child: ListTile(
+                                      dense: true,
+                                      title: Text(command.invocation),
+                                      subtitle: Text(
+                                        '${command.category} · ${command.description}',
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      onTap: () =>
+                                          _selectSlashCommand(context, command),
                                     ),
-                                    onTap: () =>
-                                        _selectSlashCommand(context, command),
                                   );
                                 },
                               ),

@@ -8,27 +8,49 @@ import 'src/data/app_database.dart';
 import 'src/interaction/interaction_panel.dart';
 import 'src/notifications/notification_controller.dart';
 import 'src/pairing/pairing_payload.dart';
+import 'src/pairing/pairing_enrollment.dart';
 import 'src/pairing/pairing_screen.dart';
+import 'src/security/secure_credential_store.dart';
 import 'src/ui/shell/app_shell.dart';
 import 'src/ui/theme/pi_theme.dart';
+import 'src/version.dart';
 
+/// Starts the Pi Mob shell with an immediate first-frame placeholder so
+/// cold launch never paints a blank screen while [ConnectionCoordinator] is
+/// still reading durable state from the local database and reconnecting to
+/// the bridge. The placeholder swaps in the real coordinator as soon as it
+/// is ready, so the user sees progress from the very first frame.
 Future<void> main() async {
+  // Paint a placeholder immediately. `WidgetsFlutterBinding` is required
+  // before the first `runApp`, but we hand the engine a tiny widget tree
+  // first so the OS surface is never black between process start and the
+  // first coordinator-driven rebuild.
   WidgetsFlutterBinding.ensureInitialized();
+  runApp(const _BootPlaceholder());
+
   final database = AppDatabase();
+  final secureCredentialStore = KeychainSecureCredentialStore();
   final coordinator = ConnectionCoordinator(
     transport: IoBridgeTransport(),
     database: database,
+    secureCredentialStore: secureCredentialStore,
+    onAuthRejection: (reason) {
+      // TODO(l10n): show a sanitized re-pair card. The coordinator's phase
+      // already carries the actionable reason; the UI subscribes to
+      // `phase` and renders the card.
+      debugPrint('[pi-mob][auth] bridge rejected auth: $reason');
+    },
   );
   await coordinator.initialize();
   final notifications = NotificationController(
     adapter: MethodChannelNotificationAdapter(),
     deviceId: coordinator.installationId,
-    appVersion: '0.0.0',
+    appVersion: kMobileAppVersion,
     register: (platform, token) => coordinator.registerNotificationDevice(
       deviceId: coordinator.installationId,
       platform: platform,
       token: token,
-      appVersion: '0.0.0',
+      appVersion: kMobileAppVersion,
     ),
     reconcile: (sessionId) async {
       if (!coordinator.sessions.any(
@@ -41,7 +63,82 @@ Future<void> main() async {
     },
   );
   await notifications.initialize();
+  // Hand control to the real app. The router rebuilds immediately to
+  // reflect the paired host and current connection phase.
   runApp(PiMobApp(coordinator: coordinator, notifications: notifications));
+}
+
+/// Minimal placeholder rendered before [ConnectionCoordinator.initialize]
+/// finishes. It paints the brand background, a small spinner and the same
+/// "Preparing Pi Mob" copy the user will see at the bottom of the live
+/// session sync screen — so the cold launch and the warm sync screen share
+/// one visual language.
+class _BootPlaceholder extends StatelessWidget {
+  const _BootPlaceholder();
+
+  @override
+  Widget build(BuildContext context) {
+    return MaterialApp(
+      title: 'Pi Mob',
+      debugShowCheckedModeBanner: false,
+      theme: piLightTheme(),
+      darkTheme: piDarkTheme(),
+      themeMode: ThemeMode.system,
+      home: const _BootPlaceholderScreen(),
+    );
+  }
+}
+
+class _BootPlaceholderScreen extends StatelessWidget {
+  const _BootPlaceholderScreen();
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colors = theme.colorScheme;
+    return Scaffold(
+      key: const Key('boot-placeholder-screen'),
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 480),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 24),
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.terminal_rounded, size: 56, color: colors.primary),
+                  const SizedBox(height: 16),
+                  Text(
+                    'Pi Mob',
+                    key: const Key('boot-placeholder-title'),
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    'Preparing your local data and reconnecting to the bridge…',
+                    key: const Key('boot-placeholder-message'),
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: colors.onSurfaceVariant,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  const SizedBox(
+                    width: 28,
+                    height: 28,
+                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class PiMobApp extends StatelessWidget {
@@ -86,13 +183,28 @@ class _HomeRouterState extends State<_HomeRouter> {
     super.initState();
     _paired = widget.coordinator.hostId != null;
     widget.coordinator.addListener(_onCoordinatorChanged);
+    if (widget.coordinator.isReady && widget.notifications != null) {
+      unawaited(
+        widget.notifications!.onBridgeReady(
+          notificationsSupported: widget.coordinator.supportsCapability(
+            'notifications.v1',
+          ),
+        ),
+      );
+    }
   }
 
   void _onCoordinatorChanged() {
     if (!mounted) return;
     final notifications = widget.notifications;
     if (widget.coordinator.isReady && notifications != null) {
-      unawaited(notifications.synchronizeToken());
+      unawaited(
+        notifications.onBridgeReady(
+          notificationsSupported: widget.coordinator.supportsCapability(
+            'notifications.v1',
+          ),
+        ),
+      );
     }
     final nextPaired = widget.coordinator.hostId != null;
     if (nextPaired != _paired) {
@@ -109,11 +221,17 @@ class _HomeRouterState extends State<_HomeRouter> {
   }
 
   Future<void> _handlePair(PairingPayload payload) async {
-    // Drive the existing M5+ connection path so the bridge hello handshake
-    // can fill in hostId and hostDisplayName. The pairing screen has already
-    // validated the payload and confirmed the user; persistence happens
-    // through the coordinator.
-    await widget.coordinator.pairAndWait(payload.endpoint.toString());
+    final secure = widget.coordinator.secureCredentialStore;
+    if (secure == null) {
+      throw const EnrollmentPairingException(
+        'Secure credential storage is unavailable. Pairing cannot continue.',
+      );
+    }
+    await completePairing(
+      payload: payload,
+      coordinator: widget.coordinator,
+      enrollment: PairingEnrollmentService(secureCredentialStore: secure),
+    );
     await widget.notifications?.refreshToken();
   }
 

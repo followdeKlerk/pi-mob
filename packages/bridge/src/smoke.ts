@@ -10,10 +10,10 @@
 import { parseConfig, loadConfig, ConfigParseError } from "./config";
 import { createRedactingLogger } from "./logger";
 import { collectBuildMetadata } from "./build-metadata";
+import { BRIDGE_VERSION } from "./version";
 import { existsSync } from "node:fs";
 
 const PROTOCOL_VERSION = "1.0";
-const BRIDGE_VERSION = "0.0.0-m1";
 
 interface Args {
   configPath: string | null;

@@ -1,12 +1,51 @@
 import { ERROR_CODES, LIMITS, PROTOCOL_MAJOR, PROTOCOL_MINOR, validateFixture } from "@pi-mob/protocol-schema";
-
+import type { BindOutcome } from "../auth/enrollment";
 const MAX_JSON_BYTES = LIMITS.maxJsonBytes;
 export const MAX_OUTBOUND_BYTES = 8 * 1024 * 1024;
 export function exceedsSlowConsumerLimit(bufferedBytes: number, nextMessageBytes: number): boolean { return bufferedBytes + nextMessageBytes > MAX_OUTBOUND_BYTES; }
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const LOOPBACK = new Set(["127.0.0.1", "::1", "localhost"]);
 const SUMMARY_EVENTS = new Set(["session.state", "session.metadata", "controller.state", "turn.started", "turn.waiting_for_input", "turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate", "queue.snapshot", "command.state", "error.event"]);
+const ENROLLMENT_RATE_WINDOW_MS = 60_000;
+const ENROLLMENT_RATE_LIMIT = 10;
+const enrollmentAttempts = new Map<string, { windowStartedAt: number; count: number }>();
 function compareCursor(left: string, right: string): number { return left.length === right.length ? left.localeCompare(right) : left.length - right.length; }
+
+async function enroll(request: Request, runtime: BridgeRuntimePort): Promise<Response> {
+  const binder = runtime.bindEnrollment;
+  if (!binder) return Response.json({ code: "invalid_state", message: "Enrollment is unavailable.", retryable: false, details: {} }, { status: 503 });
+  const length = Number(request.headers.get("content-length") ?? "0");
+  if (length > 16 * 1024) return Response.json({ code: "payload_too_large", message: "Enrollment request is too large.", retryable: false, details: {} }, { status: 413 });
+  let value: Record<string, unknown>;
+  try {
+    const raw = await request.text();
+    if (Buffer.byteLength(raw) > 16 * 1024) throw new Error("too large");
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) throw new Error("invalid object");
+    value = parsed as Record<string, unknown>;
+  } catch {
+    return Response.json({ code: "invalid_message", message: "Enrollment request is invalid.", retryable: false, details: {} }, { status: 400 });
+  }
+  if (typeof value.installationId !== "string" || typeof value.passcode !== "string") {
+    return Response.json({ code: "invalid_message", message: "Enrollment request is invalid.", retryable: false, details: {} }, { status: 400 });
+  }
+  const now = Date.now();
+  const key = value.installationId;
+  const previous = enrollmentAttempts.get(key);
+  const attempt = previous && now - previous.windowStartedAt < ENROLLMENT_RATE_WINDOW_MS
+    ? { windowStartedAt: previous.windowStartedAt, count: previous.count + 1 }
+    : { windowStartedAt: now, count: 1 };
+  enrollmentAttempts.set(key, attempt);
+  if (attempt.count > ENROLLMENT_RATE_LIMIT) {
+    return Response.json({ code: "rate_limited", message: "Enrollment is temporarily rate limited.", retryable: true, details: {} }, { status: 429 });
+  }
+  const outcome = binder(value.installationId, value.passcode);
+  if (outcome.kind !== "bound") {
+    const status = outcome.kind === "expired" || outcome.kind === "already_used" ? 410 : 401;
+    return Response.json({ code: "invalid_auth", message: "Enrollment challenge is not valid.", retryable: false, details: {} }, { status });
+  }
+  return Response.json({ installationId: outcome.installationId, installationCredential: outcome.credential }, { status: 201 });
+}
 
 export interface SubscriptionMessage { readonly type: string; readonly payload: Record<string, unknown>; readonly eventId?: string; readonly streamId?: string; readonly cursor?: string; }
 export interface SubscriptionResult { readonly streams: readonly Record<string, unknown>[]; readonly messages?: readonly SubscriptionMessage[]; }
@@ -15,6 +54,13 @@ export interface BridgeRuntimePort {
   readonly piVersion: string;
   identity(): { hostId: string; hostGeneration: string; hostDisplayName: string };
   ready(): { ready: boolean; reason?: string };
+  /** Phase 4 — verify an installation credential against the durable store.
+   *  Returns null when no row is associated with the `installationId`.
+   *  Otherwise returns the row's authoritative state (including revoked/
+   *  expired flags) so the server can apply a single non-enumerating
+   *  rejection on every miss. */
+  verifyInstallationCredential?(installationId: string, plaintext: string, now?: number): CredentialVerificationResult;
+  bindEnrollment?(installationId: string, passcode: string): BindOutcome;
   /** Additive optional capabilities; absence must remain explicit to clients. */
   optionalCapabilities?(): readonly string[];
   subscribe(connection: ConnectionContext, payload: Record<string, unknown>): Promise<SubscriptionResult> | SubscriptionResult;
@@ -54,6 +100,21 @@ export interface BridgeServerOptions {
 }
 export type BridgeServer = Bun.Server<SocketData> & { broadcastProtocol(value: Record<string, unknown>, streamId?: string): void; connectionCount(): number };
 
+/**
+ * Phase 4 — the verification contract every runtime MUST implement when
+ * `hello` carries an installation credential.
+ */
+export interface CredentialVerification {
+  readonly kind: "valid";
+  readonly installationId: string;
+  readonly lastSeenAt: number;
+}
+export interface CredentialRejection {
+  readonly kind: "missing" | "revoked" | "expired" | "wrong" | "not_bound";
+  readonly installationId?: string;
+}
+export type CredentialVerificationResult = CredentialVerification | CredentialRejection;
+
 function id(): string { return crypto.randomUUID().toLowerCase(); }
 function envelope(type: string, payload: Record<string, unknown>, requestId?: unknown, commandId?: unknown): Record<string, unknown> {
   return { protocol: { major: PROTOCOL_MAJOR, minor: PROTOCOL_MINOR }, messageId: id(), ...(typeof requestId === "string" ? { requestId } : {}), ...(typeof commandId === "string" ? { commandId } : {}), type, sentAt: new Date().toISOString(), payload };
@@ -76,6 +137,10 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
       let url: URL;
       try { url = new URL(request.url); }
       catch { return new Response("bad request", { status: 400 }); }
+      if (url.pathname === "/v1/enroll") {
+        if (request.method !== "POST") return Response.json({ code: "invalid_message", message: "POST required", retryable: false, details: {} }, { status: 405 });
+        return enroll(request, options.runtime);
+      }
       if (url.pathname === "/healthz") return Response.json({ status: "ok" });
       if (url.pathname === "/readyz") {
         try { const ready = options.runtime.ready(); return Response.json({ status: ready.ready ? "ready" : "not_ready", ...(ready.reason ? { reason: ready.reason } : {}) }, { status: ready.ready ? 200 : 503 }); }
@@ -184,6 +249,35 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
     const installationId = payload.installationId; if (typeof installationId !== "string" || !UUID.test(installationId)) { sendError(ws, "invalid_message", "Invalid installation ID.", message.requestId); return; }
     const identity = runtime.identity();
     if (payload.expectedHostId !== undefined && payload.expectedHostId !== identity.hostId) { sendError(ws, "host_identity_mismatch", "Host identity differs.", message.requestId); ws.close(1008, "host identity"); return; }
+    // Phase 4 — Application-layer authentication. The hello payload now
+    // carries an `installationCredential`; the bridge refuses the
+    // handshake for unknown / wrong / revoked / expired / not-bound
+    // cases under a single non-enumerating error code so an attacker
+    // cannot probe state.
+    const installationCredential = payload.installationCredential;
+    if (typeof installationCredential !== "string" || installationCredential.length === 0) {
+      sendError(ws, "invalid_auth", "Missing installation credential.", message.requestId);
+      ws.close(1008, "auth");
+      return;
+    }
+    const verifier = runtime.verifyInstallationCredential;
+    if (typeof verifier !== "function") {
+      sendError(ws, "invalid_auth", "Installation credential verification is unavailable.", message.requestId);
+      ws.close(1008, "auth");
+      return;
+    }
+    const verification = verifier(installationId, installationCredential);
+    if (verification.kind !== "valid") {
+      // `not_bound` carries the actionable re-pair message; everything
+      // else collapses to the same code word for non-enumeration.
+      const code = verification.kind === "not_bound" ? "re_pair_required" : "invalid_auth";
+      const reason = verification.kind === "not_bound"
+        ? "Re-pair your phone with the bridge to continue."
+        : "Credential is not valid.";
+      sendError(ws, code, reason, message.requestId);
+      ws.close(1008, "auth");
+      return;
+    }
     const required = Array.isArray(payload.requiredCapabilities) ? payload.requiredCapabilities : [];
     const capabilities = ["streams.v1", "commands.v1", "controller_leases.v1", "raw_rpc.v1", ...(runtime.optionalCapabilities?.() ?? [])];
     if (required.some((item) => typeof item !== "string" || !capabilities.includes(item))) { sendError(ws, "unsupported_capability", "A required capability is unsupported.", message.requestId); ws.close(1002, "capability"); return; }

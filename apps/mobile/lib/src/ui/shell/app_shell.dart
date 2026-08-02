@@ -4,16 +4,10 @@ import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../domain/prompt_send_lifecycle.dart';
-import '../../attention/attention_inbox.dart';
 import '../../notifications/notification_controller.dart';
-import '../../controls/catalogue_unavailable_notice.dart';
-import '../../controls/control_view_data.dart';
-import '../../controls/supported_command_list.dart';
 import 'activity_destination.dart';
-import '../theme/pi_tokens.dart';
 import 'chat_session_drawer.dart';
 import 'global_search_sheet.dart';
-import 'model_picker_sheet.dart';
 import 'session_sync_screen.dart';
 import 'shortcut_intents.dart';
 import 'transcript_search_sheet.dart';
@@ -28,10 +22,11 @@ import 'transcript_search_sheet.dart';
 /// intercepts the back gesture. Order: keyboard shortcuts -> transient
 /// sheet/dialog (close that) -> drawer (close that) -> navigation
 /// history. The `Shortcuts`/`Actions` layer provides the keyboard
-/// surface described in `docs/REMAINING_UX_PLAN.md` §5 R12
-/// (Cmd/Ctrl+Enter send, Cmd/Ctrl+K search, Cmd/Ctrl+M model picker,
-/// Cmd/Ctrl+Shift+O chats, Cmd/Ctrl+Shift+P commands). Modal focus and
-/// IME composition win over the shell.
+/// surface (Cmd/Ctrl+Enter send, Cmd/Ctrl+K search, Cmd/Ctrl+Shift+O chats).
+/// Modal focus and IME composition win over the
+/// shell. The catalogue intent is intentionally absent: the catalogue
+/// capability is not produced by the normal daemon, so the released
+/// surface does not expose a commands/catalogue entry point.
 class AppShell extends StatefulWidget {
   const AppShell({
     required this.coordinator,
@@ -86,18 +81,6 @@ class _AppShellState extends State<AppShell> {
     if (mounted) setState(() {});
   }
 
-  /// Returns the label of the currently selected model for the open chat,
-  /// or `null` when no chat is open or no model has been chosen yet.
-  String? _currentModelLabel() {
-    final coordinator = widget.coordinator;
-    final modelId = coordinator.selectedControls?.modelId;
-    if (modelId == null) return null;
-    for (final model in coordinator.configuredModels) {
-      if (model.id == modelId) return model.label;
-    }
-    return modelId;
-  }
-
   void _openChats() => _scaffoldKey.currentState?.openDrawer();
 
   void _closeDrawerIfOpen() {
@@ -129,133 +112,6 @@ class _AppShellState extends State<AppShell> {
     }
   }
 
-  void _openModel() {
-    if (widget.coordinator.selectedSessionId == null) return;
-    unawaited(showModelPickerSheet(context, widget.coordinator));
-  }
-
-  void _openCommandsAction() {
-    unawaited(_openCommands(context));
-  }
-
-  Future<void> _showUnavailableSheet(
-    BuildContext context, {
-    required String title,
-    required String message,
-  }) => showModalBottomSheet<void>(
-    context: context,
-    showDragHandle: true,
-    builder: (sheetContext) => SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.all(PiSpacing.lg),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(title, style: Theme.of(sheetContext).textTheme.titleMedium),
-            const SizedBox(height: PiSpacing.sm),
-            Text(message),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  Future<void> _openAttention(BuildContext context) async {
-    if (!widget.coordinator.supportsCapability('attention.v1')) {
-      await _showUnavailableSheet(
-        context,
-        title: 'Attention inbox unavailable',
-        message:
-            'This host did not advertise the durable attention inbox capability.',
-      );
-      return;
-    }
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: SizedBox(
-          height: MediaQuery.sizeOf(sheetContext).height * .75,
-          child: AttentionInbox(
-            state: widget.coordinator.attentionItems,
-            onOpen: (item) {
-              unawaited(
-                widget.coordinator.markAttentionItemRead(item.attentionId),
-              );
-              unawaited(widget.coordinator.selectSession(item.sessionId));
-              Navigator.of(sheetContext).pop();
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Opens the authoritative host catalogue. When the bridge has not
-  /// reported one, the sheet remains explicit instead of inventing entries.
-  Future<void> _openCommands(BuildContext context) async {
-    if (widget.coordinator.supportsCapability('catalogue.v1')) {
-      try {
-        await widget.coordinator.requestCatalogue();
-      } on Object {
-        // The explicit unavailable state below remains visible when the host
-        // cannot report a catalogue.
-      }
-    }
-    if (!context.mounted) return;
-    final publishedCommands = widget.coordinator.supportedCommands;
-    final catalogueUnavailable =
-        publishedCommands?.isEmpty ??
-        !widget.coordinator.supportsCapability('catalogue.v1');
-    final commands = publishedCommands ?? <SupportedCommandData>[];
-    await showModalBottomSheet<void>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (sheetContext) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: PiSpacing.lg,
-              vertical: PiSpacing.md,
-            ),
-            child: SizedBox(
-              height: MediaQuery.sizeOf(sheetContext).height * .7,
-              child: Column(
-                children: [
-                  if (catalogueUnavailable) const CatalogueUnavailableNotice(),
-                  Expanded(
-                    child: SupportedCommandList(
-                      commands: commands,
-                      onInvoke: (command) {
-                        final invocation = command.invocation;
-                        if (invocation == null || invocation.isEmpty) return;
-                        final current = widget.draftController.text;
-                        final next = current.trim().isEmpty
-                            ? invocation
-                            : '$current $invocation';
-                        widget.draftController.value = TextEditingValue(
-                          text: next,
-                          selection: TextSelection.collapsed(
-                            offset: next.length,
-                          ),
-                        );
-                        unawaited(widget.coordinator.updateDraft(next));
-                        Navigator.of(sheetContext).pop();
-                      },
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        );
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     final historyAvailable =
@@ -284,21 +140,9 @@ class _AppShellState extends State<AppShell> {
               return null;
             },
           ),
-          OpenModelPickerIntent: CallbackAction<OpenModelPickerIntent>(
-            onInvoke: (_) {
-              _openModel();
-              return null;
-            },
-          ),
           OpenChatsIntent: CallbackAction<OpenChatsIntent>(
             onInvoke: (_) {
               _openChats();
-              return null;
-            },
-          ),
-          OpenCommandsIntent: CallbackAction<OpenCommandsIntent>(
-            onInvoke: (_) {
-              _openCommandsAction();
               return null;
             },
           ),
@@ -349,32 +193,6 @@ class _AppShellState extends State<AppShell> {
                 centerTitle: false,
                 actions: [
                   if (chatOpen) ...[
-                    Builder(
-                      builder: (context) {
-                        final modelLabel = _currentModelLabel();
-                        return IconButton(
-                          key: const Key('open-model-picker'),
-                          tooltip: modelLabel == null
-                              ? 'Choose model'
-                              : 'Model: $modelLabel',
-                          onPressed: () =>
-                              showModelPickerSheet(context, widget.coordinator),
-                          icon: const Icon(Icons.smart_toy_outlined),
-                        );
-                      },
-                    ),
-                    IconButton(
-                      key: const Key('open-attention'),
-                      tooltip: 'Attention inbox',
-                      onPressed: () => _openAttention(context),
-                      icon: const Icon(Icons.notifications_none),
-                    ),
-                    IconButton(
-                      key: const Key('open-commands'),
-                      tooltip: 'Commands and skills',
-                      onPressed: () => _openCommands(context),
-                      icon: const Icon(Icons.bolt_rounded),
-                    ),
                     IconButton(
                       key: const Key('open-transcript-search'),
                       tooltip: 'Search this chat',

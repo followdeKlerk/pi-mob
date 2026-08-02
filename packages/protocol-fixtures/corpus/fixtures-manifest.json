@@ -555,6 +555,11 @@
     "kind": "error"
   },
   {
+    "file": "error-invalid-auth-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
     "file": "error-invalid-message-valid.json",
     "valid": true,
     "kind": "error"
@@ -651,6 +656,11 @@
   },
   {
     "file": "error-rate-limited-valid.json",
+    "valid": true,
+    "kind": "error"
+  },
+  {
+    "file": "error-re-pair-required-valid.json",
     "valid": true,
     "kind": "error"
   },

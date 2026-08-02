@@ -1,9 +1,9 @@
 /**
- * Bridge package public surface (M1 placeholder).
+ * Bridge package public surface.
  *
- * Exports the strict TS bridge entrypoints. The M2 protocol schemas and the M3
- * real Pi adapter live in sibling packages and are imported here only when the
- * bridge starts consuming them.
+ * The normal daemon owns the production wiring. Optional provider modules that
+ * are not constructed by `runDaemon` are intentionally kept on their direct
+ * module paths and are not re-exported here.
  */
 
 export {
@@ -32,7 +32,6 @@ export * from "./pi/types";
 export * from "./pi/commands";
 export * from "./pi/command-catalogue";
 export * from "./pi/catalogue-service";
-export * from "./pi/mobile-catalogue-service";
 export * from "./pi/normalize";
 export * from "./pi/raw-rpc";
 export * from "./pi/jsonl";
@@ -70,3 +69,7 @@ export * from "./core/workspace-files";
 export * from "./notifications";
 export * from "./git/summary-service";
 export * from "./ops";
+export * from "./auth/credentials";
+export * from "./auth/enrollment";
+export * from "./auth/rate-quota";
+export * from "./auth/revoke";

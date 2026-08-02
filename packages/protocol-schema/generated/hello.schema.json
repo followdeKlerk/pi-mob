@@ -20,6 +20,10 @@
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
           "type": "string"
         },
+        "installationCredential": {
+          "minLength": 1,
+          "type": "string"
+        },
         "installationId": {
           "$id": "pi-mob/protocol/uuid",
           "pattern": "^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
@@ -108,6 +112,7 @@
         "mobileVersion",
         "platform",
         "installationId",
+        "installationCredential",
         "requiredCapabilities",
         "optionalCapabilities"
       ],

@@ -8,11 +8,21 @@ This document is the canonical capability map for Pi Mob. It uses three terms pr
 
 A library, a class, or an isolated test never proves a production feature. Capability discipline is enforced.
 
+## Normal daemon capability matrix
+
+This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`.
+
+| Configuration | hello.accepted.capabilities |
+| --- | --- |
+| without-FCM | `commands.v1`, `controller_leases.v1`, `raw_rpc.v1`, `streams.v1` |
+| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `raw_rpc.v1`, `streams.v1` |
+
 ## Production-wired in `v0.0.1-alpha.1`
 
 | Capability | Verified end-to-end |
 | --- | --- |
-| Pairing via QR code over a private Tailscale address | Yes |
+| Pairing via HTTPS MagicDNS endpoint and one-time six-digit passcode (passcode mints the per-installation bearer credential) | Yes |
+| Per-installation bearer credential on `hello`, `POST /v1/attachments`, `GET /v1/exports/<id>`, and `device.register` with constant-time hash verification and host-side revocation | Yes |
 | Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed time, ETA, and throughput | Yes |
 | Stream subscription with durable cursor, replay, and live delivery | Yes |
 | Session list, rename, create, and delete | Yes |
@@ -21,22 +31,33 @@ A library, a class, or an isolated test never proves a production feature. Capab
 | Session activation and PI process ownership tied to a stable `--session-id` | Yes |
 | Prompt dispatch through the correct session owner with safe rejection when no live owner exists | Yes |
 | Reconnectable shell that restores the most recent chat, drafts, and attachments | Yes |
-| Catalogue authority with explicit unavailable states | Yes |
-| Model picker with host-supplied models | Yes |
+| Model changes through the normal `/model` command | Yes |
 | Per-chat transcript search and global cross-chat search | Yes |
 | Bounded workspace search under the configured search root | Yes |
-| FCM notifications with capability-gated automatic enrollment, foreground and background delivery, and tap routing | Yes |
+| FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone | Yes |
 | Host diagnostic surface with explicit phases, sanitized errors, and retry actions | Yes |
+
+> Note on focus: foreground FCM notification posting is wired in this preview (the messaging service posts a status notification when the app is foregrounded). Tap routing and foreground dedupe are wired but not yet proven on a physical device; treat them as best-effort until physical-device runtime proof exists.
+
+## Implemented in isolation, not production-wired
+The items below have code or UI in the repository, but the normal daemon does not construct the provider required to advertise them. They are not part of the released preview.
+
+- **Command catalogue** — `MobileCatalogueService` exists at the direct module path `packages/bridge/src/pi/mobile-catalogue-service.ts`, but `runDaemon` does not construct a catalogue provider, so `hello.accepted` does not advertise `catalogue.v1`. The UI affordance is therefore absent in the released Android app. It is isolated from the package root export and remains planned.
+
+## Android release hygiene
+
+- Stable preview identity is `com.example.pi_mob` across Gradle, Kotlin packages, Firebase wiring, services, and deep links.
+- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.1-alpha.1` / code `1`, signer type, permissions, and deep-link declarations.
 
 ## Planned
 
-- Code-signed bridge distributable for macOS and Linux.
+- Code-signed bridge distributable for macOS. (Non-macOS hosts are not a released target; see "Out of scope".)
 - Notarized macOS bundle.
 - iOS distribution.
 - Public release notes after `1.0.0`.
 - Biometric unlock for the mobile app.
 - Background sync scheduler that opts in only when the app is foregrounded (no silent background work).
-- Tailwind UI for the workspace catalogue.
+- A real `MobileCatalogueService` wired through `runDaemon`, integration-tested, and the catalogue UI surface rebuilt.
 
 ## Out of scope
 

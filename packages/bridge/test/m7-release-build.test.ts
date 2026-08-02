@@ -55,13 +55,13 @@ import {
   sha256Of,
   verifyManifest,
 } from "../src/ops/release-manifest";
+import { BRIDGE_VERSION as CANONICAL_BRIDGE_VERSION } from "../src/version";
 
 // ---------------------------------------------------------------------------
 // Constants — kept in lock-step with scripts/build.ts.
 // ---------------------------------------------------------------------------
 
-const DEFAULT_BRIDGE_VERSION = "0.0.0-m7";
-const BRIDGE_VERSION = process.env.PI_MOB_VERSION?.trim() || DEFAULT_BRIDGE_VERSION;
+const BRIDGE_VERSION = process.env.PI_MOB_VERSION?.trim() || CANONICAL_BRIDGE_VERSION;
 const PROTOCOL_VERSION = "1.0";
 const BUN_MINIMUM = "1.3.14";
 const MIN_MACOS = "13.0";

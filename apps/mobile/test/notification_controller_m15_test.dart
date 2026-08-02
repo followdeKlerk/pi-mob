@@ -10,6 +10,7 @@ class FakePlatform implements NotificationPlatformAdapter {
   int prompts = 0;
   bool? service;
   bool? visible;
+  int openSettingsCalls = 0;
   final tokens = StreamController<String>.broadcast();
   final taps = StreamController<Uri>.broadcast();
   @override
@@ -26,6 +27,9 @@ class FakePlatform implements NotificationPlatformAdapter {
   Stream<String> get tokenChanges => tokens.stream;
   @override
   Stream<Uri> get notificationTaps => taps.stream;
+  @override
+  Future<void> openNotificationSettings() async => openSettingsCalls++;
+
   @override
   Future<void> setForegroundServiceEnabled(
     bool enabled, {
@@ -71,6 +75,67 @@ void main() {
       controller.dispose();
     },
   );
+  test(
+    'connected notification capability enrolls once without the drawer action',
+    () async {
+      final platform = FakePlatform();
+      final registrations = <String>[];
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (kind, token) async => registrations.add('$kind:$token'),
+        reconcile: (_) async => false,
+      );
+      await controller.initialize();
+      await controller.onBridgeReady(notificationsSupported: false);
+      expect(platform.prompts, 0);
+      expect(registrations, isEmpty);
+
+      await controller.onBridgeReady(notificationsSupported: true);
+      expect(platform.prompts, 1);
+      expect(registrations, ['fcm:token']);
+      await controller.onBridgeReady(notificationsSupported: true);
+      expect(platform.prompts, 1);
+      expect(registrations, ['fcm:token']);
+      controller.dispose();
+    },
+  );
+  test(
+    'denied notification permission remains retryable without repeated prompts',
+    () async {
+      final platform = FakePlatform()..status = NotificationPermission.denied;
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (kind, token) async {},
+        reconcile: (_) async => false,
+      );
+      await controller.initialize();
+      await controller.onBridgeReady(notificationsSupported: true);
+      expect(platform.prompts, 0);
+      expect(controller.enabled, false);
+      controller.dispose();
+    },
+  );
+  test('authorized permission without a token stays disabled and retryable', () async {
+    final platform = FakePlatform()
+      ..status = NotificationPermission.authorized
+      ..token = null;
+    final controller = NotificationController(
+      adapter: platform,
+      deviceId: 'd',
+      appVersion: '1',
+      register: (platform, token) async {},
+      reconcile: (_) async => false,
+    );
+    await controller.initialize();
+    await controller.onBridgeReady(notificationsSupported: true);
+    expect(controller.enabled, false);
+    expect(controller.tokenAvailable, false);
+    controller.dispose();
+  });
   test(
     'token arriving before bridge readiness is retained and retried',
     () async {
@@ -131,6 +196,19 @@ void main() {
       expect(controller.lastReconciledSession, 'current');
     },
   );
+  test('notification settings action delegates to the platform adapter', () async {
+    final platform = FakePlatform();
+    final controller = NotificationController(
+      adapter: platform,
+      deviceId: 'd',
+      appVersion: '1',
+      register: (platform, token) async {},
+      reconcile: (_) async => false,
+    );
+    await controller.openNotificationSettings();
+    expect(platform.openSettingsCalls, 1);
+    controller.dispose();
+  });
   test(
     'foreground service can only start from visible app and no mutating action exists',
     () async {

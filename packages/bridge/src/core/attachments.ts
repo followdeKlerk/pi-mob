@@ -769,6 +769,39 @@ export class AttachmentStore {
   }
 
   /**
+   * Phase 4 — Total bytes retained across all non-expired attachments.
+   * Counts `received_bytes` for in-progress uploads and
+   * `declared_total_bytes` for completed ones. Sum is bounded by
+   * the periodic sweep so the aggregate converges back to zero when a
+   * retention window passes.
+   */
+  aggregateRetainedBytes(): number {
+    this.ensureOpen();
+    const rows = this.db.query(
+      "SELECT received_bytes AS r, declared_total_bytes AS d FROM attachments WHERE state IN ('open','complete')",
+    ).all() as Array<{ r: number; d: number }>;
+    let total = 0;
+    for (const row of rows) total += Number(row.r ?? row.d ?? 0);
+    return total;
+  }
+
+  /**
+   * Phase 4 — Total bytes retained for one installation. The
+   * `client_upload_id` is conventionally `installationId:uploadId`,
+   * so a LIKE prefix is the cheapest partition key. Used by the
+   * rate/quota tracker before busboy opens the body.
+   */
+  retainedBytesForInstallation(installationId: string): number {
+    this.ensureOpen();
+    const rows = this.db.query(
+      "SELECT received_bytes AS r, declared_total_bytes AS d FROM attachments WHERE state IN ('open','complete') AND client_upload_id LIKE ?",
+    ).all(`${installationId}:%`) as Array<{ r: number; d: number }>;
+    let total = 0;
+    for (const row of rows) total += Number(row.r ?? row.d ?? 0);
+    return total;
+  }
+
+  /**
    * Resolve an attachment reference. Does not surface paths; returns
    * only the metadata needed to address the attachment.
    *

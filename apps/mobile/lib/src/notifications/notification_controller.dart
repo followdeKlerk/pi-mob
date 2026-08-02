@@ -11,6 +11,7 @@ abstract interface class NotificationPlatformAdapter {
   Future<String?> currentToken();
   Stream<String> get tokenChanges;
   Stream<Uri> get notificationTaps;
+  Future<void> openNotificationSettings();
   Future<void> setForegroundServiceEnabled(
     bool enabled, {
     required bool appVisible,
@@ -68,6 +69,10 @@ class MethodChannelNotificationAdapter implements NotificationPlatformAdapter {
       .cast<String>()
       .map(Uri.parse);
   @override
+  Future<void> openNotificationSettings() =>
+      _channel.invokeMethod('openNotificationSettings');
+
+  @override
   Future<void> setForegroundServiceEnabled(
     bool enabled, {
     required bool appVisible,
@@ -113,8 +118,12 @@ class NotificationController extends ChangeNotifier {
   String? _pendingToken;
   String? _registeredToken;
   Future<void>? _tokenSync;
+  Future<void>? _enrollment;
+  bool _automaticPermissionPrompted = false;
+  bool? _bridgeNotificationsSupported;
   NotificationPermission permission = NotificationPermission.notDetermined;
   bool enabled = false;
+  bool tokenAvailable = false;
   bool foregroundServiceEnabled = false;
   String? lastReconciledSession;
   Future<void> initialize() async {
@@ -132,7 +141,40 @@ class NotificationController extends ChangeNotifier {
   Future<void> enableByUserAction() async {
     permission = await adapter.requestPermission();
     enabled = permission == NotificationPermission.authorized;
-    if (enabled) await refreshToken();
+    if (enabled) {
+      await refreshToken();
+      enabled = tokenAvailable;
+    }
+    notifyListeners();
+  }
+
+  /// Enrolls this installation after the bridge advertises remote
+  /// notifications. A process requests permission at most once; reconnects
+  /// still refresh the real token and retry registration when needed.
+  Future<void> onBridgeReady({required bool notificationsSupported}) {
+    _bridgeNotificationsSupported = notificationsSupported;
+    if (!notificationsSupported) return Future<void>.value();
+    final active = _enrollment;
+    if (active != null) return active;
+    final future = _enrollAutomatically();
+    _enrollment = future;
+    return future.whenComplete(() {
+      if (identical(_enrollment, future)) _enrollment = null;
+    });
+  }
+
+  Future<void> _enrollAutomatically() async {
+    permission = await adapter.permissionStatus();
+    if (permission == NotificationPermission.notDetermined &&
+        !_automaticPermissionPrompted) {
+      _automaticPermissionPrompted = true;
+      permission = await adapter.requestPermission();
+    }
+    enabled = permission == NotificationPermission.authorized;
+    if (enabled) {
+      await refreshToken();
+      enabled = tokenAvailable;
+    }
     notifyListeners();
   }
 
@@ -140,7 +182,9 @@ class NotificationController extends ChangeNotifier {
   /// scoped to the installation, but registration is scoped to each bridge.
   Future<void> refreshToken() async {
     final token = await adapter.currentToken();
-    if (token != null) await _acceptToken(token);
+    tokenAvailable = token != null && token.isNotEmpty;
+    if (tokenAvailable) await _acceptToken(token!);
+    notifyListeners();
   }
 
   /// Clears host-scoped registration state without deleting the installation
@@ -152,6 +196,7 @@ class NotificationController extends ChangeNotifier {
 
   Future<void> _acceptToken(String token) async {
     if (token.isEmpty) return;
+    tokenAvailable = true;
     _pendingToken = token;
     await synchronizeToken();
   }
@@ -171,6 +216,7 @@ class NotificationController extends ChangeNotifier {
 
   Future<void> _drainPendingToken() async {
     while (true) {
+      if (_bridgeNotificationsSupported == false) return;
       final token = _pendingToken;
       if (token == null) return;
       if (token == _registeredToken) {
@@ -201,6 +247,9 @@ class NotificationController extends ChangeNotifier {
     }
     return applied;
   }
+
+  Future<void> openNotificationSettings() =>
+      adapter.openNotificationSettings();
 
   Future<void> setForegroundService(
     bool value, {

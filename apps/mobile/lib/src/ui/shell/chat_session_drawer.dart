@@ -39,6 +39,30 @@ class ChatSessionDrawer extends StatefulWidget {
 }
 
 class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
+  /// True when the coordinator has demoted to a phase where the bridge
+  /// is unreachable, the protocol is incompatible, or the host is
+  /// degraded. The drawer surfaces a sanitized error and a Retry action
+  /// in these phases; for healthy/syncing phases it does not.
+  static bool _isOffRailConnection(ConnectionPhase phase) {
+    switch (phase) {
+      case ConnectionPhase.incompatible:
+      case ConnectionPhase.hostUnreachable:
+      case ConnectionPhase.degraded:
+      case ConnectionPhase.hostDraining:
+      case ConnectionPhase.rePairRequired:
+        return true;
+      case ConnectionPhase.unpaired:
+      case ConnectionPhase.probing:
+      case ConnectionPhase.connecting:
+      case ConnectionPhase.handshaking:
+      case ConnectionPhase.synchronizing:
+      case ConnectionPhase.ready:
+      case ConnectionPhase.disconnected:
+      case ConnectionPhase.background:
+        return false;
+    }
+  }
+
   @override
   void initState() {
     super.initState();
@@ -402,7 +426,115 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                   ),
                 ],
               ),
+
             ),
+            if (_isOffRailConnection(coordinator.phase))
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  PiSpacing.md,
+                  PiSpacing.none,
+                  PiSpacing.md,
+                  PiSpacing.md,
+                ),
+                child: Container(
+                  key: const Key('drawer-connection-issue-card'),
+                  padding: const EdgeInsets.all(PiSpacing.md),
+                  decoration: BoxDecoration(
+                    color: colors.errorContainer,
+                    borderRadius: BorderRadius.circular(PiRadius.md),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
+                        children: [
+                          Icon(
+                            Icons.error_outline,
+                            size: 18,
+                            color: colors.onErrorContainer,
+                          ),
+                          const SizedBox(width: PiSpacing.xs),
+                          Expanded(
+                            child: Text(
+                              'Connection issue',
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                color: colors.onErrorContainer,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: PiSpacing.xs),
+                      SelectableText(
+                        ConnectionCoordinator.sanitizeErrorMessage(
+                          coordinator.errorMessage,
+                        ),
+                        key: const Key('drawer-connection-error'),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: colors.onErrorContainer,
+                        ),
+                      ),
+                      const SizedBox(height: PiSpacing.sm),
+                      Align(
+                        alignment: Alignment.centerRight,
+                        child: TextButton.icon(
+                          key: const Key('drawer-connection-retry'),
+                          onPressed: coordinator.retryConnection,
+                          icon: const Icon(Icons.refresh),
+                          label: const Text('Retry connection'),
+                          style: TextButton.styleFrom(
+                            foregroundColor: colors.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            if (coordinator.phase == ConnectionPhase.synchronizing ||
+                (coordinator.phase == ConnectionPhase.ready &&
+                    !coordinator.historyGateComplete))
+              Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: PiSpacing.md,
+                  vertical: PiSpacing.xs,
+                ),
+                child: Container(
+                  key: const Key('drawer-history-sync-indicator'),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: PiSpacing.md,
+                    vertical: PiSpacing.sm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: colors.primaryContainer,
+                    borderRadius: BorderRadius.circular(PiRadius.md),
+                  ),
+                  child: Row(
+                    children: [
+                      SizedBox(
+                        width: 14,
+                        height: 14,
+                        child: MotionSpinner(
+                          strokeWidth: 2,
+                          dimension: 14,
+                          label: 'Syncing chats',
+                        ),
+                      ),
+                      const SizedBox(width: PiSpacing.sm),
+                      Expanded(
+                        child: Text(
+                          coordinator.phase == ConnectionPhase.synchronizing
+                              ? 'Syncing chat history…'
+                              : 'Loading saved chats\u2026',
+                          style: theme.textTheme.labelSmall,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md),
               child: FilledButton.icon(
@@ -576,22 +708,42 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
             if (widget.notifications case final notifications?)
               ListenableBuilder(
                 listenable: notifications,
-                builder: (context, _) => ListTile(
-                  key: const Key('drawer-notifications'),
-                  leading: Icon(
-                    notifications.enabled
-                        ? Icons.notifications_active_outlined
-                        : Icons.notifications_none,
-                  ),
-                  title: Text(
-                    notifications.enabled
-                        ? 'Notifications on'
-                        : 'Enable notifications',
-                  ),
-                  onTap: notifications.enabled
-                      ? null
-                      : () => unawaited(notifications.enableByUserAction()),
-                ),
+                builder: (context, _) {
+                  final supported = coordinator.supportsCapability(
+                    'notifications.v1',
+                  );
+                  final blocked =
+                      notifications.permission == NotificationPermission.denied;
+                  final tokenMissing = notifications.permission ==
+                          NotificationPermission.authorized &&
+                      !notifications.tokenAvailable;
+                  return ListTile(
+                    key: const Key('drawer-notifications'),
+                    leading: Icon(
+                      notifications.enabled
+                          ? Icons.notifications_active_outlined
+                          : Icons.notifications_none,
+                    ),
+                    title: Text(
+                      !supported
+                          ? 'Notifications unavailable'
+                          : notifications.enabled
+                          ? 'Notifications on'
+                          : blocked
+                          ? 'Notifications blocked'
+                          : tokenMissing
+                          ? 'Notification token unavailable'
+                          : 'Enable notifications',
+                    ),
+                    onTap: !supported
+                        ? null
+                        : notifications.enabled || blocked || tokenMissing
+                        ? () => unawaited(
+                            notifications.openNotificationSettings(),
+                          )
+                        : () => unawaited(notifications.enableByUserAction()),
+                  );
+                },
               ),
             ListTile(
               key: const Key('drawer-forget-host'),

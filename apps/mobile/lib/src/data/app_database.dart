@@ -7,6 +7,7 @@ import 'package:uuid/uuid.dart';
 import '../domain/attachments.dart';
 import '../domain/mobile_state.dart' hide StreamCursor;
 import '../domain/session_tree.dart';
+import '../version.dart';
 
 part 'app_database.g.dart';
 
@@ -163,7 +164,7 @@ class AppDatabase extends _$AppDatabase {
             MetadataEntriesCompanion.insert(
               installationId: _bootstrapInstallationId(),
               platform: 'unknown',
-              appVersion: '0.0.0',
+              appVersion: kMobileAppVersion,
               protocolMajor: 1,
               protocolMinor: 0,
               firstSeenAt: DateTime.now().toUtc(),

@@ -4,6 +4,8 @@ import { mkdtempSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { AttachmentStore, createBinaryHttpHandler, inspectImage } from "../src";
+import { BridgeStore } from "../src/core/store";
+import { generateInstallationCredential, hashCredential } from "../src/auth/credentials";
 
 const PNG = Uint8Array.from(Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
 const digest = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
@@ -17,17 +19,33 @@ function setup(now = 1_700_000_000_000) {
 describe("M13 attachment security", () => {
   test("valid PNG uploads once and retry deduplicates without path disclosure", async () => {
     const { store } = setup();
-    const handler = createBinaryHttpHandler({ attachments: store });
-    const form = () => { const value = new FormData(); value.set("installationId", "install-a"); value.set("clientUploadId", "upload-a"); value.set("content", new File([PNG], "one.png", { type: "application/octet-stream" })); return value; };
-    const first = await handler(new Request("https://host.test/v1/attachments", { method: "POST", body: form() }));
+    const bridge = new BridgeStore(join(mkdtempSync(join(tmpdir(), "pi-mob-att-rs-")), "bridge.sqlite"));
+    const installationId = "11111111-2222-4333-8444-555555555555";
+    const plain = generateInstallationCredential();
+    bridge.upsertInstallationCredential({
+      installationId,
+      credentialHash: hashCredential(plain),
+      enrollmentSecretHash: "1".repeat(64),
+      enrollmentSource: "seed",
+      createdAt: 1,
+      lastSeenAt: 1,
+    });
+    const handler = createBinaryHttpHandler({
+      attachments: store,
+      credentials: { verify: (id, supplied) => bridge.findInstallationCredential(id)?.credentialHash === hashCredential(supplied) ? { kind: "valid", installationId: id } : { kind: "wrong" } },
+    });
+    const reqHeaders = { "X-Installation-Id": installationId, "X-Installation-Credential": plain };
+    const form = () => { const value = new FormData(); value.set("installationId", installationId); value.set("clientUploadId", "upload-a"); value.set("content", new File([PNG], "one.png", { type: "application/octet-stream" })); return value; };
+    const first = await handler(new Request("https://host.test/v1/attachments", { method: "POST", body: form(), headers: reqHeaders }));
     expect(first!.status).toBe(201);
     const body = await first!.json() as Record<string, unknown>;
     expect(body).toMatchObject({ mimeType: "image/png", width: 1, height: 1, bytes: PNG.length, sha256: digest(PNG) });
     expect(JSON.stringify(body)).not.toContain(store.configuration.toString());
-    const second = await handler(new Request("https://host.test/v1/attachments", { method: "POST", body: form() }));
+    const second = await handler(new Request("https://host.test/v1/attachments", { method: "POST", body: form(), headers: reqHeaders }));
     expect(second!.status).toBe(200);
     expect((await second!.json() as Record<string, unknown>).attachmentId).toBe(body.attachmentId);
     store.close();
+    bridge.close();
   });
 
   test("same client upload id with different digest conflicts", () => {

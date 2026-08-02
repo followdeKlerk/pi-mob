@@ -1,3 +1,5 @@
+import java.util.Properties
+
 plugins {
     id("com.android.application")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
@@ -11,7 +13,36 @@ if (file("google-services.json").exists()) {
     apply(plugin = "com.google.gms.google-services")
 }
 
+// Release credentials must come from outside the repository. Operators can
+// pass -PreleaseProperties=/absolute/path/release.properties or the
+// ANDROID_RELEASE_PROPERTIES environment variable. The file must contain:
+// storeFile, storePassword, keyAlias, keyPassword.
+val releaseProperties = Properties()
+val releasePropertiesPath = providers.gradleProperty("releaseProperties").orNull
+    ?: providers.environmentVariable("ANDROID_RELEASE_PROPERTIES").orNull
+if (releasePropertiesPath != null) {
+    val propertiesFile = file(releasePropertiesPath)
+    require(propertiesFile.isFile) { "Release signing properties file does not exist: $releasePropertiesPath" }
+    propertiesFile.inputStream().use { input -> releaseProperties.load(input) }
+}
+fun nonBlank(value: String?): String? = if (value != null && value.isNotBlank()) value else null
+fun releaseValue(property: String, environment: String): String? =
+    nonBlank(releaseProperties.getProperty(property))
+        ?: nonBlank(providers.gradleProperty(property).orNull)
+        ?: nonBlank(providers.environmentVariable(environment).orNull)
+
+val releaseStoreFile = releaseValue("storeFile", "ANDROID_RELEASE_KEYSTORE")
+val releaseStorePassword = releaseValue("storePassword", "ANDROID_RELEASE_STORE_PASSWORD")
+val releaseKeyAlias = releaseValue("keyAlias", "ANDROID_RELEASE_KEY_ALIAS")
+val releaseKeyPassword = releaseValue("keyPassword", "ANDROID_RELEASE_KEY_PASSWORD")
+val releaseSigningReady = listOf(releaseStoreFile, releaseStorePassword, releaseKeyAlias, releaseKeyPassword).all { it != null }
+val requestedReleaseTask = gradle.startParameter.taskNames.any { it.contains("Release", ignoreCase = true) }
+check(!requestedReleaseTask || releaseSigningReady) {
+    "Release signing is fail-closed. Supply an external releaseProperties file or all ANDROID_RELEASE_* values."
+}
+
 android {
+    // Stable preview identity. Keep aligned with Firebase and Kotlin package paths.
     namespace = "com.example.pi_mob"
     compileSdk = flutter.compileSdkVersion
     ndkVersion = flutter.ndkVersion
@@ -22,7 +53,7 @@ android {
     }
 
     defaultConfig {
-        // TODO: Specify your own unique Application ID (https://developer.android.com/studio/build/application-id.html).
+        // Stable preview identity: changing this requires coordinated Firebase and deep-link migration.
         applicationId = "com.example.pi_mob"
         // pi-mob M1: lock the floor to API 29 per docs/TOOLCHAIN.md. Flutter's
         // generated `flutter.minSdkVersion` is intentionally not used here so
@@ -33,11 +64,21 @@ android {
         versionName = flutter.versionName
     }
 
+    signingConfigs {
+        create("release") {
+            if (releaseSigningReady) {
+                storeFile = file(requireNotNull(releaseStoreFile))
+                storePassword = requireNotNull(releaseStorePassword)
+                keyAlias = requireNotNull(releaseKeyAlias)
+                keyPassword = requireNotNull(releaseKeyPassword)
+            }
+        }
+    }
+
     buildTypes {
         release {
-            // TODO: Add your own signing config for the release build.
-            // Signing with the debug keys for now, so `flutter run --release` works.
-            signingConfig = signingConfigs.getByName("debug")
+            // Never fall back to the debug key. Missing credentials fail above.
+            signingConfig = signingConfigs.getByName("release")
         }
     }
 }

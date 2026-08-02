@@ -51,6 +51,7 @@ void main() {
     );
     await coordinator.initialize(autoConnect: false);
 
+    coordinator.selectedSessionId = sessionId;
     final result = await coordinator.submitPromptWithRecovery();
     expect(result.phase, PromptSendPhase.failed);
     expect(coordinator.draft, 'Keep this message');
@@ -84,6 +85,25 @@ void main() {
     expect(find.text('Reconnect'), findsOneWidget);
     expect(find.text('Keep this message'), findsOneWidget);
     expect(find.textContaining('11111111'), findsNothing);
+
+    await tester.enterText(find.byKey(const Key('draft-field')), '/model');
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(coordinator.draft, '/model');
+    expect(find.byKey(const Key('slash-command-list')), findsOneWidget);
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('slash-command-results')),
+        matching: find.text('/model'),
+      ),
+      findsOneWidget,
+    );
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('slash-command-results')),
+        matching: find.textContaining('Change the model using Pi command syntax'),
+      ),
+      findsOneWidget,
+    );
   });
 }
 

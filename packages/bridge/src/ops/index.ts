@@ -18,7 +18,6 @@ export * from "./rollback";
 export * from "./uninstall";
 export * from "./endpoint-guard";
 export * from "./tailscale-serve";
-export * from "./pairing";
 export * from "./doctor";
 export * from "./macos-system";
 export * from "./cli";

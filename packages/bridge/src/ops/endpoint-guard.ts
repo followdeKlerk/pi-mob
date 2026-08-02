@@ -16,7 +16,7 @@
  *   - The endpoint MUST NOT contain a `funnel` token (Funnel would expose
  *     the bridge to the public internet).
  *   - The endpoint MUST NOT carry credentials, query tokens, fragments, or
- *     attachment identifiers — the QR only ever carries the public origin.
+ *     attachment identifiers — pairing only ever carries the public origin.
  *
  * The validator is pure (no I/O) so the install/doctor flows can run it
  * against synthetic values without spawning subprocesses.
@@ -43,7 +43,7 @@ export type EndpointRejectionCode =
   | "path"
   | "syntax";
 
-/** Parsed bridge endpoint suitable for QR pairing and WebSocket derivation. */
+/** Parsed bridge endpoint suitable for passcode pairing and WebSocket derivation. */
 export interface BridgeEndpoint {
   readonly scheme: "https";
   /** Lowercase hostname ending in `.ts.net`. Never a wildcard or IP literal. */
@@ -159,7 +159,7 @@ export function classifyEndpoint(
     return reject("host_unsafe_characters", `endpoint host contains disallowed characters: ${JSON.stringify(host)}`);
   }
 
-  // Reject literal IPv4/IPv6 hosts — the QR must be a phone-reachable
+  // Reject literal IPv4/IPv6 hosts — pairing must be a phone-reachable
   // MagicDNS hostname. Numeric hosts cannot be served by Tailscale Serve.
   if (isIpLiteral(host)) {
     return reject("host_ip_literal", `endpoint host must be a MagicDNS name, not an IP literal (got ${JSON.stringify(host)})`);

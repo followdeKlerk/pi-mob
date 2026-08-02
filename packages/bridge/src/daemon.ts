@@ -40,6 +40,7 @@ import { DurableBridgeRuntime } from "./core/runtime";
 import { createBridgeServer, type BridgeServer } from "./core/server";
 import { AttachmentStore } from "./core/attachments";
 import { createBinaryHttpHandler } from "./core/binary-http";
+import { createRateQuotaTracker } from "./auth/rate-quota";
 import { ExportRegistry } from "./pi/export-registry";
 import type { NotificationService } from "./notifications";
 import { BridgeNotificationService } from "./notifications/service";
@@ -58,9 +59,9 @@ import {
   type WorkspaceRootId,
   type HostPolicyMode,
 } from "./core/workspace-policy";
+import { BRIDGE_VERSION } from "./version";
 
 const PROTOCOL_VERSION = "1.0";
-const BRIDGE_VERSION = "0.0.0-m8";
 
 export interface DaemonOptions {
   readonly workspace: string;
@@ -496,6 +497,12 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   // below. Its exit callback must use that explicit binding, never an
   // arbitrary sessionStates()[0] lookup.
   let primaryRpcOwner: string | null = null;
+  let hostDrainingEmitted = false;
+  const appendHostDraining = (payload: Record<string, unknown>): void => {
+    if (hostDrainingEmitted) return;
+    hostDrainingEmitted = true;
+    store.appendEvent(hostStream, "host.draining", payload);
+  };
   const rpc = new SupervisedRpcClient({
     beforeUnexpectedExit: () => primaryRpcOwner
       ? reconcile(primaryRpcOwner, false)
@@ -509,6 +516,10 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       closeGracePeriodMs: 5_000,
     },
     emit(event) {
+      if (event.type === "host.draining") {
+        appendHostDraining(event.payload);
+        return;
+      }
       if (event.type.startsWith("host.")) {
         store.appendEvent(hostStream, event.type, event.payload);
         return;
@@ -537,10 +548,8 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     },
   });
   let rpcStarted = false;
-  if (!store.sessionStates().some((session) => session.runtimeState === "crash_loop")) {
-    await rpc.start();
-    rpcStarted = true;
-  }
+  // Do not launch an unbound compatibility Pi process. Mobile sessions are
+  // started lazily by their own per-session supervised client below.
   const config: OneSessionWorkspaceConfig = {
     workspaceId,
     rootPath: options.workspace,
@@ -588,13 +597,9 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     const externalSessionPath = typeof state.piSessionPath === "string"
       ? state.piSessionPath
       : null;
-    // Keep the pre-existing primary client as an explicit single-session
-    // compatibility binding. Every other session gets its own supervised
-    // client, so one process exit cannot reconcile a different session.
-    if (!externalSessionPath && primaryRpcOwner === null) {
-      primaryRpcOwner = sessionId;
-      return rpc;
-    }
+    // Mobile sessions always get an independent supervised client. The old
+    // primary binding had no stable Pi identity and could replace a valid
+    // session file with a fresh restart path.
     const client = new SupervisedRpcClient({
       beforeUnexpectedExit: () => reconcile(sessionId, false),
       processId: sessionId,
@@ -605,7 +610,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
           "--mode", "rpc",
           ...(externalSessionPath
             ? ["--session", externalSessionPath, "--session-dir", sessionDir]
-            : ["--session-dir", sessionDir]),
+            : ["--session-id", sessionId, "--session-dir", sessionDir]),
           ...extensionArgs,
           ...(options.rpcArgs ?? []),
         ],
@@ -613,7 +618,16 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
         defaultRequestTimeoutMs: 30_000,
         closeGracePeriodMs: 5_000,
       },
+      ...(externalSessionPath ? {
+        beforeSpawn: () => {
+          if (!existsSync(externalSessionPath)) throw new Error("pi session history is unavailable");
+        },
+      } : {}),
       emit(event) {
+        if (event.type === "host.draining") {
+          appendHostDraining(event.payload);
+          return;
+        }
         if (event.type.startsWith("host.")) {
           store.appendEvent(hostStream, event.type, event.payload);
           return;
@@ -654,7 +668,20 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     hostname: "127.0.0.1",
     port: options.port ?? 0,
     runtime,
-    httpHandler: createBinaryHttpHandler({ attachments, exports: adapter }),
+    httpHandler: createBinaryHttpHandler({
+      attachments,
+      exports: adapter,
+      credentials: { verify: (installationId, plaintext) => runtime.verifyInstallationCredential(installationId, plaintext) },
+      rateQuota: createRateQuotaTracker({
+        store,
+        attachments,
+        limits: {
+          uploadsPerMinute: 10,
+          retainedBytesPerInstallation: 250 * 1024 * 1024,
+          aggregateBytes: 1024 * 1024 * 1024,
+        },
+      }),
+    }),
   });
 
   return {

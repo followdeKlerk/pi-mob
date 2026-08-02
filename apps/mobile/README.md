@@ -11,13 +11,14 @@ The Flutter Android client for Pi Mob. Pairs with a local bridge over a private 
 - Session activation and Pi process ownership tied to a stable `--session-id`.
 - Prompt dispatch through the correct session owner with safe rejection when no live owner exists.
 - Reconnectable shell that restores the most recent chat, drafts, and attachments.
-- Catalogue authority with explicit unavailable states.
-- Model picker with host-supplied models.
+- Model changes through the normal `/model` command.
 - Per-chat transcript search and global cross-chat search.
 - Bounded workspace search under the configured search root.
 - Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed time, ETA, and throughput.
-- FCM notifications with capability-gated automatic enrollment, foreground and background delivery, and tap routing back to the correct chat.
+- FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone. Foreground posting is wired but tap routing and dedupe are not yet proven on a physical device.
 - Host diagnostic surface with explicit phases, sanitized errors, and retry actions.
+
+> Note: the catalogue surface is implemented in the bridge codebase but the normal daemon does not construct a catalogue provider, so the released Android app does not advertise `catalogue.v1` and exposes no catalogue UI. The catalogue capability is tracked in `docs/PROJECT_STATUS.md` as "implemented in isolation, not production-wired".
 
 ## Layout
 
@@ -26,7 +27,7 @@ lib/
   connection/        transport, coordinator, durable projection
   domain/            state and reducers
   notifications/     notification controller and FCM adapter
-  pairing/           QR pairing and bridge pairing screen
+  pairing/           Endpoint and passcode pairing screen
   ui/                screens, shell, theme, primitives
 test/
   ...
@@ -37,8 +38,14 @@ android/            Android project
 
 ```sh
 flutter pub get
-flutter build apk --release
+cd android
+./gradlew assembleRelease \
+  -PreleaseProperties=/absolute/path/to/external-release.properties
 ```
+
+The release build fails when the external signing properties are absent. The
+properties file must contain `storeFile`, `storePassword`, `keyAlias`, and
+`keyPassword`. Use an ephemeral keystore in `/tmp` for local verification only.
 
 The release APK is produced at `build/app/outputs/flutter-apk/app-release.apk`.
 
@@ -57,12 +64,10 @@ The mobile app uses focused regression tests only. Broad Flutter suites are not 
 | --- | --- |
 | `INTERNET` | contact the bridge over the user's private tailnet. |
 | `POST_NOTIFICATIONS` | surface replies with system notifications. |
-| `FOREGROUND_SERVICE_DATA_SYNC` | keep the bridge connection alive while the app is foregrounded. |
-| `WAKE_LOCK` | paired with the foreground service. |
-| `RECEIVE_BOOT_COMPLETED` | schedule the foreground service after reboot. |
-| `REQUEST_INSTALL_PACKAGES` | allow the user to install APK updates in place. |
+| `FOREGROUND_SERVICE` | permit the status foreground service. |
+| `FOREGROUND_SERVICE_DATA_SYNC` | classify the status foreground service. |
 
-The app does not request location, contacts, microphone, camera, or storage. Camera access is only used inside the pairing screen to scan the QR code, and only while that screen is visible.
+The app does not request camera access. Pairing uses the HTTPS endpoint and one-time six-digit passcode printed by `pi-mob pair`. It does not request location, contacts, microphone, or general storage access.
 
 ## What is not in the app
 

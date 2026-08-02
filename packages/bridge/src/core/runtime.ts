@@ -1,7 +1,9 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { COMMAND_METADATA, LIMITS, semanticCommandSha256 } from "@pi-mob/protocol-schema";
 import { ControllerLeaseService, DurableCommandService, StreamService, type AdapterPort } from "./domain";
-import type { BridgeRuntimePort, ConnectionContext, SubscriptionMessage, SubscriptionResult } from "./server";
+import type { BridgeRuntimePort, ConnectionContext, CredentialVerificationResult, SubscriptionMessage, SubscriptionResult } from "./server";
+import { generateInstallationCredential, verifyCredential } from "../auth/credentials";
+import { bindEnrollment, type BindOutcome } from "../auth/enrollment";
 import { type BridgeStore, StoreError, type LeaseMutation } from "./store";
 import { WorkspaceFileError, type WorkspaceFileService, type FileReference } from "./workspace-files";
 import {
@@ -186,6 +188,30 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   }
   onEvent(listener: Parameters<BridgeStore["onEvent"]>[0]): () => void { return this.options.store.onEvent(listener); }
   identity(): { hostId: string; hostGeneration: string; hostDisplayName: string } { return { ...this.options.store.identity(), hostDisplayName: this.hostDisplayName }; }
+
+  /**
+   * Phase 4 — verify an installationCredential against the durable
+   * `installation_credentials` table. The runtime is the single source
+   * of truth: it hashes the supplied plaintext, walks the row through
+   * `revoked_at`/`expires_at`, and bumps `last_seen_at` on success.
+   */
+  bindEnrollment = (installationId: string, passcode: string): BindOutcome => bindEnrollment({
+    store: this.options.store,
+    installationId,
+    plainPasscode: passcode,
+    issueCredential: generateInstallationCredential,
+  });
+  verifyInstallationCredential = (installationId: string, plaintext: string): CredentialVerificationResult => {
+    const row = this.options.store.findInstallationCredential(installationId);
+    if (!row) return { kind: "not_bound", installationId };
+    if (row.revokedAt !== undefined) return { kind: "revoked", installationId };
+    if (typeof row.expiresAt === "number" && row.expiresAt <= Date.now()) return { kind: "expired", installationId };
+    if (!verifyCredential(plaintext, row.credentialHash)) return { kind: "wrong", installationId };
+    const now = Date.now();
+    try { this.options.store.touchInstallationCredential(installationId, now); }
+    catch { /* touch failure must not block an otherwise-valid auth */ }
+    return { kind: "valid", installationId, lastSeenAt: now };
+  }
   ready(): { ready: boolean; reason?: string } {
     if (!this.readyState) return { ready: false, reason: "startup recovery incomplete" };
     const health = this.options.store.health(); return health.ready ? { ready: true } : { ready: false, reason: `durable store ${health.reason ?? "unavailable"}` };
@@ -760,6 +786,9 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   command(connection: ConnectionContext, message: Record<string, unknown>): Record<string, unknown> {
     const type = String(message.type); const payload = message.payload as Record<string, unknown>; const commandId = String(message.commandId ?? "");
     const metadata = COMMAND_METADATA.find((item) => item.type === type); if (!metadata) throw new RuntimeProtocolError("invalid_state", "unsupported command");
+    if (type === "notification.device.register" && payload.installationId !== connection.installationId) {
+      throw new RuntimeProtocolError("invalid_message", "installation identity does not match the authenticated connection");
+    }
     const existing = this.options.store.command(commandId);
     if (existing) {
       const hash = semanticCommandSha256({ type, payload });
@@ -840,6 +869,12 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     }
   }
 
-  disconnected(connection: ConnectionContext): void { this.options.store.disconnectConnection(connection.connectionId); }
+  disconnected(connection: ConnectionContext): void {
+    try { this.options.store.disconnectConnection(connection.connectionId); }
+    catch {
+      // The durable store may already be closed during teardown; this is a
+      // best-effort hook.
+    }
+  }
   async recover(): Promise<{ resumed: number; indeterminate: number }> { return this.commands.recover(); }
 }

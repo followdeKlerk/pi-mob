@@ -10,7 +10,6 @@ export 'command_palette.dart';
 export 'compaction_controls.dart';
 export 'context_stats_card.dart';
 export 'control_view_data.dart';
-export 'model_thinking_selector.dart';
 export 'retry_controls.dart';
 export 'supported_command_list.dart';
 export 'unsupported_control_state.dart';

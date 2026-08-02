@@ -31,7 +31,15 @@ The current baseline is:
 
 Optional capabilities are added as the host enables them. `notifications.v1` is advertised when the bridge was started with a valid notification service account.
 
-## Envelope
+## Normal daemon capability matrix
+
+This is the canonical exact capability contract for `hello.accepted`. The normal daemon emits the baseline set without FCM and adds only `notifications.v1` when FCM is configured.
+
+| Configuration | hello.accepted.capabilities |
+| --- | --- |
+| without-FCM | `commands.v1`, `controller_leases.v1`, `raw_rpc.v1`, `streams.v1` |
+| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `raw_rpc.v1`, `streams.v1` |
+
 
 Every message is a JSON object with the following top-level fields:
 
@@ -86,7 +94,7 @@ The host persists a per-stream cursor. The mobile app seeds its in-memory cursor
 ## Connection lifecycle
 
 1. Mobile app opens the WebSocket.
-2. Mobile app sends `hello` with installation identifier, platform, and requested capabilities.
+2. Mobile app sends `hello` with installation identifier, platform, the per-installation bearer credential, and requested capabilities. The bridge validates the credential before issuing `hello.accepted`; a missing / wrong / revoked / expired / not-bound credential is rejected with `invalid_auth` (or `re_pair_required` for never-bound installs) and the connection is closed with code `1008`.
 3. Bridge validates the protocol version, the installation identifier, and the requested capabilities, then responds with `hello.accepted`.
 4. Mobile app subscribes to the streams it needs.
 5. The bridge replays from the persisted cursor, then begins live delivery.
@@ -94,7 +102,24 @@ The host persists a per-stream cursor. The mobile app seeds its in-memory cursor
 
 ## What is not in the protocol
 
-- File uploads and blob storage. Attachments are referenced by URL and never proxied through the bridge.
 - Voice.
 - Group chat.
 - Cloud mirror. The protocol is designed for one client, one host.
+
+## Enrollment and companion HTTP endpoints
+
+The bridge exposes enrollment and a small binary HTTP API on the same loopback listener. The mobile client reaches these endpoints only through Tailscale Serve, not directly.
+
+`POST /v1/enroll` accepts `{ "installationId": "<uuid>", "passcode": "<six-digit passcode>" }`. The passcode is checked against its stored hash for expiry and single use in one SQLite transaction. Enrollment attempts are rate limited. A successful 201 response contains the plaintext `installationCredential` once. The bridge stores only its hash. The Android client writes the returned value only to Keystore-backed secure storage. Missing, expired, or replayed challenges return sanitized errors and never return a credential.
+
+Both `/v1/attachments` and `/v1/exports/<id>` REQUIRE two headers before any body read:
+
+- `X-Installation-Id`: a UUID-shaped stable identifier
+- `X-Installation-Credential`: a 256-bit secret minted during enrollment
+
+The server validates the credential against a stored SHA-256 hash with a constant-time compare, rejects unknown / wrong / revoked / expired / not-bound credentials with `401 invalid_auth`, and only then reads the body. A `re_pair_required` distinguished error is returned only for credentials that were never bound, so the mobile app can render an actionable re-pair card.
+
+- `POST /v1/attachments` accepts a multipart upload. The multipart `installationId` field is a HINT only — the header is authoritative. A mismatch is rejected with `401`. The server validates the image (JPEG/PNG only), persists it under the bridge state directory, and returns the attachment id. The per-upload cap is 10 MiB. Per-installation upload rate limit, per-installation retained-byte quota, and aggregate attachment-store byte ceiling are checked before allocation; 429 / 413 / 507-style errors are returned for `rate_limited`, `quota_exceeded`, and `storage_full`.
+- `GET /v1/exports/<id>` returns generated HTML for a completed session export. The export id is a UUID. The same `X-Installation-Id` + `X-Installation-Credential` headers are required. An export whose `expiresAt` has passed returns `404 export_unavailable`.
+
+`installationId` identifies one app installation. In `v0.0.1-alpha.1` it is bound to a per-installation bearer credential that the WebSocket handshake and the binary HTTP endpoints share. Pairing pins host discovery but no longer authorises the phone.
