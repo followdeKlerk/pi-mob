@@ -20,7 +20,7 @@ This is a printable end-to-end guide for the `v0.0.1-alpha.1` preview. The exact
    ./pi-mob pair
    ```
 
-   `pair` checks the installed listener and owned Tailscale Serve route before issuing the challenge. It prints only the HTTPS endpoint, six-digit passcode, and expiry. If the route or listener is unavailable, it refuses without issuing a challenge.
+   `pair` checks the installed listener and owned Tailscale Serve route before issuing the challenge. It prints only the HTTPS endpoint, six-digit passcode, and expiry. If the route or listener is unavailable, it refuses without issuing a challenge. QR generation, QR scanning, and JSON pairing-payload entry are not supported.
 7. If you want notifications, drop a Firebase service-account JSON into the bridge state directory and add the absolute path to the bridge launch arguments.
 
 ## One-time phone setup

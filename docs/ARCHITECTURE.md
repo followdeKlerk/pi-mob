@@ -64,7 +64,7 @@ The mobile app does not run a web server. It does not cache credentials. It does
 
 ## Trust boundary
 
-Pairing pins the bridge endpoint and the host identity. The phone authorises itself with a per-installation bearer credential minted at enrollment:
+Pairing is deliberately manual: the operator enters the HTTPS endpoint and one-time passcode in the Android app. QR generation, QR scanning, and JSON pairing-payload entry are removed and unsupported. The passcode mints the per-installation bearer credential during enrollment:
 
 - `hello` MUST carry the credential or the handshake is closed with `invalid_auth` / `re_pair_required`.
 - `POST /v1/attachments` and `GET /v1/exports/<id>` MUST carry `X-Installation-Id` and `X-Installation-Credential`; the multipart `installationId` is a hint only.

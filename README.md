@@ -41,7 +41,7 @@ The bridge:
 
 The Android app:
 
-- pairs once with the bridge using an HTTPS endpoint and one-time passcode;
+- pairs once with the bridge using a manually entered HTTPS endpoint and one-time passcode; QR generation, QR scanning, and JSON pairing-payload entry are removed and unsupported;
 - downloads only the chat history you can see;
 - mirrors the Pi sessions as native chat surfaces;
 - fires system notifications when replies arrive while the app is backgrounded;

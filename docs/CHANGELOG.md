@@ -8,6 +8,7 @@ First public preview of Pi Mob. The mobile app is Android-only and the bridge is
 
 ### Production-wired
 
+- Manual endpoint plus one-time six-digit passcode enrollment; QR generation/scanning and JSON pairing-payload entry are removed and unsupported.
 - Stream subscription with durable cursor, replay, and live delivery.
 - Session list, rename, create, and delete.
 - Per-session history import with bounded batches, durable checkpoints, and restart coverage.

@@ -110,6 +110,8 @@ The host persists a per-stream cursor. The mobile app seeds its in-memory cursor
 
 The bridge exposes enrollment and a small binary HTTP API on the same loopback listener. The mobile client reaches these endpoints only through Tailscale Serve, not directly.
 
+Pairing is deliberately manual: the operator enters the HTTPS endpoint and six-digit passcode in the Android app. QR generation, QR scanning, and JSON pairing-payload entry are removed and unsupported.
+
 `POST /v1/enroll` accepts `{ "installationId": "<uuid>", "passcode": "<six-digit passcode>" }`. The passcode is checked against its stored hash for expiry and single use in one SQLite transaction. Enrollment attempts are rate limited. A successful 201 response contains the plaintext `installationCredential` once. The bridge stores only its hash. The Android client writes the returned value only to Keystore-backed secure storage. Missing, expired, or replayed challenges return sanitized errors and never return a credential.
 
 Both `/v1/attachments` and `/v1/exports/<id>` REQUIRE two headers before any body read:

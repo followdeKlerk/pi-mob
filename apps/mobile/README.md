@@ -67,7 +67,7 @@ The mobile app uses focused regression tests only. Broad Flutter suites are not 
 | `FOREGROUND_SERVICE` | permit the status foreground service. |
 | `FOREGROUND_SERVICE_DATA_SYNC` | classify the status foreground service. |
 
-The app does not request camera access. Pairing uses the HTTPS endpoint and one-time six-digit passcode printed by `pi-mob pair`. It does not request location, contacts, microphone, or general storage access.
+The app does not request camera access. Pairing uses only the manually entered HTTPS endpoint and one-time six-digit passcode printed by `pi-mob pair`; QR generation/scanning and JSON pairing-payload entry are removed and unsupported. It does not request location, contacts, microphone, or general storage access.
 
 ## What is not in the app
 

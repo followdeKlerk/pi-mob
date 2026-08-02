@@ -47,7 +47,7 @@ The released bridge is macOS x64 only. The public CLI is the `pi-mob` installer 
 ./pi-mob pair
 ```
 
-`pair` prints only the HTTPS endpoint, six-digit passcode, and expiry in human mode. It refuses when the configured listener or owned Serve route is unavailable. Enter these values in the **Pair** action in the Android app.
+`pair` prints only the HTTPS endpoint, six-digit passcode, and expiry in human mode. It refuses when the configured listener or owned Serve route is unavailable. Enter these values manually in the **Pair** action in the Android app. QR generation, QR scanning, and JSON pairing-payload entry are removed and unsupported.
 
 ## Configuration
 

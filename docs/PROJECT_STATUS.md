@@ -21,7 +21,7 @@ This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`
 
 | Capability | Verified end-to-end |
 | --- | --- |
-| Pairing via HTTPS MagicDNS endpoint and one-time six-digit passcode (passcode mints the per-installation bearer credential) | Yes |
+| Manual pairing via HTTPS MagicDNS endpoint and one-time six-digit passcode (passcode mints the per-installation bearer credential); QR and JSON pairing-payload flows are removed and unsupported | Yes |
 | Per-installation bearer credential on `hello`, `POST /v1/attachments`, `GET /v1/exports/<id>`, and `device.register` with constant-time hash verification and host-side revocation | Yes |
 | Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed time, ETA, and throughput | Yes |
 | Stream subscription with durable cursor, replay, and live delivery | Yes |
