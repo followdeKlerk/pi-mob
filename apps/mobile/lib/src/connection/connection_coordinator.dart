@@ -559,7 +559,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         lifecycle == SessionLifecycleState.softDeleted ||
         lifecycle == SessionLifecycleState.purged ||
         draft.trim().isEmpty ||
-        pendingCommandId != null ||
+        (pendingCommandId != null && pendingState != 'indeterminate') ||
         requiresTrustApproval) {
       return false;
     }
@@ -574,7 +574,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         selectedSessionId == null ||
         leaseId == null ||
         draft.trim().isEmpty ||
-        pendingCommandId != null ||
+        (pendingCommandId != null && pendingState != 'indeterminate') ||
         requiresTrustApproval) {
       return false;
     }
@@ -594,7 +594,9 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (selectedSessionId == null) return 'Select a session.';
     if (leaseId == null) return 'Acquire the controller lease.';
     if (draft.trim().isEmpty) return 'Compose a message before sending.';
-    if (pendingCommandId != null) return 'A command is already in flight.';
+    if (pendingCommandId != null && pendingState != 'indeterminate') {
+      return 'A command is already in flight.';
+    }
     final state = _effectiveRuntimeState;
     if (!_deliveryModeMatchesRuntime(_effectiveDeliveryMode, state)) {
       return _deliveryModeMismatchReason(_effectiveDeliveryMode, state);
@@ -686,10 +688,13 @@ final class ConnectionCoordinator extends ChangeNotifier
     switch (mode) {
       case DeliveryMode.immediate:
         // Session is eligible for an immediate prompt when idle, stopped, or
-        // when the state has not yet been reported. Anything else means a
-        // turn is already in flight or has crashed and the bridge cannot
-        // dispatch directly.
-        return state == null || state == 'idle' || state == 'stopped';
+        // when the state has not yet been reported. A connected
+        // indeterminate state is intentionally treated as sendable by the
+        // mobile client; the user accepted the delivery-risk tradeoff.
+        return state == null ||
+            state == 'idle' ||
+            state == 'stopped' ||
+            state == 'indeterminate';
       case DeliveryMode.steer:
       case DeliveryMode.followUp:
         return state == 'running';

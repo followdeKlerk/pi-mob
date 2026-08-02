@@ -185,38 +185,12 @@ class Composer extends StatelessWidget {
         }
         return;
       case PromptFailureAction.discardUncertain:
-        if (context.mounted) await _discardIndeterminate(context);
+        // Uncertain completion is intentionally non-blocking. The connected
+        // composer remains usable and the next prompt may be sent.
         return;
     }
   }
 
-  Future<void> _discardIndeterminate(BuildContext context) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Discard uncertain message?'),
-        content: const Text(
-          'This message may already have completed. Discarding will not '
-          'cancel or undo it. Pi will restart without sending it again, and '
-          'you can compose a new message.',
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(false),
-            child: const Text('Keep'),
-          ),
-          FilledButton(
-            key: const Key('confirm-discard-indeterminate'),
-            onPressed: () => Navigator.of(dialogContext).pop(true),
-            child: const Text('Discard and continue'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed == true) {
-      await coordinator.discardIndeterminateAndContinue();
-    }
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -259,53 +233,7 @@ class Composer extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (coordinator.pendingState == 'indeterminate' ||
-                    coordinator.selectedRuntimeState == 'indeterminate') ...[
-                  Card(
-                    key: const Key('indeterminate-warning'),
-                    color: Theme.of(context).colorScheme.errorContainer,
-                    child: Padding(
-                      padding: const EdgeInsets.all(PiSpacing.md),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Completion is unknown',
-                            style: Theme.of(context).textTheme.titleSmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onErrorContainer,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          const SizedBox(height: PiSpacing.xs),
-                          Text(
-                            'The previous message will not run again automatically.',
-                            style: Theme.of(context).textTheme.bodySmall
-                                ?.copyWith(
-                                  color: Theme.of(
-                                    context,
-                                  ).colorScheme.onErrorContainer,
-                                ),
-                          ),
-                          const SizedBox(height: PiSpacing.sm),
-                          Align(
-                            alignment: Alignment.centerRight,
-                            child: TextButton(
-                              key: const Key('discard-indeterminate'),
-                              onPressed: () =>
-                                  unawaited(_discardIndeterminate(context)),
-                              child: const Text('Discard and continue'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: PiSpacing.sm),
-                ],
+
                 if (const {
                   PromptSendPhase.acquiringControl,
                   PromptSendPhase.submitting,

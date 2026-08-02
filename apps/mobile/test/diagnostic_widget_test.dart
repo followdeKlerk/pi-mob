@@ -204,13 +204,15 @@ void main() {
     await tester.tap(find.byKey(const Key('close-chat-drawer')));
     await tester.pumpAndSettle();
 
-    // Chat hosts the indeterminate warning and one collapsed truncation badge
-    // inside the originating tool card, never a standalone timeline notice.
-    expect(find.byKey(const Key('indeterminate-warning')), findsOneWidget);
+    // An uncertain prior send is not surfaced as a blocking warning or dialog;
+    // the connected chat remains usable and the normal truncation badge stays
+    // scoped to the originating tool card.
+    expect(find.byKey(const Key('indeterminate-warning')), findsNothing);
     expect(
       find.textContaining('will not run again automatically'),
-      findsOneWidget,
+      findsNothing,
     );
+    expect(find.text('Discard uncertain message?'), findsNothing);
     expect(find.text('Tool output truncated'), findsNothing);
     expect(find.text('Output truncated'), findsOneWidget);
     expect(
