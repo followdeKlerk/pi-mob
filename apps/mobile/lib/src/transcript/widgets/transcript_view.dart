@@ -432,6 +432,17 @@ class _TurnView extends StatelessWidget {
   /// align with the rest of the transcript.
   static const double _contentInset = 16;
 
+  bool _userMessageReceived(UserTurnStatus status) => switch (status) {
+    UserTurnStatus.accepted ||
+    UserTurnStatus.queued ||
+    UserTurnStatus.dispatching ||
+    UserTurnStatus.dispatched ||
+    UserTurnStatus.settled => true,
+    UserTurnStatus.aborted ||
+    UserTurnStatus.failed ||
+    UserTurnStatus.indeterminate => false,
+  };
+
   Future<void> _showUserActions(BuildContext context, String message) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -554,7 +565,17 @@ class _TurnView extends StatelessWidget {
           child: ListTile(
             leading: const Icon(Icons.person_outline),
             title: Text(message),
-            subtitle: Text('You · ${user.deliveryMode} · ${user.status.name}'),
+            subtitle: _userMessageReceived(user.status)
+                ? Semantics(
+                    label: 'Message received',
+                    child: Icon(
+                      Icons.check,
+                      key: Key('user-delivery-check-${user.turnId}'),
+                      size: 16,
+                      color: scheme.primary,
+                    ),
+                  )
+                : null,
           ),
         ),
       );

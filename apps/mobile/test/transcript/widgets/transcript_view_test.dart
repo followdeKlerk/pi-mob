@@ -119,6 +119,54 @@ void main() {
     expect(list.controller, isNotNull);
   });
 
+  testWidgets('received user messages show only a checkmark', (tester) async {
+    await tester.pumpWidget(
+      _app(
+        TranscriptView(
+          document: _document([
+            const UserTurn(
+              turnId: 'user-1',
+              commandId: 'command-1',
+              deliveryMode: 'immediate',
+              status: UserTurnStatus.settled,
+              message: 'Hello',
+            ),
+          ]),
+        ),
+      ),
+    );
+
+    expect(find.text('Hello'), findsOneWidget);
+    expect(find.byKey(const Key('user-delivery-check-user-1')), findsOneWidget);
+    expect(find.textContaining('You ·'), findsNothing);
+    expect(find.textContaining('settled'), findsNothing);
+  });
+
+  testWidgets('unconfirmed user messages show no delivery text', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        TranscriptView(
+          document: _document([
+            const UserTurn(
+              turnId: 'user-2',
+              commandId: 'command-2',
+              deliveryMode: 'immediate',
+              status: UserTurnStatus.indeterminate,
+              message: 'Maybe sent',
+            ),
+          ]),
+        ),
+      ),
+    );
+
+    expect(find.text('Maybe sent'), findsOneWidget);
+    expect(find.byKey(const Key('user-delivery-check-user-2')), findsNothing);
+    expect(find.textContaining('You ·'), findsNothing);
+    expect(find.textContaining('indeterminate'), findsNothing);
+  });
+
   testWidgets('settled event with no assistant output is explicit', (
     tester,
   ) async {
