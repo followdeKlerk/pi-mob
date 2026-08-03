@@ -54,7 +54,7 @@ jobs:
         run: bun run all
 
   mobile:
-    name: Mobile (Dart analyze + fixture parity)
+    name: Mobile (analyze + protocol + tool results)
     runs-on: macos-15-intel
     timeout-minutes: 20
     env:
@@ -101,3 +101,9 @@ jobs:
       - name: flutter test (protocol fixture parity)
         working-directory: apps/mobile
         run: flutter test test/protocol_fixture_test.dart
+
+      - name: flutter test (native tool result compatibility)
+        working-directory: apps/mobile
+        run: |
+          flutter test test/transcript/widgets/native_tool_result_compat_test.dart
+          flutter test test/transcript/widgets/tool_card_test.dart
