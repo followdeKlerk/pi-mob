@@ -13,11 +13,19 @@ import android.provider.Settings
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.android.FlutterSurfaceView
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+  override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
+    super.onFlutterSurfaceViewCreated(flutterSurfaceView)
+    window.attributes = window.attributes.also {
+      it.preferredRefreshRate = 120f
+    }
+  }
+
   private val channelName = "pi-mob/notifications"
   private var tapSink:EventChannel.EventSink?=null
   private var tokenSink:EventChannel.EventSink?=null
