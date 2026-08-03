@@ -1,25 +1,7 @@
-/// View-data types for a single tool call.
-///
-/// The mobile transcript renders a stream of turns. Each turn may contain zero
-/// or more tool calls, zero or one reasoning block, and zero or one final
-/// answer. The transcript widgets are intentionally decoupled from the
-/// protocol-domain types so the same widgets can be exercised by tests
-/// without spinning up a coordinator, and so the domain can evolve without
-/// invalidating the presentation layer.
-///
-/// All view-data here is **immutable**. Once constructed, a [ToolCallViewData]
-/// cannot change. New state replaces the old value, which keeps widget
-/// `==` stable and lets Flutter reuse [Element]s across rebuilds.
-///
-/// The argument and result parsers are deliberately strict: unknown fields are
-/// tolerated but malformed fields throw a [FormatException] so the reducer
-/// surfaces the bug at the boundary instead of rendering silent placeholders.
-library;
+import 'dart:convert';
 
 import '../transcript_status.dart';
 
-/// Names of the built-in tools the mobile transcript renders with a dedicated
-/// card. Anything outside this set falls through to [UnknownToolCard].
 class BuiltInToolName {
   const BuiltInToolName._();
 
@@ -31,8 +13,6 @@ class BuiltInToolName {
   static const String find = 'find';
   static const String ls = 'ls';
 
-  /// All built-in tool names. Order matters: it is the order the factory
-  /// uses to pick the dedicated card before falling back to the unknown card.
   static const List<String> all = <String>[
     read,
     bash,
@@ -43,13 +23,9 @@ class BuiltInToolName {
     ls,
   ];
 
-  /// Returns true when [name] matches a built-in tool.
   static bool isBuiltIn(String name) => all.contains(name);
 }
 
-/// Truncation metadata attached to a tool result when the host has dropped
-/// part of the output. The mobile widget keeps byte counts and the optional
-/// digest collapsed inside the originating tool card until requested.
 class ToolOutputTruncation {
   const ToolOutputTruncation({
     required this.retainedBytes,
@@ -57,19 +33,10 @@ class ToolOutputTruncation {
     this.digest,
   });
 
-  /// Bytes retained in the cached result the mobile widget will render.
   final int retainedBytes;
-
-  /// Bytes the host originally produced before truncation.
   final int totalBytes;
-
-  /// Optional SHA-256 digest of the full original payload. When present the
-  /// widget exposes it so the user can verify they are looking at the same
-  /// bytes the host produced.
   final String? digest;
 
-  /// Sanity-check factory: [retainedBytes] must be smaller than
-  /// [totalBytes], both must be non-negative.
   factory ToolOutputTruncation.parse({
     required int retainedBytes,
     required int totalBytes,
@@ -92,7 +59,6 @@ class ToolOutputTruncation {
     );
   }
 
-  /// Human-readable summary suitable for the visible truncation label.
   String get summaryLabel {
     final retained = _formatBytes(retainedBytes);
     final total = _formatBytes(totalBytes);
@@ -110,9 +76,6 @@ class ToolOutputTruncation {
   int get hashCode => Object.hash(retainedBytes, totalBytes, digest);
 }
 
-/// View-data describing one tool invocation as the transcript widget sees
-/// it. The widget never inspects the raw protocol payload directly; the
-/// reducer has already lowered it into a [ToolCallViewData].
 class ToolCallViewData {
   const ToolCallViewData({
     required this.toolCallId,
@@ -126,47 +89,19 @@ class ToolCallViewData {
     this.finishedAt,
   });
 
-  /// Stable identifier for the tool call. The mobile list keys cards by this
-  /// value so the framework reuses the correct [Element] across rebuilds.
   final String toolCallId;
-
-  /// Canonical tool name. Compared against [BuiltInToolName] to decide
-  /// whether a dedicated card or the generic unknown card is rendered.
   final String toolName;
-
-  /// Argument map as lowered by the reducer. Built-in cards cast the values
-  /// they care about via [ReadToolArgs.fromMap] etc. and ignore unknown
-  /// fields. The map is unmodifiable so widgets can rely on referential
-  /// equality during rebuild.
   final Map<String, Object?> arguments;
-
-  /// Lifecycle status. See [TranscriptToolStatus].
   final TranscriptToolStatus status;
-
-  /// Optional structured result. Built-in cards parse it into a typed shape
-  /// (e.g. [ReadToolResult]); unknown cards display the raw JSON.
   final Map<String, Object?>? result;
-
-  /// Short human-readable error message. Populated only when
-  /// [status] is [TranscriptToolStatus.error] or [TranscriptToolStatus.policyDenied].
   final String? errorMessage;
-
-  /// Optional truncation metadata. When present, the card renders a compact
-  /// badge and reveals retained/original byte counts only when expanded.
   final ToolOutputTruncation? truncation;
-
-  /// When the call started. Optional so older journals without timestamps
-  /// still render.
   final DateTime? startedAt;
-
-  /// When the call finished. Same rationale as [startedAt].
   final DateTime? finishedAt;
 
-  /// Convenience flag: true when the tool has a dedicated card.
   bool get isBuiltIn => BuiltInToolName.isBuiltIn(toolName);
 }
 
-/// Strict parser for the argument shape of the `read` tool.
 class ReadToolArgs {
   const ReadToolArgs({required this.path, this.offset, this.limit});
 
@@ -175,27 +110,16 @@ class ReadToolArgs {
   final int? limit;
 
   factory ReadToolArgs.fromMap(Map<String, Object?> map) {
-    final path = map['path'];
-    if (path is! String || path.isEmpty) {
-      throw const FormatException('read requires a non-empty string `path`');
-    }
-    final offset = map['offset'];
-    final limit = map['limit'];
-    if (offset != null && offset is! int) {
-      throw const FormatException('read `offset` must be an integer');
-    }
-    if (limit != null && limit is! int) {
-      throw const FormatException('read `limit` must be an integer');
-    }
+    final offset = _optionalInt(map['offset'], 'read `offset`');
+    final limit = _optionalInt(map['limit'], 'read `limit`');
     return ReadToolArgs(
-      path: path,
-      offset: offset as int?,
-      limit: limit as int?,
+      path: _displayPath(map['path']),
+      offset: offset,
+      limit: limit,
     );
   }
 }
 
-/// Strict parser for the argument shape of the `bash` tool.
 class BashToolArgs {
   const BashToolArgs({required this.command, this.cwd, this.timeoutMs});
 
@@ -209,26 +133,18 @@ class BashToolArgs {
       throw const FormatException('bash requires a non-empty string `command`');
     }
     final cwd = map['cwd'];
-    final timeoutMs = map['timeoutMs'];
     if (cwd != null && cwd is! String) {
       throw const FormatException('bash `cwd` must be a string');
     }
-    if (timeoutMs != null &&
-        (timeoutMs is! num ||
-            !timeoutMs.isFinite ||
-            timeoutMs.toInt() != timeoutMs)) {
-      throw const FormatException('bash `timeoutMs` must be an integer');
-    }
+    final timeoutMs = _optionalInt(map['timeoutMs'], 'bash `timeoutMs`');
     return BashToolArgs(
       command: command,
       cwd: cwd as String?,
-      timeoutMs: timeoutMs is num ? timeoutMs.toInt() : null,
+      timeoutMs: timeoutMs,
     );
   }
 }
 
-/// Strict parser for the argument shape of the `edit` tool. `edit` replaces
-/// the unique occurrence of [oldText] in [path] with [newText].
 class EditToolArgs {
   const EditToolArgs({
     required this.path,
@@ -241,10 +157,6 @@ class EditToolArgs {
   final String newText;
 
   factory EditToolArgs.fromMap(Map<String, Object?> map) {
-    final path = map['path'];
-    if (path is! String || path.isEmpty) {
-      throw const FormatException('edit requires a non-empty string `path`');
-    }
     final oldText = map['oldText'];
     if (oldText is! String) {
       throw const FormatException('edit requires a string `oldText`');
@@ -253,11 +165,14 @@ class EditToolArgs {
     if (newText is! String) {
       throw const FormatException('edit requires a string `newText`');
     }
-    return EditToolArgs(path: path, oldText: oldText, newText: newText);
+    return EditToolArgs(
+      path: _displayPath(map['path']),
+      oldText: oldText,
+      newText: newText,
+    );
   }
 }
 
-/// Strict parser for the argument shape of the `write` tool.
 class WriteToolArgs {
   const WriteToolArgs({required this.path, required this.content});
 
@@ -265,19 +180,17 @@ class WriteToolArgs {
   final String content;
 
   factory WriteToolArgs.fromMap(Map<String, Object?> map) {
-    final path = map['path'];
-    if (path is! String || path.isEmpty) {
-      throw const FormatException('write requires a non-empty string `path`');
-    }
     final content = map['content'];
     if (content is! String) {
       throw const FormatException('write requires a string `content`');
     }
-    return WriteToolArgs(path: path, content: content);
+    return WriteToolArgs(
+      path: _displayPath(map['path']),
+      content: content,
+    );
   }
 }
 
-/// Strict parser for the argument shape of the `grep` tool.
 class GrepToolArgs {
   const GrepToolArgs({
     required this.pattern,
@@ -317,7 +230,6 @@ class GrepToolArgs {
   }
 }
 
-/// Strict parser for the argument shape of the `find` tool.
 class FindToolArgs {
   const FindToolArgs({required this.pattern, this.path, this.type});
 
@@ -346,22 +258,15 @@ class FindToolArgs {
   }
 }
 
-/// Strict parser for the argument shape of the `ls` tool.
 class LsToolArgs {
   const LsToolArgs({required this.path});
 
   final String path;
 
-  factory LsToolArgs.fromMap(Map<String, Object?> map) {
-    final path = map['path'];
-    if (path is! String || path.isEmpty) {
-      throw const FormatException('ls requires a non-empty string `path`');
-    }
-    return LsToolArgs(path: path);
-  }
+  factory LsToolArgs.fromMap(Map<String, Object?> map) =>
+      LsToolArgs(path: _displayPath(map['path']));
 }
 
-/// Result shape for a `read` call.
 class ReadToolResult {
   const ReadToolResult({
     required this.content,
@@ -374,27 +279,21 @@ class ReadToolResult {
   final int? totalLines;
 
   factory ReadToolResult.fromMap(Map<String, Object?> map) {
-    final content = map['content'];
-    if (content is! String) {
-      throw const FormatException('read result requires string `content`');
+    final content = _resultText(map);
+    if (content == null) {
+      throw const FormatException('read result requires textual content');
     }
-    final byteCount = map['byteCount'];
-    if (byteCount is! int) {
-      throw const FormatException('read result requires int `byteCount`');
-    }
-    final totalLines = map['totalLines'];
-    if (totalLines != null && totalLines is! int) {
-      throw const FormatException('read result `totalLines` must be int');
-    }
+    final byteCount = _intFromResult(map, 'byteCount') ?? utf8.encode(content).length;
+    final totalLines = _intFromResult(map, 'totalLines') ??
+        (content.isEmpty ? 0 : '\n'.allMatches(content).length + 1);
     return ReadToolResult(
       content: content,
       byteCount: byteCount,
-      totalLines: totalLines as int?,
+      totalLines: totalLines,
     );
   }
 }
 
-/// Result shape for a `bash` call.
 class BashToolResult {
   const BashToolResult({
     required this.stdout,
@@ -407,54 +306,44 @@ class BashToolResult {
   final int exitCode;
 
   factory BashToolResult.fromMap(Map<String, Object?> map) {
-    final stdout = map['stdout'];
-    final stderr = map['stderr'];
-    final exitCode = map['exitCode'];
-    if (stdout is! String) {
-      throw const FormatException('bash result requires string `stdout`');
+    final stdout = _stringFromResult(map, 'stdout') ?? _resultText(map);
+    if (stdout == null) {
+      throw const FormatException('bash result requires textual output');
     }
-    if (stderr is! String) {
-      throw const FormatException('bash result requires string `stderr`');
-    }
-    if (exitCode is! int) {
-      throw const FormatException('bash result requires int `exitCode`');
-    }
-    return BashToolResult(stdout: stdout, stderr: stderr, exitCode: exitCode);
+    return BashToolResult(
+      stdout: stdout,
+      stderr: _stringFromResult(map, 'stderr') ?? '',
+      exitCode: _intFromResult(map, 'exitCode') ?? 0,
+    );
   }
 }
 
-/// Result shape for an `edit` call. The optional [diff] is the host-reported
-/// unified diff; the widget falls back to a before/after preview when absent.
 class EditToolResult {
   const EditToolResult({this.diff});
 
   final String? diff;
 
-  factory EditToolResult.fromMap(Map<String, Object?> map) {
-    final diff = map['diff'];
-    if (diff != null && diff is! String) {
-      throw const FormatException('edit result `diff` must be a string');
-    }
-    return EditToolResult(diff: diff as String?);
-  }
+  factory EditToolResult.fromMap(Map<String, Object?> map) => EditToolResult(
+        diff: _stringFromResult(map, 'diff') ?? _resultText(map),
+      );
 }
 
-/// Result shape for a `write` call.
 class WriteToolResult {
   const WriteToolResult({required this.byteCount});
 
   final int byteCount;
 
   factory WriteToolResult.fromMap(Map<String, Object?> map) {
-    final byteCount = map['byteCount'];
-    if (byteCount is! int) {
-      throw const FormatException('write result requires int `byteCount`');
+    final text = _resultText(map);
+    final byteCount = _intFromResult(map, 'byteCount') ??
+        (text == null ? null : _byteCountFromText(text));
+    if (byteCount == null) {
+      throw const FormatException('write result requires a byte count');
     }
     return WriteToolResult(byteCount: byteCount);
   }
 }
 
-/// One match in a `grep` result.
 class GrepToolMatch {
   const GrepToolMatch({
     required this.path,
@@ -483,7 +372,6 @@ class GrepToolMatch {
   }
 }
 
-/// Result shape for a `grep` call.
 class GrepToolResult {
   const GrepToolResult({required this.matches});
 
@@ -491,21 +379,37 @@ class GrepToolResult {
 
   factory GrepToolResult.fromMap(Map<String, Object?> map) {
     final raw = map['matches'];
-    if (raw is! List) {
-      throw const FormatException('grep result requires list `matches`');
-    }
-    final matches = <GrepToolMatch>[];
-    for (final item in raw) {
-      if (item is! Map) {
-        throw const FormatException('grep match must be an object');
+    if (raw is List) {
+      final matches = <GrepToolMatch>[];
+      for (final item in raw) {
+        if (item is! Map) {
+          throw const FormatException('grep match must be an object');
+        }
+        matches.add(GrepToolMatch.fromMap(Map<String, Object?>.from(item)));
       }
-      matches.add(GrepToolMatch.fromMap(Map<String, Object?>.from(item)));
+      return GrepToolResult(matches: List<GrepToolMatch>.unmodifiable(matches));
+    }
+
+    final lines = _resultLines(map);
+    final matches = <GrepToolMatch>[];
+    final pattern = RegExp(r'^(.+?):(\d+):(.*)$');
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index];
+      final match = pattern.firstMatch(line);
+      matches.add(
+        match == null
+            ? GrepToolMatch(path: 'output', lineNumber: index + 1, line: line)
+            : GrepToolMatch(
+                path: match.group(1)!,
+                lineNumber: int.parse(match.group(2)!),
+                line: match.group(3)!.trimLeft(),
+              ),
+      );
     }
     return GrepToolResult(matches: List<GrepToolMatch>.unmodifiable(matches));
   }
 }
 
-/// One match in a `find` result.
 class FindToolMatch {
   const FindToolMatch({required this.path});
 
@@ -520,7 +424,6 @@ class FindToolMatch {
   }
 }
 
-/// Result shape for a `find` call.
 class FindToolResult {
   const FindToolResult({required this.matches});
 
@@ -528,21 +431,24 @@ class FindToolResult {
 
   factory FindToolResult.fromMap(Map<String, Object?> map) {
     final raw = map['matches'];
-    if (raw is! List) {
-      throw const FormatException('find result requires list `matches`');
-    }
-    final matches = <FindToolMatch>[];
-    for (final item in raw) {
-      if (item is! Map) {
-        throw const FormatException('find match must be an object');
+    if (raw is List) {
+      final matches = <FindToolMatch>[];
+      for (final item in raw) {
+        if (item is! Map) {
+          throw const FormatException('find match must be an object');
+        }
+        matches.add(FindToolMatch.fromMap(Map<String, Object?>.from(item)));
       }
-      matches.add(FindToolMatch.fromMap(Map<String, Object?>.from(item)));
+      return FindToolResult(matches: List<FindToolMatch>.unmodifiable(matches));
     }
-    return FindToolResult(matches: List<FindToolMatch>.unmodifiable(matches));
+    return FindToolResult(
+      matches: List<FindToolMatch>.unmodifiable(
+        _resultLines(map).map((line) => FindToolMatch(path: line)),
+      ),
+    );
   }
 }
 
-/// One entry in an `ls` result.
 class LsEntry {
   const LsEntry({required this.name, required this.kind, this.sizeBytes});
 
@@ -559,15 +465,11 @@ class LsEntry {
     if (kind is! String) {
       throw const FormatException('ls entry requires string `kind`');
     }
-    final sizeBytes = map['sizeBytes'];
-    if (sizeBytes != null && sizeBytes is! int) {
-      throw const FormatException('ls entry `sizeBytes` must be int');
-    }
-    return LsEntry(name: name, kind: kind, sizeBytes: sizeBytes as int?);
+    final sizeBytes = _optionalInt(map['sizeBytes'], 'ls entry `sizeBytes`');
+    return LsEntry(name: name, kind: kind, sizeBytes: sizeBytes);
   }
 }
 
-/// Result shape for an `ls` call.
 class LsToolResult {
   const LsToolResult({required this.entries});
 
@@ -575,24 +477,101 @@ class LsToolResult {
 
   factory LsToolResult.fromMap(Map<String, Object?> map) {
     final raw = map['entries'];
-    if (raw is! List) {
-      throw const FormatException('ls result requires list `entries`');
-    }
-    final entries = <LsEntry>[];
-    for (final item in raw) {
-      if (item is! Map) {
-        throw const FormatException('ls entry must be an object');
+    if (raw is List) {
+      final entries = <LsEntry>[];
+      for (final item in raw) {
+        if (item is! Map) {
+          throw const FormatException('ls entry must be an object');
+        }
+        entries.add(LsEntry.fromMap(Map<String, Object?>.from(item)));
       }
-      entries.add(LsEntry.fromMap(Map<String, Object?>.from(item)));
+      return LsToolResult(entries: List<LsEntry>.unmodifiable(entries));
     }
-    return LsToolResult(entries: List<LsEntry>.unmodifiable(entries));
+    return LsToolResult(
+      entries: List<LsEntry>.unmodifiable(
+        _resultLines(map).map((line) => LsEntry(name: line, kind: 'item')),
+      ),
+    );
   }
 }
 
-/// Approximate human-readable byte formatter shared across the truncation
-/// notice and large-output viewer. Always uses the larger unit that still
-/// yields a value greater than or equal to 1, except for sub-kilobyte
-/// values which stay in bytes.
+const String _redactedPathLabel = '<path redacted>';
+
+String _displayPath(Object? value) =>
+    value is String && value.isNotEmpty ? value : _redactedPathLabel;
+
+int? _optionalInt(Object? value, String label) {
+  if (value == null) return null;
+  if (value is int) return value;
+  if (value is num && value.isFinite && value.toInt() == value) {
+    return value.toInt();
+  }
+  throw FormatException('$label must be an integer');
+}
+
+Map<String, Object?>? _details(Map<String, Object?> map) {
+  final value = map['details'];
+  return value is Map ? Map<String, Object?>.from(value) : null;
+}
+
+String? _stringFromResult(Map<String, Object?> map, String key) {
+  final direct = map[key];
+  if (direct is String) return direct;
+  final nested = _details(map)?[key];
+  return nested is String ? nested : null;
+}
+
+int? _intFromResult(Map<String, Object?> map, String key) {
+  final direct = map[key];
+  if (direct is int) return direct;
+  final nested = _details(map)?[key];
+  if (nested is int) return nested;
+  return null;
+}
+
+String? _resultText(Map<String, Object?> map) {
+  for (final key in const <String>['output', 'stdout', 'text']) {
+    final value = _stringFromResult(map, key);
+    if (value != null) return value;
+  }
+
+  final content = map['content'];
+  if (content is String) return content;
+  if (content is List) {
+    final parts = <String>[];
+    for (final item in content) {
+      if (item is String) {
+        parts.add(item);
+        continue;
+      }
+      if (item is Map) {
+        final text = item['text'];
+        if (text is String) parts.add(text);
+      }
+    }
+    if (parts.isNotEmpty) return parts.join('\n');
+  }
+
+  final nestedContent = _details(map)?['content'];
+  if (nestedContent is String) return nestedContent;
+  return null;
+}
+
+int? _byteCountFromText(String text) {
+  final match = RegExp(r'(\d+)\s+bytes?', caseSensitive: false).firstMatch(text);
+  return match == null ? null : int.tryParse(match.group(1)!);
+}
+
+List<String> _resultLines(Map<String, Object?> map) {
+  final text = _resultText(map);
+  if (text == null || text.isEmpty) return const <String>[];
+  return text
+      .split('\n')
+      .map((line) => line.trimRight())
+      .where((line) => line.isNotEmpty)
+      .toList(growable: false);
+}
+
 String _formatBytes(int bytes) {
   if (bytes < 1024) return '$bytes B';
   const units = ['KB', 'MB', 'GB', 'TB'];
@@ -602,12 +581,7 @@ String _formatBytes(int bytes) {
     value /= 1024;
     unitIndex++;
   }
-  // Always use one decimal place for KB+ so values like 5120 B render as
-  // "5.0 KB" rather than inconsistently switching between "5 KB" and
-  // "5.0 KB" depending on whether the scaled value happens to be integer.
   return '${value.toStringAsFixed(1)} ${units[unitIndex]}';
 }
 
-/// Public wrapper so widgets and tests can use the formatter without
-/// accessing the private symbol.
 String formatRetainedBytes(int bytes) => _formatBytes(bytes);
