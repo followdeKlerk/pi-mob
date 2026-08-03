@@ -303,8 +303,7 @@ void main() {
             _buildData(
               toolName: BuiltInToolName.read,
               status: TranscriptToolStatus.completed,
-              // Missing required `path`.
-              arguments: const <String, Object?>{'limit': 1},
+              arguments: const <String, Object?>{'limit': 'not-an-integer'},
               result: const <String, Object?>{'content': 'x', 'byteCount': 1},
             ),
           ),
