@@ -113,7 +113,7 @@ class ReadToolArgs {
     final offset = _optionalInt(map['offset'], 'read `offset`');
     final limit = _optionalInt(map['limit'], 'read `limit`');
     return ReadToolArgs(
-      path: _displayPath(map['path']),
+      path: _displayPath(map['path'], 'read `path`'),
       offset: offset,
       limit: limit,
     );
@@ -166,7 +166,7 @@ class EditToolArgs {
       throw const FormatException('edit requires a string `newText`');
     }
     return EditToolArgs(
-      path: _displayPath(map['path']),
+      path: _displayPath(map['path'], 'edit `path`'),
       oldText: oldText,
       newText: newText,
     );
@@ -185,7 +185,7 @@ class WriteToolArgs {
       throw const FormatException('write requires a string `content`');
     }
     return WriteToolArgs(
-      path: _displayPath(map['path']),
+      path: _displayPath(map['path'], 'write `path`'),
       content: content,
     );
   }
@@ -264,7 +264,7 @@ class LsToolArgs {
   final String path;
 
   factory LsToolArgs.fromMap(Map<String, Object?> map) =>
-      LsToolArgs(path: _displayPath(map['path']));
+      LsToolArgs(path: _displayPath(map['path'], 'ls `path`'));
 }
 
 class ReadToolResult {
@@ -283,8 +283,11 @@ class ReadToolResult {
     if (content == null) {
       throw const FormatException('read result requires textual content');
     }
-    final byteCount = _intFromResult(map, 'byteCount') ?? utf8.encode(content).length;
-    final totalLines = _intFromResult(map, 'totalLines') ??
+    final byteCount =
+        _intFromResult(map, 'byteCount', 'read result `byteCount`') ??
+        utf8.encode(content).length;
+    final totalLines =
+        _intFromResult(map, 'totalLines', 'read result `totalLines`') ??
         (content.isEmpty ? 0 : '\n'.allMatches(content).length + 1);
     return ReadToolResult(
       content: content,
@@ -306,14 +309,18 @@ class BashToolResult {
   final int exitCode;
 
   factory BashToolResult.fromMap(Map<String, Object?> map) {
-    final stdout = _stringFromResult(map, 'stdout') ?? _resultText(map);
+    final stdout =
+        _stringFromResult(map, 'stdout', 'bash result `stdout`') ??
+        _resultText(map);
     if (stdout == null) {
       throw const FormatException('bash result requires textual output');
     }
     return BashToolResult(
       stdout: stdout,
-      stderr: _stringFromResult(map, 'stderr') ?? '',
-      exitCode: _intFromResult(map, 'exitCode') ?? 0,
+      stderr:
+          _stringFromResult(map, 'stderr', 'bash result `stderr`') ?? '',
+      exitCode:
+          _intFromResult(map, 'exitCode', 'bash result `exitCode`') ?? 0,
     );
   }
 }
@@ -324,7 +331,8 @@ class EditToolResult {
   final String? diff;
 
   factory EditToolResult.fromMap(Map<String, Object?> map) => EditToolResult(
-        diff: _stringFromResult(map, 'diff') ?? _resultText(map),
+        diff: _stringFromResult(map, 'diff', 'edit result `diff`') ??
+            _resultText(map),
       );
 }
 
@@ -335,7 +343,8 @@ class WriteToolResult {
 
   factory WriteToolResult.fromMap(Map<String, Object?> map) {
     final text = _resultText(map);
-    final byteCount = _intFromResult(map, 'byteCount') ??
+    final byteCount =
+        _intFromResult(map, 'byteCount', 'write result `byteCount`') ??
         (text == null ? null : _byteCountFromText(text));
     if (byteCount == null) {
       throw const FormatException('write result requires a byte count');
@@ -379,7 +388,10 @@ class GrepToolResult {
 
   factory GrepToolResult.fromMap(Map<String, Object?> map) {
     final raw = map['matches'];
-    if (raw is List) {
+    if (raw != null) {
+      if (raw is! List) {
+        throw const FormatException('grep result `matches` must be a list');
+      }
       final matches = <GrepToolMatch>[];
       for (final item in raw) {
         if (item is! Map) {
@@ -431,7 +443,10 @@ class FindToolResult {
 
   factory FindToolResult.fromMap(Map<String, Object?> map) {
     final raw = map['matches'];
-    if (raw is List) {
+    if (raw != null) {
+      if (raw is! List) {
+        throw const FormatException('find result `matches` must be a list');
+      }
       final matches = <FindToolMatch>[];
       for (final item in raw) {
         if (item is! Map) {
@@ -477,7 +492,10 @@ class LsToolResult {
 
   factory LsToolResult.fromMap(Map<String, Object?> map) {
     final raw = map['entries'];
-    if (raw is List) {
+    if (raw != null) {
+      if (raw is! List) {
+        throw const FormatException('ls result `entries` must be a list');
+      }
       final entries = <LsEntry>[];
       for (final item in raw) {
         if (item is! Map) {
@@ -496,9 +514,18 @@ class LsToolResult {
 }
 
 const String _redactedPathLabel = '<path redacted>';
+const Object _missingResultField = Object();
 
-String _displayPath(Object? value) =>
-    value is String && value.isNotEmpty ? value : _redactedPathLabel;
+String _displayPath(Object? value, String label) {
+  if (value == null) return _redactedPathLabel;
+  if (value is! String) {
+    throw FormatException('$label must be a string');
+  }
+  if (value.isEmpty) {
+    throw FormatException('$label must be non-empty');
+  }
+  return value;
+}
 
 int? _optionalInt(Object? value, String label) {
   if (value == null) return null;
@@ -510,51 +537,91 @@ int? _optionalInt(Object? value, String label) {
 }
 
 Map<String, Object?>? _details(Map<String, Object?> map) {
+  if (!map.containsKey('details') || map['details'] == null) return null;
   final value = map['details'];
-  return value is Map ? Map<String, Object?>.from(value) : null;
+  if (value is! Map) {
+    throw const FormatException('tool result `details` must be an object');
+  }
+  return Map<String, Object?>.from(value);
 }
 
-String? _stringFromResult(Map<String, Object?> map, String key) {
-  final direct = map[key];
-  if (direct is String) return direct;
-  final nested = _details(map)?[key];
-  return nested is String ? nested : null;
+Object? _resultField(Map<String, Object?> map, String key) {
+  if (map.containsKey(key)) return map[key];
+  final details = _details(map);
+  if (details != null && details.containsKey(key)) return details[key];
+  return _missingResultField;
 }
 
-int? _intFromResult(Map<String, Object?> map, String key) {
-  final direct = map[key];
-  if (direct is int) return direct;
-  final nested = _details(map)?[key];
-  if (nested is int) return nested;
-  return null;
+String? _stringFromResult(
+  Map<String, Object?> map,
+  String key,
+  String label,
+) {
+  final value = _resultField(map, key);
+  if (identical(value, _missingResultField) || value == null) return null;
+  if (value is! String) {
+    throw FormatException('$label must be a string');
+  }
+  return value;
+}
+
+int? _intFromResult(
+  Map<String, Object?> map,
+  String key,
+  String label,
+) {
+  final value = _resultField(map, key);
+  if (identical(value, _missingResultField) || value == null) return null;
+  if (value is! int) {
+    throw FormatException('$label must be an integer');
+  }
+  return value;
 }
 
 String? _resultText(Map<String, Object?> map) {
-  for (final key in const <String>['output', 'stdout', 'text']) {
-    final value = _stringFromResult(map, key);
+  for (final entry in const <(String, String)>[
+    ('output', 'tool result `output`'),
+    ('stdout', 'tool result `stdout`'),
+    ('text', 'tool result `text`'),
+  ]) {
+    final value = _stringFromResult(map, entry.$1, entry.$2);
     if (value != null) return value;
   }
 
-  final content = map['content'];
+  final content = _resultField(map, 'content');
+  if (identical(content, _missingResultField) || content == null) return null;
+  return _textFromContent(content);
+}
+
+String? _textFromContent(Object content) {
   if (content is String) return content;
-  if (content is List) {
-    final parts = <String>[];
-    for (final item in content) {
-      if (item is String) {
-        parts.add(item);
-        continue;
-      }
-      if (item is Map) {
-        final text = item['text'];
-        if (text is String) parts.add(text);
-      }
-    }
-    if (parts.isNotEmpty) return parts.join('\n');
+  if (content is! List) {
+    throw const FormatException(
+      'tool result `content` must be a string or list',
+    );
   }
 
-  final nestedContent = _details(map)?['content'];
-  if (nestedContent is String) return nestedContent;
-  return null;
+  final parts = <String>[];
+  for (final item in content) {
+    if (item is String) {
+      parts.add(item);
+      continue;
+    }
+    if (item is! Map) {
+      throw const FormatException(
+        'tool result content blocks must be strings or objects',
+      );
+    }
+    if (!item.containsKey('text') || item['text'] == null) continue;
+    final text = item['text'];
+    if (text is! String) {
+      throw const FormatException(
+        'tool result content block `text` must be a string',
+      );
+    }
+    parts.add(text);
+  }
+  return parts.isEmpty ? null : parts.join('\n');
 }
 
 int? _byteCountFromText(String text) {
