@@ -25,7 +25,7 @@ const ALLOWED_PERMISSIONS = new Set([
   "android.permission.CAMERA",
   "com.example.pi_mob.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
 ]);
-const REQUIRED_MANIFEST = [".MainActivity", ".PiMobMessagingService", "pi-mob", "session"]; 
+const REQUIRED_MANIFEST = [".MainActivity", ".PiMobMessagingService", "pi-mob", "session"];
 
 export interface AndroidReleaseInput {
   gradle: string;
