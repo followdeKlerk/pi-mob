@@ -248,8 +248,7 @@ class NotificationController extends ChangeNotifier {
     return applied;
   }
 
-  Future<void> openNotificationSettings() =>
-      adapter.openNotificationSettings();
+  Future<void> openNotificationSettings() => adapter.openNotificationSettings();
 
   Future<void> setForegroundService(
     bool value, {

@@ -191,7 +191,6 @@ class Composer extends StatelessWidget {
     }
   }
 
-
   @override
   Widget build(BuildContext context) {
     return ListenableBuilder(
@@ -233,7 +232,6 @@ class Composer extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               mainAxisSize: MainAxisSize.min,
               children: [
-
                 if (const {
                   PromptSendPhase.acquiringControl,
                   PromptSendPhase.submitting,

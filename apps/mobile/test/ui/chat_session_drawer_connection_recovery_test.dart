@@ -44,10 +44,7 @@ void main() {
 
       await _openDrawer(tester, fixture);
 
-      expect(
-        find.byKey(const Key('drawer-connection-error')),
-        findsOneWidget,
-      );
+      expect(find.byKey(const Key('drawer-connection-error')), findsOneWidget);
       final widget = tester.widget<SelectableText>(
         find.byKey(const Key('drawer-connection-error')),
       );
@@ -55,40 +52,38 @@ void main() {
     },
   );
 
-  testWidgets(
-    'drawer does not surface error details while phase is ready',
-    (tester) async {
-      final fixture = _DrawerFixture();
-      fixture.coordinator.debugForcePhase(ConnectionPhase.ready);
-      addTearDown(fixture.dispose);
+  testWidgets('drawer does not surface error details while phase is ready', (
+    tester,
+  ) async {
+    final fixture = _DrawerFixture();
+    fixture.coordinator.debugForcePhase(ConnectionPhase.ready);
+    addTearDown(fixture.dispose);
 
-      await _openDrawer(tester, fixture);
+    await _openDrawer(tester, fixture);
 
-      expect(find.byKey(const Key('drawer-connection-error')), findsNothing);
-      expect(find.byKey(const Key('drawer-connection-retry')), findsNothing);
-    },
-  );
+    expect(find.byKey(const Key('drawer-connection-error')), findsNothing);
+    expect(find.byKey(const Key('drawer-connection-retry')), findsNothing);
+  });
 
-  testWidgets(
-    'retry button is enabled and tappable on off-rail phase',
-    (tester) async {
-      final fixture = _DrawerFixture();
-      fixture.coordinator.debugSetErrorMessage('Protocol error: Bad envelope');
-      fixture.coordinator.debugForcePhase(ConnectionPhase.incompatible);
-      addTearDown(fixture.dispose);
+  testWidgets('retry button is enabled and tappable on off-rail phase', (
+    tester,
+  ) async {
+    final fixture = _DrawerFixture();
+    fixture.coordinator.debugSetErrorMessage('Protocol error: Bad envelope');
+    fixture.coordinator.debugForcePhase(ConnectionPhase.incompatible);
+    addTearDown(fixture.dispose);
 
-      await _openDrawer(tester, fixture);
-      final retry = find.byKey(const Key('drawer-connection-retry'));
-      expect(retry, findsOneWidget);
-      // Tapping the button must not throw in the offline fixture; the
-      // coordinator's retryConnection is a safe no-op when the endpoint
-      // has not been seeded, which is the same shape the device sees when
-      // hello completes and the URL is missing.
-      await tester.tap(retry);
-      await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull);
-    },
-  );
+    await _openDrawer(tester, fixture);
+    final retry = find.byKey(const Key('drawer-connection-retry'));
+    expect(retry, findsOneWidget);
+    // Tapping the button must not throw in the offline fixture; the
+    // coordinator's retryConnection is a safe no-op when the endpoint
+    // has not been seeded, which is the same shape the device sees when
+    // hello completes and the URL is missing.
+    await tester.tap(retry);
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
 
   testWidgets(
     'sanitized errorMessage redacts secrets if the host ever surfaces one',

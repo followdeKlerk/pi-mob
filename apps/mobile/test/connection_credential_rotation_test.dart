@@ -25,10 +25,10 @@ class FakeSecureCredentialStore implements SecureCredentialStore {
 class FakeBridgeTransport implements BridgeTransport {
   @override
   Future<EndpointProbe> probe(Uri endpoint) async => const EndpointProbe(
-        statusCode: 200,
-        ready: true,
-        body: {'status': 'ready'},
-      );
+    statusCode: 200,
+    ready: true,
+    body: {'status': 'ready'},
+  );
 
   @override
   Future<BridgeSocket> connect(Uri endpoint) async {
@@ -38,18 +38,22 @@ class FakeBridgeTransport implements BridgeTransport {
       if (message['type'] == 'hello') {
         // Phase 4 — simulate the bridge's `re_pair_required` reply so the
         // coordinator surfaces the new phase and the test can assert it.
-        controller.add(jsonEncode(_envelope('error', {
-          'code': 're_pair_required',
-          'message': 'Re-pair your phone with the bridge to continue.',
-          'retryable': false,
-          'details': <String, Object?>{},
-        }, requestId: message['requestId'])));
+        controller.add(
+          jsonEncode(
+            _envelope('error', {
+              'code': 're_pair_required',
+              'message': 'Re-pair your phone with the bridge to continue.',
+              'retryable': false,
+              'details': <String, Object?>{},
+            }, requestId: message['requestId']),
+          ),
+        );
         await Future<void>.delayed(const Duration(milliseconds: 5));
         await controller.close();
       }
     }
 
-      return _FakeBridgeSocket(messages, send);
+    return _FakeBridgeSocket(messages, send);
   }
 }
 
@@ -68,7 +72,11 @@ class _FakeBridgeSocket implements BridgeSocket {
   Future<void> close([int? code, String? reason]) async {}
 }
 
-Map<String, Object?> _envelope(String type, Map<String, Object?> payload, {Object? requestId}) {
+Map<String, Object?> _envelope(
+  String type,
+  Map<String, Object?> payload, {
+  Object? requestId,
+}) {
   return <String, Object?>{
     'protocol': {'major': 1, 'minor': 0},
     'messageId': 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -82,27 +90,30 @@ Map<String, Object?> _envelope(String type, Map<String, Object?> payload, {Objec
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('re-pair required surfaces a dedicated phase and clears no credential implicitly', () async {
-    final database = AppDatabase.withExecutor(NativeDatabase.memory());
-    final secure = FakeSecureCredentialStore();
-    await secure.write('pc_initial');
-    String? rejectionReason;
-    final transport = FakeBridgeTransport();
-    final coordinator = ConnectionCoordinator(
-      transport: transport,
-      database: database,
-      secureCredentialStore: secure,
-      onAuthRejection: (reason) => rejectionReason = reason,
-    );
-    await coordinator.initialize(autoConnect: false);
-    await coordinator.connect('https://host.ts.net');
-    // Yield long enough for the hello path to complete.
-    await Future<void>.delayed(const Duration(milliseconds: 50));
-    expect(coordinator.phase, ConnectionPhase.rePairRequired);
-    expect(rejectionReason, isNotNull);
-    expect(await secure.read(), 'pc_initial');
-    await database.close();
-  });
+  test(
+    're-pair required surfaces a dedicated phase and clears no credential implicitly',
+    () async {
+      final database = AppDatabase.withExecutor(NativeDatabase.memory());
+      final secure = FakeSecureCredentialStore();
+      await secure.write('pc_initial');
+      String? rejectionReason;
+      final transport = FakeBridgeTransport();
+      final coordinator = ConnectionCoordinator(
+        transport: transport,
+        database: database,
+        secureCredentialStore: secure,
+        onAuthRejection: (reason) => rejectionReason = reason,
+      );
+      await coordinator.initialize(autoConnect: false);
+      await coordinator.connect('https://host.ts.net');
+      // Yield long enough for the hello path to complete.
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(coordinator.phase, ConnectionPhase.rePairRequired);
+      expect(rejectionReason, isNotNull);
+      expect(await secure.read(), 'pc_initial');
+      await database.close();
+    },
+  );
 
   test('forgetHost clears the secure-store credential', () async {
     final database = AppDatabase.withExecutor(NativeDatabase.memory());

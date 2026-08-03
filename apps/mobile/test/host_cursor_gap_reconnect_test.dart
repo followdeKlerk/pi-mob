@@ -13,88 +13,105 @@ const _sessionId = '22222222-2222-4222-8222-222222222222';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  test('rapid contiguous host replay reaches ready after restored cursor 847', () async {
-    final database = AppDatabase.withExecutor(NativeDatabase.memory());
-    final transport = _GapTransport();
-    final coordinator = ConnectionCoordinator(
-      transport: transport,
-      database: database,
-    );
-    final streamId = 'host:$_hostId';
-    try {
-      await database.advanceCursor(
-        streamId: streamId,
-        hostId: _hostId,
-        cursor: '847',
+  test(
+    'rapid contiguous host replay reaches ready after restored cursor 847',
+    () async {
+      final database = AppDatabase.withExecutor(NativeDatabase.memory());
+      final transport = _GapTransport();
+      final coordinator = ConnectionCoordinator(
+        transport: transport,
+        database: database,
       );
-      await coordinator.initialize(autoConnect: false);
-      await coordinator.connect('https://fixture.test');
-      final socket = transport.socket!;
-      socket.server(_helloAccepted());
-      await _eventually(
-        () => socket.sent.any((message) => message['type'] == 'subscription.set'),
-      );
-      final subscription = socket.sent.lastWhere(
-        (message) => message['type'] == 'subscription.set',
-      );
-      expect(
-        ((subscription['payload'] as Map)['streams'] as List).single['afterCursor'],
-        '847',
-      );
-      socket.server(_response('subscription.accepted', {
-        'streams': [
-          {'streamId': streamId, 'mode': 'replay'},
-        ],
-      }));
-
-      for (var cursor = 848; cursor <= 909; cursor += 1) {
-        socket.server(_event(
-          type: 'host.draining',
+      final streamId = 'host:$_hostId';
+      try {
+        await database.advanceCursor(
           streamId: streamId,
-          cursor: '$cursor',
-          eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-${cursor.toString().padLeft(12, '0')}',
-          payload: {'draining': true},
-        ));
-      }
-      socket.server(_event(
-        type: 'session.summary',
-        streamId: streamId,
-        cursor: '910',
-        eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000910',
-        payload: {
-          'sessionId': _sessionId,
-          'runtimeState': 'idle',
-          'attentionState': 'ready',
-          'queueCount': 0,
-        },
-      ));
-      socket.server(_event(
-        type: 'session.summary',
-        streamId: streamId,
-        cursor: '911',
-        eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000911',
-        payload: {
-          'sessionId': _sessionId,
-          'runtimeState': 'idle',
-          'attentionState': 'ready',
-          'queueCount': 0,
-        },
-      ));
-      socket.server(_response('stream.sync.complete', {
-        'streamId': streamId,
-        'currentCursor': '911',
-        'mode': 'replay',
-      }, requestId: null));
+          hostId: _hostId,
+          cursor: '847',
+        );
+        await coordinator.initialize(autoConnect: false);
+        await coordinator.connect('https://fixture.test');
+        final socket = transport.socket!;
+        socket.server(_helloAccepted());
+        await _eventually(
+          () => socket.sent.any(
+            (message) => message['type'] == 'subscription.set',
+          ),
+        );
+        final subscription = socket.sent.lastWhere(
+          (message) => message['type'] == 'subscription.set',
+        );
+        expect(
+          ((subscription['payload'] as Map)['streams'] as List)
+              .single['afterCursor'],
+          '847',
+        );
+        socket.server(
+          _response('subscription.accepted', {
+            'streams': [
+              {'streamId': streamId, 'mode': 'replay'},
+            ],
+          }),
+        );
 
-      await _eventually(() => coordinator.isReady);
-      expect(coordinator.isReady, isTrue);
-      expect(await database.cursor(streamId), '911');
-      expect(coordinator.errorMessage, isNull);
-    } finally {
-      coordinator.dispose();
-      await database.close();
-    }
-  });
+        for (var cursor = 848; cursor <= 909; cursor += 1) {
+          socket.server(
+            _event(
+              type: 'host.draining',
+              streamId: streamId,
+              cursor: '$cursor',
+              eventId:
+                  'aaaaaaaa-aaaa-4aaa-8aaa-${cursor.toString().padLeft(12, '0')}',
+              payload: {'draining': true},
+            ),
+          );
+        }
+        socket.server(
+          _event(
+            type: 'session.summary',
+            streamId: streamId,
+            cursor: '910',
+            eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000910',
+            payload: {
+              'sessionId': _sessionId,
+              'runtimeState': 'idle',
+              'attentionState': 'ready',
+              'queueCount': 0,
+            },
+          ),
+        );
+        socket.server(
+          _event(
+            type: 'session.summary',
+            streamId: streamId,
+            cursor: '911',
+            eventId: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000911',
+            payload: {
+              'sessionId': _sessionId,
+              'runtimeState': 'idle',
+              'attentionState': 'ready',
+              'queueCount': 0,
+            },
+          ),
+        );
+        socket.server(
+          _response('stream.sync.complete', {
+            'streamId': streamId,
+            'currentCursor': '911',
+            'mode': 'replay',
+          }, requestId: null),
+        );
+
+        await _eventually(() => coordinator.isReady);
+        expect(coordinator.isReady, isTrue);
+        expect(await database.cursor(streamId), '911');
+        expect(coordinator.errorMessage, isNull);
+      } finally {
+        coordinator.dispose();
+        await database.close();
+      }
+    },
+  );
 }
 
 Map<String, Object?> _helloAccepted() => _response('hello.accepted', {
@@ -158,10 +175,10 @@ final class _GapTransport implements BridgeTransport {
 
   @override
   Future<EndpointProbe> probe(Uri endpoint) async => const EndpointProbe(
-        statusCode: 200,
-        ready: true,
-        body: {'status': 'ready'},
-      );
+    statusCode: 200,
+    ready: true,
+    body: {'status': 'ready'},
+  );
 
   @override
   Future<BridgeSocket> connect(Uri endpoint) async {
@@ -182,7 +199,8 @@ final class _GapSocket implements BridgeSocket {
     sent.add(Map<String, Object?>.from(message));
   }
 
-  void server(Map<String, Object?> message) => _messages.add(jsonEncode(message));
+  void server(Map<String, Object?> message) =>
+      _messages.add(jsonEncode(message));
 
   @override
   Future<void> close([int? code, String? reason]) => _messages.close();

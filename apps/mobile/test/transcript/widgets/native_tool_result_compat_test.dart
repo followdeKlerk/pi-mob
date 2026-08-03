@@ -147,14 +147,11 @@ void main() {
       expect(grep.matches.single.path, 'lib/main.dart');
       expect(grep.matches.single.lineNumber, 12);
       expect(grep.matches.single.line, 'frame callback');
-      expect(
-        find.matches.map((match) => match.path),
-        <String>['lib/a.dart', 'lib/b.dart'],
-      );
-      expect(
-        ls.entries.map((entry) => entry.name),
-        <String>['lib', 'test'],
-      );
+      expect(find.matches.map((match) => match.path), <String>[
+        'lib/a.dart',
+        'lib/b.dart',
+      ]);
+      expect(ls.entries.map((entry) => entry.name), <String>['lib', 'test']);
     });
   });
 }

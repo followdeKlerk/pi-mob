@@ -21,20 +21,19 @@ void main() {
 
   test('never persists the credential in the SQLite drift database', () async {
     final database = AppDatabase.withExecutor(NativeDatabase.memory());
-    await database.upsertHost(HostEntriesCompanion.insert(
-      hostId: '11111111-1111-4111-8111-111111111111',
-      endpoint: 'https://host.ts.net',
-      displayName: 'preview',
-      generation: '1',
-      connectionState: 'connected',
-      capabilitiesJson: '[]',
-    ));
+    await database.upsertHost(
+      HostEntriesCompanion.insert(
+        hostId: '11111111-1111-4111-8111-111111111111',
+        endpoint: 'https://host.ts.net',
+        displayName: 'preview',
+        generation: '1',
+        connectionState: 'connected',
+        capabilitiesJson: '[]',
+      ),
+    );
     // Even simulating the user entering a credential, no drift column holds it.
     final rows = await database.select(database.metadataEntries).get();
-    expect(
-      rows.any((row) => row.installationId.startsWith('pc_')),
-      isFalse,
-    );
+    expect(rows.any((row) => row.installationId.startsWith('pc_')), isFalse);
     await database.close();
   });
 }

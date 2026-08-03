@@ -317,10 +317,8 @@ class BashToolResult {
     }
     return BashToolResult(
       stdout: stdout,
-      stderr:
-          _stringFromResult(map, 'stderr', 'bash result `stderr`') ?? '',
-      exitCode:
-          _intFromResult(map, 'exitCode', 'bash result `exitCode`') ?? 0,
+      stderr: _stringFromResult(map, 'stderr', 'bash result `stderr`') ?? '',
+      exitCode: _intFromResult(map, 'exitCode', 'bash result `exitCode`') ?? 0,
     );
   }
 }
@@ -331,9 +329,10 @@ class EditToolResult {
   final String? diff;
 
   factory EditToolResult.fromMap(Map<String, Object?> map) => EditToolResult(
-        diff: _stringFromResult(map, 'diff', 'edit result `diff`') ??
-            _resultText(map),
-      );
+    diff:
+        _stringFromResult(map, 'diff', 'edit result `diff`') ??
+        _resultText(map),
+  );
 }
 
 class WriteToolResult {
@@ -552,11 +551,7 @@ Object? _resultField(Map<String, Object?> map, String key) {
   return _missingResultField;
 }
 
-String? _stringFromResult(
-  Map<String, Object?> map,
-  String key,
-  String label,
-) {
+String? _stringFromResult(Map<String, Object?> map, String key, String label) {
   final value = _resultField(map, key);
   if (identical(value, _missingResultField) || value == null) return null;
   if (value is! String) {
@@ -565,11 +560,7 @@ String? _stringFromResult(
   return value;
 }
 
-int? _intFromResult(
-  Map<String, Object?> map,
-  String key,
-  String label,
-) {
+int? _intFromResult(Map<String, Object?> map, String key, String label) {
   final value = _resultField(map, key);
   if (identical(value, _missingResultField) || value == null) return null;
   if (value is! int) {
@@ -625,7 +616,10 @@ String? _textFromContent(Object content) {
 }
 
 int? _byteCountFromText(String text) {
-  final match = RegExp(r'(\d+)\s+bytes?', caseSensitive: false).firstMatch(text);
+  final match = RegExp(
+    r'(\d+)\s+bytes?',
+    caseSensitive: false,
+  ).firstMatch(text);
   return match == null ? null : int.tryParse(match.group(1)!);
 }
 

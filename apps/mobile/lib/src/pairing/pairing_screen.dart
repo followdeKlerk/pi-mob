@@ -52,9 +52,9 @@ class _PairingScreenState extends State<PairingScreen> {
     } on Object catch (error) {
       _flow.reset();
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Pairing failed: $error')),
-        );
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text('Pairing failed: $error')));
       }
     } finally {
       if (mounted) setState(() => _busy = false);

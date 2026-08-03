@@ -19,12 +19,14 @@ class InMemorySecureCredentialStore implements SecureCredentialStore {
 
 class KeychainSecureCredentialStore implements SecureCredentialStore {
   KeychainSecureCredentialStore({FlutterSecureStorage? storage})
-      : _storage = storage ?? const FlutterSecureStorage(
-          aOptions: AndroidOptions(
-            encryptedSharedPreferences: true,
-            resetOnError: true,
-          ),
-        );
+    : _storage =
+          storage ??
+          const FlutterSecureStorage(
+            aOptions: AndroidOptions(
+              encryptedSharedPreferences: true,
+              resetOnError: true,
+            ),
+          );
 
   static const String _key = 'pi-mob.installationCredential.v1';
   final FlutterSecureStorage _storage;

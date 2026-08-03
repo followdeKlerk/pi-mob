@@ -1354,58 +1354,61 @@ void main() {
     },
   );
 
-  test('rapid A to B to A keeps A lease and latest selection authoritative', () async {
-    const secondSessionId = '68686868-6868-4686-8686-686868686868';
-    await makeReady(coordinator, transport);
-    final socket = transport.sockets.single;
-    coordinator.adoptControllerEvent({
-      'sessionId': sessionId,
-      'mode': 'controller',
-      'leaseId': 'lease-a',
-    });
-    socket.server(
-      event(
-        type: 'session.summary',
-        streamId: 'host:$hostId',
-        cursor: '2',
-        eventId: '36363636-3636-4636-8636-363636363636',
-        payload: {
-          'sessionId': secondSessionId,
-          'workspaceId': workspaceId,
-          'name': 'Second session',
-          'runtimeState': 'idle',
-          'queueCount': 0,
-        },
-      ),
-    );
-    await eventually(
-      () => coordinator.sessions.any(
-        (session) => session.sessionId == secondSessionId,
-      ),
-    );
+  test(
+    'rapid A to B to A keeps A lease and latest selection authoritative',
+    () async {
+      const secondSessionId = '68686868-6868-4686-8686-686868686868';
+      await makeReady(coordinator, transport);
+      final socket = transport.sockets.single;
+      coordinator.adoptControllerEvent({
+        'sessionId': sessionId,
+        'mode': 'controller',
+        'leaseId': 'lease-a',
+      });
+      socket.server(
+        event(
+          type: 'session.summary',
+          streamId: 'host:$hostId',
+          cursor: '2',
+          eventId: '36363636-3636-4636-8636-363636363636',
+          payload: {
+            'sessionId': secondSessionId,
+            'workspaceId': workspaceId,
+            'name': 'Second session',
+            'runtimeState': 'idle',
+            'queueCount': 0,
+          },
+        ),
+      );
+      await eventually(
+        () => coordinator.sessions.any(
+          (session) => session.sessionId == secondSessionId,
+        ),
+      );
 
-    await coordinator.updateDraft('Draft A');
-    await coordinator.selectPrimarySession(secondSessionId);
-    await coordinator.updateDraft('Draft B');
+      await coordinator.updateDraft('Draft A');
+      await coordinator.selectPrimarySession(secondSessionId);
+      await coordinator.updateDraft('Draft B');
 
-    final acquiresBeforeSwitch = socket.sent
-        .where((message) => message['type'] == 'controller.acquire')
-        .length;
-    final toA = coordinator.selectPrimarySession(sessionId);
-    final toB = coordinator.selectPrimarySession(secondSessionId);
-    final backToA = coordinator.selectPrimarySession(sessionId);
-    await Future.wait([toA, toB, backToA]);
+      final acquiresBeforeSwitch = socket.sent
+          .where((message) => message['type'] == 'controller.acquire')
+          .length;
+      final toA = coordinator.selectPrimarySession(sessionId);
+      final toB = coordinator.selectPrimarySession(secondSessionId);
+      final backToA = coordinator.selectPrimarySession(sessionId);
+      await Future.wait([toA, toB, backToA]);
 
-    expect(coordinator.selectedSessionId, sessionId);
-    expect(coordinator.draft, 'Draft A');
-    expect(coordinator.subscriptionSet.full?.sessionId, sessionId);
-    expect(coordinator.leaseId, 'lease-a');
-    expect(
-      socket.sent.where((message) => message['type'] == 'controller.acquire'),
-      hasLength(acquiresBeforeSwitch),
-    );
-    expect(coordinator.errorMessage, isNull);
-  });
+      expect(coordinator.selectedSessionId, sessionId);
+      expect(coordinator.draft, 'Draft A');
+      expect(coordinator.subscriptionSet.full?.sessionId, sessionId);
+      expect(coordinator.leaseId, 'lease-a');
+      expect(
+        socket.sent.where((message) => message['type'] == 'controller.acquire'),
+        hasLength(acquiresBeforeSwitch),
+      );
+      expect(coordinator.errorMessage, isNull);
+    },
+  );
 
   test('background receipt clears only its own session draft', () async {
     const secondSessionId = '68686868-6868-4686-8686-686868686868';

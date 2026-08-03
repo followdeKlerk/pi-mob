@@ -426,7 +426,6 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                   ),
                 ],
               ),
-
             ),
             if (_isOffRailConnection(coordinator.phase))
               Padding(
@@ -714,7 +713,8 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                   );
                   final blocked =
                       notifications.permission == NotificationPermission.denied;
-                  final tokenMissing = notifications.permission ==
+                  final tokenMissing =
+                      notifications.permission ==
                           NotificationPermission.authorized &&
                       !notifications.tokenAvailable;
                   return ListTile(

@@ -46,10 +46,10 @@ class SessionSyncScreen extends StatelessWidget {
                   label: error != null
                       ? 'Chat synchronization failed'
                       : ready
-                          ? 'Chats are ready'
-                          : total == 0
-                              ? 'Syncing chats'
-                              : 'Syncing chats, $completed of $total complete',
+                      ? 'Chats are ready'
+                      : total == 0
+                      ? 'Syncing chats'
+                      : 'Syncing chats, $completed of $total complete',
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     mainAxisSize: MainAxisSize.min,
@@ -58,8 +58,8 @@ class SessionSyncScreen extends StatelessWidget {
                         error != null
                             ? Icons.sync_problem
                             : ready
-                                ? Icons.check_circle_outline
-                                : Icons.sync,
+                            ? Icons.check_circle_outline
+                            : Icons.sync,
                         size: 36,
                         color: error != null ? colors.error : colors.primary,
                       ),
@@ -76,8 +76,8 @@ class SessionSyncScreen extends StatelessWidget {
                         error != null
                             ? 'Sync paused. Your existing local data is safe.'
                             : ready
-                                ? 'Your local chat history is ready.'
-                                : _bootMessage(connectionPhase),
+                            ? 'Your local chat history is ready.'
+                            : _bootMessage(connectionPhase),
                         textAlign: TextAlign.center,
                         style: theme.textTheme.bodyMedium?.copyWith(
                           color: colors.onSurfaceVariant,
@@ -223,22 +223,13 @@ class _SyncMetricsRow extends StatelessWidget {
             spacing: PiSpacing.md,
             runSpacing: 2,
             children: [
-              Text(
-                remainingLine,
-                key: const Key('chat-sync-remaining'),
-              ),
+              Text(remainingLine, key: const Key('chat-sync-remaining')),
               Text(
                 'Elapsed $elapsedLabel',
                 key: const Key('chat-sync-elapsed'),
               ),
-              Text(
-                'ETA $etaLabel',
-                key: const Key('chat-sync-eta'),
-              ),
-              Text(
-                rateLabel,
-                key: const Key('chat-sync-throughput'),
-              ),
+              Text('ETA $etaLabel', key: const Key('chat-sync-eta')),
+              Text(rateLabel, key: const Key('chat-sync-throughput')),
             ],
           ),
         ],

@@ -119,23 +119,26 @@ void main() {
       controller.dispose();
     },
   );
-  test('authorized permission without a token stays disabled and retryable', () async {
-    final platform = FakePlatform()
-      ..status = NotificationPermission.authorized
-      ..token = null;
-    final controller = NotificationController(
-      adapter: platform,
-      deviceId: 'd',
-      appVersion: '1',
-      register: (platform, token) async {},
-      reconcile: (_) async => false,
-    );
-    await controller.initialize();
-    await controller.onBridgeReady(notificationsSupported: true);
-    expect(controller.enabled, false);
-    expect(controller.tokenAvailable, false);
-    controller.dispose();
-  });
+  test(
+    'authorized permission without a token stays disabled and retryable',
+    () async {
+      final platform = FakePlatform()
+        ..status = NotificationPermission.authorized
+        ..token = null;
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (platform, token) async {},
+        reconcile: (_) async => false,
+      );
+      await controller.initialize();
+      await controller.onBridgeReady(notificationsSupported: true);
+      expect(controller.enabled, false);
+      expect(controller.tokenAvailable, false);
+      controller.dispose();
+    },
+  );
   test(
     'token arriving before bridge readiness is retained and retried',
     () async {
@@ -196,19 +199,22 @@ void main() {
       expect(controller.lastReconciledSession, 'current');
     },
   );
-  test('notification settings action delegates to the platform adapter', () async {
-    final platform = FakePlatform();
-    final controller = NotificationController(
-      adapter: platform,
-      deviceId: 'd',
-      appVersion: '1',
-      register: (platform, token) async {},
-      reconcile: (_) async => false,
-    );
-    await controller.openNotificationSettings();
-    expect(platform.openSettingsCalls, 1);
-    controller.dispose();
-  });
+  test(
+    'notification settings action delegates to the platform adapter',
+    () async {
+      final platform = FakePlatform();
+      final controller = NotificationController(
+        adapter: platform,
+        deviceId: 'd',
+        appVersion: '1',
+        register: (platform, token) async {},
+        reconcile: (_) async => false,
+      );
+      await controller.openNotificationSettings();
+      expect(platform.openSettingsCalls, 1);
+      controller.dispose();
+    },
+  );
   test(
     'foreground service can only start from visible app and no mutating action exists',
     () async {

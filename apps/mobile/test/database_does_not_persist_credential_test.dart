@@ -28,16 +28,25 @@ void main() {
     final database = AppDatabase.withExecutor(NativeDatabase.memory());
     final secure = FakeSecureCredentialStore();
     await secure.write(_plaintext);
-    await database.upsertHost(HostEntriesCompanion.insert(
-      hostId: '11111111-1111-4111-8111-111111111111',
-      endpoint: 'https://host.ts.net',
-      displayName: 'preview',
-      generation: '1',
-      connectionState: 'connected',
-      capabilitiesJson: '[]',
-    ));
+    await database.upsertHost(
+      HostEntriesCompanion.insert(
+        hostId: '11111111-1111-4111-8111-111111111111',
+        endpoint: 'https://host.ts.net',
+        displayName: 'preview',
+        generation: '1',
+        connectionState: 'connected',
+        capabilitiesJson: '[]',
+      ),
+    );
     final rows = await database.allHosts();
-    final encoded = utf8.encode(rows.map((row) => '${row.endpoint}|${row.displayName}|${row.capabilitiesJson}|${row.connectionState}').join(','));
+    final encoded = utf8.encode(
+      rows
+          .map(
+            (row) =>
+                '${row.endpoint}|${row.displayName}|${row.capabilitiesJson}|${row.connectionState}',
+          )
+          .join(','),
+    );
     expect(utf8.decode(encoded), isNot(contains(_plaintext)));
     await database.close();
   });
