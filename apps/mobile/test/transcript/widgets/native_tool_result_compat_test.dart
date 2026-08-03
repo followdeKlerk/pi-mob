@@ -16,6 +16,24 @@ void main() {
       expect(ls.path, '<path redacted>');
     });
 
+    test('malformed non-null paths remain parse failures', () {
+      expect(
+        () => ReadToolArgs.fromMap(const <String, Object?>{'path': 123}),
+        throwsFormatException,
+      );
+      expect(
+        () => LsToolArgs.fromMap(const <String, Object?>{'path': ''}),
+        throwsFormatException,
+      );
+      expect(
+        () => WriteToolArgs.fromMap(const <String, Object?>{
+          'path': false,
+          'content': 'data',
+        }),
+        throwsFormatException,
+      );
+    });
+
     test('read accepts Pi content blocks and derives metadata', () {
       final result = ReadToolResult.fromMap(const <String, Object?>{
         'content': <Object?>[
@@ -41,6 +59,69 @@ void main() {
       expect(result.stdout, 'apps/mobile/lib/main.dart:1');
       expect(result.stderr, isEmpty);
       expect(result.exitCode, 0);
+    });
+
+    test('malformed result metadata is rejected instead of defaulted', () {
+      expect(
+        () => BashToolResult.fromMap(const <String, Object?>{
+          'content': <Object?>[
+            <String, Object?>{'type': 'text', 'text': 'done'},
+          ],
+          'exitCode': '1',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => BashToolResult.fromMap(const <String, Object?>{
+          'content': <Object?>[
+            <String, Object?>{'type': 'text', 'text': 'done'},
+          ],
+          'stderr': 7,
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => ReadToolResult.fromMap(const <String, Object?>{
+          'content': 'data',
+          'byteCount': '4',
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => ReadToolResult.fromMap(const <String, Object?>{
+          'content': 'data',
+          'details': <String, Object?>{'totalLines': '1'},
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => WriteToolResult.fromMap(const <String, Object?>{
+          'content': 'wrote 4 bytes',
+          'byteCount': false,
+        }),
+        throwsFormatException,
+      );
+    });
+
+    test('malformed structured lists do not fall back to text output', () {
+      expect(
+        () => GrepToolResult.fromMap(const <String, Object?>{
+          'matches': 'not-a-list',
+          'content': <Object?>[
+            <String, Object?>{'type': 'text', 'text': 'lib/main.dart:1:x'},
+          ],
+        }),
+        throwsFormatException,
+      );
+      expect(
+        () => LsToolResult.fromMap(const <String, Object?>{
+          'entries': 42,
+          'content': <Object?>[
+            <String, Object?>{'type': 'text', 'text': 'lib'},
+          ],
+        }),
+        throwsFormatException,
+      );
     });
 
     test('native text output is adapted for grep, find, and ls', () {
