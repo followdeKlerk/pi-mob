@@ -13,62 +13,66 @@ import 'package:pi_mob/src/ui/shell/chat_session_drawer.dart';
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 
-  testWidgets('drawer surfaces synchronizing indicator when phase is synchronizing',
-      (tester) async {
-    final fixture = _DrawerFixture();
-    fixture.coordinator.debugForcePhase(ConnectionPhase.synchronizing);
-    addTearDown(fixture.dispose);
+  testWidgets(
+    'drawer surfaces synchronizing indicator when phase is synchronizing',
+    (tester) async {
+      final fixture = _DrawerFixture();
+      fixture.coordinator.debugForcePhase(ConnectionPhase.synchronizing);
+      addTearDown(fixture.dispose);
 
-    await _openDrawer(tester, fixture);
+      await _openDrawer(tester, fixture);
 
-    expect(
-      find.byKey(const Key('drawer-history-sync-indicator')),
-      findsOneWidget,
-    );
-  });
+      expect(
+        find.byKey(const Key('drawer-history-sync-indicator')),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
-      'drawer surfaces history-gate indicator when phase is ready and gate incomplete',
-      (tester) async {
-    final fixture = _DrawerFixture();
-    // phase=ready mirrors a successful hello/handshake; the gate being
-    // incomplete mirrors the post-hello state where the bridge is
-    // streaming durable history before the user can browse it.
-    fixture.coordinator.debugForcePhase(ConnectionPhase.ready);
-    fixture.coordinator.debugSetHistorySyncState(
-      completed: 1,
-      total: 4,
-      complete: false,
-    );
-    addTearDown(fixture.dispose);
+    'drawer surfaces history-gate indicator when phase is ready and gate incomplete',
+    (tester) async {
+      final fixture = _DrawerFixture();
+      // phase=ready mirrors a successful hello/handshake; the gate being
+      // incomplete mirrors the post-hello state where the bridge is
+      // streaming durable history before the user can browse it.
+      fixture.coordinator.debugForcePhase(ConnectionPhase.ready);
+      fixture.coordinator.debugSetHistorySyncState(
+        completed: 1,
+        total: 4,
+        complete: false,
+      );
+      addTearDown(fixture.dispose);
 
-    await _openDrawer(tester, fixture);
+      await _openDrawer(tester, fixture);
 
-    expect(
-      find.byKey(const Key('drawer-history-sync-indicator')),
-      findsOneWidget,
-    );
-  });
+      expect(
+        find.byKey(const Key('drawer-history-sync-indicator')),
+        findsOneWidget,
+      );
+    },
+  );
 
   testWidgets(
-      'drawer does NOT surface history-sync indicator when ready and gate complete',
-      (tester) async {
-    final fixture = _DrawerFixture();
-    fixture.coordinator.debugForcePhase(ConnectionPhase.ready);
-    fixture.coordinator.debugSetHistorySyncState(
-      completed: 4,
-      total: 4,
-      complete: true,
-    );
-    addTearDown(fixture.dispose);
+    'drawer does NOT surface history-sync indicator when ready and gate complete',
+    (tester) async {
+      final fixture = _DrawerFixture();
+      fixture.coordinator.debugForcePhase(ConnectionPhase.ready);
+      fixture.coordinator.debugSetHistorySyncState(
+        completed: 4,
+        total: 4,
+        complete: true,
+      );
+      addTearDown(fixture.dispose);
 
-    await _openDrawer(tester, fixture);
+      await _openDrawer(tester, fixture);
 
-    expect(
-      find.byKey(const Key('drawer-history-sync-indicator')),
-      findsNothing,
-    );
-  });
+      expect(
+        find.byKey(const Key('drawer-history-sync-indicator')),
+        findsNothing,
+      );
+    },
+  );
 }
 
 Future<void> _openDrawer(WidgetTester tester, _DrawerFixture fixture) async {
