@@ -1,0 +1,46 @@
+name: Branch Dart Format
+
+on:
+  push:
+    branches: [fix/native-tool-result-rendering]
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: macos-15-intel
+    timeout-minutes: 15
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: fix/native-tool-result-rendering
+          fetch-depth: 0
+
+      - name: Install Flutter 3.44.4
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://storage.googleapis.com/flutter_infra_release/releases/stable/macos/flutter_macos_3.44.4-stable.zip" \
+            -o /tmp/flutter.zip
+          echo "32bca4386121042e827ff2d90edbd7c7fb47c514fc04d5a87db6e3202dafde5d  /tmp/flutter.zip" | shasum -a 256 -c -
+          sudo mkdir -p /opt
+          sudo unzip -q /tmp/flutter.zip -d /opt
+          sudo chown -R "$(id -u):$(id -g)" /opt/flutter
+
+      - name: Format Dart sources
+        run: /opt/flutter/bin/dart format apps/mobile/lib apps/mobile/test
+
+      - name: Commit canonical formatting
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- apps/mobile/lib apps/mobile/test; then
+            echo "No Dart formatting changes required"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add apps/mobile/lib apps/mobile/test
+          git commit -m "chore(format): apply canonical Dart formatting"
+          git push origin HEAD:fix/native-tool-result-rendering
