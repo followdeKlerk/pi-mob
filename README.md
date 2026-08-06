@@ -65,19 +65,6 @@ Verified end-to-end on a real phone and a real host:
 - **Workspace search** — bounded workspace discovery, list, and search rooted under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
 - **Reconnectable shell** — restores the most recent chat, the in-flight draft, and attachments after reconnect or relaunch.
 
-## What is explicitly out of scope
-
-The following are intentionally not part of Pi Mob in this preview:
-
-- Public Tailscale Funnel, public listeners, or any non-private exposure.
-- Multi-user tenancy, accounts, or billing.
-- iOS distribution (the app is Android-only for this release).
-- Cloud-hosted bridge. The bridge runs on your hardware.
-- Git status, commit, push, or other repository actions.
-- Biometric unlock, device-side encryption, or secret-management on the phone.
-- Code-signed, notarized, or App Store distribution. Android preview release APKs use an operator-supplied non-debug keystore outside the repository.
-- Non-macOS install paths. The released bridge is macOS x64 only; the build pipeline produces no other host artefact today.
-
 ## Quick start
 
 A printable quick-start ships in `docs/QUICKSTART.md`. The short version:
