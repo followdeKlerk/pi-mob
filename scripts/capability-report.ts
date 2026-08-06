@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { runDaemon, type DaemonHandle } from "../packages/bridge/src/daemon";
 import { BRIDGE_VERSION } from "../packages/bridge/src/version";
 
-export const CORE = ["streams.v1", "commands.v1", "controller_leases.v1", "raw_rpc.v1"] as const;
+export const CORE = ["streams.v1", "commands.v1", "controller_leases.v1", "session_events.v2"] as const;
 export const EXPECTED = { withoutFcm: [...CORE].sort(), withFcm: [...CORE, "notifications.v1"].sort() };
 const FCM = { projectId: "capability-report-project", serviceAccountEmail: "capability-report@example.invalid", privateKey: "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----" };
 export type CapabilityMatrix = { withoutFcm: string[]; withFcm: string[] };
@@ -88,7 +88,7 @@ const metadata = [
   ["streams.v1", "packages/bridge/src/daemon.ts", "runDaemon", "apps/mobile/lib/src/connection/connection_coordinator.dart", "capability", "packages/bridge/test/capability-report.test.ts"],
   ["commands.v1", "packages/bridge/src/daemon.ts", "runDaemon", "apps/mobile/lib/src/connection/connection_coordinator.dart", "command", "packages/bridge/test/capability-report.test.ts"],
   ["controller_leases.v1", "packages/bridge/src/daemon.ts", "runDaemon", "apps/mobile/lib/src/connection/connection_coordinator.dart", "lease", "packages/bridge/test/capability-report.test.ts"],
-  ["raw_rpc.v1", "packages/bridge/src/daemon.ts", "runDaemon", "apps/mobile/lib/src/connection/connection_coordinator.dart", "rpc", "packages/bridge/test/capability-report.test.ts"],
+  ["session_events.v2", "packages/bridge/src/daemon.ts", "CanonicalEventTransport", "apps/mobile/lib/src/connection/connection_coordinator.dart", "session.events.subscribe", "packages/bridge/test/session-events/canonical-server-runtime.test.ts"],
   ["notifications.v1", "packages/bridge/src/daemon.ts", "BridgeNotificationService", "apps/mobile/lib/src/notifications/notification_controller.dart", "onBridgeReady", "packages/bridge/test/capability-report.test.ts"],
 ] as const;
 

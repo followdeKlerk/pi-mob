@@ -13,6 +13,7 @@
       "mobileVersion": "1.0.0",
       "platform": "ios",
       "installationId": "55555555-5555-4555-8555-555555555555",
+      "installationCredential": "pc_fixture_credential",
       "requiredCapabilities": [
         "streams.v1",
         "commands.v1"

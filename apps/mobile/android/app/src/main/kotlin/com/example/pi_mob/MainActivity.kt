@@ -19,6 +19,24 @@ import io.flutter.plugin.common.EventChannel
 import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
+  override fun onCreate(savedInstanceState: android.os.Bundle?) {
+    super.onCreate(savedInstanceState)
+    getSharedPreferences(PiMobMessagingService.PREFS, MODE_PRIVATE)
+      .edit().putBoolean(PiMobMessagingService.KEY_APP_FOREGROUND, false).apply()
+  }
+
+  override fun onStart() {
+    super.onStart()
+    getSharedPreferences(PiMobMessagingService.PREFS, MODE_PRIVATE)
+      .edit().putBoolean(PiMobMessagingService.KEY_APP_FOREGROUND, true).apply()
+  }
+
+  override fun onStop() {
+    getSharedPreferences(PiMobMessagingService.PREFS, MODE_PRIVATE)
+      .edit().putBoolean(PiMobMessagingService.KEY_APP_FOREGROUND, false).apply()
+    super.onStop()
+  }
+
   override fun onFlutterSurfaceViewCreated(flutterSurfaceView: FlutterSurfaceView) {
     super.onFlutterSurfaceViewCreated(flutterSurfaceView)
     window.attributes = window.attributes.also {

@@ -287,8 +287,9 @@ function toPosixRelative(value: string): string {
 
 const WORKSPACE_SEARCH_SKIPPED = new Set(["node_modules", "build", "dist"]);
 const MAX_WORKSPACE_SEARCH_ROOTS = 4;
-const MAX_WORKSPACE_SEARCH_ENTRIES = 256;
-const MAX_WORKSPACE_SEARCH_RESULTS = 20;
+const MAX_WORKSPACE_SEARCH_ENTRIES = 512;
+const MAX_WORKSPACE_SEARCH_RESULTS = 64;
+const MAX_WORKSPACE_SEARCH_RESULTS_PER_ROOT = 24;
 
 export interface WorkspaceDirectoryMatch {
   readonly canonicalPath: CanonicalPath;
@@ -315,10 +316,16 @@ export function enumerateWorkspaceDirectories(
       canonicalRoot = realpathSync(root);
     } catch { continue; }
 
+    let rootMatches = 0;
     const add = (canonicalPath: string): void => {
-      if (matches.length >= MAX_WORKSPACE_SEARCH_RESULTS || seen.has(canonicalPath)) return;
+      if (
+        matches.length >= MAX_WORKSPACE_SEARCH_RESULTS ||
+        rootMatches >= MAX_WORKSPACE_SEARCH_RESULTS_PER_ROOT ||
+        seen.has(canonicalPath)
+      ) return;
       seen.add(canonicalPath);
       matches.push({ canonicalPath, rootCanonicalPath: canonicalRoot });
+      rootMatches += 1;
     };
     add(canonicalRoot);
 

@@ -7,6 +7,7 @@ import 'package:drift/drift.dart';
 import '../connection/connection_coordinator.dart';
 import '../data/app_database.dart';
 import '../domain/mobile_state.dart';
+import '../session_events/transcript_reducer.dart';
 import 'search_source.dart';
 
 /// Maximum characters of the visible summary retained per search entry.
@@ -56,8 +57,6 @@ class SearchIndexer {
   Future<void> indexSession(String sessionId) async {
     final hostId = _coordinator.hostId;
     if (hostId == null) return;
-    final events = _coordinator.transcriptEvents(sessionId);
-    if (events.isEmpty) return;
     final session = _coordinator.sessions.firstWhere(
       (s) => s.sessionId == sessionId,
       orElse: () => SessionState(
@@ -68,7 +67,17 @@ class SearchIndexer {
         queueCount: 0,
       ),
     );
-    final indexed = _extractAll(hostId, session, events);
+    final canonicalState = _coordinator.canonicalTranscriptStateFor(sessionId);
+    final indexed = _coordinator.canonicalSessionManager.isEnabled
+        ? (canonicalState == null
+              ? const <_Extracted>[]
+              : _extractCanonical(hostId, session, canonicalState))
+        : _extractAll(
+            hostId,
+            session,
+            _coordinator.transcriptEvents(sessionId),
+          );
+    if (indexed.isEmpty) return;
     for (final extracted in indexed) {
       await _database.upsertSearchEntry(
         hostId: extracted.hostId,
@@ -259,6 +268,88 @@ class SearchIndexer {
       );
     }
   }
+
+  List<_Extracted> _extractCanonical(
+    String hostId,
+    SessionState session,
+    CanonicalTranscriptState state,
+  ) {
+    final output = <_Extracted>[];
+    final cursor = _coordinator
+        .canonicalLastAppliedSequence(session.sessionId)
+        .toString();
+    for (final message in state.userMessages.values) {
+      output.add(
+        _simpleCanonical(
+          hostId,
+          session,
+          cursor,
+          message.occurredAt,
+          SearchSource.userPrompt,
+          message.text,
+          'user:${message.messageId}',
+        ),
+      );
+    }
+    for (final message in state.assistantMessages.values) {
+      final text = message.content.map((block) => block.text).join('\\n');
+      if (text.trim().isNotEmpty) {
+        output.add(
+          _simpleCanonical(
+            hostId,
+            session,
+            cursor,
+            message.startedAt,
+            SearchSource.assistant,
+            text,
+            'assistant:${message.messageId}',
+          ),
+        );
+      }
+    }
+    for (final tool in state.toolCalls.values) {
+      final text = <String>[
+        tool.toolName,
+        jsonEncode(tool.arguments),
+        if (tool.progress != null) tool.progress.toString(),
+        if (tool.result != null) tool.result.toString(),
+        if (tool.errorMessage != null) tool.errorMessage!,
+      ].where((value) => value.trim().isNotEmpty).join('\\n');
+      if (text.trim().isNotEmpty) {
+        output.add(
+          _simpleCanonical(
+            hostId,
+            session,
+            cursor,
+            tool.startedAt,
+            SearchSource.tool,
+            text,
+            'tool:${tool.toolCallId}',
+          ),
+        );
+      }
+    }
+    return output;
+  }
+
+  _Extracted _simpleCanonical(
+    String hostId,
+    SessionState session,
+    String cursor,
+    DateTime occurredAt,
+    SearchSource source,
+    String raw,
+    String key,
+  ) => _Extracted(
+    hostId: hostId,
+    sessionId: session.sessionId,
+    sourceKey: key,
+    cursor: cursor,
+    source: source,
+    summary: _cap(raw),
+    tokens: _tokenize(_cap(raw)),
+    occurredAt: occurredAt,
+  );
 
   List<_Extracted> _extractAll(
     String hostId,

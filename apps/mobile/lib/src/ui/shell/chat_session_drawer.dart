@@ -10,7 +10,6 @@ import '../../notifications/notification_controller.dart';
 import '../../workspaces/workspace_picker.dart';
 import '../theme/pi_theme.dart';
 import 'motion_primitives.dart';
-import 'raw_rpc_sheet.dart';
 
 enum _ChatAction { rename, delete }
 
@@ -103,6 +102,50 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
         ? workspace?.displayName
         : workspace?.relativePath;
     return folder?.split('/').last ?? 'Untitled chat';
+  }
+
+  String _dateKey(SessionState session) {
+    final date =
+        (session.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
+            .toLocal();
+    return '${date.year.toString().padLeft(4, '0')}-${date.month.toString().padLeft(2, '0')}-${date.day.toString().padLeft(2, '0')}';
+  }
+
+  String _dateLabel(String key) {
+    final parts = key.split('-').map(int.parse).toList();
+    final date = DateTime(parts[0], parts[1], parts[2]);
+    final now = DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final difference = today.difference(date).inDays;
+    if (difference == 0) return 'Today';
+    if (difference == 1) return 'Yesterday';
+    if (difference >= 2 && difference < 7) {
+      const weekdays = <String>[
+        'Monday',
+        'Tuesday',
+        'Wednesday',
+        'Thursday',
+        'Friday',
+        'Saturday',
+        'Sunday',
+      ];
+      return weekdays[date.weekday - 1];
+    }
+    const months = <String>[
+      'January',
+      'February',
+      'March',
+      'April',
+      'May',
+      'June',
+      'July',
+      'August',
+      'September',
+      'October',
+      'November',
+      'December',
+    ];
+    return '${months[date.month - 1]} ${date.day}, ${date.year}';
   }
 
   String? _context(SessionState session) {
@@ -263,16 +306,57 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     await widget.onForgetHost();
   }
 
-  Future<void> _openRawRpc() async {
-    final sessionId = widget.coordinator.selectedSessionId;
-    if (sessionId == null) return;
-    Navigator.of(context).pop();
-    await WidgetsBinding.instance.endOfFrame;
-    if (!mounted) return;
-    await showRawRpcSheet(
-      context,
-      coordinator: widget.coordinator,
-      sessionId: sessionId,
+  Future<void> _openSettings() async {
+    await showModalBottomSheet<void>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) {
+        final notifications = widget.notifications;
+        return SafeArea(
+          child: ListenableBuilder(
+            listenable: notifications ?? widget.coordinator,
+            builder: (context, _) {
+              final enabled = notifications?.enabled ?? false;
+              return Wrap(
+                children: [
+                  ListTile(
+                    leading: const Icon(Icons.notifications_outlined),
+                    title: const Text('Notifications'),
+                    subtitle: Text(enabled ? 'On' : 'Off'),
+                    trailing: Switch(
+                      value: enabled,
+                      onChanged: notifications == null
+                          ? null
+                          : (_) => unawaited(
+                              enabled
+                                  ? notifications.openNotificationSettings()
+                                  : notifications.enableByUserAction(),
+                            ),
+                    ),
+                    onTap: notifications == null
+                        ? null
+                        : () => unawaited(
+                            enabled
+                                ? notifications.openNotificationSettings()
+                                : notifications.enableByUserAction(),
+                          ),
+                  ),
+                  ListTile(
+                    key: const Key('drawer-forget-host'),
+                    leading: const Icon(Icons.swap_horiz),
+                    title: const Text('Change bridge address'),
+                    subtitle: const Text('Change connected bridge'),
+                    onTap: () {
+                      Navigator.of(sheetContext).pop();
+                      unawaited(_changeBridgeAddress());
+                    },
+                  ),
+                ],
+              );
+            },
+          ),
+        );
+      },
     );
   }
 
@@ -335,21 +419,35 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     final transcriptSyncing =
         selectedSessionId != null &&
         coordinator.isHistorySyncing(selectedSessionId);
+    int attentionRank(String id) => switch (coordinator.attentionFor(id)) {
+      SessionAttentionState.needsAttention => 0,
+      SessionAttentionState.unread => 1,
+      SessionAttentionState.background => 2,
+      SessionAttentionState.none => 3,
+    };
     final sessions = coordinator.sessions.toList()
       ..sort((a, b) {
-        int rank(String id) => switch (coordinator.attentionFor(id)) {
-          SessionAttentionState.needsAttention => 0,
-          SessionAttentionState.unread => 1,
-          SessionAttentionState.background => 2,
-          SessionAttentionState.none => 3,
-        };
-        final attention = rank(a.sessionId).compareTo(rank(b.sessionId));
+        final date = _dateKey(b).compareTo(_dateKey(a));
+        if (date != 0) return date;
+        final attention = attentionRank(
+          a.sessionId,
+        ).compareTo(attentionRank(b.sessionId));
         if (attention != 0) return attention;
         return (b.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0))
             .compareTo(
               a.lastActivityAt ?? DateTime.fromMillisecondsSinceEpoch(0),
             );
       });
+    final groupedEntries = <Object>[];
+    String? currentDate;
+    for (final session in sessions) {
+      final date = _dateKey(session);
+      if (date != currentDate) {
+        groupedEntries.add(_dateLabel(date));
+        currentDate = date;
+      }
+      groupedEntries.add(session);
+    }
 
     return Drawer(
       key: const Key('chat-session-drawer'),
@@ -418,6 +516,12 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                     ),
                   ),
                   const SizedBox(width: PiSpacing.xs),
+                  IconButton(
+                    key: const Key('drawer-settings'),
+                    tooltip: 'Settings',
+                    onPressed: _openSettings,
+                    icon: const Icon(Icons.settings_outlined),
+                  ),
                   IconButton(
                     key: const Key('close-chat-drawer'),
                     tooltip: 'Close',
@@ -642,9 +746,27 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                       padding: const EdgeInsets.symmetric(
                         horizontal: PiSpacing.sm,
                       ),
-                      itemCount: sessions.length,
+                      itemCount: groupedEntries.length,
                       itemBuilder: (context, index) {
-                        final session = sessions[index];
+                        final entry = groupedEntries[index];
+                        if (entry is String) {
+                          return Padding(
+                            padding: const EdgeInsets.fromLTRB(
+                              PiSpacing.sm,
+                              PiSpacing.md,
+                              PiSpacing.sm,
+                              PiSpacing.xs,
+                            ),
+                            child: Text(
+                              entry,
+                              style: theme.textTheme.labelLarge?.copyWith(
+                                color: colors.onSurfaceVariant,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          );
+                        }
+                        final session = entry as SessionState;
                         final selected =
                             session.sessionId == coordinator.selectedSessionId;
                         return Padding(
@@ -653,6 +775,11 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                             key: Key('saved-chat-${session.sessionId}'),
                             selected: selected,
                             selectedTileColor: colors.secondaryContainer,
+                            dense: true,
+                            visualDensity: const VisualDensity(vertical: -1),
+                            contentPadding: const EdgeInsets.symmetric(
+                              horizontal: PiSpacing.sm,
+                            ),
                             shape: RoundedRectangleBorder(
                               borderRadius: BorderRadius.circular(PiRadius.md),
                             ),
@@ -695,62 +822,6 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
                     ),
             ),
             const Divider(height: 1),
-            ListTile(
-              key: const Key('drawer-raw-rpc'),
-              leading: const Icon(Icons.code),
-              title: const Text('Advanced · Raw RPC'),
-              enabled: coordinator.selectedSessionId != null,
-              onTap: coordinator.selectedSessionId == null
-                  ? null
-                  : () => unawaited(_openRawRpc()),
-            ),
-            if (widget.notifications case final notifications?)
-              ListenableBuilder(
-                listenable: notifications,
-                builder: (context, _) {
-                  final supported = coordinator.supportsCapability(
-                    'notifications.v1',
-                  );
-                  final blocked =
-                      notifications.permission == NotificationPermission.denied;
-                  final tokenMissing =
-                      notifications.permission ==
-                          NotificationPermission.authorized &&
-                      !notifications.tokenAvailable;
-                  return ListTile(
-                    key: const Key('drawer-notifications'),
-                    leading: Icon(
-                      notifications.enabled
-                          ? Icons.notifications_active_outlined
-                          : Icons.notifications_none,
-                    ),
-                    title: Text(
-                      !supported
-                          ? 'Notifications unavailable'
-                          : notifications.enabled
-                          ? 'Notifications on'
-                          : blocked
-                          ? 'Notifications blocked'
-                          : tokenMissing
-                          ? 'Notification token unavailable'
-                          : 'Enable notifications',
-                    ),
-                    onTap: !supported
-                        ? null
-                        : notifications.enabled || blocked || tokenMissing
-                        ? () => unawaited(
-                            notifications.openNotificationSettings(),
-                          )
-                        : () => unawaited(notifications.enableByUserAction()),
-                  );
-                },
-              ),
-            ListTile(
-              key: const Key('drawer-forget-host'),
-              leading: const Icon(Icons.swap_horiz),
-              title: const Text('Change bridge address'),
-              onTap: () => unawaited(_changeBridgeAddress()),
-            ),
           ],
         ),
       ),

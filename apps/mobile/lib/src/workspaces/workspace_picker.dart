@@ -113,7 +113,7 @@ class _WorkspacePickerState extends State<WorkspacePicker> {
             ),
             const SizedBox(height: 4),
             Text(
-              'Folders are indexed by your host under ${coordinator.workspaces.isEmpty ? 'your home folder' : coordinator.workspaces.first.rootLabel}. Select one as Pi’s working directory.',
+              'Folders are indexed from your host home and local GitHub folders. Select one as Pi’s working directory.',
               key: const Key('workspace-picker-guardrail-note'),
               style: text.bodySmall?.copyWith(color: colors.onSurfaceVariant),
             ),

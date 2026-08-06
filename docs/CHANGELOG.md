@@ -18,9 +18,9 @@ First public preview of Pi Mob. The mobile app is Android-only and the bridge is
 - Reconnectable shell that restores the most recent chat, drafts, and attachments.
 - Model changes through the normal `/model` command.
 - Per-chat transcript search and global cross-chat search.
-- Bounded workspace search under the configured search root.
+- Bounded workspace discovery and search under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
 - Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed, ETA, and throughput.
-- FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone. Foreground posting is wired but tap routing and dedupe are not yet proven on a physical device.
+- FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery works on a real phone. Foreground alerts are suppressed while the app is visible; tap routing and dedupe remain best-effort until proven on a physical device.
 - Host diagnostic surface with explicit phases, sanitized errors, and retry actions.
 
 ### Known limitations

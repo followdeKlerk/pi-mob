@@ -67,6 +67,15 @@ export interface BridgeRuntimePort {
   control(connection: ConnectionContext, type: string, payload: Record<string, unknown>): Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
   command(connection: ConnectionContext, message: Record<string, unknown>): Promise<Record<string, unknown>> | Record<string, unknown>;
   onEvent?(listener: (event: { eventId: string; streamId: string; cursor: string; type: string; payload: Record<string, unknown> }) => void): () => void;
+  /**
+   * Phase 4 — register a listener for canonical session-event live
+   * pushes. The listener is invoked once per committed canonical
+   * event with the wire-shape payload (`eventId`, `sessionId`,
+   * `sequence`, `eventType`, `occurredAt`, `data`). The runtime
+   * only emits after the dedicated canonical-session-event log has
+   * committed the row.
+   */
+  onCanonicalLiveEvent?(listener: (event: { readonly eventId: string; readonly sessionId: string; readonly sequence: number; readonly eventType: string; readonly occurredAt: string; readonly data: Record<string, unknown> }) => void): () => void;
   disconnected?(connection: ConnectionContext): void;
 }
 export interface ConnectionContext { readonly connectionId: string; readonly installationId: string; readonly subscriptions: ReadonlySet<string>; }
@@ -77,6 +86,14 @@ interface SocketData {
   hello: boolean;
   synchronized: boolean;
   subscriptions: Map<string, "full" | "summary">;
+  /**
+   * Phase 4 — set of sessionIds the connection is subscribed to via
+   * `session.events.subscribe`. The set is populated by the server
+   * when the control handler returns a `session.events.replay.result`
+   * and torn down when the socket closes (the runtime's `disconnected`
+   * hook handles the matching transport-side cleanup).
+   */
+  canonicalSubscriptions: Set<string>;
   syncing: boolean;
   pendingEvents: PendingLiveEvent[];
   tokens: number;
@@ -120,6 +137,27 @@ function envelope(type: string, payload: Record<string, unknown>, requestId?: un
   return { protocol: { major: PROTOCOL_MAJOR, minor: PROTOCOL_MINOR }, messageId: id(), ...(typeof requestId === "string" ? { requestId } : {}), ...(typeof commandId === "string" ? { commandId } : {}), type, sentAt: new Date().toISOString(), payload };
 }
 function context(data: SocketData): ConnectionContext { return { connectionId: data.connectionId, installationId: data.installationId, subscriptions: new Set(data.subscriptions.keys()) }; }
+
+/** Phase 4 — build the wire envelope for a single live canonical session event.
+ *  The shape is byte-equivalent to one element of the
+ *  `session.events.replay.result.events` array so replay and live
+ *  frames are indistinguishable to the client (plan §3.4). */
+function canonicalLiveMessage(event: { readonly eventId: string; readonly sessionId: string; readonly sequence: number; readonly eventType: string; readonly occurredAt: string; readonly data: Record<string, unknown> }): Record<string, unknown> {
+  return {
+    protocol: { major: PROTOCOL_MAJOR, minor: PROTOCOL_MINOR },
+    messageId: id(),
+    type: "session.event",
+    sentAt: new Date().toISOString(),
+    payload: {
+      eventId: event.eventId,
+      sessionId: event.sessionId,
+      sequence: event.sequence,
+      eventType: event.eventType,
+      occurredAt: event.occurredAt,
+      data: event.data,
+    },
+  };
+}
 function hasInvalidCursor(value: unknown, key = ""): boolean {
   if (Array.isArray(value)) return value.some((item) => hasInvalidCursor(item, key));
   if (value && typeof value === "object") return Object.entries(value as Record<string,unknown>).some(([childKey, child]) => hasInvalidCursor(child, childKey));
@@ -151,7 +189,7 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
         if (response) return response;
       }
       if (url.pathname === "/v1/ws") {
-        const upgraded = server.upgrade(request, { data: { connectionId: id(), installationId: "", hello: false, synchronized: false, subscriptions: new Map(), syncing: false, pendingEvents: [], tokens: 20, tokenAt: Date.now(), queuedBytes: 0 } });
+        const upgraded = server.upgrade(request, { data: { connectionId: id(), installationId: "", hello: false, synchronized: false, subscriptions: new Map(), canonicalSubscriptions: new Set(), syncing: false, pendingEvents: [], tokens: 20, tokenAt: Date.now(), queuedBytes: 0 } });
         return upgraded ? undefined : new Response("upgrade required", { status: 426 });
       }
       return new Response("not found", { status: 404 });
@@ -218,8 +256,29 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
             if (fault !== "drop_receipt") send(ws, envelope("command.receipt", result, message.requestId, message.commandId));
             return;
           }
-          const result = await options.runtime.control(context(ws.data), type, payload);
-          if (result) send(ws, envelope(`${type}.result`, result, message.requestId));
+          const result = await options.runtime.control(context(ws.data), type, type === "session.events.subscribe" ? { ...payload, __requestId: typeof message.requestId === "string" ? message.requestId : null } : payload);
+          if (result) {
+            // Phase 4 — the `session.events.subscribe` control
+            // returns the ready-to-send envelope plus a side
+            // channel that registers the connection for live
+            // canonical pushes. The server forwards the envelope
+            // verbatim (already byte-shape compatible with the
+            // server envelope) and updates the socket's canonical
+            // subscription set.
+            if (type === "session.events.subscribe") {
+              const subscribeSessionId = typeof (result as { __canonicalSubscribeSessionId?: unknown }).__canonicalSubscribeSessionId === "string"
+                ? (result as { __canonicalSubscribeSessionId: string }).__canonicalSubscribeSessionId
+                : null;
+              if (subscribeSessionId) ws.data.canonicalSubscriptions.add(subscribeSessionId);
+              // `__canonicalSubscribeSessionId` is an internal routing hint;
+              // never expose it on the strict replay-result wire envelope.
+              const wireResult = { ...(result as Record<string, unknown>) };
+              delete wireResult.__canonicalSubscribeSessionId;
+              send(ws, wireResult);
+            } else if (result) {
+              send(ws, envelope(`${type}.result`, result, message.requestId));
+            }
+          }
         } catch (error) {
           const storeCode = error && typeof error === "object" ? (error as { code?: unknown }).code : undefined;
           const code = typeof storeCode === "string" && ERROR_CODES.includes(storeCode as never) ? storeCode : storeCode === "full" ? "storage_full" : ["busy", "readonly", "corrupt", "io"].includes(String(storeCode)) ? "database_unavailable" : error instanceof Error && /idempotency conflict/i.test(error.message) ? "idempotency_conflict" : "invalid_state";
@@ -279,7 +338,10 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
       return;
     }
     const required = Array.isArray(payload.requiredCapabilities) ? payload.requiredCapabilities : [];
-    const capabilities = ["streams.v1", "commands.v1", "controller_leases.v1", "raw_rpc.v1", ...(runtime.optionalCapabilities?.() ?? [])];
+    // Advertise only capabilities that the released mobile path can exercise.
+  // Raw Pi RPC remains an internal bridge command for compatibility callers,
+  // but it is not a mobile capability and must not be required by the app.
+  const capabilities = ["streams.v1", "commands.v1", "controller_leases.v1", ...(runtime.optionalCapabilities?.() ?? [])];
     if (required.some((item) => typeof item !== "string" || !capabilities.includes(item))) { sendError(ws, "unsupported_capability", "A required capability is unsupported.", message.requestId); ws.close(1002, "capability"); return; }
     if (!validateFixture({ name: "live", kind: "hello", valid: true, message })) { sendError(ws, "invalid_message", "Hello does not match the protocol schema.", message.requestId); return; }
     ws.data.installationId = installationId; ws.data.hello = true;
@@ -292,6 +354,18 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
       if (!socket.data.subscriptions.has(event.streamId)) continue;
       if (socket.data.syncing) socket.data.pendingEvents.push(event);
       else if (socket.data.synchronized) sendLiveEvent(socket, event);
+    }
+  });
+  options.runtime.onCanonicalLiveEvent?.((event) => {
+    // Forward canonical live events to sockets that registered for
+    // the owning sessionId via `session.events.subscribe`. The
+    // envelope uses the plan's top-level canonical frame so replay
+    // and live frames are byte-shape equivalent (plan §3.4).
+    const wire = canonicalLiveMessage(event);
+    for (const socket of sockets) {
+      if (!socket.data.canonicalSubscriptions.has(event.sessionId)) continue;
+      if (!socket.data.hello) continue;
+      send(socket, wire);
     }
   });
   Object.assign(server, {

@@ -372,11 +372,23 @@ function event(type: NormalizedPiEvent["type"], sessionId: string, payload: Reco
   return { type, payload: { sessionId, ...payload } };
 }
 
+/**
+ * Normalize one raw Pi notification into the canonical session event
+ * set.
+ *
+ * The rewrite slice removes raw Pi events from the user-visible session
+ * stream per plan §3.3. The companion `pi.rpc.event` envelope is no
+ * longer appended to the transcript; raw events are routed through
+ * `PiDiagnosticsSink` instead. Callers that need raw observability
+ * (support bundle, integration tests) should subscribe to the
+ * diagnostics sink and never read it back into the transcript.
+ *
+ * Curated events remain the sole source of transcript mutations. The
+ * shape returned here is the closed TypeScript union consumed by the
+ * canonical event store facade.
+ */
 export function normalizePiEvent(raw: RawPiEvent, context: PiNormalizationContext): readonly NormalizedPiEvent[] {
-  return [
-    ...normalizeCuratedPiEvent(raw, context),
-    event("pi.rpc.event", context.sessionId, { event: raw }),
-  ];
+  return normalizeCuratedPiEvent(raw, context);
 }
 
 function normalizeCuratedPiEvent(raw: RawPiEvent, context: PiNormalizationContext): readonly NormalizedPiEvent[] { const sessionId = context.sessionId;
@@ -392,6 +404,10 @@ switch (raw.type) {
   case "message_start": {
     const message = object(raw.message);
     if (message.role !== "assistant") return [];
+    // Pi emits an empty assistant message_start before the first text_start.
+    // The text block is the real stable transcript identity; admitting both
+    // creates an empty assistant reply beside the actual response.
+    if (Array.isArray(message.content) && message.content.length === 0) return [];
     return [event("assistant.started", sessionId, { contentBlockId: message.id ?? raw.messageId ?? "message" })];
   }
   case "message_update": return normalizeMessageUpdate(raw, sessionId);
@@ -401,7 +417,9 @@ switch (raw.type) {
     if (message.stopReason === "aborted") {
       return [event("turn.aborted", sessionId, { reason: "aborted" })];
     }
-    return [event("assistant.completed", sessionId, { content: safe(raw.message) })];
+    // text_end already closes the streamed content block. Reuse its stable
+    // first-block identity instead of creating a second `:assistant` card.
+    return [event("assistant.completed", sessionId, { contentBlockId: "0", content: safe(raw.message) })];
   }
   case "tool_execution_start": {
     const toolCallId = identifier(raw.toolCallId);

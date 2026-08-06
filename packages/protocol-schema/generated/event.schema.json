@@ -10537,6 +10537,10 @@
                   {
                     "const": "raw_rpc.v1",
                     "type": "string"
+                  },
+                  {
+                    "const": "session_events.v2",
+                    "type": "string"
                   }
                 ]
               },

@@ -818,7 +818,6 @@ const _supportedCapabilities = <String>{
   'attention.v1',
   'agents.v1',
   'catalogue.v1',
-  'raw_rpc.v1',
 };
 const _commandTypes = <String>{
   'controller.acquire',
@@ -875,6 +874,7 @@ const _controlTypes = <String>{
   'session.snapshot.request',
   'session.list',
   'session.history.page',
+  'session.events.subscribe',
   'workspace.list',
   'workspace.search',
   'model.list',
@@ -929,6 +929,8 @@ const _responseTypes = <String>{
   'catalogue.snapshot.result',
   'plan.snapshot.result',
   'pi.rpc.response',
+  'session.events.replay.result',
+  'session.event',
 };
 const _eventTypes = <String>{
   'host.state',

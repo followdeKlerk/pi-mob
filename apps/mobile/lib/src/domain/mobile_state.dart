@@ -365,16 +365,16 @@ const Object _sentinel = Object();
 
 /// Per-session history buffer populated from `session.history.page` responses.
 ///
-/// History items predate the live stream's sync baseline: they are merged
-/// with the live `_streams['session:<id>'].events` only at the view layer
-/// (see [ConnectionCoordinator.transcriptEvents]) so the canonical
-/// cursor-ordered reducer that owns the live stream view is never bypassed.
+/// This operational buffer remains for bounded history synchronization and
+/// older hosts. The canonical chat surface does not read it when the host
+/// advertises `session_events.v2`; canonical replay/live events go directly
+/// to `SessionEventSynchronizer`.
 ///
 /// Stored events are deduplicated by `eventId` and kept in ascending cursor
 /// order across all fetched pages. The coordinator tracks [snapshotRevision]
-/// so the UI can react to concurrent host changes (per
-/// `docs/PROTOCOL.md §16`). The [nextPageToken] is opaque; mobile never
-/// reads or reconstructs it, only echoes it back.
+/// so non-canonical operational consumers can react to concurrent host
+/// changes (per `docs/PROTOCOL.md §16`). The [nextPageToken] is opaque;
+/// mobile never reads or reconstructs it, only echoes it back.
 final class SessionHistoryState {
   SessionHistoryState({
     required this.sessionId,

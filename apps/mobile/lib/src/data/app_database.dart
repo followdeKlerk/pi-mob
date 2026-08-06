@@ -154,6 +154,7 @@ class AppDatabase extends _$AppDatabase {
       await _ensureM12Schema();
       await _ensureM13Schema();
       await _ensureHistorySyncSchema();
+      await _ensureCanonicalTranscriptCleanup();
       await _ensureSearchIndexSchema();
       await _ensureAttentionItemsSchema();
       await _ensureR12ScrollSchema();
@@ -302,7 +303,11 @@ class AppDatabase extends _$AppDatabase {
   /// Inserts one history page in a single transaction. History rows do not
   /// advance the live stream cursor until the complete page chain is durable.
   Future<void> insertHistoryEvents(Iterable<StreamEventState> events) async {
+    // Canonical session events have their own durable repository. Keep this
+    // generic cache for host/operational history only; persisting session
+    // transcript pages here creates a second mobile transcript authority.
     final values = events
+        .where((event) => !event.streamId.startsWith('session:'))
         .map(
           (event) => CachedEventsCompanion.insert(
             eventId: event.eventId,
@@ -480,6 +485,29 @@ class AppDatabase extends _$AppDatabase {
         PRIMARY KEY (host_id, session_id)
       )
     ''');
+  }
+
+  Future<void> _ensureCanonicalTranscriptCleanup() async {
+    await customStatement('''
+      CREATE TABLE IF NOT EXISTS canonical_cleanup_markers (
+        marker TEXT PRIMARY KEY,
+        applied_at INTEGER NOT NULL
+      )
+    ''');
+    final existing = await customSelect(
+      'SELECT marker FROM canonical_cleanup_markers WHERE marker = ?',
+      variables: const [Variable<String>('session-transcript-cache-v1')],
+    ).getSingleOrNull();
+    if (existing != null) return;
+    await transaction(() async {
+      await customStatement(
+        "DELETE FROM cached_events WHERE stream_id LIKE 'session:%'",
+      );
+      await customStatement(
+        'INSERT OR IGNORE INTO canonical_cleanup_markers(marker, applied_at) VALUES (?, ?)',
+        ['session-transcript-cache-v1', DateTime.now().millisecondsSinceEpoch],
+      );
+    });
   }
 
   Future<String?> historySyncRevision(String hostId, String sessionId) async {

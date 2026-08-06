@@ -18,6 +18,9 @@ import type { MobileCatalogueService } from "../pi/mobile-catalogue-service";
 import { type PlanSourceService, isPlanUnavailable, boundPlanSnapshot } from "../plans/source-service";
 import { type ContextSourceService, type ContextMutationTarget, isContextUnavailable, boundContextSnapshot } from "../context/source-service";
 import type { NotificationService } from "../notifications";
+import type { CanonicalEventTransport } from "../session-events/canonical-event-transport";
+import { buildReplayResultMessage } from "../session-events/canonical-event-transport";
+import type { CanonicalSessionStore } from "../session-events/canonical-session-store";
 
 export class RuntimeProtocolError extends Error { override readonly name = "RuntimeProtocolError"; constructor(readonly code: string, message: string) { super(message); } }
 const SUMMARY_EVENT_TYPES = new Set(["session.state", "session.metadata", "controller.state", "turn.started", "turn.waiting_for_input", "turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate", "queue.snapshot", "command.state", "error.event"]);
@@ -146,6 +149,18 @@ export interface DurableRuntimeOptions {
    * clients can discover push; otherwise the capability is omitted and
    * the truthful "Notifications unavailable" state is presented. */
   readonly notifications?: NotificationService;
+  /** Phase 4 — dedicated canonical session-event store. When present,
+   * the bridge advertises `session_events.v2` in the handshake and
+   * accepts the additive `session.events.subscribe` control. When
+   * omitted the capability is hidden and the legacy transcript path
+   * remains the only authoritative surface. */
+  readonly canonicalSessionStore?: CanonicalSessionStore;
+  /**
+   * Optional transport constructed by the daemon. The runtime calls
+   * into this transport for the `session.events.subscribe` control
+   * and for live `session.event` pushes; the transport owns the
+   * per-connection subscription map. */
+  readonly canonicalEventTransport?: CanonicalEventTransport;
 }
 
 export class DurableBridgeRuntime implements BridgeRuntimePort {
@@ -167,6 +182,8 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   private readonly agents: AgentSupervisionService | null;
   private readonly catalogue: MobileCatalogueService | null;
   private readonly notifications: NotificationService | null;
+  private readonly canonicalSessionStore: CanonicalSessionStore | null;
+  private readonly canonicalEventTransport: CanonicalEventTransport | null;
   private readonly inFlightContextSnapshots = new Map<string, AbortController>();
   private readyState = false;
   constructor(readonly options: DurableRuntimeOptions) {
@@ -182,11 +199,30 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     this.agents = options.agents ?? null;
     this.catalogue = options.catalogue ?? null;
     this.notifications = options.notifications ?? null;
+    this.canonicalSessionStore = options.canonicalSessionStore ?? null;
+    this.canonicalEventTransport = options.canonicalEventTransport ?? null;
   }
   async start(): Promise<{ resumed: number; indeterminate: number }> {
     const recovered = await this.commands.recover(); this.readyState = true; return recovered;
   }
   onEvent(listener: Parameters<BridgeStore["onEvent"]>[0]): () => void { return this.options.store.onEvent(listener); }
+  /**
+   * Phase 4 — register a listener for canonical session-event live
+   * pushes. The runtime forwards events from the dedicated canonical
+   * log; the listener is invoked after the underlying SQLite
+   * transaction commits, satisfying plan §3.2.
+   */
+  onCanonicalLiveEvent(listener: (event: { readonly eventId: string; readonly sessionId: string; readonly sequence: number; readonly eventType: string; readonly occurredAt: string; readonly data: Record<string, unknown> }) => void): () => void {
+    if (!this.canonicalSessionStore) return () => undefined;
+    return this.canonicalSessionStore.onCommit((event) => listener({
+      eventId: event.eventId,
+      sessionId: event.sessionId,
+      sequence: event.sequence,
+      eventType: event.eventType,
+      occurredAt: event.occurredAt,
+      data: { ...event.payload },
+    }));
+  }
   identity(): { hostId: string; hostGeneration: string; hostDisplayName: string } { return { ...this.options.store.identity(), hostDisplayName: this.hostDisplayName }; }
 
   /**
@@ -228,6 +264,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (this.agents) caps.push("agents.v1");
     if (this.catalogue) caps.push("catalogue.v1");
     if (this.notifications) caps.push("notifications.v1");
+    if (this.canonicalEventTransport) caps.push("session_events.v2");
     return caps;
   }
 
@@ -313,7 +350,56 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (type === "context.unpin") return this.contextMutation("context.unpin", payload);
     if (type === "context.exclude") return this.contextMutation("context.exclude", payload);
     if (type === "context.refresh") return this.contextMutation("context.refresh", payload);
+    if (type === "session.events.subscribe") return this.sessionEventsSubscribe(connection, payload);
     return {};
+  }
+
+  /**
+   * Phase 4 — `session.events.subscribe` accepts a `sessionId` and an
+   * `afterSequence` integer; the transport reads the canonical
+   * session-event log in strict per-session sequence order, then
+   * subscribes the connection for live delivery. Returns the
+   * `session.events.replay.result` envelope as the control reply so
+   * the server can forward it verbatim. Live events are delivered
+   * separately through the transport's post-commit listener.
+   *
+   * The transport handles subscribe-before-replay ordering: events
+   * committed during the replay window are buffered and delivered
+   * after the replay in strict sequence order, so the client never
+   * sees a gap.
+   */
+  private sessionEventsSubscribe(connection: ConnectionContext, payload: Record<string, unknown>): Record<string, unknown> {
+    if (!this.canonicalEventTransport || !this.canonicalSessionStore) {
+      throw new RuntimeProtocolError("unsupported_capability", "session_events.v2 is not advertised on this host");
+    }
+    const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+    const afterSequence = typeof payload.afterSequence === "number" && Number.isInteger(payload.afterSequence) && payload.afterSequence >= 0
+      ? payload.afterSequence
+      : 0;
+    if (!sessionId) throw new RuntimeProtocolError("invalid_message", "sessionId is required");
+    if (!this.options.store.sessionExists(sessionId)) {
+      throw new RuntimeProtocolError("session_not_found", "session is not provisioned");
+    }
+    const replay = this.canonicalEventTransport.subscribe(
+      connection.connectionId,
+      sessionId,
+      afterSequence,
+      // The server wires this through its existing send helper;
+      // we never collect live events into the control response.
+      () => undefined,
+    );
+    if (!replay.complete) {
+      throw new RuntimeProtocolError("invalid_state", "canonical replay detected a sequence gap; client must rebuild");
+    }
+    const requestId = typeof payload.__requestId === "string" && payload.__requestId.length > 0
+      ? payload.__requestId
+      : crypto.randomUUID().toLowerCase();
+    const reply = buildReplayResultMessage(replay, requestId);
+    // The server uses the `__canonicalSubscribeSessionId` side
+    // channel to register the connection for live `session.event`
+    // pushes; the runtime does not own the socket map so the hint
+    // travels out-of-band through the control response.
+    return { ...reply, __canonicalSubscribeSessionId: sessionId };
   }
 
   /** R5 — `process.snapshot.request` returns the frozen closed
@@ -870,7 +956,10 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
   }
 
   disconnected(connection: ConnectionContext): void {
-    try { this.options.store.disconnectConnection(connection.connectionId); }
+    try {
+      this.canonicalEventTransport?.disconnect(connection.connectionId);
+      this.options.store.disconnectConnection(connection.connectionId);
+    }
     catch {
       // The durable store may already be closed during teardown; this is a
       // best-effort hook.

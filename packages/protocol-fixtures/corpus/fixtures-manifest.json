@@ -320,6 +320,11 @@
     "kind": "control"
   },
   {
+    "file": "control-session-events-subscribe-valid.json",
+    "valid": true,
+    "kind": "control"
+  },
+  {
     "file": "control-session-history-page-valid.json",
     "valid": true,
     "kind": "control"
@@ -1759,6 +1764,16 @@
   },
   {
     "file": "response-process-snapshot-result-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-session-event-valid.json",
+    "valid": true,
+    "kind": "response"
+  },
+  {
+    "file": "response-session-events-replay-result-valid.json",
     "valid": true,
     "kind": "response"
   },

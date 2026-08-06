@@ -100,6 +100,8 @@ void main() {
       await tester.tap(find.byKey(const Key('open-chat-drawer')));
       await tester.pumpAndSettle();
       expect(find.text('Saved session'), findsWidgets);
+      await tester.tap(find.byKey(const Key('drawer-settings')));
+      await tester.pumpAndSettle();
       expect(find.byKey(const Key('drawer-forget-host')), findsOneWidget);
 
       coordinator.dispose();

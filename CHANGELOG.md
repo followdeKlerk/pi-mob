@@ -6,11 +6,13 @@ All notable user-facing changes are recorded here while pi-mob remains pre-relea
 
 ### Added
 
-- Generic `raw_rpc.v1` command, response, and event transport without a Pi method allowlist.
 - Shared owner login-environment capture for model discovery and Pi RPC processes.
 - Multi-session Pi RPC handling with bounded host process capacity.
 - Android chat shell with saved chats, model controls, transcript search, global search, follow-up queues, attachments, exports, extension requests, and explicit uncertain-command recovery.
-- Bounded shallow workspace discovery from explicit search roots.
+- Canonical session-event v2 replay/live transport and mobile transcript reducer.
+- Bounded shallow workspace discovery from host home/GitHub defaults or explicit search roots.
+- Date-grouped chat navigation with compact settings and notification controls.
+- Foreground notification suppression; background FCM delivery remains enabled.
 - Inline subagent activity presentation.
 - Canonical project-status and roadmap documentation.
 
@@ -32,7 +34,7 @@ All notable user-facing changes are recorded here while pi-mob remains pre-relea
 
 ### Known limitations
 
-- The daemon still performs external-history import and Pi startup before binding the loopback server.
+- Legacy transcript caches/history synchronization and the bridge recipe projection remain during the canonical migration; the subtractive rewrite is not yet complete.
 - Advanced providers for attention, first-class agent supervision, catalogues, plans, context, file browsing, and process output are not injected by the normal daemon.
 - Projection failures for malformed known events can be isolated without a visible degraded-state signal.
 - Android and macOS artifacts remain preview-signed or unsigned; version metadata is not fully aligned.

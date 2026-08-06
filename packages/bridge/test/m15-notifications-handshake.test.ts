@@ -27,7 +27,6 @@ const SERVER_CAPABILITIES = new Set([
   "streams.v1",
   "commands.v1",
   "controller_leases.v1",
-  "raw_rpc.v1",
 ]);
 
 function fixtureRuntime(opts: {

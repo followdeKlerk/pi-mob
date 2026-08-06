@@ -38,10 +38,13 @@ import type { AttachmentStore } from "../core/attachments";
 import { canonicalizeOrThrow, deriveRootId, enumerateWorkspaceDirectories, searchWorkspaceDirectories } from "../core/workspace-policy";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
 import { handleRawRpcRequest } from "./raw-rpc";
-import { DurableRecipeActivityProjection } from "./external-history";
+import { DurableRecipeActivityProjection, canonicalProjectionEvent } from "./external-history";
+import type { CanonicalSessionStore } from "../session-events/canonical-session-store";
 import { normalizeCommandCatalogue } from "./command-catalogue";
 import { ExportRegistry, ExportRegistryInvalidInputError, type ExportMetadata } from "./export-registry";
 import type { NormalizedPiEvent, RawPiEvent } from "./types";
+import type { CanonicalEventStore } from "../session-events/event-store";
+import { isCanonicalTranscriptEventType } from "../session-events/canonical-event";
 import { classifyEvent, safePublishStatus, type NotificationService } from "../notifications";
 import {
   ProcessSupervisor,
@@ -200,6 +203,41 @@ export interface OneSessionAdapterOptions {
   readonly hostModels?: ReadonlyArray<Record<string, unknown>>;
   /** Reconcile Pi-owned JSONL at authoritative session lifecycle boundaries. */
   readonly reconcileHistory?: (sessionId: string, liveProcess: boolean) => { readonly authoritativeTerminal: boolean };
+  /**
+   * Optional diagnostics sink for raw Pi events. The rewrite slice
+   * removes raw Pi events from the user-visible session stream; raw
+   * events still flow into this sink for support / forensic use. The
+   * sink is intentionally absent from the transcript and from the
+   * schema fixtures, so a bridge without it simply drops raw events
+   * (the existing behaviour). When omitted, the adapter falls back to
+   * an in-memory sink that records nothing; production wiring
+   * constructed by `runDaemon` injects a durable sink.
+   */
+  readonly diagnosticsSink?: PiDiagnosticsSinkLike;
+  /**
+   * Legacy canonical facade used only by older injected integrations and
+   * JSONL reconciliation. Live production admission should provide the
+   * dedicated store below instead.
+   */
+  readonly canonicalEventStore?: CanonicalEventStore;
+  /** Dedicated canonical log used by the v2 mobile transport and live admission. */
+  readonly canonicalSessionStore?: CanonicalSessionStore;
+}
+
+/**
+ * Minimal sink contract the adapter needs to route raw Pi events to a
+ * bounded diagnostics table without coupling the adapter to the
+ * diagnostics module's full surface. The concrete implementation
+ * lives in `packages/bridge/src/session-events/diagnostics.ts`.
+ *
+ * The contract is intentionally minimal: a single `append` method
+ * that never throws. The adapter invokes `append` for every raw Pi
+ * notification regardless of whether the diagnostics DB is healthy;
+ * a transient SQLite failure must never block Pi notification
+ * processing.
+ */
+export interface PiDiagnosticsSinkLike {
+  append(raw: unknown, sessionId: string | null): void;
 }
 
 // ---------------- Adapter ----------------
@@ -265,6 +303,10 @@ export class OneSessionPiAdapter {
   private readonly notificationService: NotificationService | null;
   private readonly hostModels: ReadonlyArray<Record<string, unknown>>;
   private readonly reconcileHistory: ((sessionId: string, liveProcess: boolean) => { readonly authoritativeTerminal: boolean }) | null;
+  private readonly diagnosticsSink: PiDiagnosticsSinkLike | null;
+  private readonly canonicalEventStore: CanonicalEventStore | null;
+  private readonly canonicalSessionStore: CanonicalSessionStore | null;
+  private readonly assistantContent = new Map<string, string>();
 
   constructor(options: OneSessionAdapterOptions) {
     this.store = options.store;
@@ -280,6 +322,9 @@ export class OneSessionPiAdapter {
     this.notificationService = options.notificationService ?? null;
     this.hostModels = (options.hostModels ?? []).map((model) => ({ ...model }));
     this.reconcileHistory = options.reconcileHistory ?? null;
+    this.diagnosticsSink = options.diagnosticsSink ?? null;
+    this.canonicalEventStore = options.canonicalEventStore ?? null;
+    this.canonicalSessionStore = options.canonicalSessionStore ?? null;
     // Production injects a registry rooted in the bridge state directory.
     // Keeping this optional avoids filesystem side effects for adapters that
     // do not advertise export support (including read-only test fixtures).
@@ -351,8 +396,17 @@ export class OneSessionPiAdapter {
     sessionId: string,
     type: string,
     payload: Record<string, unknown>,
+    sourceEventId?: string,
   ): import("../core/store").StoredEvent {
     try {
+      if (this.canonicalSessionStore && isCanonicalTranscriptEventType(type)) {
+        return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
+      }
+      if (this.canonicalEventStore) {
+        return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
+      }
+      // Operational/session-state events remain compatibility output and do
+      // not consume canonical transcript sequence numbers.
       return this.recipeProjection(sessionId).append(type, payload);
     } catch (error) {
       // The durable projection rebuilds itself after rollback; dropping the
@@ -360,6 +414,80 @@ export class OneSessionPiAdapter {
       this.recipeProjections.delete(sessionId);
       throw error;
     }
+  }
+
+  /**
+   * Admission entry point. Production writes to the dedicated canonical
+   * store, then feeds a non-authoritative normalized view to the durable
+   * recipe projection so older consumers retain `recipe.activity` output.
+   * The legacy facade branch remains only for older injected integrations.
+   */
+  private appendNormalizedEventViaCanonicalStore(
+    sessionId: string,
+    type: string,
+    payload: Record<string, unknown>,
+    sourceEventId?: string,
+  ): import("../core/store").StoredEvent {
+    const streamId = `session:${sessionId}`;
+    const activeTurnId = this.activeTurns.get(sessionId)?.turnId ?? `historical:${sessionId}`;
+    const legacyType = type as Parameters<CanonicalEventStore["append"]>[1]["type"];
+    let canonicalType = legacyType;
+    let canonicalPayload: Record<string, unknown> = { ...payload };
+    if (type === "assistant.started" || type === "assistant.delta" || type === "assistant.completed") {
+      const turnId = typeof payload.turnId === "string" ? payload.turnId : activeTurnId;
+      // Pi content indexes (for example `0`) repeat on every turn. Scope the
+      // fallback identity by turn so a later reply cannot collide with a
+      // terminal assistant message from an earlier turn.
+      const messageId = typeof payload.messageId === "string"
+        ? payload.messageId
+        : `${sessionId}:${turnId}:${String(payload.contentBlockId ?? "assistant")}`;
+      const contentKey = `${sessionId}:${messageId}`;
+      if (type === "assistant.delta") {
+        const text = typeof payload.text === "string" ? payload.text : "";
+        const content = `${this.assistantContent.get(contentKey) ?? ""}${text}`;
+        this.assistantContent.set(contentKey, content);
+        canonicalType = "assistant.content.replaced" as typeof canonicalType;
+        canonicalPayload = { turnId, messageId, content: [{ kind: "text", text: content }] };
+      } else if (type === "assistant.completed") {
+        canonicalType = "assistant.message.completed" as typeof canonicalType;
+        canonicalPayload = { turnId, messageId };
+      } else {
+        canonicalPayload = { ...payload, turnId, messageId };
+      }
+    } else if (type === "tool.started" || type === "tool.output" || type === "tool.completed" || type === "tool.failed") {
+      const turnId = typeof payload.turnId === "string" ? payload.turnId : activeTurnId;
+      canonicalPayload = { ...payload, turnId };
+      if (type === "tool.output") {
+        canonicalType = "tool.progress.replaced" as typeof canonicalType;
+        canonicalPayload = { turnId, toolCallId: payload.toolCallId, progress: payload.output };
+      }
+    }
+    if (this.canonicalSessionStore) {
+      const committed = this.canonicalSessionStore.append({
+        sessionId,
+        type: canonicalType,
+        payload: canonicalPayload,
+        ...(sourceEventId ? { sourceEventId } : {}),
+      });
+      const canonicalEvent = canonicalProjectionEvent(committed.event);
+      // The recipe projector is compatibility output. Feed it the legacy
+      // normalized shape while the dedicated store remains authoritative.
+      const projectionEvent = { ...canonicalEvent, type, payload };
+      if (!committed.deduplicated) this.recipeProjection(sessionId).applyAndPublish(projectionEvent);
+      return projectionEvent;
+    }
+    if (this.canonicalEventStore) {
+      const result = this.canonicalEventStore.append(sessionId, {
+        type: legacyType,
+        payload,
+        ...(sourceEventId ? { sourceEventId } : {}),
+      });
+      const storedEvent = result.events[0] ?? this.store.listEvents(streamId).at(-1);
+      if (!storedEvent) throw new Error(`canonical event store returned no persisted event for ${type}`);
+      if (!result.deduplicated) this.recipeProjection(sessionId).applyAndPublish(storedEvent);
+      return storedEvent;
+    }
+    return this.recipeProjection(sessionId).append(type, payload);
   }
 
   /** Detach all RPC listeners. Idempotent. */
@@ -370,6 +498,18 @@ export class OneSessionPiAdapter {
     this.recipeProjections.clear();
     for (const entry of this.sessions.values()) entry.detach();
     this.sessions.clear();
+  }
+
+  /**
+   * Close the diagnostics sink if the adapter owns one. The daemon calls
+   * this on shutdown so the diagnostics DB connection does not leak. No-op
+   * when the adapter has no sink (the legacy default).
+   */
+  closeDiagnosticsSink(): void {
+    if (this.diagnosticsSink && typeof (this.diagnosticsSink as { close?: () => void }).close === "function") {
+      try { (this.diagnosticsSink as unknown as { close: () => void }).close(); }
+      catch { /* sink close is best-effort */ }
+    }
   }
 
   /** Lists the same bounded explicit-root candidates exposed by search. */
@@ -1184,6 +1324,28 @@ export class OneSessionPiAdapter {
     if (lifecycle !== undefined && !["idle", "running", "waiting_for_input", "compacting"].includes(lifecycle)) {
       throw new Error("Pi process unavailable; activate the session first");
     }
+    // Admit the user prompt to the canonical log before Pi receives it.
+    // The command id is stable across retries and is the message id.
+    const promptEventPayload = {
+      turnId: command.commandId,
+      messageId: command.commandId,
+      text: payload.message,
+      ...(Array.isArray(payload.attachmentIds) ? { attachmentIds: payload.attachmentIds } : {}),
+    };
+    if (this.canonicalSessionStore) {
+      this.canonicalSessionStore.append({
+        sessionId: payload.sessionId,
+        type: "user.message.created",
+        sourceEventId: command.commandId,
+        payload: promptEventPayload,
+      });
+    } else if (this.canonicalEventStore) {
+      this.canonicalEventStore.append(payload.sessionId, {
+        type: "user.message.created",
+        sourceEventId: command.commandId,
+        payload: promptEventPayload,
+      });
+    }
     rpc.markDispatchStart?.();
     const method: "prompt" | "steer" | "follow_up" =
       payload.deliveryMode === "steer" ? "steer" :
@@ -1213,11 +1375,30 @@ export class OneSessionPiAdapter {
       await this.rawRpc(payload.sessionId, method, { message: payload.message, ...(images.length ? { images } : {}) }, { commandId: command.commandId });
     } catch (error) {
       this.activeTurns.delete(payload.sessionId);
-      const streamId = `session:${payload.sessionId}`;
-      this.store.appendEvent(streamId, "turn.indeterminate", {
+      const indeterminatePayload = {
         sessionId: payload.sessionId,
+        turnId: command.commandId,
         reason: "rpc_outcome_unknown",
-      });
+      };
+      if (this.canonicalSessionStore) {
+        this.canonicalSessionStore.append({
+          sessionId: payload.sessionId,
+          type: "turn.indeterminate",
+          sourceEventId: `${command.commandId}:indeterminate`,
+          payload: indeterminatePayload,
+        });
+      } else if (this.canonicalEventStore) {
+        this.canonicalEventStore.append(payload.sessionId, {
+          type: "turn.indeterminate",
+          sourceEventId: `${command.commandId}:indeterminate`,
+          payload: indeterminatePayload,
+        });
+      } else {
+        // Test and older injected adapters without canonical wiring retain the
+        // compatibility journal behavior; the production daemon always wires
+        // the canonical store.
+        this.store.appendEvent(`session:${payload.sessionId}`, "turn.indeterminate", indeterminatePayload);
+      }
       const prior = this.store.sessionState(payload.sessionId) ?? {};
       this.store.updateSessionState(payload.sessionId, {
         ...prior,
@@ -1659,7 +1840,12 @@ export class OneSessionPiAdapter {
     else if (typeof input.value === "string") response.value = input.value;
     else throw new Error("invalid extension response");
     await rpc.sendExtensionUiResponse(response);
-    this.store.appendEvent(`session:${sessionId}`, "extension.dialog", { sessionId, dialogId:dialog.dialogId, method:dialog.method, state:"responded", expiresAt:new Date(dialog.expiresAt).toISOString() });
+    this.appendNormalizedEvent(
+      sessionId,
+      "extension.dialog",
+      { sessionId, dialogId: dialog.dialogId, method: dialog.method, state: "responded", expiresAt: new Date(dialog.expiresAt).toISOString() },
+      `${command.commandId}:extension.responded`,
+    );
   }
 
   private async dispatchNextFollowUp(sessionId:string): Promise<void> {
@@ -1670,12 +1856,27 @@ export class OneSessionPiAdapter {
     } catch (error) { this.store.finishFollowUp(item.queueItemId, true); throw error; }
   }
 
+  private appendDiagnostics(raw: unknown, sessionId: string | null): void {
+    if (!this.diagnosticsSink) return;
+    try { this.diagnosticsSink.append(raw, sessionId); }
+    catch { /* diagnostics sink is best-effort; never block Pi notifications */ }
+  }
+
   private handleNotification(raw: unknown): void {
+    // Diagnostics come FIRST, before any object/type guard. The plan
+    // §7.4 requires that unknown, malformed, or future events are
+    // observable through the diagnostics sink. Routing diagnostics
+    // before session resolution guarantees that no production event is
+    // silently dropped from the forensic surface. The sink contract
+    // is best-effort, but the adapter still wraps each call in a
+    // try/catch so a misbehaving sink cannot block Pi notifications.
+    if (raw !== undefined && raw !== null) this.appendDiagnostics(raw, null);
     if (!raw || typeof raw !== "object") return;
     const record = raw as Record<string, unknown>;
     const type = typeof record.type === "string" ? record.type : null;
     if (!type) return;
     const inferredSessionId = this.resolveNotificationSessionId(record);
+    if (inferredSessionId) this.appendDiagnostics(record, inferredSessionId);
     if (!inferredSessionId) return;
     const streamId = `session:${inferredSessionId}`;
     if (!this.store.streamPosition(streamId)) return;
@@ -1687,7 +1888,6 @@ export class OneSessionPiAdapter {
       const dialog = this.store.createDialog({ sessionId:inferredSessionId, upstreamId:String(record.id ?? "").slice(0,256), method, request, expiresAt:this.now()+timeout });
       this.store.appendEvent(streamId, "extension.dialog", { sessionId:inferredSessionId, dialogId:dialog.dialogId, method, ...request, createdAt:new Date(dialog.createdAt).toISOString(), expiresAt:new Date(dialog.expiresAt).toISOString(), state:"pending" });
       this.store.updateSessionState(inferredSessionId, { ...(this.store.sessionState(inferredSessionId) ?? {}), pendingDialog:{ dialogId:dialog.dialogId, method, ...request, expiresAt:new Date(dialog.expiresAt).toISOString() } });
-      this.store.appendEvent(streamId, "pi.rpc.event", { sessionId: inferredSessionId, event: record });
       return;
     }
     const normalized = normalizePiEvent(record as RawPiEvent, {
@@ -1713,7 +1913,10 @@ export class OneSessionPiAdapter {
           ? { commandId: activeTurn.turnId, deliveryMode: activeTurn.deliveryMode, message: activeTurn.message }
           : {}),
       };
-      const storedEvent=this.appendNormalizedEvent(inferredSessionId, event.type, enrichedPayload);
+      const sourceEventId = typeof record.id === "string" && record.id.length > 0
+        ? `${type}:${record.id}`
+        : undefined;
+      const storedEvent=this.appendNormalizedEvent(inferredSessionId, event.type, enrichedPayload, sourceEventId);
       const notificationKind=classifyEvent({type:event.type,sessionId:inferredSessionId,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt,...(typeof enrichedPayload.errorCode==="string"?{errorCode:enrichedPayload.errorCode}:{}),...(typeof enrichedPayload.attentionState==="string"?{attentionState:enrichedPayload.attentionState}:{}),...(typeof enrichedPayload.runtimeState==="string"?{runtimeState:enrichedPayload.runtimeState}:{})});
       if(notificationKind) safePublishStatus(this.notificationService,{sessionId:inferredSessionId,kind:notificationKind,sourceEventId:storedEvent.eventId,sourceAt:storedEvent.createdAt});
       const prior = this.store.sessionState(inferredSessionId) ?? {};

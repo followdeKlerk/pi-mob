@@ -432,17 +432,6 @@ class _TurnView extends StatelessWidget {
   /// align with the rest of the transcript.
   static const double _contentInset = 16;
 
-  bool _userMessageReceived(UserTurnStatus status) => switch (status) {
-    UserTurnStatus.accepted ||
-    UserTurnStatus.queued ||
-    UserTurnStatus.dispatching ||
-    UserTurnStatus.dispatched ||
-    UserTurnStatus.settled => true,
-    UserTurnStatus.aborted ||
-    UserTurnStatus.failed ||
-    UserTurnStatus.indeterminate => false,
-  };
-
   Future<void> _showUserActions(BuildContext context, String message) async {
     await showModalBottomSheet<void>(
       context: context,
@@ -559,23 +548,37 @@ class _TurnView extends StatelessWidget {
           horizontal: _contentInset,
           vertical: PiSpacing.sm,
         ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(PiRadius.md),
-          onLongPress: () => _showUserActions(context, message),
-          child: ListTile(
-            leading: const Icon(Icons.person_outline),
-            title: Text(message),
-            subtitle: _userMessageReceived(user.status)
-                ? Semantics(
-                    label: 'Message received',
-                    child: Icon(
-                      Icons.check,
-                      key: Key('user-delivery-check-${user.turnId}'),
-                      size: 16,
-                      color: scheme.primary,
+        child: Align(
+          alignment: Alignment.centerRight,
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: MediaQuery.sizeOf(context).width * 0.82,
+            ),
+            child: Semantics(
+              container: true,
+              label: 'Your message',
+              child: InkWell(
+                borderRadius: BorderRadius.circular(PiRadius.lg),
+                onLongPress: () => _showUserActions(context, message),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: PiSpacing.md,
+                    vertical: PiSpacing.sm,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.primary.withValues(alpha: 0.22),
+                    border: Border.all(
+                      color: scheme.primary.withValues(alpha: 0.5),
                     ),
-                  )
-                : null,
+                    borderRadius: BorderRadius.circular(PiRadius.lg),
+                  ),
+                  child: Text(
+                    message,
+                    style: text.bodyLarge?.copyWith(color: scheme.onSurface),
+                  ),
+                ),
+              ),
+            ),
           ),
         ),
       );

@@ -132,7 +132,7 @@ function checkCapMatrix(): string[] {
     issues.push("reports/capabilities.json is missing one of the expected configurations");
     return issues;
   }
-  const expectedWithout = ["commands.v1", "controller_leases.v1", "raw_rpc.v1", "streams.v1"];
+  const expectedWithout = ["commands.v1", "controller_leases.v1", "session_events.v2", "streams.v1"];
   const expectedWith = [...expectedWithout, "notifications.v1"];
   if (JSON.stringify([...without.capabilities].sort()) !== JSON.stringify([...expectedWithout].sort())) {
     issues.push("without-fcm capability drift");

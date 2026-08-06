@@ -22,12 +22,14 @@ If the major version does not match, the bridge closes the socket with `unsuppor
 
 Capabilities are advertised in the `hello.accepted` payload. The mobile client may request any subset of advertised capabilities in `hello.requiredCapabilities`. It may list optional capabilities in `hello.optionalCapabilities`.
 
-The current baseline is:
+The current released baseline is:
 
 - `streams.v1`
 - `commands.v1`
 - `controller_leases.v1`
-- `raw_rpc.v1`
+- `session_events.v2`
+
+The bridge may continue to accept internal raw Pi RPC commands for compatibility, but `raw_rpc.v1` is not advertised because the released mobile client has no raw-RPC surface.
 
 Optional capabilities are added as the host enables them. `notifications.v1` is advertised when the bridge was started with a valid notification service account.
 
@@ -37,8 +39,8 @@ This is the canonical exact capability contract for `hello.accepted`. The normal
 
 | Configuration | hello.accepted.capabilities |
 | --- | --- |
-| without-FCM | `commands.v1`, `controller_leases.v1`, `raw_rpc.v1`, `streams.v1` |
-| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `raw_rpc.v1`, `streams.v1` |
+| without-FCM | `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
+| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
 
 
 Every message is a JSON object with the following top-level fields:
@@ -99,6 +101,25 @@ The host persists a per-stream cursor. The mobile app seeds its in-memory cursor
 4. Mobile app subscribes to the streams it needs.
 5. The bridge replays from the persisted cursor, then begins live delivery.
 6. The bridge can drain, disconnect, or background the connection at any time. Drain is signalled by a `host.draining` event.
+
+## Canonical session events v2
+
+The bridge advertises `session_events.v2` when the normal daemon constructs the canonical session-event store and transport.
+
+The mobile client sends `session.events.subscribe` with `sessionId` and `afterSequence`. The bridge subscribes before it reads replay data.
+
+Replay uses `session.events.replay.result`. Live delivery uses `session.event`. Both messages carry the same event fields:
+
+- `eventId`
+- `sessionId`
+- `sequence`
+- `eventType`
+- `occurredAt`
+- `data`
+
+The bridge stores each canonical event before it sends a live message. The mobile client rejects gaps and requests replay from its last durable sequence. Assistant and tool updates use replacement events (`assistant.content.replaced`, `assistant.message.completed`, and `tool.progress.replaced`) with stable turn/message/tool identifiers.
+
+The legacy stream and history API remain only for older hosts and operational state. The canonical mobile chat, transcript search, and search index do not read those paths when `session_events.v2` is advertised.
 
 ## What is not in the protocol
 

@@ -119,7 +119,7 @@ void main() {
     expect(list.controller, isNotNull);
   });
 
-  testWidgets('received user messages show only a checkmark', (tester) async {
+  testWidgets('user messages render without delivery indicators', (tester) async {
     await tester.pumpWidget(
       _app(
         TranscriptView(
@@ -137,7 +137,6 @@ void main() {
     );
 
     expect(find.text('Hello'), findsOneWidget);
-    expect(find.byKey(const Key('user-delivery-check-user-1')), findsOneWidget);
     expect(find.textContaining('You ·'), findsNothing);
     expect(find.textContaining('settled'), findsNothing);
   });

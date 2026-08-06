@@ -921,7 +921,6 @@ void main() {
       expect(coordinator.selectedSessionId, isNull);
       expect(coordinator.pendingCommandId, isNull);
       expect(coordinator.draft, 'Keep across restore');
-      expect(coordinator.rawEvents, isEmpty);
       final quarantined = await database.draft(hostId, sessionId);
       expect(quarantined?.draftText, 'Keep across restore');
       expect(quarantined?.pendingCommandId, isNull);
@@ -2021,7 +2020,7 @@ void main() {
         coordinator.sessionTree['66666666-6666-4666-8666-666666666666'],
         isNotNull,
         reason:
-            'host cursor ${coordinator.streams['host:$hostId']?.lastContiguousCursor.value}; phase ${coordinator.phase}; error ${coordinator.errorMessage}; raw ${coordinator.rawEvents.isEmpty ? 'none' : coordinator.rawEvents.last}',
+            'host cursor ${coordinator.streams['host:$hostId']?.lastContiguousCursor.value}; phase ${coordinator.phase}; error ${coordinator.errorMessage}',
       );
       expect(
         coordinator

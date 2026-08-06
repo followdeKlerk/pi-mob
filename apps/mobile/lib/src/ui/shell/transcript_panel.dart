@@ -1,22 +1,27 @@
 import 'package:flutter/material.dart';
 
 import '../../connection/connection_coordinator.dart';
-import '../../transcript/widgets/transcript_view.dart';
+import '../../session_events/canonical_transcript_view.dart';
 import '../theme/pi_theme.dart';
 
 /// Transcript surface as composed on the Activity destination. The
-/// stream-keyed `TranscriptEventView` is the sole presentation path for
-/// conversational and tool activity, including truncation metadata attached
-/// to its originating tool card.
+/// canonical session-event projection is the sole presentation path for
+/// conversational and tool activity.
 ///
 /// R12 — Per-chat scroll position is mobile-authoritative. When the
 /// selected session changes, the panel reads the persisted tuple from
-/// the coordinator and passes `(offset, followMode)` into the inner
-/// `TranscriptEventView`/`TranscriptView` so the transcript jumps back
+/// the coordinator and passes `(offset, followMode)` into the canonical
+/// `TranscriptView` so the transcript jumps back
 /// to where the user left it instead of the latest tail. User-initiated
 /// scroll changes flush back through `onScrollPersist` to the
 /// coordinator, which value-coalesces (no Timer / Future.delayed —
 /// see FIELD_GUIDE §R11) and writes the row immediately.
+///
+/// Phase 6 — UI cutover. When the bridge advertises
+/// `session_events.v2` the panel renders the canonical
+/// `CanonicalTranscriptView` (one deterministic reducer state fed by
+/// the dedicated canonical session-event log). Hosts without the capability
+/// show the canonical empty state until upgraded.
 class TranscriptPanel extends StatefulWidget {
   const TranscriptPanel({required this.coordinator, super.key});
 
@@ -31,6 +36,24 @@ class _TranscriptPanelState extends State<TranscriptPanel> {
   int? _restoredOffset;
   bool _restoredFollow = true;
   bool _restoredLoaded = false;
+
+  @override
+  void initState() {
+    super.initState();
+    widget.coordinator.canonicalSessionManager.addListener(_onCanonicalChanged);
+  }
+
+  @override
+  void dispose() {
+    widget.coordinator.canonicalSessionManager.removeListener(
+      _onCanonicalChanged,
+    );
+    super.dispose();
+  }
+
+  void _onCanonicalChanged() {
+    if (mounted) setState(() {});
+  }
 
   @override
   void didChangeDependencies() {
@@ -83,18 +106,20 @@ class _TranscriptPanelState extends State<TranscriptPanel> {
       );
     }
     final streamId = 'session:$sessionId';
+    final restoreOffset = _restoredLoaded ? _restoredOffset : null;
+    final restoreFollow = _restoredLoaded ? _restoredFollow : true;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         Expanded(
-          child: TranscriptEventView(
+          child: CanonicalTranscriptView(
             key: ValueKey(streamId),
-            streamId: streamId,
-            events: coordinator.transcriptEvents(sessionId),
+            sessionId: sessionId,
+            manager: coordinator.canonicalSessionManager,
             onEditUserMessage: coordinator.updateDraft,
             onScrollPersist: _onPersist,
-            initialScrollOffset: _restoredLoaded ? _restoredOffset : null,
-            initialFollowMode: _restoredLoaded ? _restoredFollow : true,
+            initialScrollOffset: restoreOffset,
+            initialFollowMode: restoreFollow,
           ),
         ),
       ],

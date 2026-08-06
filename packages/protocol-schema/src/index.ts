@@ -344,6 +344,19 @@ export const RESPONSE_TYPES = [
 	// current.result`, mirroring the R5 process pattern.
 	"git.summary.result",
 	"pi.rpc.response",
+	// Phase 4 — additive canonical session-event replay response. The
+	// `events` array carries canonical events in strict per-session
+	// sequence order. `latestSequence` mirrors the dedicated canonical
+	// session-event log so a client can verify it has the most recent
+	// committed sequence after a replay.
+	"session.events.replay.result",
+	// Phase 4 — additive canonical session-event LIVE push. The shape
+	// is byte-equivalent to one element of
+	// `session.events.replay.result.events` so replay and live frames
+	// are indistinguishable to the client (plan §3.4). The bridge
+	// only emits this after the dedicated canonical-session-event
+	// store has committed the row (persist-before-publish).
+	"session.event",
 ] as const;
 export const SUPPORTED_CAPABILITIES = [
 	"streams.v1",
@@ -374,6 +387,15 @@ export const SUPPORTED_CAPABILITIES = [
 	"agents.v1",
 	"catalogue.v1",
 	"raw_rpc.v1",
+	// Phase 4 — additive capability literal for the canonical
+	// session-event log + wire delivery model. The bridge advertises
+	// `session_events.v2` only when the host constructs the dedicated
+	// canonical-session-event store and exposes the
+	// `session.events.subscribe` control with replay + live delivery
+	// on the same canonical envelope. Mobile clients map absence
+	// directly to the legacy transcript path; presence enables a
+	// feature-flagged cutover.
+	"session_events.v2",
 ] as const;
 export const CONTROL_TYPES = [
 	"subscription.set",
@@ -407,6 +429,15 @@ export const CONTROL_TYPES = [
 	// COMMAND_TYPES above.
 	"git.summary.request",
 	"git.summary.cancel",
+	// Phase 4 — additive canonical session-event subscription control.
+	// The bridge advertises `session_events.v2` when the dedicated
+	// canonical-session-event store is constructed; mobile then opens
+	// a logical subscription with `afterSequence` (0 for a full
+	// replay). The bridge responds with a `session.events.replay.result`
+	// message carrying the canonical events in strict sequence order;
+	// subsequent live events arrive on the optional additive
+	// `session.event` envelope which uses the same shape.
+	"session.events.subscribe",
 ] as const;
 
 export const ERROR_CODES = [
@@ -2757,6 +2788,21 @@ const ControlPayloads = {
 		{ targetRequestId: Uuid },
 		{ additionalProperties: false },
 	),
+	// Phase 4 — additive canonical session-event subscription control.
+	// The bridge advertises `session_events.v2` when the dedicated
+	// canonical-session-event store is constructed; mobile then opens
+	// a logical subscription with `afterSequence` (0 for a full
+	// replay). The bridge responds with a `session.events.replay.result`
+	// message carrying the canonical events in strict sequence order;
+	// subsequent live events arrive on the optional additive
+	// `session.event` envelope which uses the same shape.
+	"session.events.subscribe": Type.Object(
+		{
+			sessionId: SessionId,
+			afterSequence: Type.Integer({ minimum: 0 }),
+		},
+		{ additionalProperties: false },
+	),
 } as const;
 export const SubscriptionSchema = ControlPayloads["subscription.set"];
 const ResponsePayloads = {
@@ -2895,6 +2941,44 @@ const ResponsePayloads = {
 	"process.output.page.result": ProcessOutputSchema,
 	"git.summary.result": GitSummarySchema,
 	"pi.rpc.response": PiRpcResponseEnvelopeSchema,
+	// Phase 4 — additive canonical session-event replay response. The
+	// `events` array is the ordered canonical sequence for the
+	// requested session at the time the response is assembled. The
+	// shape of each element matches the plan's top-level canonical
+	// envelope so replay and live frames are byte-shape equivalent.
+	"session.events.replay.result": Type.Object(
+		{
+			sessionId: SessionId,
+			events: Type.Array(
+				Type.Object(
+					{
+						eventId: Uuid,
+						sessionId: SessionId,
+						sequence: Type.Integer({ minimum: 1 }),
+						eventType: Type.String({ minLength: 1, maxLength: 128 }),
+						occurredAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+						data: Type.Object({}, { additionalProperties: true }),
+					},
+					{ additionalProperties: false, $id: "pi-mob/protocol/canonical-session-event" },
+				),
+				{ maxItems: 1024 },
+			),
+			latestSequence: Type.Integer({ minimum: 0 }),
+			complete: Type.Boolean(),
+		},
+		{ additionalProperties: false, $id: "pi-mob/protocol/canonical-session-events-replay" },
+	),
+	"session.event": Type.Object(
+		{
+			eventId: Uuid,
+			sessionId: SessionId,
+			sequence: Type.Integer({ minimum: 1 }),
+			eventType: Type.String({ minLength: 1, maxLength: 128 }),
+			occurredAt: Type.String({ pattern: ISO_UTC_PATTERN }),
+			data: Type.Object({}, { additionalProperties: true }),
+		},
+		{ additionalProperties: false, $id: "pi-mob/protocol/canonical-session-event-live" },
+	),
 } as const;
 
 export const SnapshotSchema = Type.Union(

@@ -14,6 +14,7 @@ void main() {
     addTearDown(fixture.dispose);
 
     await _openDrawer(tester, fixture);
+    await _openSettings(tester);
 
     expect(find.byKey(const Key('drawer-forget-host')), findsOneWidget);
     expect(find.text('Change bridge address'), findsOneWidget);
@@ -27,6 +28,7 @@ void main() {
       addTearDown(fixture.dispose);
 
       await _openDrawer(tester, fixture);
+      await _openSettings(tester);
       await tester.tap(find.byKey(const Key('drawer-forget-host')));
       await tester.pumpAndSettle();
 
@@ -53,6 +55,7 @@ void main() {
       addTearDown(fixture.dispose);
 
       await _openDrawer(tester, fixture);
+      await _openSettings(tester);
       await tester.tap(find.byKey(const Key('drawer-forget-host')));
       await tester.pumpAndSettle();
 
@@ -69,6 +72,11 @@ void main() {
       expect(find.byKey(const Key('chat-session-drawer')), findsNothing);
     },
   );
+}
+
+Future<void> _openSettings(WidgetTester tester) async {
+  await tester.tap(find.byKey(const Key('drawer-settings')));
+  await tester.pumpAndSettle();
 }
 
 Future<void> _openDrawer(WidgetTester tester, _DrawerFixture fixture) async {

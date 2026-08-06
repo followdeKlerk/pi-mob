@@ -30,7 +30,7 @@
 
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, readSync, readdirSync, statSync } from "node:fs";
 import { isAbsolute, basename, join, relative, resolve } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
 import { resolvePiLaunchConfig, type PiLaunchConfig } from "./pi/launch-config";
 import { importExternalSessionHistory, reconcileSessionHistoryTail } from "./pi/external-history";
@@ -42,6 +42,10 @@ import { AttachmentStore } from "./core/attachments";
 import { createBinaryHttpHandler } from "./core/binary-http";
 import { createRateQuotaTracker } from "./auth/rate-quota";
 import { ExportRegistry } from "./pi/export-registry";
+import { Database } from "bun:sqlite";
+import { PiDiagnosticsSink } from "./session-events/diagnostics";
+import { CanonicalSessionStore } from "./session-events/canonical-session-store";
+import { CanonicalEventTransport } from "./session-events/canonical-event-transport";
 import type { NotificationService } from "./notifications";
 import { BridgeNotificationService } from "./notifications/service";
 import { FcmAdapter, type FcmConfig } from "./notifications/transports/fcm";
@@ -173,6 +177,8 @@ export interface DaemonHandle {
   readonly rpc: SupervisedRpcClient;
   readonly store: BridgeStore;
   readonly workspace: OneSessionWorkspaceConfig;
+  /** Dedicated canonical transcript authority used by session_events.v2. */
+  readonly canonicalSessionStore: CanonicalSessionStore;
   /** True when the Pi RPC supervisor has been started. */
   readonly rpcStarted: boolean;
   close(): Promise<void>;
@@ -308,6 +314,28 @@ function discoverPiSessions(workspaceRoot: string, environment: Readonly<Record<
   return discovered.sort((a, b) => b.modifiedAt.localeCompare(a.modifiedAt));
 }
 
+function defaultWorkspaceSearchRoots(workspace: string): string[] {
+  const home = homedir();
+  const candidates = [
+    join(home, "GitHub"),
+    join(home, "github"),
+    home,
+    workspace,
+  ];
+  const roots: string[] = [];
+  for (const candidate of candidates) {
+    try {
+      const metadata = lstatSync(candidate);
+      if (!metadata.isDirectory() || metadata.isSymbolicLink()) continue;
+      const resolved = resolve(candidate);
+      if (!roots.includes(resolved)) roots.push(resolved);
+    } catch {
+      // A conventional folder may not exist on this host.
+    }
+  }
+  return roots;
+}
+
 export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   assertAbsolute("workspace", options.workspace);
   assertAbsolute("executable", options.executable);
@@ -349,6 +377,33 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   const workspaceId: WorkspaceRootId = deriveRootId(canonicalWorkspacePath);
   const fingerprint = hashFingerprint(canonicalWorkspacePath);
   const hostStream = `host:${store.identity().hostId}`;
+  const canonicalSessionStore = new CanonicalSessionStore(store);
+  const canonicalTranscriptTypes = new Set<string>([
+    "user.message.created", "assistant.started", "assistant.delta",
+    "assistant.completed", "reasoning.started", "reasoning.delta", "reasoning.completed",
+    "tool.started", "tool.output", "tool.completed", "tool.failed", "tool.cancelled",
+    "turn.started", "turn.settled", "turn.failed", "turn.aborted", "turn.indeterminate",
+    "turn.waiting_for_input", "turn.retrying", "turn.compacting", "turn.accepted", "turn.queued",
+    "extension.dialog", "extension.notify", "extension.status", "extension.widget",
+    "retry.state", "compaction.state", "error.event",
+  ]);
+  const appendTranscriptEvent = (
+    sessionId: string,
+    type: string,
+    payload: Record<string, unknown>,
+    sourceEventId?: string,
+  ): void => {
+    if (!canonicalTranscriptTypes.has(type)) {
+      store.appendEvent(`session:${sessionId}`, type, payload);
+      return;
+    }
+    canonicalSessionStore.append({
+      sessionId,
+      type: type as Parameters<CanonicalSessionStore["append"]>[0]["type"],
+      ...(sourceEventId ? { sourceEventId } : {}),
+      payload,
+    });
+  };
   store.ensureStream(hostStream, "host");
 
   // One owner-captured launch contract is shared by model discovery and every
@@ -398,7 +453,9 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     if (!state || typeof state.piSessionPath !== "string") {
       return { authoritativeTerminal: false, turnOutcome: { kind: "live", imported: 0 } as const };
     }
-    return reconcileSessionHistoryTail(store, sessionId, state.piSessionPath, { liveProcess });
+    return reconcileSessionHistoryTail(store, sessionId, state.piSessionPath, { liveProcess }, {
+      sessionStore: canonicalSessionStore,
+    });
   };
 
   /** Map a `ReconciledTurnOutcome` to the canonical adapter runtimeState/
@@ -432,11 +489,16 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   // genuinely settled out of a stale "Running" presentation, while still
   // leaving a healthy live owner's persisted state untouched.
   const reconciledAtStartup = new Set<string>();
+  // Defer bulk JSONL reconciliation until the loopback server exists.
+  // Health remains not-ready until this function and runtime recovery finish.
+  const reconcileStartup = (): void => {
   for (const state of store.sessionStates()) {
     if (typeof state.sessionId !== "string" || typeof state.piSessionPath !== "string") continue;
     try {
       if (state.externalSession === true) {
-        importExternalSessionHistory(store, state.sessionId, state.piSessionPath);
+        importExternalSessionHistory(store, state.sessionId, state.piSessionPath, {
+          sessionStore: canonicalSessionStore,
+        });
         continue;
       }
       if (!existsSync(state.piSessionPath)) continue;
@@ -488,11 +550,12 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       runtimeState: "indeterminate",
       attentionState: "needs_attention",
     });
-    store.appendEvent(`session:${sessionId}`, "turn.indeterminate", {
+    appendTranscriptEvent(sessionId, "turn.indeterminate", {
       sessionId,
       reason: "bridge_restart",
-    });
+    }, `reconcile:${sessionId}:bridge_restart`);
   }
+  };
   // The legacy primary client may be assigned to one session by the factory
   // below. Its exit callback must use that explicit binding, never an
   // arbitrary sessionStates()[0] lookup.
@@ -529,7 +592,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       const session = store.sessionState(sessionId) as Record<string, unknown> | undefined;
       if (!session) return;
       const payload: Record<string, unknown> = { ...event.payload, sessionId };
-      store.appendEvent(`session:${sessionId}`, event.type, payload);
+      appendTranscriptEvent(sessionId, event.type, payload);
       if (event.type === "turn.indeterminate") {
         store.updateSessionState(sessionId, { ...session, runtimeState: "indeterminate", attentionState: "needs_attention" });
       } else if (event.type === "session.state" && typeof payload.runtimeState === "string") {
@@ -550,6 +613,9 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   let rpcStarted = false;
   // Do not launch an unbound compatibility Pi process. Mobile sessions are
   // started lazily by their own per-session supervised client below.
+  const searchRoots = options.searchRoots && options.searchRoots.length > 0
+    ? options.searchRoots
+    : defaultWorkspaceSearchRoots(options.workspace);
   const config: OneSessionWorkspaceConfig = {
     workspaceId,
     rootPath: options.workspace,
@@ -558,7 +624,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     policyMode: "full",
     availableSince: new Date().toISOString(),
     lastSeenAt: new Date().toISOString(),
-    ...(options.searchRoots && options.searchRoots.length > 0 ? { searchRoots: options.searchRoots } : {}),
+    ...(searchRoots.length > 0 ? { searchRoots } : {}),
   };
   const attachments = new AttachmentStore({ root: join(stateDir, "attachments") });
   attachments.sweep();
@@ -634,7 +700,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
         }
         const current = store.sessionState(sessionId) ?? {};
         const payload: Record<string, unknown> = { ...event.payload, sessionId };
-        store.appendEvent(`session:${sessionId}`, event.type, payload);
+        appendTranscriptEvent(sessionId, event.type, payload);
         if (event.type === "session.state" && typeof payload.runtimeState === "string") {
           store.updateSessionState(sessionId, {
             ...current,
@@ -647,23 +713,66 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     return client;
   };
   const hostModels = discoverHostModels(piLaunchConfig);
-  const adapter = new OneSessionPiAdapter({ store, createRpc: createSessionRpc, workspace: config, attachmentStore: attachments, exportRegistry: exports, hostModels, reconcileHistory: (sessionId, liveProcess) => reconcile(sessionId, liveProcess), ...(notificationService ? {notificationService} : {}) });
+  // The dedicated store is created before the adapter so canonical Pi
+  // notifications can enter the v2 log before mobile subscriptions begin.
+  // Rewrite slice: route raw Pi notifications to a bounded diagnostics
+  // sink instead of the user-visible session stream. The diagnostics DB
+  // lives beside the canonical journal so a corruption or sweep in one
+  // never blocks the other. Diagnostics are NEVER consulted by transcript
+  // rendering code; the sink is support-only. A failure to open the
+  // diagnostics DB MUST NOT prevent the daemon from starting; the
+  // adapter simply falls back to no diagnostics, and the bridge enters
+  // runtime with full canonical journal functionality.
+  let diagnosticsSink: PiDiagnosticsSink | null = null;
+  try {
+    const path = join(stateDir, "pi-diagnostics.sqlite");
+    diagnosticsSink = new PiDiagnosticsSink(new Database(path));
+  } catch (error) {
+    // Diagnostics is a support-only surface; the canonical journal
+    // above is the user-visible authority. A permissions or filesystem
+    // failure here is logged via the redacting logger and the daemon
+    // continues with no diagnostics sink.
+    try {
+      const logger = options.logger ?? createRedactingLogger();
+      logger.log({ class: "warning", event: "diagnostics_sink_disabled", fields: { error: error instanceof Error ? error.message : String(error) } });
+    } catch { /* logger is itself best-effort */ }
+  }
+  const adapterOptions: Record<string, unknown> = {
+    store,
+    createRpc: createSessionRpc,
+    workspace: config,
+    attachmentStore: attachments,
+    exportRegistry: exports,
+    hostModels,
+    reconcileHistory: (sessionId: string, liveProcess: boolean) => reconcile(sessionId, liveProcess),
+    // Live adapter admission uses the dedicated canonical log directly.
+    // `recipe.activity` remains a derived compatibility projection only.
+    canonicalSessionStore,
+  };
+  if (diagnosticsSink !== null) adapterOptions["diagnosticsSink"] = diagnosticsSink;
+  if (notificationService) adapterOptions["notificationService"] = notificationService;
+  const adapter = new OneSessionPiAdapter(adapterOptions as never);
   if(notificationService && capabilityProviders) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:[...capabilityProviders],bestEffort:true});
   const notificationSweepTimer=setInterval(()=>{ try{notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
   notificationSweepTimer.unref();
   const dialogSweepTimer=setInterval(()=>{ try{adapter.sweepExtensionDialogs();}catch{/* service outlives cleanup failure */} },30_000);
   dialogSweepTimer.unref();
   const bridgeVersion = options.bridgeVersion?.trim() || BRIDGE_VERSION;
+  // Phase 4 — dedicated canonical session-event log + transport. The
+  // runtime advertises `session_events.v2` only when the transport is
+  // constructed; otherwise the capability stays hidden and the
+  // legacy transcript path remains the only authoritative surface.
+  const canonicalEventTransport = new CanonicalEventTransport({ store: canonicalSessionStore });
   const runtime = new DurableBridgeRuntime({
     store,
     adapter,
     bridgeVersion,
     piVersion: "0.82.0",
     hostDisplayName: displayName,
+    canonicalSessionStore,
+    canonicalEventTransport,
     ...(notificationService ? { notifications: notificationService } : {}),
   });
-  await runtime.start();
-
   const server = createBridgeServer({
     hostname: "127.0.0.1",
     port: options.port ?? 0,
@@ -683,9 +792,13 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       }),
     }),
   });
+  // The listener is bound before bulk reconciliation. Runtime readiness stays
+  // false until command recovery and the deferred history pass finish.
+  reconcileStartup();
+  await runtime.start();
 
   return {
-    server, runtime, adapter, rpc, store, workspace: config,
+    server, runtime, adapter, rpc, store, workspace: config, canonicalSessionStore,
     get rpcStarted() { return rpcStarted; },
     async close() {
       clearInterval(attachmentSweepTimer);
@@ -699,6 +812,11 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
         try { await client.drain(); } catch { /* best-effort */ }
       }
       adapter.close();
+      if (diagnosticsSink) {
+        try { diagnosticsSink.close(); } catch { /* best-effort */ }
+      }
+      adapter.closeDiagnosticsSink();
+      try { canonicalEventTransport.close(); } catch { /* best-effort */ }
       try { server.stop(true); } catch { /* ignore */ }
       for (const client of sessionRpcs.values()) {
         try { await client.close(); } catch { /* ignore */ }

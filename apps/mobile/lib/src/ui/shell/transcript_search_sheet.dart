@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../../connection/connection_coordinator.dart';
-import '../../domain/mobile_state.dart';
+import '../../session_events/transcript_reducer.dart';
 import '../theme/pi_theme.dart';
 
 Future<void> showTranscriptSearch(
@@ -26,33 +26,43 @@ class TranscriptSearchSheet extends StatefulWidget {
 class _TranscriptSearchSheetState extends State<TranscriptSearchSheet> {
   String query = '';
 
-  String? _text(StreamEventState event) {
-    if (event.type == 'turn.started') {
-      return event.payload['message'] as String?;
-    }
-    if (event.type == 'assistant.delta') {
-      return (event.payload['text'] ?? event.payload['delta']) as String?;
-    }
-    return null;
-  }
+  List<({String type, String text})> _canonicalResults(
+    CanonicalTranscriptState state,
+  ) => <({String type, String text})>[
+    ...state.userMessages.values.map(
+      (message) => (type: 'user.message.created', text: message.text),
+    ),
+    ...state.assistantMessages.values.map(
+      (message) => (
+        type: 'assistant.message.completed',
+        text: message.content.map((block) => block.text).join('\\n'),
+      ),
+    ),
+    ...state.toolCalls.values.map(
+      (tool) => (
+        type: 'tool.completed',
+        text: <String>[
+          tool.toolName,
+          if (tool.result != null) tool.result.toString(),
+          if (tool.errorMessage != null) tool.errorMessage!,
+        ].join('\\n'),
+      ),
+    ),
+  ];
 
   @override
   Widget build(BuildContext context) {
     final sessionId = widget.coordinator.selectedSessionId;
     final q = query.trim().toLowerCase();
-    final results = sessionId == null
-        ? <({StreamEventState event, String text})>[]
-        : widget.coordinator
-              .transcriptEvents(sessionId)
-              .map((event) => (event: event, text: _text(event)))
-              .where(
-                (item) =>
-                    item.text != null &&
-                    q.isNotEmpty &&
-                    item.text!.toLowerCase().contains(q),
-              )
-              .map((item) => (event: item.event, text: item.text!))
-              .toList(growable: false);
+    final candidates = sessionId == null
+        ? <({String type, String text})>[]
+        : _canonicalResults(
+            widget.coordinator.canonicalTranscriptStateFor(sessionId) ??
+                CanonicalTranscriptState(sessionId: sessionId),
+          );
+    final results = candidates
+        .where((item) => q.isNotEmpty && item.text.toLowerCase().contains(q))
+        .toList(growable: false);
     return SafeArea(
       child: SizedBox(
         height: MediaQuery.sizeOf(context).height * .82,
@@ -97,7 +107,7 @@ class _TranscriptSearchSheetState extends State<TranscriptSearchSheet> {
                           label: 'Result ${index + 1} of ${results.length}',
                           child: ListTile(
                             leading: Icon(
-                              result.event.type == 'turn.started'
+                              result.type == 'user.message.created'
                                   ? Icons.person_outline
                                   : Icons.smart_toy_outlined,
                             ),
@@ -107,7 +117,7 @@ class _TranscriptSearchSheetState extends State<TranscriptSearchSheet> {
                               overflow: TextOverflow.ellipsis,
                             ),
                             subtitle: Text(
-                              result.event.type == 'turn.started'
+                              result.type == 'user.message.created'
                                   ? 'Your prompt'
                                   : 'Assistant response',
                             ),

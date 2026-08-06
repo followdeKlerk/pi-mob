@@ -36,13 +36,21 @@ Responsibilities:
 - expose a companion binary HTTP API at `POST /v1/attachments` (image uploads, 10 MiB cap, JPEG/PNG decode, bounded retention) and `GET /v1/exports/<id>` (generated HTML sessions). Both endpoints require the per-installation `X-Installation-Id` and `X-Installation-Credential` headers; the multipart `installationId` field is downgraded to a hint. Per-installation rate / quota and aggregate byte ceiling are checked before allocation;
 - surface explicit unavailable states when host capabilities are not advertised rather than fabricating entries.
 
-The bridge runs on the loopback interface. **Listener-binding order is a known gap.** Today `runDaemon` calls `runtime.start()` (which runs `commands.recover()` and bulk external-history reconciliation) before `createBridgeServer()` invokes `Bun.serve()`. The loopback listener is therefore bound after the bulk reconciliation work, not before. This remains planned operational hardening. The mobile client only ever reaches the bridge through Tailscale.
+The bridge runs on the loopback interface. `runDaemon` binds the loopback listener before it runs bulk external-history reconciliation. The readiness state remains false until command recovery and reconciliation finish. The mobile client only reaches the bridge through Tailscale.
+
+## Canonical session events
+
+The bridge has a dedicated `CanonicalSessionStore` for user-visible session events. It allocates a sequence per session and stores events before live delivery.
+
+The bridge sends replay and live events through the `session_events.v2` capability. Both paths use the same event envelope. The mobile coordinator decodes both paths through one synchronizer and one canonical projection.
+
+The chat panel uses the canonical projection as its released transcript view. Legacy history/live state remains for bounded synchronization and older operational clients. The bridge retains the recipe activity projection as a derived compatibility surface until reducer parity is proven. This is a production cutover with migration leftovers, not completion of the subtractive rewrite.
 
 ## Host
 
 The host is the computer running the bridge. It owns the Pi processes, the workspaces, the credentials, and the notification service account.
 
-- Workspaces are discovered under a configured search root. The bridge exposes a bounded workspace search capability.
+- Workspaces are discovered under explicit `--search-root` paths, or the normal shallow defaults (`~/GitHub`/`~/github`, the home directory, and the configured workspace). The bridge exposes bounded workspace search.
 - Pi processes are spawned, supervised, and recycled by the bridge. Each mobile session has a stable `--session-id` so reconnect can resume the same process.
 - The notification service account is read once at startup; the bridge never logs the credential contents.
 
@@ -57,7 +65,7 @@ Responsibilities:
 - gate sensitive actions (such as starting a chat) on bridge readiness and the durable history gate;
 - surface the per-chat progress while history sync is in flight, including current chat, remaining chats, elapsed time, ETA, and throughput;
 - keep controller leases session-scoped so navigating between chats does not destroy valid leases;
-- request notification permission once per process, register the FCM token automatically, and fire a real notification when a reply arrives while the app is backgrounded;
+- request notification permission once per process, register the FCM token automatically, and fire a real notification when a reply arrives while the app is backgrounded; foreground FCM alerts are suppressed while the main activity is visible;
 - reconcile notifications back to the correct chat via the existing deep-link path.
 
 The mobile app does not run a web server. It does not cache credentials. It does not advertise services to other apps.

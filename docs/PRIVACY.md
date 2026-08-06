@@ -57,7 +57,7 @@ This section lists the traffic the bridge itself emits. The bridge runs on the u
 - The mobile app requests notification permission once per process. The user can revoke it at any time through the OS settings; the app surfaces a control that opens Android's app notification settings.
 - The FCM token is registered with the host bridge after the WebSocket `hello` is accepted. The `hello` validates protocol version, the per-installation bearer credential, and the capability list. Token rotation is the same path: a new FCM token is sent as a `device.register` command after the same handshake. The `device.register` payload may only register the authenticated connection's `installationId`; the runtime rejects any cross-installation claim before it reaches the durable device table. The bridge never logs the token.
 - The bridge deduplicates notifications by their source event id (`(sourceEventId, kind, sessionId)`); the bridge drops a duplicate status before sending. The mobile app relies on the Android `PendingIntent` request code derived from `notificationId` (or `deepLink` fallback) to make FCM re-deliveries no-op on the device. Whether Android deduplicates fully on a real device is not yet proven in this preview.
-- Foreground posting is wired in the messaging service. Tap routing and foreground dedupe are implemented in this preview but are not yet proven on a physical device.
+- Foreground notification alerts are suppressed while the main activity is visible. Background posting and tap routing are implemented; notification dedupe is not yet proven on a physical device.
 
 ## Deletion
 

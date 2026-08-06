@@ -14,8 +14,8 @@ This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`
 
 | Configuration | hello.accepted.capabilities |
 | --- | --- |
-| without-FCM | `commands.v1`, `controller_leases.v1`, `raw_rpc.v1`, `streams.v1` |
-| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `raw_rpc.v1`, `streams.v1` |
+| without-FCM | `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
+| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
 
 ## Production-wired in `v0.0.1-alpha.1`
 
@@ -33,11 +33,18 @@ This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`
 | Reconnectable shell that restores the most recent chat, drafts, and attachments | Yes |
 | Model changes through the normal `/model` command | Yes |
 | Per-chat transcript search and global cross-chat search | Yes |
-| Bounded workspace search under the configured search root | Yes |
+| Bounded workspace discovery and search under the normal host roots (`~/GitHub`/`~/github`, home, and the configured workspace), or explicit `--search-root` paths | Yes |
 | FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone | Yes |
 | Host diagnostic surface with explicit phases, sanitized errors, and retry actions | Yes |
+| Canonical session-event v2 transport, replay, live delivery, coordinator ingestion, canonical reducer, and chat rendering | Yes on the released daemon/mobile path; bounded legacy caches and recipe projection remain as migration compatibility |
 
-> Note on focus: foreground FCM notification posting is wired in this preview (the messaging service posts a status notification when the app is foregrounded). Tap routing and foreground dedupe are wired but not yet proven on a physical device; treat them as best-effort until physical-device runtime proof exists.
+The bridge may still accept internal raw Pi RPC commands for compatibility, but `raw_rpc.v1` is not advertised to the released mobile client because the mobile raw-RPC surface was removed.
+
+### Simplification rewrite status
+
+The canonical transcript path is production-wired. The larger subtractive rewrite is **not complete**: legacy mobile cache/history structures and the bridge recipe projection remain during migration. The remaining deletion work requires parity coverage and a deliberate older-host migration; this status document does not claim that all competing storage paths have been removed.
+
+> Note on focus: foreground FCM alerts are suppressed while the main activity is visible. Background delivery is wired on a real phone. Tap routing and notification dedupe remain best-effort until physical-device runtime proof exists.
 
 ## Implemented in isolation, not production-wired
 The items below have code or UI in the repository, but the normal daemon does not construct the provider required to advertise them. They are not part of the released preview.

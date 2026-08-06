@@ -263,6 +263,8 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "agent.snapshot.result") return { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript", "steer"], revision: "agent-r1" }] };
   if (type === "agent.transcript.page.result") return { agentId: "agent-fixture", items: [], isTruncated: false };
   if (type === "catalogue.snapshot.result") return { revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1" }] };
+  if (type === "session.event") return { eventId: ids.eventId, sessionId: ids.sessionId, sequence: 1, eventType: "turn.started", occurredAt: base.sentAt, data: { turnId: "turn-fixture" } };
+  if (type === "session.events.replay.result") return { sessionId: ids.sessionId, events: [], latestSequence: 0, complete: true };
   return { items: [] };
 }
 function controlPayload(type: string): Record<string, unknown> {
@@ -288,6 +290,7 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "agent.snapshot.request") return { requestId: ids.requestId };
   if (type === "agent.transcript.page") return { agentId: "agent-fixture", pageSize: 50 };
   if (type === "catalogue.snapshot.request") return { requestId: ids.requestId };
+  if (type === "session.events.subscribe") return { sessionId: ids.sessionId, afterSequence: 0 };
   return {};
 }
 const hostEvents = new Set([
@@ -304,7 +307,7 @@ const hostEvents = new Set([
 
 rmSync(corpus, { recursive: true, force: true });
 mkdirSync(corpus, { recursive: true });
-emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "git-ci.v1", "future.optional"] } });
+emit("hello-valid", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1.0.0", platform: "ios", installationId: ids.installationId, installationCredential: "pc_fixture_credential", requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: ["runtime.processes.v1", "git-ci.v1", "future.optional"] } });
 for (const type of COMMAND_TYPES) emit(fileName("command", type), "command", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: ids.commandId, leaseId: ids.leaseId, type, payload: commandPayload(type) });
 for (const type of CONTROL_TYPES) emit(fileName("control", type), "control", true, { ...base, requestId: ids.requestId, connectionId: ids.installationId, type, payload: controlPayload(type) });
 for (const type of EVENT_TYPES) emit(fileName("event", type), "event", true, { ...base, eventId: ids.eventId, streamId: `${hostEvents.has(type) ? "host" : "session"}:${ids.sessionId}`, cursor: "9007199254740992", type, payload: type === "recipe.activity" ? recipeActivity("thinking") : type === "recipe.unavailable" ? { capability: "recipes.v1", status: capabilityStatus("unavailable") } : type === "plan.snapshot" ? planSnapshot() : type === "plan.unavailable" ? { capability: "plans.v1", status: capabilityStatus("stale") } : eventPayload(type) });
@@ -335,7 +338,7 @@ emit("export-metadata-valid", "export", true, { exportId: ids.messageId, format:
 emit("tool-output-event-boundary", "event", true, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740993", type: "tool.output", payload: { toolCallId: ids.sessionId, retainedBytes: 262144, totalBytes: 262144, isTruncated: false } });
 emit("tool-output-retained-boundary", "event", true, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "9007199254740994", type: "tool.output", payload: { toolCallId: ids.sessionId, retainedBytes: 5242880, totalBytes: 6291456, digest: "c".repeat(64), isTruncated: true } });
 emit("hello-major-mismatch", "hello", false, { ...base, protocol: { major: 2, minor: 0 }, requestId: ids.requestId, type: "hello", payload: { mobileVersion: "1", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] } });
-emit("hello-host-mismatch", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { expectedHostId: ids.sessionId, mobileVersion: "1", platform: "ios", installationId: ids.installationId, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] } });
+emit("hello-host-mismatch", "hello", true, { ...base, requestId: ids.requestId, type: "hello", payload: { expectedHostId: ids.sessionId, mobileVersion: "1", platform: "ios", installationId: ids.installationId, installationCredential: "pc_fixture_credential", requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] } });
 emit("event-unknown-optional-valid", "event", true, { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "1", type: "future.notice", payload: { optional: true } });
 emit("stream-expired-cursor", "error", true, { ...base, requestId: ids.requestId, type: "error", payload: { code: "cursor_invalid", message: "cursor expired", retryable: true, details: {} } });
 emit("snapshot-failure", "error", true, { ...base, requestId: ids.requestId, type: "error", payload: { code: "snapshot_failed", message: "snapshot failed", retryable: true, details: {} } });

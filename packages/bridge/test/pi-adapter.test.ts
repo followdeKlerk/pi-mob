@@ -35,7 +35,20 @@ describe("Pi event normalization", () => {
   const context = { sessionId: "session" };
   test("agent_settled is the only settled boundary", () => {
     expect(normalizePiEvent({ type: "agent_end", willRetry: false }, context).map((item) => item.type)).not.toContain("turn.settled");
-    expect(normalizePiEvent({ type: "agent_settled" }, context).map((item) => item.type)).toEqual(["turn.settled", "pi.rpc.event"]);
+    // Rewrite slice: raw Pi events are routed through the diagnostics sink,
+    // NOT the user-visible session stream. The curated output is the only
+    // shape the transcript authority sees.
+    expect(normalizePiEvent({ type: "agent_settled" }, context).map((item) => item.type)).toEqual(["turn.settled"]);
+  });
+
+  test("does not create empty assistant replies around a streamed text block", () => {
+    expect(normalizePiEvent({ type: "message_start", message: { role: "assistant", content: [] } }, context)).toEqual([]);
+    expect(normalizePiEvent({ type: "message_update", assistantMessageEvent: { type: "text_start", contentIndex: 0 } }, context)).toEqual([
+      { type: "assistant.started", payload: { sessionId: "session", contentBlockId: "0" } },
+    ]);
+    expect(normalizePiEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Hi" }] } }, context)).toEqual([
+      { type: "assistant.completed", payload: { sessionId: "session", contentBlockId: "0", content: { role: "assistant", content: [{ type: "text", text: "Hi" }] } } },
+    ]);
   });
 
   test("covers lifecycle, content, tools, queue, retry, compaction, and extension UI", () => {
@@ -58,10 +71,12 @@ describe("Pi event normalization", () => {
     const output = raws.flatMap((raw) => normalizePiEvent(raw, context));
     expect(new Set(output.map((item) => item.type)).size).toBeGreaterThan(12);
     expect(output.filter((item) => item.type === "tool.started").map((item) => item.payload.toolCallId)).toEqual(["one", "two"]);
-    const curated = output.filter((item) => item.type !== "pi.rpc.event");
-    expect(JSON.stringify(curated)).not.toContain("/private");
-    expect(JSON.stringify(curated)).not.toContain("/home/private");
-    expect(output.filter((item) => item.type === "pi.rpc.event")).toHaveLength(raws.length);
+    // Rewrite slice: curated output NEVER carries raw `pi.rpc.event`
+    // envelopes; raw events flow into the diagnostics sink. The curated
+    // shape still redacts private paths.
+    expect(JSON.stringify(output)).not.toContain("/private");
+    expect(JSON.stringify(output)).not.toContain("/home/private");
+    expect(output.filter((item) => item.type === "pi.rpc.event")).toHaveLength(0);
     expect(output.some((item) => item.type === "turn.failed" && item.payload.errorCode === "provider_interrupted")).toBe(true);
   });
 });

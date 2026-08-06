@@ -4,6 +4,9 @@ import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter/scheduler.dart';
+import 'package:pi_mob/src/session_events/canonical_session_manager.dart';
+import 'package:pi_mob/src/session_events/transcript_reducer.dart'
+    show CanonicalTranscriptState;
 import 'package:uuid/uuid.dart';
 
 import '../../protocol_fixture.dart';
@@ -21,7 +24,6 @@ import '../domain/prompt_send_lifecycle.dart';
 import '../domain/process_domain.dart';
 import '../git/git_domain.dart' show GitState, reduceGit;
 import '../plans/plan_domain.dart' show PlanState, reducePlan;
-import '../protocol/raw_rpc.dart';
 import '../search/global_search_controller.dart';
 import '../search/search_indexer.dart';
 import '../context/context_domain.dart'
@@ -185,17 +187,6 @@ class _PendingPrompt {
   String state;
 }
 
-class _TranscriptEventsCache {
-  const _TranscriptEventsCache({
-    required this.history,
-    required this.live,
-    required this.result,
-  });
-  final List<StreamEventState> history;
-  final List<StreamEventState> live;
-  final List<StreamEventState> result;
-}
-
 /// Owns the foreground bridge socket and the durable one-session M5 state.
 ///
 /// The transport is injected so synchronization, lost-receipt recovery, and
@@ -210,6 +201,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     DateTime Function()? now,
     SecureCredentialStore? secureCredentialStore,
     void Function(String)? onAuthRejection,
+    CanonicalSessionManager? canonicalSessionManager,
   }) : // Public parameter names keep this boundary ergonomic while these
        // assignments retain private fields.
        // ignore: prefer_initializing_formals
@@ -220,7 +212,9 @@ final class ConnectionCoordinator extends ChangeNotifier
        _uuid = uuid,
        _now = now ?? (() => DateTime.now().toUtc()),
        _secureCredentialStore = secureCredentialStore,
-       _onAuthRejection = onAuthRejection;
+       _onAuthRejection = onAuthRejection,
+       _canonicalSessionManager =
+           canonicalSessionManager ?? CanonicalSessionManager();
 
   String installationId = '';
   static const _acceptedOrLater = <String>{
@@ -264,6 +258,18 @@ final class ConnectionCoordinator extends ChangeNotifier
   final void Function(String)? _onAuthRejection;
   bool _authRevokedSeen = false;
   final OrderedEventReducer _reducer = const OrderedEventReducer();
+
+  /// Phase 5 — tracks the most recent in-flight
+  /// `session.events.subscribe` request id so the matching
+  /// `session.events.replay.result` envelope can be matched even
+  /// when the bridge returns multiple results in a single epoch.
+  String? _canonicalSubscribeRequestId;
+
+  /// Canonical session-event manager. When the host advertises
+  /// `session_events.v2`, it is the transcript synchronization path and
+  /// persists the last durably applied sequence for reconnect/replay.
+  /// The legacy history/live merge remains only for older hosts.
+  final CanonicalSessionManager _canonicalSessionManager;
   final Map<String, StreamViewState> _streams = {};
   final Map<String, SnapshotAssembler> _snapshots = {};
   final Map<String, String> _snapshotStreams = {};
@@ -275,7 +281,6 @@ final class ConnectionCoordinator extends ChangeNotifier
   Future<void>? _modelListFuture;
   String? _modelListRequestId;
   final Map<String, SessionHistoryState> _history = {};
-  final Map<String, _TranscriptEventsCache> _transcriptEventsCache = {};
   // In-flight `session.history.page` requests. The host may take several
   // seconds to return a large page; without bookkeeping we could apply a
   // response from a stale epoch after the user has reconnected.
@@ -307,11 +312,6 @@ final class ConnectionCoordinator extends ChangeNotifier
   String? _historyGateError;
   Completer<void>? _pairingCompleter;
   final List<WorkspaceEntry> _workspaces = [];
-  final List<String> _rawEvents = [];
-  final List<PiRpcEventPayload> _rawPiEvents = [];
-  final Map<String, PiRpcResponsePayload> _rawRpcResponses = {};
-  final StreamController<PiRpcResponsePayload> _rawRpcResponseController =
-      StreamController<PiRpcResponsePayload>.broadcast();
   final Set<String> _syncPending = {};
   final Set<String> _forceSnapshot = {};
   final Set<String> _capabilities = {};
@@ -759,20 +759,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       ? null
       : (_sessionControls[selectedSessionId!] ??
             SessionControlState.empty(selectedSessionId!));
-  List<String> get rawEvents => List.unmodifiable(_rawEvents);
-  List<PiRpcEventPayload> rawPiEventsForSession(String sessionId) =>
-      List.unmodifiable(
-        _rawPiEvents.where((event) => event.sessionId == sessionId),
-      );
-  PiRpcResponsePayload? rawRpcResponse(String sessionId, String requestId) =>
-      _rawRpcResponses['$sessionId:$requestId'];
-  Stream<PiRpcResponsePayload> rawRpcResponsesFor(
-    String sessionId,
-    String requestId,
-  ) => _rawRpcResponseController.stream.where(
-    (response) =>
-        response.sessionId == sessionId && response.requestId == requestId,
-  );
   Map<String, StreamViewState> get streams => Map.unmodifiable(_streams);
 
   SessionHistoryState historyFor(String sessionId) =>
@@ -1051,15 +1037,14 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   List<StreamEventState> transcriptEvents(String sessionId) {
+    // Once the host advertises session_events.v2, the canonical synchronizer
+    // is the only transcript authority. This compatibility accessor returns
+    // no legacy projection instead of silently reintroducing a history/live
+    // merge behind a released UI.
+    if (_canonicalSessionManager.isEnabled) return const <StreamEventState>[];
     final history = _history[sessionId]?.items ?? const <StreamEventState>[];
     final live =
         _streams['session:$sessionId']?.events ?? const <StreamEventState>[];
-    final cached = _transcriptEventsCache[sessionId];
-    if (cached != null &&
-        identical(cached.history, history) &&
-        identical(cached.live, live)) {
-      return cached.result;
-    }
     final byId = <String, StreamEventState>{};
     for (final event in history) {
       byId[event.eventId] = event;
@@ -1083,13 +1068,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       // the same transcript instead of silently dropping work.
       return true;
     }).toList()..sort((a, b) => a.cursor.compareTo(b.cursor));
-    final immutable = List<StreamEventState>.unmodifiable(result);
-    _transcriptEventsCache[sessionId] = _TranscriptEventsCache(
-      history: history,
-      live: live,
-      result: immutable,
-    );
-    return immutable;
+    return List<StreamEventState>.unmodifiable(result);
   }
 
   bool hasOlderHistory(String sessionId) {
@@ -1345,49 +1324,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     'follow_up_mode.set',
     <String, Object?>{'enabled': enabled},
   );
-
-  Future<void> sendRawRpc({
-    required String sessionId,
-    required String requestId,
-    required Map<String, Object?> command,
-  }) async {
-    if (selectedSessionId != sessionId) {
-      throw StateError('Select this chat before sending raw RPC');
-    }
-    final payload = PiRpcRequestPayload(
-      sessionId: sessionId,
-      requestId: requestId,
-      command: command,
-    );
-    await _sendCommand(
-      type: 'pi.rpc.request',
-      commandId: _id(),
-      payload: payload.toJson(),
-      requiresLease: true,
-    );
-  }
-
-  void clearRawRpcState({required String sessionId, String? requestId}) {
-    if (requestId == null) {
-      _rawRpcResponses.removeWhere(
-        (_, response) => response.sessionId == sessionId,
-      );
-    } else {
-      _rawRpcResponses.remove('$sessionId:$requestId');
-    }
-    _rawPiEvents.removeWhere((event) => event.sessionId == sessionId);
-    _rawEvents.removeWhere((encoded) {
-      try {
-        final message = jsonDecode(encoded);
-        if (message is! Map || message['type'] != 'pi.rpc.event') return false;
-        final payload = message['payload'];
-        return payload is Map && payload['sessionId'] == sessionId;
-      } on FormatException {
-        return false;
-      }
-    });
-    _notify();
-  }
 
   Future<void> _sendSessionControl(
     String type,
@@ -1739,7 +1675,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     _workspaces.clear();
     _workspaceSearch = WorkspaceSearchState.idle();
     _workspaceSearchEpoch += 1;
-    _rawEvents.clear();
     _capabilities.clear();
     _forceSnapshot.clear();
     _syncPending.clear();
@@ -1872,12 +1807,16 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
     _historySyncLocalRevisions.remove(sessionId);
     _history.remove(sessionId);
-    _transcriptEventsCache.remove(sessionId);
     _streams.remove('session:$sessionId');
     _syncPending.remove('session:$sessionId');
     _forceSnapshot.remove('session:$sessionId');
     _controllers.drop(sessionId);
     await _searchIndexer.removeSession(sessionId);
+    // Phase 5 — drop the canonical-session binding for this session.
+    // The manager keeps its own per-session SQLite handle so the next
+    // chat with the same id starts cold; the persisted sequence
+    // cursor is also cleared so reconnect reads from sequence zero.
+    await _canonicalSessionManager.forgetSession(sessionId);
 
     final subscriptionChanged = _subscriptionSet.contains(sessionId);
     _subscriptionSet = _subscriptionSet.remove(sessionId);
@@ -2266,6 +2205,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (_socket != null && connectionId != null) {
       await _subscribe();
       if (!_isCurrentSelection(sessionId, epoch)) return;
+      await _subscribeCanonical(sessionId);
     }
   }
 
@@ -2836,7 +2776,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       throw const FormatException('Bridge message has an invalid envelope');
     }
     final payload = Map<String, Object?>.from(payloadValue);
-    _appendRaw(message);
 
     // Every durable event must advance its stream cursor before any
     // type-specific projection runs. Handling selected event types directly
@@ -2918,6 +2857,12 @@ final class ConnectionCoordinator extends ChangeNotifier
         }
       case 'session.state':
         _mergeSession(payload);
+      case 'session.events.replay.result':
+        await _sessionEventsReplayResult(message, payload);
+        break;
+      case 'session.event':
+        await _sessionEventLive(message, payload);
+        break;
       default:
         break;
     }
@@ -2955,6 +2900,15 @@ final class ConnectionCoordinator extends ChangeNotifier
       ..addAll(
         (payload['capabilities'] as List? ?? const []).whereType<String>(),
       );
+    final advertisedCanonical = _capabilities.contains('session_events.v2');
+    // The canonical-session manager is enabled or disabled based on
+    // the advertised capability. A generation change already cleared
+    // the legacy caches above, so the manager resets its own
+    // per-session bindings through the host-generation branch.
+    await _canonicalSessionManager.updateCapabilities(
+      advertised: advertisedCanonical,
+      hostGeneration: newGeneration,
+    );
     if (generationChanged) {
       await _database.resetHostCaches(newHostId);
       await _database.quarantinePendingCommands(newHostId);
@@ -2984,9 +2938,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       _historySyncCurrentSessionId = null;
       _historySyncQueue.clear();
       _historySyncLocalRevisions.clear();
-      _rawEvents.clear();
-      _rawPiEvents.clear();
-      _rawRpcResponses.clear();
       _forceSnapshot.add('host:$newHostId');
     } else {
       await _loadCachedStreams(newHostId);
@@ -3001,6 +2952,21 @@ final class ConnectionCoordinator extends ChangeNotifier
       }
       selectedSessionId = null;
       leaseId = null;
+    }
+    if (advertisedCanonical) {
+      // Canonical replay is the transcript synchronization path. Do not
+      // block readiness on the legacy session.history.page gate: large Pi
+      // histories are already imported by the bridge and are replayed by
+      // sequence through CanonicalSessionManager.
+      _historyGateComplete = true;
+      _historyGateError = null;
+      _historySyncCurrentSessionId = null;
+      _historySyncQueue.clear();
+      _historySyncLocalRevisions.clear();
+      _historySyncStartedAt = null;
+      _historySyncEventsPerSecond = 0;
+      _historySyncLastSampleAt = null;
+      _historySyncEventsAtLastSample = 0;
     }
     await _database.upsertHost(
       HostEntriesCompanion.insert(
@@ -3068,7 +3034,115 @@ final class ConnectionCoordinator extends ChangeNotifier
     await _sendControl('subscription.set', <String, Object?>{
       'streams': streams,
     });
+    // Phase 5 — when the canonical session-event capability is
+    // advertised, kick off the canonical replay for every selected
+    // and background session so the dedicated log has the most recent
+    // committed state after each subscription cycle.
+    final canonical = _canonicalSessionManager.isEnabled
+        ? _canonicalSessionManager
+        : null;
+    if (canonical != null) {
+      final targets = <String>{
+        if (selectedSessionId != null) selectedSessionId!,
+        ..._subscriptionSet.items.map((item) => item.sessionId),
+      };
+      for (final sessionId in targets) {
+        await _subscribeCanonical(sessionId);
+      }
+    }
   }
+
+  /// Open a `session.events.subscribe` for [sessionId] using the
+  /// manager's last durable sequence as the cursor. This is the sole
+  /// transcript replay path for hosts advertising `session_events.v2`.
+  Future<void> _subscribeCanonical(String sessionId) async {
+    if (sessionId.isEmpty) return;
+    if (!_canonicalSessionManager.isEnabled) return;
+    if (_socket == null || connectionId == null) return;
+    if (!_isActiveChat(sessionId)) return;
+    final payload = _canonicalSessionManager.buildSubscribePayload(sessionId);
+    if (payload == null) return;
+    _canonicalSubscribeRequestId = await _sendControl(
+      'session.events.subscribe',
+      payload,
+    );
+  }
+
+  /// Phase 5 — handle a `session.events.replay.result` envelope.
+  /// The envelope always carries a `payload.sessionId`; the manager
+  /// validates it against the per-session wire schema and feeds the
+  /// ordered canonical events into the synchronizer.
+  Future<void> _sessionEventsReplayResult(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) async {
+    final sessionId = payload['sessionId'];
+    if (sessionId is! String || sessionId.isEmpty) return;
+    final requestId = message['requestId'];
+    if (requestId is String && _canonicalSubscribeRequestId == requestId) {
+      _canonicalSubscribeRequestId = null;
+    }
+    try {
+      await _canonicalSessionManager.ingestReplay(
+        message,
+        sessionId: sessionId,
+      );
+    } on Object {
+      // A malformed or locally unwritable canonical replay must not tear
+      // down the host connection and clear the session list. Keep the
+      // connection usable and let the next replay/reconnect retry it.
+      errorMessage = 'Transcript synchronization failed; retrying.';
+      _notify();
+    }
+  }
+
+  /// Phase 5 — handle a single live `session.event` push.
+  Future<void> _sessionEventLive(
+    Map<String, Object?> message,
+    Map<String, Object?> payload,
+  ) async {
+    final sessionId = payload['sessionId'];
+    if (sessionId is! String || sessionId.isEmpty) return;
+    CanonicalIngestSummary summary;
+    try {
+      summary = await _canonicalSessionManager.ingestLive(
+        message,
+        sessionId: sessionId,
+      );
+    } on Object {
+      // Keep a local persistence/projection failure from disconnecting a
+      // healthy bridge and making every chat disappear from the UI.
+      errorMessage = 'Transcript synchronization failed; retrying.';
+      _notify();
+      return;
+    }
+    if (summary.gaps > 0 || summary.conflicts > 0) {
+      // A live gap pauses the reducer. Re-open replay from the last applied
+      // sequence instead of waiting for a reconnect that may never happen.
+      await _subscribeCanonical(sessionId);
+    }
+  }
+
+  /// Read-only accessor for future UI cutover. Returns the
+  /// canonical transcript state for [sessionId], or `null` when the
+  /// canonical capability is not advertised or no binding exists.
+  /// The returned state MUST NOT be mutated by callers.
+  CanonicalTranscriptState? canonicalTranscriptStateFor(String sessionId) {
+    return _canonicalSessionManager.snapshotFor(sessionId);
+  }
+
+  /// Last durably applied sequence for [sessionId] in the local
+  /// canonical cache. The coordinator feeds this value back to the
+  /// bridge on reconnect so a replay never repeats committed state.
+  int canonicalLastAppliedSequence(String sessionId) {
+    return _canonicalSessionManager.lastAppliedSequence(sessionId);
+  }
+
+  /// Read-only accessor for the canonical session-event manager.
+  /// Returns the manager instance so widgets can subscribe to its
+  /// update stream and render canonical state directly.
+  CanonicalSessionManager get canonicalSessionManager =>
+      _canonicalSessionManager;
 
   void _subscriptionAccepted(Map<String, Object?> payload) {
     final accepted = (payload['streams'] as List? ?? const <Object?>[])
@@ -3258,29 +3332,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   void _handleEventPayload(String type, Map<String, Object?> payload) {
-    if (type == 'pi.rpc.response') {
-      final response = PiRpcResponsePayload.fromJson(payload);
-      _rawRpcResponses['${response.sessionId}:${response.requestId}'] =
-          response;
-      _rawRpcResponseController.add(response);
-    } else if (type == 'pi.rpc.event') {
-      // Raw Pi events are an opaque pass-through. A malformed or newer
-      // extension event must not escape this projection and be treated as a
-      // protocol failure: _receive's error handler would otherwise demote
-      // the live connection and schedule a reconnect while the socket is
-      // still healthy. The durable event remains available in the journal.
-      final sessionId = payload['sessionId'];
-      final event = payload['event'];
-      if (sessionId is! String || event is! Map) return;
-      final rawEvent = PiRpcEventPayload(
-        sessionId: sessionId,
-        event: Map<String, Object?>.from(event),
-      );
-      _rawPiEvents.add(rawEvent);
-      if (_rawPiEvents.length > 200) {
-        _rawPiEvents.removeRange(0, _rawPiEvents.length - 200);
-      }
-    } else if (type == 'host.state') {
+    if (type == 'host.state') {
       if (payload['ready'] == false) {
         errorMessage = 'Host reported not ready';
       }
@@ -4891,15 +4943,6 @@ final class ConnectionCoordinator extends ChangeNotifier
       final payload = Map<String, Object?>.from(
         jsonDecode(event.payloadJson) as Map,
       );
-      final wire = <String, Object?>{
-        'eventId': event.eventId,
-        'streamId': event.streamId,
-        'cursor': event.cursor,
-        'type': event.type,
-        'sentAt': event.occurredAt.toUtc().toIso8601String(),
-        'payload': payload,
-      };
-      _appendRaw(wire);
       final normalized = StreamEventState(
         hostId: event.hostId,
         streamId: event.streamId,
@@ -5009,13 +5052,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     controllerState: entry.controllerState,
   );
 
-  void _appendRaw(Map<String, Object?> message) {
-    _rawEvents.add(jsonEncode(message));
-    if (_rawEvents.length > 200) {
-      _rawEvents.removeRange(0, _rawEvents.length - 200);
-    }
-  }
-
   String _probeError(EndpointProbe probe) =>
       'Readiness ${probe.statusCode}: ${probe.body['reason'] ?? probe.body['status'] ?? 'not ready'}';
 
@@ -5027,6 +5063,10 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
     _failSessionCreation('The connection closed before the chat was created.');
     _failModelListRequest('The connection closed before agents were loaded.');
+    // Phase 5 — clear the canonical in-flight request id; the
+    // manager itself keeps its per-session caches so reconnect can
+    // resume from the persisted last sequence without rebuilding.
+    _canonicalSubscribeRequestId = null;
     ++_connectionEpoch;
     _processSnapshotRequests.clear();
     _gitSummaryRequests.clear();
@@ -5268,6 +5308,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   @override
   void dispose() {
     _disposed = true;
+    _canonicalSessionManager.resetAll();
     _globalSearchController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     _failSessionCreation('Chat creation was cancelled.');
@@ -5282,7 +5323,6 @@ final class ConnectionCoordinator extends ChangeNotifier
     _cancelReconnect();
     _ackTimer?.cancel();
     _leaseTimer?.cancel();
-    unawaited(_rawRpcResponseController.close());
     unawaited(_closeSocket());
     super.dispose();
   }

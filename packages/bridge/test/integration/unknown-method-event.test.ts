@@ -107,7 +107,7 @@ describe("integration: unknown method / event behavior", () => {
     }
   });
 
-  test("normalize: unknown upstream event emits a pi.rpc.event envelope verbatim", () => {
+  test("normalize: unknown upstream event produces no curated events and is diagnostics-only", () => {
     const sessionId = "66666666-6666-4666-8666-666666666666";
     const raw = {
       type: "some_future_event",
@@ -115,9 +115,10 @@ describe("integration: unknown method / event behavior", () => {
       nested: { ok: true },
     };
     const normalized = normalizePiEvent(raw, { sessionId });
-    expect(normalized).toEqual([
-      { type: "pi.rpc.event", payload: { sessionId, event: raw } },
-    ]);
+    // Rewrite slice: unknown raw shapes are NOT promoted to user-visible
+    // canonical events. They flow through the diagnostics sink instead
+    // (covered by `packages/bridge/test/raw-event-passthrough.test.ts`).
+    expect(normalized).toEqual([]);
   });
 
   test("real subprocess: direct Pi returns error for unknown command (parity sanity)", async () => {

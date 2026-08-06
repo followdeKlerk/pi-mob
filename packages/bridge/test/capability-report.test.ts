@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import { buildReport, snapshot } from "../../../scripts/capability-report";
 
-const WITHOUT = ["commands.v1", "controller_leases.v1", "raw_rpc.v1", "streams.v1"];
-const WITH = ["commands.v1", "controller_leases.v1", "notifications.v1", "raw_rpc.v1", "streams.v1"];
+const WITHOUT = ["commands.v1", "controller_leases.v1", "session_events.v2", "streams.v1"];
+const WITH = ["commands.v1", "controller_leases.v1", "notifications.v1", "session_events.v2", "streams.v1"];
 
 describe("normal daemon capability contract", () => {
   test("without-FCM live path returns the exact set and no catalogue", async () => {
@@ -24,12 +24,12 @@ describe("normal daemon capability contract", () => {
     expect(report.snapshots.find((item) => item.configuration === "without-fcm")?.capabilities).toEqual(WITHOUT);
     expect(report.snapshots.find((item) => item.configuration === "with-fcm")?.capabilities).toEqual(WITH);
     expect(report.capabilities.map((item) => item.capability)).toEqual([
-      "streams.v1", "commands.v1", "controller_leases.v1", "raw_rpc.v1", "notifications.v1",
+      "streams.v1", "commands.v1", "controller_leases.v1", "session_events.v2", "notifications.v1",
     ]);
     for (const item of report.capabilities) {
       expect(item.providerConstructionSource).toContain("packages/bridge/src/daemon.ts");
       expect(item.mobileEntryPoint).toContain("apps/mobile/");
-      expect(item.focusedTestPath).toBe("packages/bridge/test/capability-report.test.ts");
+      expect(item.focusedTestPath).toMatch(/^packages\/bridge\/test\/(capability-report\.test\.ts|session-events\/canonical-server-runtime\.test\.ts)$/);
       expect(item.releaseVersion).toBe("0.0.1-alpha.1");
     }
   });

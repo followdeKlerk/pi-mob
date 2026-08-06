@@ -21,7 +21,11 @@ class PiMobMessagingService : FirebaseMessagingService() {
 
   override fun onMessageReceived(message: RemoteMessage) {
     // FCM displays notification-payload messages automatically while the app
-    // is backgrounded. This callback is the foreground/data-only path.
+    // is backgrounded. This callback is the foreground/data-only path. Do not
+    // create a second system alert while the main activity is visible; the
+    // live bridge connection already updates the open chat.
+    if (getSharedPreferences(PREFS, MODE_PRIVATE)
+        .getBoolean(KEY_APP_FOREGROUND, false)) return
     postStatusNotification(message)
   }
 
@@ -76,5 +80,7 @@ class PiMobMessagingService : FirebaseMessagingService() {
     const val ACTION_TOKEN = "com.example.pi_mob.FCM_TOKEN"
     const val ACTION_NOTIFICATION_TAP = "com.example.pi_mob.NOTIFICATION_TAP"
     const val STATUS_CHANNEL = "pi_mob_status"
+    const val PREFS = "pi_mob_notifications"
+    const val KEY_APP_FOREGROUND = "app_foreground"
   }
 }

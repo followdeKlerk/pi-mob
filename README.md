@@ -59,10 +59,10 @@ Verified end-to-end on a real phone and a real host:
 - **Sessions** — paginated session list, rename, create, delete, and runtime attention state.
 - **History sync** — full chat history imported on first connect and on each reconnect, with bounded batches, durable checkpoints, and restart coverage.
 - **Synchronization UI** — a splash card immediately on cold launch, then a per-chat progress card with current chat, remaining count, elapsed time, ETA, and throughput.
-- **Notifications** — after the user grants OS permission, FCM token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone. Foreground posting is wired but tap routing and dedupe are not yet proven on a physical device.
+- **Notifications** — after the user grants OS permission, FCM token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery works on a real phone. Foreground alerts are suppressed while the app is visible. Tap routing and dedupe remain best-effort until proven on a physical device.
 - **Model control** — use the normal `/model` command in the composer; no separate model picker control is shown.
 - **Search** — per-chat transcript search and global cross-chat search.
-- **Workspace search** — bounded workspace discovery, list, and search rooted under the configured search root.
+- **Workspace search** — bounded workspace discovery, list, and search rooted under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
 - **Reconnectable shell** — restores the most recent chat, the in-flight draft, and attachments after reconnect or relaunch.
 
 ## What is explicitly out of scope
