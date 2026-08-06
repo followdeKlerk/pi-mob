@@ -26,7 +26,7 @@ This repository hosts:
 | [apps/mobile/README.md](apps/mobile/README.md) | Flutter Android client. |
 | [packages/bridge/README.md](packages/bridge/README.md) | Bridge daemon. |
 
-The Android app uses the stable preview identity `com.example.pi_mob` and is published as a pre-release `v0.0.1-alpha.1` APK. Release builds use an external non-debug signer. The bridge is published as a macOS binary tarball. iOS is not distributed in this preview.
+The Android app uses the stable preview identity `com.example.pi_mob` and is published as a pre-release `v0.0.2-alpha.1` APK. Release builds use an external non-debug signer. The bridge is published as a macOS binary tarball. iOS is not distributed in this preview.
 
 ## What Pi Mob is
 
@@ -47,7 +47,7 @@ The Android app:
 - fires system notifications when replies arrive while the app is backgrounded;
 - preserves drafts, attachments, and selection across reconnects.
 
-## What is production-wired in `v0.0.1-alpha.1`
+## What is production-wired in `v0.0.2-alpha.1`
 
 Verified end-to-end on a real phone and a real host:
 
@@ -100,4 +100,4 @@ Pi Mob is local-first. The bridge exposes its API only on a private Tailscale ta
 
 ## Status
 
-This is a `0.0.1-alpha.1` preview. Android release builds are signed with an external non-debug keystore and fail closed without it. The bridge tarball is not code-signed or notarized. See `docs/PROJECT_STATUS.md` for the accurate picture of production-wired, planned, and out-of-scope work.
+This is a `0.0.2-alpha.1` preview. Android release builds are signed with an external non-debug keystore and fail closed without it. The bridge tarball is not code-signed or notarized. See `docs/PROJECT_STATUS.md` for the accurate picture of production-wired, planned, and out-of-scope work.

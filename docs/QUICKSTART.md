@@ -1,6 +1,6 @@
 # Quick start
 
-This is a printable end-to-end guide for the `v0.0.1-alpha.1` preview. The exact files referenced here are linked from the GitHub release assets.
+This is a printable end-to-end guide for the `v0.0.2-alpha.1` preview. The exact files referenced here are linked from the GitHub release assets.
 
 ## One-time host setup
 

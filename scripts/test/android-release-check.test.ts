@@ -6,7 +6,7 @@ const clean: AndroidReleaseInput = {
   manifest: `<manifest package="com.example.pi_mob"><uses-permission android:name="android.permission.INTERNET"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/><application><activity android:name=".MainActivity"><data android:scheme="pi-mob" android:host="session"/></activity><service android:name=".PiMobMessagingService"/></application></manifest>`,
   firebase: `"package_name": "com.example.pi_mob"`,
   kotlinPaths: ["apps/mobile/android/app/src/main/kotlin/com/example/pi_mob/MainActivity.kt", "apps/mobile/android/app/src/main/kotlin/com/example/pi_mob/PiMobMessagingService.kt"],
-  versionName: "0.0.1-alpha.1",
+  versionName: "0.0.2-alpha.1",
   versionCode: 1,
   applicationId: "com.example.pi_mob",
   namespace: "com.example.pi_mob",

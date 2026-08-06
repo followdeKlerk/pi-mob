@@ -18,7 +18,7 @@
  *   - `packages/bridge/dist/release/config.sample.toml` `bridge_version = "0.0.0-m7"`
  *
  * The fix is a single source of truth at `VERSION` (canonical semver without
- * a leading `v`). The repository's release contract is `0.0.1-alpha.1`.
+ * a leading `v`). The repository's release contract is `0.0.2-alpha.1`.
  *
  * Layered model:
  *

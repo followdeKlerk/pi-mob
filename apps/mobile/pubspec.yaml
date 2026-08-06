@@ -1,8 +1,7 @@
 name: pi_mob
 description: "pi-mob Flutter mobile control surface."
 publish_to: 'none'
-version: 0.0.1-alpha.1+1
-
+version: 0.0.2-alpha.1+2
 environment:
   sdk: ^3.12.2
 

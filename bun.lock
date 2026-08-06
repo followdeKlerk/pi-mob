@@ -13,7 +13,7 @@
     },
     "packages/bridge": {
       "name": "@pi-mob/bridge",
-      "version": "0.0.1-alpha.1",
+      "version": "0.0.2-alpha.1",
       "dependencies": {
         "@fastify/busboy": "3.2.0",
         "@pi-mob/protocol-schema": "workspace:*",
@@ -30,7 +30,7 @@
     },
     "packages/protocol-fixtures": {
       "name": "@pi-mob/protocol-fixtures",
-      "version": "0.0.1-alpha.1",
+      "version": "0.0.2-alpha.1",
       "devDependencies": {
         "@pi-mob/protocol-schema": "workspace:*",
         "@pi-mob/typescript-config": "workspace:*",
@@ -38,7 +38,7 @@
     },
     "packages/protocol-schema": {
       "name": "@pi-mob/protocol-schema",
-      "version": "0.0.1-alpha.1",
+      "version": "0.0.2-alpha.1",
       "dependencies": {
         "@sinclair/typebox": "0.34.52",
       },
@@ -48,7 +48,7 @@
     },
     "packages/typescript-config": {
       "name": "@pi-mob/typescript-config",
-      "version": "0.0.1-alpha.1",
+      "version": "0.0.2-alpha.1",
     },
   },
   "packages": {

@@ -17,7 +17,7 @@ This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`
 | without-FCM | `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
 | with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
 
-## Production-wired in `v0.0.1-alpha.1`
+## Production-wired in `v0.0.2-alpha.1`
 
 | Capability | Verified end-to-end |
 | --- | --- |
@@ -54,7 +54,7 @@ The items below have code or UI in the repository, but the normal daemon does no
 ## Android release hygiene
 
 - Stable preview identity is `com.example.pi_mob` across Gradle, Kotlin packages, Firebase wiring, services, and deep links.
-- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.1-alpha.1` / code `1`, signer type, permissions, and deep-link declarations.
+- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.2-alpha.1` / code `1`, signer type, permissions, and deep-link declarations.
 
 ## Planned
 

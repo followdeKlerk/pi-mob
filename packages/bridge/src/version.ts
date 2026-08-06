@@ -14,4 +14,4 @@
  * fails the CI gate whenever this string drifts from `VERSION`.
  */
 
-export const BRIDGE_VERSION = "0.0.1-alpha.1";
+export const BRIDGE_VERSION = "0.0.2-alpha.1";

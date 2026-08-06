@@ -17,11 +17,11 @@ function runScript(): { code: number; stdout: string; stderr: string } {
   };
 }
 
-const CANONICAL = "0.0.1-alpha.1";
+const CANONICAL = "0.0.2-alpha.1";
 
 /**
  * Build a clean synthetic workspace that aligns every version source
- * with the canonical `0.0.1-alpha.1`. The bridge manifest bundle and
+ * with the canonical `0.0.2-alpha.1`. The bridge manifest bundle and
  * the Gradle/Android build still pick up `versionCode=1` from the
  * Android code fallback in `VERSION`.
  */

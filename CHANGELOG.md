@@ -2,7 +2,7 @@
 
 All notable user-facing changes are recorded here while pi-mob remains pre-release. Dates describe repository changes, not a compatibility or support promise.
 
-## Unreleased
+## 0.0.2-alpha.1
 
 ### Added
 

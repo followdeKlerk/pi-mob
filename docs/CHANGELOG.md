@@ -2,6 +2,13 @@
 
 All notable changes to Pi Mob are recorded here. Versions follow semantic versioning. The preview line uses `0.0.x-alpha.y`.
 
+## `0.0.2-alpha.1` — canonical session events and mobile UX
+
+- Added canonical session-event replay/live delivery and mobile transcript reduction.
+- Added bounded home/GitHub workspace discovery for new chats.
+- Added date-grouped chat navigation and compact settings.
+- Suppressed notification alerts while the app is in the foreground.
+
 ## `0.0.1-alpha.1` — first preview
 
 First public preview of Pi Mob. The mobile app is Android-only and the bridge is a macOS x64 binary tarball. iOS is not distributed in this preview.
