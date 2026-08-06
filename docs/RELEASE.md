@@ -6,7 +6,7 @@ Pi Mob uses semantic versioning. The preview line uses `0.0.x-alpha.y` for the f
 
 | Tag | Audience | Sign | Notes |
 | --- | --- | --- | --- |
-| `0.0.2-alpha.1` | early testers | external release keystore | Mobile release with canonical session events, workspace discovery, grouped chats, and foreground notification suppression. Bridge tarball is not code-signed. |
+| `0.0.2-alpha.1` | early testers | preview/development signing | Mobile release with canonical session events, workspace discovery, grouped chats, and foreground notification suppression. The attached preview APK is not production-signed; bridge tarball is not code-signed. |
 | `0.0.1-alpha.1` | previous preview | external release keystore | APK uses a non-debug signer supplied outside the repository; bridge tarball is not code-signed. |
 | `0.x.0` | preview | code-signed before user-facing change | bridge must be signed for macOS use. |
 | `1.0.0` | first public release | code-signed and notarized | iOS distribution gates public release. |
