@@ -1,7 +1,6 @@
 /**
- * The rewrite slice removes the legacy `pi.rpc.event` envelope from the
- * user-visible session stream (per `pi-mob-simplification-plan.md`
- * §3.3). These tests prove the contract:
+ * The bridge removes the legacy `pi.rpc.event` envelope from the
+ * user-visible session stream. These tests prove the contract:
  *
  *   - `normalizePiEvent` no longer emits any `pi.rpc.event` envelope for
  *     unknown or raw shapes.

@@ -1,7 +1,7 @@
 /**
- * Phase 1+2 contract tests for the canonical session-event rewrite slice.
+ * Contract tests for the canonical session-event store.
  *
- * These tests prove the rewrite's narrow vertical slice:
+ * These tests prove the narrow vertical slice:
  *   - Canonical envelopes are validated against the closed type set.
  *   - The store facade reuses the transactional `BridgeStore` journal
  *     so persist-before-publish remains intact.
@@ -9,7 +9,7 @@
  *   - `readAfter` and `latestSequence` give replay-friendly views.
  *
  * They do NOT touch the Flutter reducer or the broader runtime; those
- * land in later phases per `docs/rewrite/source-of-truth-inventory.md`.
+ * concerns have separate integration coverage.
  */
 
 import { describe, expect, test } from "bun:test";

@@ -1,7 +1,7 @@
 /// Mobile canonical session-event repository.
 ///
-/// This module backs the canonical session-event log described in
-/// `pi-mob-simplification-plan.md` §6. The repository is a pure cache
+/// This module backs the canonical session-event log delivered by the bridge.
+/// The repository is a pure cache
 /// of canonical events plus a single last-applied-sequence row per
 /// session. The cache is intentionally disposable: a `resetCache`
 /// call clears the row set and the next synchronizer replay rebuilds

@@ -2,22 +2,18 @@
  * Phase 1 — canonical session event contract.
  *
  * This module is the closed TypeScript shape of the session transcript
- * authority described in `pi-mob-simplification-plan.md` §5. Every
- * user-visible Pi occurrence that reaches the mobile client must pass
- * through the canonical-event store, the canonical-event notifier,
- * and the canonical-event reducer.
+ * authority delivered through `session_events.v2`. Every user-visible Pi
+ * occurrence that reaches the mobile client must pass through the
+ * canonical-event store, notifier, and reducer.
  *
- * This slice reuses the existing transactional `BridgeStore.events`
+ * This contract reuses the existing transactional `BridgeStore.events`
  * table as the durable store; it does not introduce a parallel
- * persistence layer. The contract here is the TypeScript-level guard
- * the rewrite slice puts in front of `appendNormalizedEvent`, so the
- * curated event set is closed and bounded. Raw Pi notifications remain
- * available only through diagnostics (see
- * `packages/bridge/src/session-events/diagnostics.ts`).
+ * persistence layer. Raw Pi notifications remain available only through
+ * diagnostics (see `packages/bridge/src/session-events/diagnostics.ts`).
  *
- * The rewrite MUST NOT add new event families without a contract
- * entry, a fixture, and a deletion criterion. See
- * `docs/rewrite/source-of-truth-inventory.md`.
+ * New event families require a contract entry, a fixture, and a deletion
+ * criterion. The current capability and migration rules are documented in
+ * `docs/PROJECT_STATUS.md`.
  */
 
 // ------------------------------ envelope ------------------------------

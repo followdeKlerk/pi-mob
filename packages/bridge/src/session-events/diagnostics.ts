@@ -1,11 +1,9 @@
 /**
  * Phase 3 — bounded diagnostics sink for raw Pi events.
  *
- * The rewrite removes `pi.rpc.event` from the user-visible session
- * transcript per `pi-mob-simplification-plan.md` §3.3 ("Raw Pi events
- * are diagnostics only"). This module is the sink that retains raw
- * event observability without leaking raw shapes into the chat
- * rendering path.
+ * The bridge removes `pi.rpc.event` from the user-visible session
+ * transcript. This module retains raw event observability without leaking
+ * raw shapes into the chat rendering path.
  *
  * The sink is implemented as a single bounded SQLite table. The bridge
  * owns the writes; mobile clients never see the table. A small row

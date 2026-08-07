@@ -1,10 +1,9 @@
 /// Canonical transcript document adapter.
 ///
-/// The plan (pi-mob-simplification-plan.md §9, §10) requires that the
-/// released chat surface render the [CanonicalTranscriptState]
+/// The released chat surface renders [CanonicalTranscriptState]
 /// produced by the bridge's `session_events.v2` log. The existing
 /// [TranscriptView] widget consumes the legacy [TranscriptDocument]
-/// produced by `TranscriptReducer` over `StreamEventState` rows.
+/// produced by [TranscriptReducer] over [StreamEventState] rows.
 ///
 /// This adapter projects [CanonicalTranscriptState] into the
 /// existing [TranscriptDocument] shape so the production

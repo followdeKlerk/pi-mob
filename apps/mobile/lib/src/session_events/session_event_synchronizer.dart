@@ -1,8 +1,7 @@
 /// Deterministic canonical event synchronizer.
 ///
 /// The synchronizer is the mobile-side counterpart of the
-/// bridge-side replay/live delivery model described in
-/// `pi-mob-simplification-plan.md` §8. It enforces:
+/// bridge-side replay/live delivery model. It enforces:
 ///
 ///   * strict sequence ordering (no gaps tolerated)
 ///   * deduplication on `(sessionId, sequence)` and event identity
