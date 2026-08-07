@@ -8,11 +8,12 @@ describe("R9 mobile catalogue", () => {
         commands: [{ name: "standup", source: "prompt", description: "Daily summary" }],
       }),
     });
-    const snapshot = await service.snapshot();
+    const snapshot = await service.snapshot("session-1");
     const entries = snapshot.entries as unknown as readonly Record<string, unknown>[];
     expect(entries.some((entry) => entry["name"] === "standup" && entry["invocation"] === "/standup")).toBe(true);
     expect(entries.some((entry) => entry["kind"] === "mcp_server" && (entry["availability"] as Record<string, unknown>)["state"] === "unavailable")).toBe(true);
     expect(entries.some((entry) => entry["name"] === "status")).toBe(false);
+    expect(snapshot.sessionId).toBe("session-1");
     expect(snapshot.revision).toBe("catalogue-1");
   });
 
@@ -41,7 +42,7 @@ describe("R9 mobile catalogue", () => {
       source: "prompt",
     }));
     const service = new MobileCatalogueService({ read: async () => ({ commands }) });
-    const snapshot = await service.snapshot();
+    const snapshot = await service.snapshot("session-1");
     // The normalised command catalogue already caps the per-category list;
     // this test ensures the combined entries array never overflows the
     // 512-entry bound at the wire layer regardless of upstream cardinality.

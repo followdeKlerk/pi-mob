@@ -22,18 +22,20 @@ export interface CatalogueEntry {
     readonly revision?: string;
   };
   readonly enabled: boolean;
+  readonly requiresInput: boolean;
   readonly canToggle: boolean;
   readonly reloadRequired: boolean;
   readonly revision: string;
 }
 
 export interface CatalogueSnapshot {
+  readonly sessionId: string;
   readonly revision: string;
   readonly entries: readonly CatalogueEntry[];
 }
 
 export interface MobileCatalogueSource {
-  read(): Promise<unknown>;
+  read(sessionId: string): Promise<unknown>;
   setEnabled?(
     entryId: string,
     enabled: boolean,
@@ -48,8 +50,9 @@ export class MobileCatalogueService {
 
   constructor(private readonly source: MobileCatalogueSource) {}
 
-  async snapshot(): Promise<CatalogueSnapshot> {
-    const normalized = await this.source.read();
+  async snapshot(sessionId: string): Promise<CatalogueSnapshot> {
+    if (!sessionId) throw new Error("sessionId is required");
+    const normalized = await this.source.read(sessionId);
     const envelope = normalizeReportedCommandCatalogue(normalized);
     const revision = `catalogue-${++this.revision}`;
     const entries: CatalogueEntry[] = envelope.commands.map((command) =>
@@ -68,6 +71,7 @@ export class MobileCatalogueService {
       entries.push(this.unavailableEntry("mcp_server", "MCP unavailable", envelope.mcp.reason ?? "MCP unavailable", revision));
     }
     return {
+      sessionId,
       revision,
       entries: entries.slice(0, MAX_ENTRIES),
     };
@@ -85,7 +89,7 @@ export class MobileCatalogueService {
   }
 
   private commandEntry(
-    command: { readonly category: string; readonly name: string; readonly description?: string },
+    command: { readonly category: string; readonly name: string; readonly description?: string; readonly requiresInput: boolean },
     revision: string,
   ): CatalogueEntry {
     return {
@@ -97,6 +101,7 @@ export class MobileCatalogueService {
       source: "pi:get_commands",
       availability: { state: "available" },
       enabled: true,
+      requiresInput: command.requiresInput,
       canToggle: false,
       reloadRequired: false,
       revision,
@@ -125,6 +130,7 @@ export class MobileCatalogueService {
           }
         : { state: "available" },
       enabled: true,
+      requiresInput: false,
       canToggle: false,
       reloadRequired: false,
       revision,
@@ -149,6 +155,7 @@ export class MobileCatalogueService {
         source: "pi:get_commands",
       },
       enabled: false,
+      requiresInput: false,
       canToggle: false,
       reloadRequired: false,
       revision,

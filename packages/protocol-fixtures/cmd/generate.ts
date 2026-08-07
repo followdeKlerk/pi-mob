@@ -229,7 +229,7 @@ function eventPayload(type: string): Record<string, unknown> {
   if (type === "attention.item") return { attentionId: uuid("9"), sessionId: ids.sessionId, turnId: "turn-fixture", category: "needs_input", occurrence: base.sentAt, summary: "Fixture attention item", actionable: true, revision: "attention-r1", resolved: false, superseded: false };
   if (type === "agent.snapshot") return { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript", "steer"], revision: "agent-r1" }] };
   if (type === "agent.unavailable") return { capability: "agents.v1", status: { state: "unavailable", reason: "Fixture agents unavailable", remediation: "Refresh capability", source: "fixture", revision: "r1" } };
-  if (type === "catalogue.snapshot") return { revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1" }] };
+  if (type === "catalogue.snapshot") return { sessionId: ids.sessionId, revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1" }] };
   if (type === "catalogue.unavailable") return { capability: "catalogue.v1", status: { state: "unavailable", reason: "Fixture catalogue unavailable", remediation: "Refresh capability", source: "fixture", revision: "r1" } };
 
   if (type === "controller.state") return { scope: "session", sessionId: ids.sessionId, mode: "controller", leaseId: ids.leaseId, installationId: ids.installationId, expiresAt: "2026-07-12T00:00:45.000Z", reclaimableUntil: "2026-07-12T00:01:00.000Z" };
@@ -262,7 +262,7 @@ function responsePayload(type: string): Record<string, unknown> {
   if (type === "git.summary.result") return gitSummary();
   if (type === "agent.snapshot.result") return { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript", "steer"], revision: "agent-r1" }] };
   if (type === "agent.transcript.page.result") return { agentId: "agent-fixture", items: [], isTruncated: false };
-  if (type === "catalogue.snapshot.result") return { revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1" }] };
+  if (type === "catalogue.snapshot.result") return { sessionId: ids.sessionId, revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1" }] };
   if (type === "session.event") return { eventId: ids.eventId, sessionId: ids.sessionId, sequence: 1, eventType: "turn.started", occurredAt: base.sentAt, data: { turnId: "turn-fixture" } };
   if (type === "session.events.replay.result") return { sessionId: ids.sessionId, events: [], latestSequence: 0, complete: true };
   return { items: [] };
@@ -289,7 +289,7 @@ function controlPayload(type: string): Record<string, unknown> {
   if (type === "command.current") return { commandId: ids.commandId };
   if (type === "agent.snapshot.request") return { requestId: ids.requestId };
   if (type === "agent.transcript.page") return { agentId: "agent-fixture", pageSize: 50 };
-  if (type === "catalogue.snapshot.request") return { requestId: ids.requestId };
+  if (type === "catalogue.snapshot.request") return { requestId: ids.requestId, sessionId: ids.sessionId };
   if (type === "session.events.subscribe") return { sessionId: ids.sessionId, afterSequence: 0 };
   return {};
 }
@@ -422,7 +422,7 @@ const invalid: ReadonlyArray<readonly [string, Kind, unknown]> = [
   ["invalid-agent-record-too-many-actions", "event", eventEnvelope("agent.snapshot", { revision: "agent-r1", items: [{ agentId: "agent-fixture", task: "fixture task", state: "running", startedAt: base.sentAt, originSessionId: ids.sessionId, originTurnId: "turn-fixture", supportedActions: ["transcript", "steer", "cancel", "compare", "adopt", "merge", "bogus"], revision: "agent-r1" }] })],
   ["invalid-agent-action-private-field", "command", commandEnvelope("agent.steer", { sessionId: ids.sessionId, agentId: "agent-fixture", expectedRevision: "agent-r1", private: "leak" })],
   ["invalid-catalogue-toggle-unconfirmed", "command", commandEnvelope("catalogue.set_enabled", { sessionId: ids.sessionId, entryId: "entry-fixture", enabled: true, expectedRevision: "catalogue-r1", confirmed: false })],
-  ["invalid-catalogue-entry-private-field", "event", eventEnvelope("catalogue.snapshot", { revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1", private: "leak" }] })],
+  ["invalid-catalogue-entry-private-field", "event", eventEnvelope("catalogue.snapshot", { sessionId: ids.sessionId, revision: "catalogue-r1", entries: [{ entryId: "entry-fixture", kind: "skill", name: "Fixture skill", source: "fixture-host", availability: { state: "available", source: "fixture", revision: "catalogue-r1" }, canToggle: false, reloadRequired: false, revision: "catalogue-r1", private: "leak" }] })],
 
   ["invalid-optional-event-type", "event", { ...base, eventId: ids.eventId, streamId: `session:${ids.sessionId}`, cursor: "1", type: "futureNotice", payload: { optional: true } }],
   ["invalid-uppercase-uuid", "command", { ...base, requestId: ids.requestId, connectionId: ids.installationId, commandId: "AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA", leaseId: ids.leaseId, type: "session.rename", payload: { sessionId: ids.sessionId, name: "fixture" } }],

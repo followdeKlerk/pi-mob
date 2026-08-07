@@ -2495,6 +2495,7 @@ void _validateCatalogueEntry(Object? value, String path) {
     'source',
     'availability',
     'enabled',
+    'requiresInput',
     'canToggle',
     'reloadRequired',
     'revision',
@@ -2522,13 +2523,21 @@ void _validateCatalogueEntry(Object? value, String path) {
   if (entry.containsKey('enabled')) {
     _boolean(entry, 'enabled');
   }
+  if (entry.containsKey('requiresInput')) {
+    _boolean(entry, 'requiresInput');
+  }
   _boolean(entry, 'canToggle');
   _boolean(entry, 'reloadRequired');
   _revisionTokenString(entry, 'revision');
 }
 
 void _validateCatalogueSnapshotPayload(Map<String, Object?> payload) {
-  _closedObject(payload, 'payload', const <String>{'revision', 'entries'});
+  _closedObject(payload, 'payload', const <String>{
+    'sessionId',
+    'revision',
+    'entries',
+  });
+  _uuidString(payload, 'sessionId');
   _revisionTokenString(payload, 'revision');
   final entries = _list(payload, 'entries');
   if (entries.length > 512) {
@@ -2787,8 +2796,9 @@ void _validateAgentSnapshotRequestPayload(Map<String, Object?> payload) {
 }
 
 void _validateCatalogueSnapshotRequestPayload(Map<String, Object?> payload) {
-  _closedObject(payload, 'payload', const <String>{'requestId'});
+  _closedObject(payload, 'payload', const <String>{'requestId', 'sessionId'});
   _uuidString(payload, 'requestId');
+  _uuidString(payload, 'sessionId');
 }
 
 void _validateWorkspaceControlPayload(

@@ -276,7 +276,14 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
               delete wireResult.__canonicalSubscribeSessionId;
               send(ws, wireResult);
             } else if (result) {
-              send(ws, envelope(`${type}.result`, result, message.requestId));
+              // The wire response name for catalogue requests predates the
+              // generic `${control}.result` convention. Keep that canonical
+              // response name so mobile validators and generated schemas
+              // remain aligned.
+              const responseType = type === "catalogue.snapshot.request"
+                ? "catalogue.snapshot.result"
+                : `${type}.result`;
+              send(ws, envelope(responseType, result, message.requestId));
             }
           }
         } catch (error) {

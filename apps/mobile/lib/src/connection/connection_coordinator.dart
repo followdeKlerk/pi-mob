@@ -744,11 +744,17 @@ final class ConnectionCoordinator extends ChangeNotifier
   /// before the first host handshake completes and stays an empty list
   /// while the bridge is reconnecting. The mobile UI uses null/empty to
   /// render a calm fallback that still explains the gap.
-  List<SupportedCommandData>? _supportedCommands;
-  List<SupportedCommandData>? get supportedCommands =>
-      _supportedCommands == null
-      ? null
-      : List.unmodifiable(_supportedCommands!);
+  final Map<String, List<SupportedCommandData>> _supportedCommandsBySession =
+      <String, List<SupportedCommandData>>{};
+  final Map<String, Completer<void>> _catalogueRequests =
+      <String, Completer<void>>{};
+  List<SupportedCommandData>? get supportedCommands {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return null;
+    final commands = _supportedCommandsBySession[sessionId];
+    return commands == null ? null : List.unmodifiable(commands);
+  }
+
   AttentionState get attentionItems => _attentionItems;
   AgentSupervisionState get agents => _agents;
 
@@ -2843,6 +2849,8 @@ final class ConnectionCoordinator extends ChangeNotifier
         _contextSnapshotResult(message, payload);
       case 'catalogue.snapshot.result':
         _applyCatalogue(payload);
+        final requestId = message['requestId']?.toString();
+        if (requestId != null) _catalogueRequests.remove(requestId)?.complete();
       case 'agent.snapshot.result':
         _applyAgentSnapshot(payload);
       case 'command.current.result':
@@ -3528,7 +3536,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       // An empty list is the explicit unavailable state. `null` remains the
       // pre-snapshot/loading state, so the shell never substitutes fabricated
       // catalogue entries after the host has reported unavailability.
-      _supportedCommands = const <SupportedCommandData>[];
+      final sessionId = payload['sessionId']?.toString() ?? selectedSessionId;
+      if (sessionId != null && sessionId == selectedSessionId) {
+        _supportedCommandsBySession[sessionId] = const <SupportedCommandData>[];
+      }
     } else if (type == 'agent.snapshot') {
       _applyAgentSnapshot(payload);
     } else if (type == 'agent.unavailable') {
@@ -3942,9 +3953,12 @@ final class ConnectionCoordinator extends ChangeNotifier
   }
 
   void _applyCatalogue(Map<String, Object?> payload) {
+    final sessionId = payload['sessionId']?.toString() ?? selectedSessionId;
+    if (sessionId == null || sessionId != selectedSessionId) return;
     final entries = payload['entries'];
     if (entries is! List) return;
-    _supportedCommands = entries
+    _supportedCommandsBySession[sessionId] = entries
+        .take(512)
         .whereType<Map>()
         .map((raw) {
           final item = Map<String, Object?>.from(raw);
@@ -3969,6 +3983,7 @@ final class ConnectionCoordinator extends ChangeNotifier
             description: item['description']?.toString(),
             invocation: item['invocation']?.toString(),
             enabled: available,
+            requiresInput: item['requiresInput'] == true,
             disabledReason: available
                 ? null
                 : availabilityReason ?? 'Unavailable',
@@ -4267,6 +4282,16 @@ final class ConnectionCoordinator extends ChangeNotifier
     Map<String, Object?> message,
     Map<String, Object?> payload,
   ) async {
+    final catalogueRequestId = message['requestId']?.toString();
+    if (catalogueRequestId != null) {
+      _catalogueRequests
+          .remove(catalogueRequestId)
+          ?.completeError(
+            StateError(
+              payload['message']?.toString() ?? 'Bridge request failed',
+            ),
+          );
+    }
     final code = payload['code']?.toString() ?? 'unknown';
     // Phase 4 — `invalid_auth` / `re_pair_required` are surfaced as a
     // dedicated phase so the UI can render the re-pair card and stop
@@ -5164,8 +5189,21 @@ final class ConnectionCoordinator extends ChangeNotifier
     _reconnectTimer = null;
   }
 
+  void _failCatalogueRequests(String message) {
+    final pending = _catalogueRequests.values.toList(growable: false);
+    _catalogueRequests.clear();
+    for (final completer in pending) {
+      if (!completer.isCompleted) {
+        completer.completeError(StateError(message));
+      }
+    }
+  }
+
   Future<void> _closeSocket() async {
     _failModelListRequest('The connection changed before agents were loaded.');
+    _failCatalogueRequests(
+      'The connection changed before commands were loaded.',
+    );
     _ackTimer?.cancel();
     _ackTimer = null;
     _leaseTimer?.cancel();
@@ -5380,10 +5418,25 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
   }
 
-  Future<void> requestCatalogue() => _sendControl(
-    'catalogue.snapshot.request',
-    <String, Object?>{'requestId': _id()},
-  );
+  Future<void> requestCatalogue({String? sessionId}) async {
+    final id = _id();
+    final target = sessionId ?? selectedSessionId;
+    if (target == null || target.isEmpty)
+      throw StateError('No session selected');
+    final completer = Completer<void>();
+    _supportedCommandsBySession.remove(target);
+    _notify();
+    _catalogueRequests[id] = completer;
+    try {
+      await _sendControl('catalogue.snapshot.request', <String, Object?>{
+        'requestId': id,
+        'sessionId': target,
+      }, requestId: id);
+      await completer.future.timeout(const Duration(seconds: 45));
+    } finally {
+      _catalogueRequests.remove(id);
+    }
+  }
 
   Future<void> requestAgentSnapshot() => _sendControl(
     'agent.snapshot.request',

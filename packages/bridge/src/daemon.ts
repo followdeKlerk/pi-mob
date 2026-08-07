@@ -35,7 +35,8 @@ import { SupervisedRpcClient } from "./pi/supervised-rpc-client";
 import { resolvePiLaunchConfig, type PiLaunchConfig } from "./pi/launch-config";
 import { importExternalSessionHistory, reconcileSessionHistoryTail } from "./pi/external-history";
 import { OneSessionPiAdapter, type OneSessionWorkspaceConfig } from "./pi/one-session-adapter";
-import { BridgeStore } from "./core/store";
+import { MobileCatalogueService } from "./pi/mobile-catalogue-service";
+import { BridgeStore, StoreError } from "./core/store";
 import { DurableBridgeRuntime } from "./core/runtime";
 import { createBridgeServer, type BridgeServer } from "./core/server";
 import { AttachmentStore } from "./core/attachments";
@@ -66,6 +67,8 @@ import {
 import { BRIDGE_VERSION } from "./version";
 
 const PROTOCOL_VERSION = "1.0";
+const LEGACY_COMPACTION_PROGRESS_DELAY_MS = 25;
+const LEGACY_COMPACTION_IDLE_DELAY_MS = 15 * 60_000;
 
 export interface DaemonOptions {
   readonly workspace: string;
@@ -752,6 +755,9 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   if (diagnosticsSink !== null) adapterOptions["diagnosticsSink"] = diagnosticsSink;
   if (notificationService) adapterOptions["notificationService"] = notificationService;
   const adapter = new OneSessionPiAdapter(adapterOptions as never);
+  const catalogue = new MobileCatalogueService({
+    read: (sessionId) => adapter.getCommandCatalogue(sessionId),
+  });
   if(notificationService && capabilityProviders) store.appendEvent(`host:${store.identity().hostId}`,"notification.capability",{available:true,providers:[...capabilityProviders],bestEffort:true});
   const notificationSweepTimer=setInterval(()=>{ try{notificationService?.sweep();}catch{/* Pi service outlives push cleanup */} },60_000);
   notificationSweepTimer.unref();
@@ -772,6 +778,7 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
     canonicalSessionStore,
     canonicalEventTransport,
     ...(notificationService ? { notifications: notificationService } : {}),
+    catalogue,
   });
   const server = createBridgeServer({
     hostname: "127.0.0.1",
@@ -797,6 +804,45 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
   reconcileStartup();
   await runtime.start();
 
+  // Legacy event compaction is deliberately best-effort maintenance. It runs
+  // only after listener binding and startup reconciliation, and failures are
+  // reported through the redacting logger without affecting live clients. A
+  // progressing store is drained in short, bounded transactions; idle or
+  // blocked stores back off so maintenance cannot compete with live traffic.
+  const maintenanceLogger = options.logger ?? createRedactingLogger();
+  let legacyCompactionTimer: ReturnType<typeof setTimeout> | null = null;
+  let maintenanceClosing = false;
+  const scheduleLegacyCompaction = (delayMs: number): void => {
+    if (maintenanceClosing) return;
+    if (legacyCompactionTimer) clearTimeout(legacyCompactionTimer);
+    legacyCompactionTimer = setTimeout(runLegacyCompaction, delayMs);
+    legacyCompactionTimer.unref?.();
+  };
+  const runLegacyCompaction = (): void => {
+    legacyCompactionTimer = null;
+    if (maintenanceClosing) return;
+    let progressing = false;
+    try {
+      const result = store.compactLegacyEvents();
+      progressing = result.deletedRows > 0;
+      if (progressing || result.blockedStreams.length > 0) {
+        maintenanceLogger.log({
+          class: "diagnostic",
+          event: "legacy-event-compaction",
+          fields: { deletedRows: result.deletedRows, deletedBytes: result.deletedBytes, blockedStreams: result.blockedStreams.length },
+        });
+      }
+    } catch (error) {
+      const code = error instanceof StoreError ? error.code : "io";
+      try { maintenanceLogger.log({ class: "error", event: "legacy-event-compaction-failed", fields: { code } }); } catch { /* maintenance must not affect clients */ }
+    } finally {
+      scheduleLegacyCompaction(progressing ? LEGACY_COMPACTION_PROGRESS_DELAY_MS : LEGACY_COMPACTION_IDLE_DELAY_MS);
+    }
+  };
+  // Run one bounded batch synchronously after readiness, then let the timer
+  // continue only when that batch made progress.
+  runLegacyCompaction();
+
   return {
     server, runtime, adapter, rpc, store, workspace: config, canonicalSessionStore,
     get rpcStarted() { return rpcStarted; },
@@ -804,6 +850,8 @@ export async function runDaemon(options: DaemonOptions): Promise<DaemonHandle> {
       clearInterval(attachmentSweepTimer);
       clearInterval(dialogSweepTimer);
       clearInterval(notificationSweepTimer);
+      maintenanceClosing = true;
+      if (legacyCompactionTimer) clearTimeout(legacyCompactionTimer);
       try { notificationService?.sweep(); } catch { /* best effort */ }
       try { attachments.sweep(); } catch { /* best effort */ }
       try { adapter.sweepExtensionDialogs(); } catch { /* best effort */ }

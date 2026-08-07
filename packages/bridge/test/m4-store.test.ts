@@ -4,6 +4,7 @@ import { copyFileSync, mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { BridgeStore, StoreError } from "../src/core/store";
+import { CanonicalSessionStore } from "../src/session-events/canonical-session-store";
 
 function location(name: string): string { return join(mkdtempSync(join(tmpdir(), `pi-mob-${name}-`)), "bridge.sqlite"); }
 function seeded(path = location("store")): { store: BridgeStore; hostStream: string; sessionStream: string } {
@@ -51,6 +52,53 @@ describe("M4 durable SQLite store", () => {
     store.close();
   });
 
+  test("pages forward with a hard bound, stable through cursor, and exact ordered traversal", () => {
+    const { store, sessionStream } = seeded();
+    for (let index = 1; index <= 250; index += 1) {
+      store.appendEvent(sessionStream, "assistant.delta", { index }, `forward-${index}`);
+    }
+
+    expect(() => store.pageEvents(sessionStream, 101)).toThrow("page size must be an integer from 1 through 100");
+    const traversed: string[] = [];
+    let after = "0";
+    let through: string | undefined;
+    let pages = 0;
+    while (true) {
+      const page = store.pageEvents(sessionStream, 100, after, through);
+      through ??= page.snapshotRevision;
+      pages += 1;
+      expect(page.items.length).toBeLessThanOrEqual(100);
+      traversed.push(...page.items.map((event) => event.eventId));
+      if (!page.nextAfterCursor) break;
+      after = page.nextAfterCursor;
+    }
+    expect(pages).toBe(3);
+    expect(through).toBe("250");
+    expect(traversed).toEqual(Array.from({ length: 250 }, (_, index) => `forward-${index + 1}`));
+
+    store.appendEvent(sessionStream, "assistant.delta", { index: 251 }, "forward-251");
+    const bounded = store.pageEvents(sessionStream, 100, "0", through);
+    expect(bounded.items).toHaveLength(100);
+    expect(bounded.items.at(-1)?.eventId).toBe("forward-100");
+    expect(bounded.items.some((event) => event.eventId === "forward-251")).toBe(false);
+    store.close();
+  });
+
+  test("idempotent event append returns the exact row on replay and conflicts on changed content", () => {
+    const { store, hostStream, sessionStream } = seeded();
+    const observed: string[] = [];
+    store.onEvent((event) => observed.push(event.eventId));
+    const first = store.appendEventIdempotent(sessionStream, "host.degraded", { reason: "busy" }, "operational-1");
+    const second = store.appendEventIdempotent(sessionStream, "host.degraded", { reason: "busy" }, "operational-1");
+    expect(second).toEqual(first);
+    expect(observed).toEqual(["operational-1"]);
+    expect(() => store.appendEventIdempotent(hostStream, "host.degraded", { reason: "busy" }, "operational-1")).toThrow(StoreError);
+    expect(() => store.appendEventIdempotent(sessionStream, "host.draining", { reason: "busy" }, "operational-1")).toThrow(StoreError);
+    expect(() => store.appendEventIdempotent(sessionStream, "host.degraded", { reason: "full" }, "operational-1")).toThrow(StoreError);
+    expect(store.listEvents(sessionStream)).toEqual([first]);
+    store.close();
+  });
+
   test("accepts command and event atomically, deduplicates, conflicts, and fails closed", () => {
     const { store, sessionStream } = seeded();
     const input = { commandId: "command", type: "prompt.submit", scopeKey: sessionStream, streamId: sessionStream, semanticHash: "hash", payload: { sessionId: "session", message: "safe" } };
@@ -77,6 +125,42 @@ describe("M4 durable SQLite store", () => {
     expect(store.command("full")).toBeNull(); expect(store.health().ready).toBe(false); store.close();
     const corruptPath = location("corrupt"); writeFileSync(corruptPath, "not sqlite");
     expect(() => new BridgeStore(corruptPath)).toThrow(StoreError);
+  });
+
+  test("compacts acknowledged legacy events in bounded durable batches", () => {
+    const path = location("compaction"); let { store, sessionStream } = seeded(path);
+    const canonical = new CanonicalSessionStore(store);
+    canonical.append({ sessionId: "session", type: "turn.started", payload: { turnId: "canonical" }, eventId: "canonical-1" });
+    for (let index = 1; index <= 5; index += 1) store.appendEvent(sessionStream, "legacy", { index }, `legacy-${index}`);
+    store.upsertInstallationCredential({ installationId: "active", credentialHash: "a", enrollmentSecretHash: "ea", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1 });
+    store.upsertInstallationCredential({ installationId: "other", credentialHash: "b", enrollmentSecretHash: "eb", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1 });
+    store.ackCursor("active", sessionStream, "5"); store.ackCursor("other", sessionStream, "3");
+    expect(store.compactLegacyEvents({ maxRows: 2 })).toEqual({ deletedRows: 2, deletedBytes: 22, blockedStreams: [] });
+    expect(store.streamPosition(sessionStream)).toMatchObject({ current: "5", floor: "2" });
+    expect(store.compactLegacyEvents({ maxRows: 2 })).toEqual({ deletedRows: 1, deletedBytes: 11, blockedStreams: [] });
+    expect(store.listEvents(sessionStream).map((event) => event.cursor)).toEqual(["4", "5"]);
+    expect(canonical.readAfter("session", 0).map((event) => event.sequence)).toEqual([1]);
+    store.close(); store = new BridgeStore(path); expect(store.streamPosition(sessionStream)).toMatchObject({ current: "5", floor: "3" }); expect(new CanonicalSessionStore(store).readAfter("session", 0).map((event) => event.sequence)).toEqual([1]); store.close();
+  });
+
+  test("uses only valid acknowledged cursors and does not let an unsubscribed credential pin a stream", () => {
+    const { store, sessionStream } = seeded();
+    for (let index = 1; index <= 3; index += 1) store.appendEvent(sessionStream, "legacy", { index });
+    store.upsertInstallationCredential({ installationId: "active", credentialHash: "a", enrollmentSecretHash: "ea", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1 });
+    store.upsertInstallationCredential({ installationId: "missing", credentialHash: "m", enrollmentSecretHash: "em", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1 });
+    store.upsertInstallationCredential({ installationId: "revoked", credentialHash: "b", enrollmentSecretHash: "eb", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1 });
+    store.upsertInstallationCredential({ installationId: "expired", credentialHash: "c", enrollmentSecretHash: "ec", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1, expiresAt: 50 });
+    store.ackCursor("active", sessionStream, "1"); store.ackCursor("revoked", sessionStream, "3"); store.ackCursor("expired", sessionStream, "3");
+    store.revokeInstallationCredential("revoked", "test", 1);
+    expect(store.compactLegacyEvents({ now: 100 })).toEqual({ deletedRows: 1, deletedBytes: 11, blockedStreams: [] });
+    expect(store.listEvents(sessionStream).map((event) => event.cursor)).toEqual(["2", "3"]);
+    store.ackCursor("active", sessionStream, "3"); expect(store.compactLegacyEvents({ now: 100 })).toEqual({ deletedRows: 2, deletedBytes: 22, blockedStreams: [] });
+    store.close();
+
+    const noAck = seeded(); noAck.store.appendEvent(noAck.sessionStream, "legacy", {});
+    noAck.store.upsertInstallationCredential({ installationId: "missing", credentialHash: "m", enrollmentSecretHash: "em", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1 });
+    expect(noAck.store.compactLegacyEvents()).toEqual({ deletedRows: 0, deletedBytes: 0, blockedStreams: [noAck.sessionStream] });
+    expect(noAck.store.streamPosition(noAck.sessionStream)).toMatchObject({ current: "1", floor: "0" }); noAck.store.close();
   });
 
   test("backs up, restores, verifies integrity, and increments generation", () => {

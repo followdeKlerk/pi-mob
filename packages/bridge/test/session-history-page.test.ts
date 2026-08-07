@@ -6,7 +6,9 @@ import { DurableBridgeRuntime } from "../src/core/runtime";
 import { createBridgeServer } from "../src/core/server";
 import { BridgeStore } from "../src/core/store";
 import type { AdapterPort } from "../src/core/domain";
+import { hashCredential } from "../src/auth/credentials";
 
+const INSTALLATION_CREDENTIAL = "pc_test_credential";
 const SESSION_ID = "55555555-5555-4555-8555-555555555555";
 const UNKNOWN_SESSION_ID = "66666666-6666-4666-8666-666666666666";
 const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
@@ -23,6 +25,7 @@ function start(): { store: BridgeStore; server: ReturnType<typeof createBridgeSe
   const store = new BridgeStore(path);
   store.ensureSession(SESSION_ID, { runtimeState: "idle" });
   store.ensureStream(`session:${SESSION_ID}`, "session", SESSION_ID);
+  store.upsertInstallationCredential({ installationId: INSTALLATION_ID, credentialHash: hashCredential(INSTALLATION_CREDENTIAL), enrollmentSecretHash: "e".repeat(64), enrollmentSource: "seed", createdAt: Date.now(), lastSeenAt: Date.now() });
   const adapter: AdapterPort = { async dispatch() {} };
   const runtime = new DurableBridgeRuntime({
     store,
@@ -59,6 +62,7 @@ async function connect(server: ReturnType<typeof createBridgeServer>): Promise<{
     mobileVersion: "1",
     platform: "ios",
     installationId: INSTALLATION_ID,
+    installationCredential: INSTALLATION_CREDENTIAL,
     requiredCapabilities: ["streams.v1", "commands.v1"],
     optionalCapabilities: [],
   }));

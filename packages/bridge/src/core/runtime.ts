@@ -344,7 +344,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     if (type === "plan.summary.cancel") return this.planSummaryCancel(payload);
     if (type === "context.snapshot.request") return this.contextSnapshotRequest(payload);
     if (type === "agent.snapshot.request") return this.agentSnapshotRequest();
-    if (type === "catalogue.snapshot.request") return this.catalogueSnapshotRequest();
+    if (type === "catalogue.snapshot.request") return this.catalogueSnapshotRequest(payload);
     if (type === "agent.transcript.page") return this.agentTranscriptPage(payload);
     if (type === "context.pin") return this.contextMutation("context.pin", payload);
     if (type === "context.unpin") return this.contextMutation("context.unpin", payload);
@@ -435,9 +435,12 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     return { ...output };
   }
 
-  private async catalogueSnapshotRequest(): Promise<Record<string, unknown>> {
+  private async catalogueSnapshotRequest(payload: Record<string, unknown>): Promise<Record<string, unknown>> {
     if (!this.catalogue) throw new RuntimeProtocolError("unsupported_capability", "Catalogue unavailable");
-    return { ...await this.catalogue.snapshot() };
+    const sessionId = typeof payload.sessionId === "string" ? payload.sessionId : "";
+    if (!sessionId) throw new RuntimeProtocolError("invalid_message", "sessionId is required");
+    if (!this.options.store.sessionExists(sessionId)) throw new RuntimeProtocolError("session_not_found", "session is not provisioned");
+    return { ...await this.catalogue.snapshot(sessionId) };
   }
 
   private async catalogueSetEnabled(payload: Record<string, unknown>): Promise<Record<string, unknown>> {

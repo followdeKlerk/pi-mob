@@ -101,7 +101,7 @@ void main() {
       find.descendant(
         of: find.byKey(const Key('slash-command-results')),
         matching: find.textContaining(
-          'Change the model using Pi command syntax',
+          'Open the model picker',
         ),
       ),
       findsOneWidget,

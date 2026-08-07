@@ -6,7 +6,9 @@ import { DurableBridgeRuntime } from "../src/core/runtime";
 import { createBridgeServer } from "../src/core/server";
 import { BridgeStore } from "../src/core/store";
 import type { AdapterPort } from "../src/core/domain";
+import { hashCredential } from "../src/auth/credentials";
 
+const installationCredential = (installationId: string) => `pc_test_${installationId}`;
 const INSTALLATION_A = "11111111-1111-4111-8111-111111111111";
 const INSTALLATION_B = "22222222-2222-4222-8222-222222222222";
 const INSTALLATION_C = "33333333-3333-4333-8333-333333333333";
@@ -23,6 +25,9 @@ function startRuntime(): { store: BridgeStore; server: ReturnType<typeof createB
   const path = join(mkdtempSync(join(tmpdir(), "pi-mob-m11-")), "bridge.sqlite");
   const store = new BridgeStore(path);
   const adapter: AdapterPort = { async dispatch() {} };
+  for (const installationId of [INSTALLATION_A, INSTALLATION_B, INSTALLATION_C]) {
+    store.upsertInstallationCredential({ installationId, credentialHash: hashCredential(installationCredential(installationId)), enrollmentSecretHash: hashCredential(`enrollment_${installationId}`, "enrollment"), enrollmentSource: "seed", createdAt: Date.now(), lastSeenAt: Date.now() });
+  }
   const runtime = new DurableBridgeRuntime({
     store, adapter, bridgeVersion: "fixture", piVersion: "0.82.0", hostDisplayName: "fixture",
   });
@@ -51,6 +56,7 @@ function makeClient(server: ReturnType<typeof createBridgeServer>, installationI
     ws.onopen = () => {
       ws.send(JSON.stringify(envelope("hello", {
         mobileVersion: "1", platform: "ios", installationId,
+        installationCredential: installationCredential(installationId),
         requiredCapabilities: ["streams.v1", "commands.v1", "controller_leases.v1"],
         optionalCapabilities: [],
       })));

@@ -113,12 +113,13 @@ export class SupervisedRpcClient {
 
   private project(value: unknown): void {
     if (!value || typeof value !== "object") return;
-    const type = (value as { type?: unknown }).type;
+    const record = value as { type?: unknown; method?: unknown };
+    const type = record.type;
     const state = this.supervisor.state(this.processId);
     try {
       if (type === "agent_start" && state === "idle") this.supervisor.transition(this.processId, "running");
       else if (type === "compaction_start" && ["idle", "running"].includes(state)) this.supervisor.transition(this.processId, "compacting");
-      else if (type === "extension_ui_request" && ["idle", "running"].includes(state)) this.supervisor.transition(this.processId, "waiting_for_input", "dialog");
+      else if (type === "extension_ui_request" && ["select", "confirm", "input", "editor"].includes(String(record.method ?? "")) && ["idle", "running"].includes(state)) this.supervisor.transition(this.processId, "waiting_for_input", "dialog");
       else if (type === "agent_settled" && ["running", "waiting_for_input", "compacting"].includes(state)) {
         this.supervisor.setAttention(this.processId, "none");
         this.supervisor.transition(this.processId, "idle");

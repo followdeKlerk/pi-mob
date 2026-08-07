@@ -55,12 +55,13 @@ Verified end-to-end on a real phone and a real host:
 - **Streams** — durable `host:` and `session:*` streams with cursor persistence and live replay.
 - **Commands** — typed commands with controller leases, idempotency, and terminal-state projection.
 - **Controller leases** — session-scoped leases that survive navigation and reopen quickly.
-- **Raw RPC** — per-session dev surface for inspecting Pi conversation traffic.
+- **Raw RPC** — internal bridge compatibility command only; it is not advertised in `hello.accepted` and is not exposed to the released mobile client.
 - **Sessions** — paginated session list, rename, create, delete, and runtime attention state.
 - **History sync** — full chat history imported on first connect and on each reconnect, with bounded batches, durable checkpoints, and restart coverage.
 - **Synchronization UI** — a splash card immediately on cold launch, then a per-chat progress card with current chat, remaining count, elapsed time, ETA, and throughput.
 - **Notifications** — after the user grants OS permission, FCM token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery works on a real phone. Foreground alerts are suppressed while the app is visible. Tap routing and dedupe remain best-effort until proven on a physical device.
-- **Model control** — use the normal `/model` command in the composer; no separate model picker control is shown.
+- **Model control** — `/model` opens a host-driven picker backed by `model.list` and `model.set`.
+- **Command catalogue** — `/commands` opens the selected session's bounded Pi command catalogue. Private source metadata is removed before delivery.
 - **Search** — per-chat transcript search and global cross-chat search.
 - **Workspace search** — bounded workspace discovery, list, and search rooted under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
 - **Reconnectable shell** — restores the most recent chat, the in-flight draft, and attachments after reconnect or relaunch.

@@ -28,6 +28,7 @@ The current released baseline is:
 - `commands.v1`
 - `controller_leases.v1`
 - `session_events.v2`
+- `catalogue.v1`
 
 The bridge may continue to accept internal raw Pi RPC commands for compatibility, but `raw_rpc.v1` is not advertised because the released mobile client has no raw-RPC surface.
 
@@ -39,8 +40,8 @@ This is the canonical exact capability contract for `hello.accepted`. The normal
 
 | Configuration | hello.accepted.capabilities |
 | --- | --- |
-| without-FCM | `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
-| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
+| without-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
+| with-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
 
 
 Every message is a JSON object with the following top-level fields:
@@ -117,9 +118,13 @@ Replay uses `session.events.replay.result`. Live delivery uses `session.event`. 
 - `occurredAt`
 - `data`
 
-The bridge stores each canonical event before it sends a live message. The mobile client rejects gaps and requests replay from its last durable sequence. Assistant and tool updates use replacement events (`assistant.content.replaced`, `assistant.message.completed`, and `tool.progress.replaced`) with stable turn/message/tool identifiers.
+The bridge stores each canonical event before it sends a live message. The mobile client rejects gaps and requests replay from its last durable sequence. Assistant and tool updates use replacement events (`assistant.content.replaced`, `assistant.message.completed`, and `tool.progress.replaced`) with stable turn/message/tool identifiers. Bounded tool results keep their exact value, including host paths, for the authenticated mobile client. Diagnostic records and logs redact private paths.
 
 The legacy stream and history API remain only for older hosts and operational state. The canonical mobile chat, transcript search, and search index do not read those paths when `session_events.v2` is advertised.
+
+## Command catalogue
+
+When the bridge advertises `catalogue.v1`, the client sends `catalogue.snapshot.request` with `sessionId` and `requestId`. The bridge calls Pi `get_commands` for that session. The response contains only bounded command names, descriptions, categories, and invocations. Private Pi source metadata is never returned. Results are scoped to the requested session and are not reused after session selection changes.
 
 ## What is not in the protocol
 

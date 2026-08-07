@@ -263,6 +263,12 @@ interface SessionSlot {
   bound: SessionEntry | null;
 }
 
+interface AssistantIdentity {
+  readonly messageId: string;
+  readonly turnId: string;
+  terminal: boolean;
+}
+
 class SessionProcessStub implements ManagedProcess {
   pid: number | undefined;
   start(): Promise<void> { return Promise.resolve(); }
@@ -307,6 +313,10 @@ export class OneSessionPiAdapter {
   private readonly canonicalEventStore: CanonicalEventStore | null;
   private readonly canonicalSessionStore: CanonicalSessionStore | null;
   private readonly assistantContent = new Map<string, string>();
+  private readonly assistantIdentities = new Map<string, Map<string, AssistantIdentity>>();
+  private readonly assistantPending = new Map<string, AssistantIdentity>();
+  private readonly assistantOrdinals = new Map<string, number>();
+  private readonly startedTurns = new Set<string>();
 
   constructor(options: OneSessionAdapterOptions) {
     this.store = options.store;
@@ -379,7 +389,10 @@ export class OneSessionPiAdapter {
       const liveProcess = rpcState !== undefined &&
         ["idle", "running", "waiting_for_input", "compacting"].includes(rpcState);
       this.reconcileHistory?.(id, liveProcess);
-      this.recipeProjection(id).backfill();
+      // The normal daemon owns the canonical session log. It must not
+      // hydrate or backfill the legacy recipe projection, since doing so
+      // creates duplicate transcript rows in the compatibility stream.
+      if (!this.canonicalSessionStore) this.recipeProjection(id).backfill();
     }
   }
 
@@ -399,14 +412,21 @@ export class OneSessionPiAdapter {
     sourceEventId?: string,
   ): import("../core/store").StoredEvent {
     try {
-      if (this.canonicalSessionStore && isCanonicalTranscriptEventType(type)) {
-        return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
+      if (this.canonicalSessionStore) {
+        if (isCanonicalTranscriptEventType(type)) {
+          return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
+        }
+        // Operational events are not transcript authority. Keep them on the
+        // ordinary BridgeStore stream without constructing the legacy recipe
+        // projection in the production path.
+        return sourceEventId
+          ? this.store.appendEventIdempotent(`session:${sessionId}`, type, payload, sourceEventId)
+          : this.store.appendEvent(`session:${sessionId}`, type, payload);
       }
       if (this.canonicalEventStore) {
         return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
       }
-      // Operational/session-state events remain compatibility output and do
-      // not consume canonical transcript sequence numbers.
+      // Explicitly injected older adapters retain the legacy projection.
       return this.recipeProjection(sessionId).append(type, payload);
     } catch (error) {
       // The durable projection rebuilds itself after rollback; dropping the
@@ -417,10 +437,9 @@ export class OneSessionPiAdapter {
   }
 
   /**
-   * Admission entry point. Production writes to the dedicated canonical
-   * store, then feeds a non-authoritative normalized view to the durable
-   * recipe projection so older consumers retain `recipe.activity` output.
-   * The legacy facade branch remains only for older injected integrations.
+   * Admission entry point. Production writes transcript events only to the
+   * dedicated canonical store. The legacy facade branch remains only for
+   * older injected integrations that do not provide CanonicalSessionStore.
    */
   private appendNormalizedEventViaCanonicalStore(
     sessionId: string,
@@ -435,12 +454,8 @@ export class OneSessionPiAdapter {
     let canonicalPayload: Record<string, unknown> = { ...payload };
     if (type === "assistant.started" || type === "assistant.delta" || type === "assistant.completed") {
       const turnId = typeof payload.turnId === "string" ? payload.turnId : activeTurnId;
-      // Pi content indexes (for example `0`) repeat on every turn. Scope the
-      // fallback identity by turn so a later reply cannot collide with a
-      // terminal assistant message from an earlier turn.
-      const messageId = typeof payload.messageId === "string"
-        ? payload.messageId
-        : `${sessionId}:${turnId}:${String(payload.contentBlockId ?? "assistant")}`;
+      const identity = this.resolveAssistantIdentity(sessionId, turnId, payload, type === "assistant.started");
+      const messageId = identity.messageId;
       const contentKey = `${sessionId}:${messageId}`;
       if (type === "assistant.delta") {
         const text = typeof payload.text === "string" ? payload.text : "";
@@ -469,12 +484,11 @@ export class OneSessionPiAdapter {
         payload: canonicalPayload,
         ...(sourceEventId ? { sourceEventId } : {}),
       });
+      // Return a normalized StoredEvent-shaped view to notification/status
+      // handling, without persisting a source transcript or derived recipe
+      // row in the legacy stream.
       const canonicalEvent = canonicalProjectionEvent(committed.event);
-      // The recipe projector is compatibility output. Feed it the legacy
-      // normalized shape while the dedicated store remains authoritative.
-      const projectionEvent = { ...canonicalEvent, type, payload };
-      if (!committed.deduplicated) this.recipeProjection(sessionId).applyAndPublish(projectionEvent);
-      return projectionEvent;
+      return { ...canonicalEvent, type, payload };
     }
     if (this.canonicalEventStore) {
       const result = this.canonicalEventStore.append(sessionId, {
@@ -482,8 +496,10 @@ export class OneSessionPiAdapter {
         payload,
         ...(sourceEventId ? { sourceEventId } : {}),
       });
-      const storedEvent = result.events[0] ?? this.store.listEvents(streamId).at(-1);
+      const storedEvent = result.events[0] ?? this.store.latestEvent(streamId);
       if (!storedEvent) throw new Error(`canonical event store returned no persisted event for ${type}`);
+      // This branch is intentionally retained for older injected adapters;
+      // those adapters continue to receive the isolated recipe fallback.
       if (!result.deduplicated) this.recipeProjection(sessionId).applyAndPublish(storedEvent);
       return storedEvent;
     }
@@ -745,6 +761,13 @@ export class OneSessionPiAdapter {
    * lifecycle orchestration (session create/stop/activate/restore/delete/purge,
    * queue mutations, extension UI responses, device notifications, the raw RPC
    * dispatcher) stays in its dedicated handler. */
+  async getCommandCatalogue(sessionId: string): Promise<unknown> {
+    if (!sessionId || !this.store.sessionExists(sessionId)) throw new Error("session not found");
+    this.lastUsedSessionId = sessionId;
+    this.bindSession(sessionId);
+    return this.rawRpc(sessionId, "get_commands", {}, { timeoutMs: 30_000 });
+  }
+
   private async rawRpc(
     sessionId: string,
     method: string,
@@ -1901,7 +1924,15 @@ export class OneSessionPiAdapter {
       // provider-summary contract and must not enter the durable journal or a
       // derived recipe payload.
       if (event.type === "reasoning.delta") continue;
-      if(["turn.failed","turn.aborted","turn.indeterminate"].includes(event.type)) this.store.orphanPendingDialogs(inferredSessionId);
+      // A terminal notification without a matching started identity is an
+      // orphan lifecycle event, not a visible assistant message. This is
+      // common for Pi's thinking/tool-only assistant entry before text starts.
+      if (event.type === "assistant.completed" && this.shouldSuppressAssistantCompletion(inferredSessionId, event.payload)) continue;
+      if (event.type === "turn.started" && activeTurn) {
+        if (this.startedTurns.has(inferredSessionId)) continue;
+        this.startedTurns.add(inferredSessionId);
+      }
+      if (event.type === "turn.failed" || event.type === "turn.aborted" || event.type === "turn.indeterminate") this.store.orphanPendingDialogs(inferredSessionId);
       const toolFailure = event.type === "tool.failed"
         ? recipeToolFailure(event.payload)
         : null;
@@ -1936,8 +1967,61 @@ export class OneSessionPiAdapter {
     }
     if (type === "agent_settled") {
       this.activeTurns.delete(inferredSessionId);
+      this.startedTurns.delete(inferredSessionId);
+      this.assistantIdentities.delete(inferredSessionId);
+      this.assistantPending.delete(inferredSessionId);
+      this.assistantOrdinals.delete(inferredSessionId);
+      for (const key of [...this.assistantContent.keys()]) {
+        if (key.startsWith(`${inferredSessionId}:`)) this.assistantContent.delete(key);
+      }
       void this.dispatchNextFollowUp(inferredSessionId).catch(() => undefined);
     }
+  }
+
+  private resolveAssistantIdentity(
+    sessionId: string,
+    turnId: string,
+    payload: Record<string, unknown>,
+    startsMessage: boolean,
+  ): AssistantIdentity {
+    let byBlock = this.assistantIdentities.get(sessionId);
+    if (!byBlock) {
+      byBlock = new Map<string, AssistantIdentity>();
+      this.assistantIdentities.set(sessionId, byBlock);
+    }
+    const block = String(payload.contentBlockId ?? payload.messageId ?? "assistant");
+    const current = byBlock.get(block);
+    if (current && current.turnId === turnId && (!startsMessage || !current.terminal)) return current;
+    const pending = this.assistantPending.get(sessionId);
+    if (startsMessage && !payload.messageId && pending && pending.turnId === turnId && !pending.terminal) {
+      byBlock.set(block, pending);
+      return pending;
+    }
+    const upstream = typeof payload.messageId === "string" && payload.messageId.length > 0
+      ? payload.messageId
+      : null;
+    const ordinal = (this.assistantOrdinals.get(sessionId) ?? 0) + 1;
+    this.assistantOrdinals.set(sessionId, ordinal);
+    const messageId = upstream
+      ? `${turnId}:${upstream}`
+      : `${turnId}:assistant:${ordinal}`;
+    const next: AssistantIdentity = { messageId, turnId, terminal: false };
+    byBlock.set(block, next);
+    if (startsMessage && upstream) this.assistantPending.set(sessionId, next);
+    return next;
+  }
+
+  private shouldSuppressAssistantCompletion(
+    sessionId: string,
+    payload: Readonly<Record<string, unknown>>,
+  ): boolean {
+    const byBlock = this.assistantIdentities.get(sessionId);
+    if (!byBlock) return true;
+    const block = String(payload.contentBlockId ?? payload.messageId ?? "assistant");
+    const current = byBlock.get(block);
+    if (!current || current.terminal) return true;
+    current.terminal = true;
+    return false;
   }
 
   private resolveNotificationSessionId(record: Record<string, unknown>): string | null {

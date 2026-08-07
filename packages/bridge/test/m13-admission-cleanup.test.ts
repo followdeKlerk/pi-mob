@@ -52,18 +52,20 @@ describe("M13 admission, retention, and cleanup", () => {
     const pending = registry.register({ sessionId: "s", format: "html" });
     writeFileSync(pending.storagePath, "partial");
     const attachments = new AttachmentStore({ root: join(root, "attachments") });
-    let handler = createBinaryHttpHandler({ attachments, exports: { getExport: (id) => registry.get(id), exportFile: (id) => registry.file(id) } });
-    expect((await handler(new Request(`https://private/v1/exports/${pending.metadata.exportId}`)))!.status).toBe(404);
+    const credentials = { verify: (installationId: string) => ({ kind: "valid" as const, installationId }) };
+    const headers = { "X-Installation-Id": "33333333-3333-4333-8333-333333333333", "X-Installation-Credential": "pc_test_credential" };
+    let handler = createBinaryHttpHandler({ attachments, exports: { getExport: (id) => registry.get(id), exportFile: (id) => registry.file(id) }, credentials });
+    expect((await handler(new Request(`https://private/v1/exports/${pending.metadata.exportId}`, { headers })))!.status).toBe(404);
     registry.markFailed(pending.metadata.exportId, "render failed");
-    expect((await handler(new Request(`https://private/v1/exports/${pending.metadata.exportId}`)))!.status).toBe(404);
+    expect((await handler(new Request(`https://private/v1/exports/${pending.metadata.exportId}`, { headers })))!.status).toBe(404);
 
     const completed = registry.register({ sessionId: "s", format: "html" });
     const html = Buffer.from("<html>complete</html>");
     writeFileSync(completed.storagePath, html);
     registry.markCompleted(completed.metadata.exportId, { bytes: html.length, sha256: sha(html) });
     registry = new ExportRegistry({ rootDir: root });
-    handler = createBinaryHttpHandler({ attachments, exports: { getExport: (id) => registry.get(id), exportFile: (id) => registry.file(id) } });
-    expect((await handler(new Request(`https://private/v1/exports/${completed.metadata.exportId}`)))!.status).toBe(200);
+    handler = createBinaryHttpHandler({ attachments, exports: { getExport: (id) => registry.get(id), exportFile: (id) => registry.file(id) }, credentials });
+    expect((await handler(new Request(`https://private/v1/exports/${completed.metadata.exportId}`, { headers })))!.status).toBe(200);
     attachments.close();
   });
 });

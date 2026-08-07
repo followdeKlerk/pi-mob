@@ -177,9 +177,9 @@ describe("mobile disconnect / lost projection boundary does not strand a turn", 
         workspace, executable, stateDir, sessionDir,
         environment: { HOME: daemonDir, PATH: process.env.PATH ?? "/usr/bin:/bin" },
       });
-      const events = daemon.store.listEvents(`session:${sessionId}`);
+      const events = daemon.canonicalSessionStore.readAfter(sessionId, 0).map((event) => ({ type: event.eventType, payload: event.payload }));
       expect(events.some((event) => event.type === "tool.completed" && event.payload.toolCallId === toolCallId)).toBe(true);
-      expect(events.some((event) => event.type === "assistant.completed" && event.payload.contentBlockId === "assistant-final:0")).toBe(true);
+      expect(events.some((event) => event.type === "assistant.message.completed")).toBe(true);
       expect(events.some((event) => event.type === "turn.settled" && event.payload.turnId === turnId)).toBe(true);
       expect(events.some((event) => event.type === "turn.indeterminate" && event.payload.reason === "bridge_restart")).toBe(false);
       expect(events.some((event) => event.type === "tool.failed" && (event.payload.errorInfo as Record<string, unknown> | undefined)?.code === "indeterminate")).toBe(false);
@@ -189,8 +189,8 @@ describe("mobile disconnect / lost projection boundary does not strand a turn", 
         workspace, executable, stateDir, sessionDir,
         environment: { HOME: daemonDir, PATH: process.env.PATH ?? "/usr/bin:/bin" },
       });
-      const restartedEvents = daemon.store.listEvents(`session:${sessionId}`);
-      expect(restartedEvents.filter((event) => ["tool.completed", "tool.failed", "turn.settled", "turn.indeterminate"].includes(event.type))).toHaveLength(terminalCount);
+      const restartedEvents = daemon.canonicalSessionStore.readAfter(sessionId, 0);
+      expect(restartedEvents.filter((event) => ["tool.completed", "tool.failed", "turn.settled", "turn.indeterminate"].includes(event.eventType))).toHaveLength(terminalCount);
     } finally {
       await daemon.close();
       rmSync(daemonDir, { recursive: true, force: true });
@@ -231,10 +231,11 @@ describe("mobile disconnect / lost projection boundary does not strand a turn", 
     add(first, null);
     add(second, secondPath);
     try {
-      const firstRpc = daemon.adapter.resolveRpc(first) as unknown as { markDispatchStart(): void; snapshot(): { sessions: Array<{ pid?: number }> }; state(): string };
+      const firstRpc = daemon.adapter.resolveRpc(first) as unknown as { start(): Promise<void>; markDispatchStart(): void; snapshot(): { sessions: Array<{ pid?: number }> }; state(): string };
       const secondRpc = daemon.adapter.resolveRpc(second) as unknown as { start(): Promise<void>; snapshot(): { sessions: Array<{ pid?: number }> }; state(): string };
       daemon.store.updateSessionState(first, { ...(daemon.store.sessionState(first) ?? {}), piSessionPath: firstPath });
       await secondRpc.start();
+      await firstRpc.start();
       firstRpc.markDispatchStart();
       const firstPid = firstRpc.snapshot().sessions[0]?.pid;
       expect(firstPid).toBeDefined();
@@ -244,10 +245,10 @@ describe("mobile disconnect / lost projection boundary does not strand a turn", 
         if (Date.now() > deadline) throw new Error("owner exit was not observed");
         await Bun.sleep(10);
       }
-      const firstEvents = daemon.store.listEvents(`session:${first}`);
-      const secondEvents = daemon.store.listEvents(`session:${second}`);
-      expect(firstEvents.some((event) => event.type === "turn.indeterminate")).toBe(true);
-      expect(secondEvents.some((event) => event.type === "turn.indeterminate")).toBe(false);
+      const firstEvents = daemon.canonicalSessionStore.readAfter(first, 0);
+      const secondEvents = daemon.canonicalSessionStore.readAfter(second, 0);
+      expect(firstEvents.some((event) => event.eventType === "turn.indeterminate")).toBe(true);
+      expect(secondEvents.some((event) => event.eventType === "turn.indeterminate")).toBe(false);
       expect(secondRpc.state()).toBe("idle");
     } finally {
       await daemon.close();
@@ -1388,18 +1389,21 @@ describe("startup reconciliation maps persisted session row to the reconciled ac
         expect((summary!.payload as Record<string, unknown>).runtimeState).toBe("idle");
         expect((summary!.payload as Record<string, unknown>).attentionState).toBe("ready");
         // The terminal tool lifecycle must be durable exactly once.
-        const toolTerminals = daemon.store.listEvents(`session:${SESS_A}`)
-          .filter((e) => (e.type === "tool.completed" || e.type === "tool.failed") && (e.payload as Record<string, unknown>).toolCallId === toolCallId);
+        const toolTerminals = daemon.canonicalSessionStore.readAfter(SESS_A, 0)
+          .filter((e) => (e.eventType === "tool.completed" || e.eventType === "tool.failed") && (e.payload as Record<string, unknown>).toolCallId === toolCallId);
         expect(toolTerminals).toHaveLength(1);
-        expect(toolTerminals[0]!.type).toBe("tool.completed");
-        // The settled boundary must be durable exactly once.
-        const settled = daemon.store.listEvents(`session:${SESS_A}`)
-          .filter((e) => e.type === "turn.settled" && (e.payload as Record<string, unknown>).turnId === turnId);
+        expect(toolTerminals[0]!.eventType).toBe("tool.completed");
+        const canonicalEvents = daemon.canonicalSessionStore.readAfter(SESS_A, 0);
+        // The importer derives the canonical turn identity from the JSONL
+        // user message (`u`), rather than from the stale pre-import turn id.
+        const importedTurn = canonicalEvents.find((e) => e.eventType === "turn.started" && e.payload.commandId === "u");
+        expect(importedTurn).toBeDefined();
+        const importedTurnId = importedTurn!.payload.turnId;
+        // The settled boundary must be durable exactly once for that derived
+        // identity, and the transcript must not be replayed.
+        const settled = canonicalEvents.filter((e) => e.eventType === "turn.settled" && e.payload.turnId === importedTurnId);
         expect(settled).toHaveLength(1);
-        // No duplicate transcript: the user/assistant/tool start sequence
-        // must not be replayed.
-        const turnStarts = daemon.store.listEvents(`session:${SESS_A}`)
-          .filter((e) => e.type === "turn.started" && (e.payload as Record<string, unknown>).turnId === turnId);
+        const turnStarts = canonicalEvents.filter((e) => e.eventType === "turn.started" && e.payload.turnId === importedTurnId);
         expect(turnStarts).toHaveLength(1);
       } finally {
         await daemon.close();
@@ -1443,12 +1447,17 @@ describe("startup reconciliation maps persisted session row to the reconciled ac
         expect(summary).toBeDefined();
         expect((summary!.payload as Record<string, unknown>).runtimeState).toBe("indeterminate");
         // Pi's isError=false produces tool.completed, not tool.failed.
-        const toolTerminals = daemon.store.listEvents(`session:${SESS_B}`)
-          .filter((e) => (e.type === "tool.completed" || e.type === "tool.failed") && (e.payload as Record<string, unknown>).toolCallId === toolCallId);
+        const toolTerminals = daemon.canonicalSessionStore.readAfter(SESS_B, 0)
+          .filter((e) => (e.eventType === "tool.completed" || e.eventType === "tool.failed") && (e.payload as Record<string, unknown>).toolCallId === toolCallId);
         expect(toolTerminals).toHaveLength(1);
-        expect(toolTerminals[0]!.type).toBe("tool.completed");
-        const indeterminates = daemon.store.listEvents(`session:${SESS_B}`)
-          .filter((e) => e.type === "turn.indeterminate" && (e.payload as Record<string, unknown>).turnId === turnId);
+        expect(toolTerminals[0]!.eventType).toBe("tool.completed");
+        const canonicalEvents = daemon.canonicalSessionStore.readAfter(SESS_B, 0);
+        // The importer derives the turn id from the JSONL user entry. Reuse
+        // the actual imported terminal tool identity instead of masking that
+        // mapping with a guessed fixture id.
+        const importedTurnId = toolTerminals[0]!.payload.turnId;
+        const indeterminates = canonicalEvents
+          .filter((e) => e.eventType === "turn.indeterminate" && e.payload.turnId === importedTurnId);
         expect(indeterminates).toHaveLength(1);
       } finally {
         await daemon.close();

@@ -12,6 +12,20 @@ const utf8Bytes = (value: string): number => Buffer.byteLength(value, "utf8");
 const digest = (value: string): string => createHash("sha256").update(value, "utf8").digest("hex");
 
 describe("M6-07 bounded tool output", () => {
+  test("preserves exact bounded pwd output for authenticated transport", () => {
+    const context = { sessionId: "session", toolOutputLimiter: new ToolOutputLimiter() };
+    normalizePiEvent({ type: "tool_execution_start", toolCallId: "pwd", toolName: "bash", args: {} }, context);
+    const event = normalizePiEvent({
+      type: "tool_execution_end",
+      toolCallId: "pwd",
+      toolName: "bash",
+      result: "/Users/alice/project",
+      isError: false,
+    }, context)[0]!;
+    expect(event.payload.result).toBe("/Users/alice/project");
+    expect(event.payload.totalBytes).toBe(utf8Bytes("/Users/alice/project"));
+  });
+
   test("uses exact UTF-8 wire limits without splitting a code point", () => {
     const valueBudget = TOOL_OUTPUT_EVENT_MAX_BYTES - 1024;
     const exactBytes = valueBudget - 2; // JSON string quotes consume two bytes.
@@ -90,7 +104,7 @@ describe("M6-07 bounded tool output", () => {
     });
   });
 
-  test("recursively redacts private paths before retaining nested values", () => {
+  test("preserves private paths in bounded authenticated tool values", () => {
     const limiter = new ToolOutputLimiter();
     const limited = limiter.limit("nested", {
       content: [{ type: "text", text: "read /private/repo/secret.ts then /opt/company/token" }],
@@ -102,12 +116,14 @@ describe("M6-07 bounded tool output", () => {
     const output = limited.value as Record<string, unknown>;
     const json = JSON.stringify(output);
 
-    expect(json).not.toContain("/private");
-    expect(json).not.toContain("/opt/company");
-    expect(json).not.toContain("/Users/alice");
-    expect(json).not.toContain("fullOutputPath");
-    expect(json).not.toContain("stack");
-    expect(json).toContain("<host-private>");
+    expect(json).toContain("/private/repo/secret.ts");
+    expect(json).toContain("/opt/company/token");
+    expect(json).toContain("/Users/alice/project/file.ts");
+    expect(json).toContain("fullOutputPath");
+    expect(json).toContain("/private/tmp/raw.log");
+    expect(json).toContain("stack");
+    expect(json).toContain("/private/stack");
+    expect(json).not.toContain("<host-private>");
     expect(limited).toMatchObject({
       retainedBytes: utf8Bytes(json),
       totalBytes: utf8Bytes(json),

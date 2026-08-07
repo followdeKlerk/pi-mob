@@ -49,6 +49,15 @@ describe("PiDiagnosticsSink", () => {
     expect(payload.nested.ok).toBe(true);
   });
 
+  test("redacts private paths while retaining diagnostic structure", () => {
+    const { sink, db } = makeSink();
+    sink.append({ type: "tool_execution_end", result: "/Users/alice/project/file.ts", nested: { cwd: "/private/repo" } }, "session");
+    const row = db.query("SELECT payload_json FROM pi_event_diagnostics").get() as { payload_json: string };
+    const payload = JSON.parse(row.payload_json) as { result: string; nested: { cwd: string } };
+    expect(payload.result).toBe("<host-private>");
+    expect(payload.nested.cwd).toBe("<host-private>");
+  });
+
   test("FIFO eviction enforces the row limit", () => {
     const { sink, db } = makeSink(3);
     for (let index = 0; index < 5; index += 1) sink.append({ type: "raw", index }, "session");
@@ -87,8 +96,8 @@ describe("PiDiagnosticsSink", () => {
     expect(() => sink.append(circular, "session")).not.toThrow();
     const row = db.query("SELECT payload_json FROM pi_event_diagnostics").get() as { payload_json: string } | null;
     expect(row).not.toBeNull();
-    const parsed = JSON.parse(row!.payload_json) as { __unserializable: true };
-    expect(parsed.__unserializable).toBe(true);
+    const parsed = JSON.parse(row!.payload_json) as { self: string };
+    expect(parsed.self).toBe("<circular>");
   });
 
   test("JSON.stringify returning undefined is coerced to a valid placeholder", () => {

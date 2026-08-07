@@ -166,12 +166,9 @@ describe("integration: Phase 4 guardrail regressions", () => {
     });
     try {
       const supervised = daemon.rpc as unknown as {
-        current?: { launchConfig?: { env?: Record<string, string> } };
+        options: { rpc: { launchConfig: { env: Record<string, string> } } };
       };
-      const inner = supervised.current;
-      expect(inner).toBeDefined();
-      const launchEnv = inner?.launchConfig?.env;
-      expect(launchEnv).toBeDefined();
+      const launchEnv = supervised.options.rpc.launchConfig.env;
       expect(launchEnv?.OPENAI_API_KEY).toBe("test-openai-key-do-not-use-in-prod");
       expect(launchEnv?.ANTHROPIC_API_KEY).toBe("test-anthropic-key-do-not-use-in-prod");
       expect(launchEnv?.GOOGLE_API_KEY).toBe("test-google-key-do-not-use-in-prod");

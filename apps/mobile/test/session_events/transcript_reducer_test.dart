@@ -1,6 +1,9 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/session_events/canonical_event.dart';
+import 'package:pi_mob/src/session_events/canonical_transcript_document.dart';
 import 'package:pi_mob/src/session_events/transcript_reducer.dart';
+import 'package:pi_mob/src/transcript/domain/transcript_items.dart';
+import 'package:pi_mob/src/transcript/domain/transcript_turn.dart';
 
 CanonicalSessionEvent _user({
   required String messageId,
@@ -163,8 +166,72 @@ CanonicalSessionEvent _turn({
   payload: <String, Object?>{'turnId': turnId},
 );
 
+CanonicalSessionEvent _event({
+  required int sequence,
+  required CanonicalEventType type,
+  required Map<String, Object?> payload,
+  String eventId = 'event',
+}) => CanonicalSessionEvent(
+  eventId: '$eventId-$sequence',
+  sessionId: 's1',
+  sequence: sequence,
+  type: type,
+  occurredAt: DateTime.utc(2026, 7, 14, 12, 0, sequence),
+  payload: payload,
+);
+
 void main() {
   group('CanonicalTranscriptReducer', () {
+    test('malformed completion does not create an empty assistant or duplicate tools', () {
+      const turnId = 'turn-1';
+      var state = CanonicalTranscriptState.empty('s1');
+      final events = <CanonicalSessionEvent>[
+        _event(sequence: 1, type: CanonicalEventType.userMessageCreated, payload: <String, Object?>{
+          'turnId': turnId, 'messageId': 'user-1', 'text': 'pwd',
+        }),
+        _event(sequence: 2, type: CanonicalEventType.turnStarted, payload: <String, Object?>{'turnId': turnId}),
+        _event(sequence: 3, type: CanonicalEventType.assistantMessageCompleted, payload: <String, Object?>{
+          'turnId': turnId, 'messageId': '$turnId:0',
+        }),
+        _event(sequence: 4, type: CanonicalEventType.toolCallStarted, payload: <String, Object?>{
+          'turnId': turnId, 'toolCallId': 'pwd', 'toolName': 'bash', 'arguments': <String, Object?>{},
+        }),
+        _event(sequence: 5, type: CanonicalEventType.toolCallCompleted, payload: <String, Object?>{
+          'turnId': turnId, 'toolCallId': 'pwd', 'result': '/Users/alice/project',
+        }),
+        _event(sequence: 6, type: CanonicalEventType.assistantStarted, payload: <String, Object?>{
+          'turnId': turnId, 'messageId': '$turnId:assistant:1',
+        }),
+        _event(sequence: 7, type: CanonicalEventType.assistantContentReplaced, payload: <String, Object?>{
+          'turnId': turnId, 'messageId': '$turnId:assistant:1', 'content': <Map<String, Object?>>[
+            <String, Object?>{'kind': 'text', 'text': 'The working directory is /Users/alice/project'},
+          ],
+        }),
+        _event(sequence: 8, type: CanonicalEventType.assistantMessageCompleted, payload: <String, Object?>{
+          'turnId': turnId, 'messageId': '$turnId:assistant:1',
+        }),
+        _event(sequence: 9, type: CanonicalEventType.assistantMessageCompleted, payload: <String, Object?>{
+          'turnId': turnId, 'messageId': '$turnId:assistant',
+        }),
+        _event(sequence: 10, type: CanonicalEventType.turnSettled, payload: <String, Object?>{'turnId': turnId}),
+      ];
+      for (final event in events) state = applyCanonicalEvent(state, event);
+
+      expect(state.assistantMessages, hasLength(1));
+      expect(state.assistantMessages.values.single.content.single.text, contains('/Users/alice/project'));
+      expect(state.toolCalls, hasLength(1));
+      final document = projectCanonicalToDocument(state);
+      final toolCards = document.turns
+          .whereType<AssistantTurn>()
+          .expand((turn) => turn.items)
+          .whereType<ToolItem>()
+          .toList();
+      expect(toolCards, hasLength(1));
+      expect(document.turns.whereType<AssistantTurn>().length, 2);
+      expect(state.diagnostics, hasLength(2));
+    });
+
+
     test('reused Pi content-block IDs do not hide a later reply', () {
       var state = CanonicalTranscriptState.empty('s1');
       state = applyCanonicalEvent(
@@ -229,6 +296,117 @@ void main() {
             .text,
         'second',
       );
+    });
+
+    test(
+      'distinct assistant messages in one turn retain direct storage keys',
+      () {
+        var state = CanonicalTranscriptState.empty('s1');
+        state = applyCanonicalEvent(
+          state,
+          _assistantStart(
+            turnId: 'turn-1',
+            messageId: 'message-a',
+            sequence: 1,
+            eventId: 'start-a',
+          ),
+        );
+        state = applyCanonicalEvent(
+          state,
+          _assistantStart(
+            turnId: 'turn-1',
+            messageId: 'message-b',
+            sequence: 2,
+            eventId: 'start-b',
+          ),
+        );
+        expect(
+          state.assistantMessages.keys,
+          containsAll(['message-a', 'message-b']),
+        );
+        expect(
+          state.assistantMessages.keys,
+          isNot(contains('message-b:turn-1')),
+        );
+
+        state = applyCanonicalEvent(
+          state,
+          _assistantContent(
+            turnId: 'turn-1',
+            messageId: 'message-a',
+            text: 'first',
+            sequence: 3,
+            eventId: 'content-a',
+          ),
+        );
+        state = applyCanonicalEvent(
+          state,
+          _assistantCompleted(
+            turnId: 'turn-1',
+            messageId: 'message-a',
+            sequence: 4,
+            eventId: 'complete-a',
+          ),
+        );
+        state = applyCanonicalEvent(
+          state,
+          _assistantContent(
+            turnId: 'turn-1',
+            messageId: 'message-a',
+            text: 'late',
+            sequence: 5,
+            eventId: 'late-a',
+          ),
+        );
+        expect(
+          state.assistantMessages['message-a']!.content.single.text,
+          'first',
+        );
+        expect(state.assistantMessages['message-a']!.isTerminal, isTrue);
+      },
+    );
+
+    test('reused wire message id is suffixed only across turns', () {
+      var state = CanonicalTranscriptState.empty('s1');
+      state = applyCanonicalEvent(
+        state,
+        _assistantStart(
+          turnId: 'turn-1',
+          messageId: 'wire-0',
+          sequence: 1,
+          eventId: 'reuse-start-1',
+        ),
+      );
+      state = applyCanonicalEvent(
+        state,
+        _assistantStart(
+          turnId: 'turn-2',
+          messageId: 'wire-0',
+          sequence: 2,
+          eventId: 'reuse-start-2',
+        ),
+      );
+      expect(
+        state.assistantMessages.keys,
+        containsAll(['wire-0', 'wire-0:turn-2']),
+      );
+      expect(state.assistantMessages, hasLength(2));
+
+      state = applyCanonicalEvent(
+        state,
+        _assistantContent(
+          turnId: 'turn-2',
+          messageId: 'wire-0',
+          text: 'second',
+          sequence: 3,
+          eventId: 'reuse-content-2',
+        ),
+      );
+      expect(
+        state.assistantMessages['wire-0:turn-2']!.content.single.text,
+        'second',
+      );
+      expect(state.assistantMessages['wire-0']!.content, isEmpty);
     });
 
     test('user message insertion is idempotent on duplicate messageId', () {

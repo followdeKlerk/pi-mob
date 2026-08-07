@@ -12,6 +12,7 @@ export interface AdapterPort {
   /** Optional shallow search within explicit host developer roots. */
   searchWorkspaces?(query: string): { readonly items: ReadonlyArray<Record<string, unknown>> };
   listModels?(sessionId?: string): { readonly items: ReadonlyArray<Record<string, unknown>> };
+  getCommandCatalogue?(sessionId: string): Promise<unknown>;
   admission?(): { readonly accepting: boolean; readonly reason?: string };
   /** Reject invalid external references before durable command acceptance. */
   validateCommand?(type: string, payload: Record<string, unknown>): void;

@@ -111,6 +111,7 @@ class SupportedCommandData {
     this.description,
     this.invocation,
     this.enabled = true,
+    this.requiresInput = false,
     this.disabledReason,
     this.unavailableNote,
     this.togglingDisabled = false,
@@ -123,6 +124,7 @@ class SupportedCommandData {
   final String? description;
   final String? invocation;
   final bool enabled;
+  final bool requiresInput;
   final String? disabledReason;
 
   /// Host-authoritative availability copy. This takes precedence over the

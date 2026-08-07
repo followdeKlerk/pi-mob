@@ -22,7 +22,10 @@ import {
 import { BridgeStore } from "../src/core/store";
 import { BridgeNotificationService } from "../src/notifications/service";
 import { NoopTransport } from "../src/notifications/transports/noop";
+import { hashCredential } from "../src/auth/credentials";
 
+const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
+const INSTALLATION_CREDENTIAL = "pc_test_credential";
 const SERVER_CAPABILITIES = new Set([
   "streams.v1",
   "commands.v1",
@@ -39,6 +42,7 @@ function fixtureRuntime(opts: {
 } {
   const dir = mkdtempSync(join(tmpdir(), "pi-mob-m15-handshake-"));
   const store = new BridgeStore(join(dir, "bridge.sqlite"));
+  store.upsertInstallationCredential({ installationId: INSTALLATION_ID, credentialHash: hashCredential(INSTALLATION_CREDENTIAL), enrollmentSecretHash: "e".repeat(64), enrollmentSource: "seed", createdAt: Date.now(), lastSeenAt: Date.now() });
   const adapter: BridgeRuntimePort["control"] = () => ({});
   const adapterPort = {
     dispatch: async () => undefined,
@@ -166,7 +170,8 @@ async function helloCapabilities(port: number): Promise<HelloAccepted> {
         payload: {
           mobileVersion: "1",
           platform: "android",
-          installationId: crypto.randomUUID(),
+          installationId: INSTALLATION_ID,
+          installationCredential: INSTALLATION_CREDENTIAL,
           requiredCapabilities: ["streams.v1", "commands.v1"],
           optionalCapabilities: [],
         },

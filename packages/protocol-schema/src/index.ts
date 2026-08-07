@@ -2301,6 +2301,7 @@ export const CatalogueEntrySchema = Type.Object(
 		source: Type.String({ minLength: 1, maxLength: 128 }),
 		availability: CapabilityStatusSchema,
 		enabled: Type.Optional(Type.Boolean()),
+		requiresInput: Type.Optional(Type.Boolean()),
 		canToggle: Type.Boolean(),
 		reloadRequired: Type.Boolean(),
 		revision: RevisionTokenSchema,
@@ -2308,14 +2309,14 @@ export const CatalogueEntrySchema = Type.Object(
 	{ additionalProperties: false },
 );
 export const CatalogueSnapshotSchema = Type.Object(
-	{ revision: RevisionTokenSchema, entries: Type.Array(CatalogueEntrySchema, { maxItems: LIMITS.maxCatalogueEntries }) },
+	{ sessionId: SessionId, revision: RevisionTokenSchema, entries: Type.Array(CatalogueEntrySchema, { maxItems: LIMITS.maxCatalogueEntries }) },
 	{ additionalProperties: false },
 );
 export const CatalogueUnavailableSchema = Type.Object(
 	{ capability: Type.Literal("catalogue.v1"), status: CapabilityStatusSchema },
 	{ additionalProperties: false },
 );
-const CatalogueSnapshotRequestSchema = Type.Object({ requestId: Uuid }, { additionalProperties: false });
+const CatalogueSnapshotRequestSchema = Type.Object({ requestId: Uuid, sessionId: SessionId }, { additionalProperties: false });
 const CatalogueSetEnabledSchema = Type.Object(
 	{ sessionId: SessionId, entryId: Type.String({ minLength: 1, maxLength: 128 }), enabled: Type.Boolean(), expectedRevision: RevisionTokenSchema, confirmed: Type.Literal(true) },
 	{ additionalProperties: false },

@@ -7,7 +7,7 @@ const clean: AndroidReleaseInput = {
   firebase: `"package_name": "com.example.pi_mob"`,
   kotlinPaths: ["apps/mobile/android/app/src/main/kotlin/com/example/pi_mob/MainActivity.kt", "apps/mobile/android/app/src/main/kotlin/com/example/pi_mob/PiMobMessagingService.kt"],
   versionName: "0.0.2-alpha.1",
-  versionCode: 1,
+  versionCode: 2,
   applicationId: "com.example.pi_mob",
   namespace: "com.example.pi_mob",
   signing: "CN=Phase 5 ephemeral",

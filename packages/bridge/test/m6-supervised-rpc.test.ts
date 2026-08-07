@@ -40,6 +40,27 @@ describe("M6 supervised real subprocess", () => {
     } finally { await client.close(); }
   }, 10_000);
 
+  test("non-interactive extension UI updates do not mark the process as waiting", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mob-supervised-ui-")); mkdirSync(join(root, "home"));
+    const client = new SupervisedRpcClient({
+      processId: "33333333-3333-4333-8333-333333333333",
+      rpc: {
+        launchConfig: resolvePiLaunchConfig({ executable: Bun.which("bun")!, cwd: root, env: { HOME: join(root, "home"), PATH: process.env.PATH ?? "/usr/bin:/bin" } }),
+        args: [new URL("./fixtures/fake-pi-rpc.ts", import.meta.url).pathname],
+        defaultRequestTimeoutMs: 2_000,
+        closeGracePeriodMs: 100,
+      },
+    });
+    try {
+      await client.start();
+      const project = (value: Record<string, unknown>) => (client as unknown as { project(value: unknown): void }).project(value);
+      project({ type: "extension_ui_request", method: "setStatus" });
+      expect(client.state()).toBe("idle");
+      project({ type: "extension_ui_request", method: "select" });
+      expect(client.state()).toBe("waiting_for_input");
+    } finally { await client.close(); }
+  });
+
   test("three real subprocess exits enter crash loop without a fourth start", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-supervised-loop-")); mkdirSync(join(root, "home"));
     const events: ProcessLifecycleEvent[] = [];

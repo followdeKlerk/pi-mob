@@ -86,6 +86,18 @@ describe("M4 runtime routing and bounded subscriptions", () => {
 });
 
 describe("M4 replay, snapshots, and stream isolation", () => {
+  test("compaction makes stale cursors require a snapshot while an active cursor remains current", () => {
+    const { store, stream } = setup();
+    store.appendEvent(stream, "legacy", {}); store.appendEvent(stream, "legacy", {});
+    store.upsertInstallationCredential({ installationId: "mobile", credentialHash: "hash", enrollmentSecretHash: "secret", enrollmentSource: "manual", createdAt: 1, lastSeenAt: 1 });
+    store.ackCursor("mobile", stream, "2");
+    expect(store.compactLegacyEvents()).toMatchObject({ deletedRows: 2 });
+    const service = new StreamService(store);
+    expect(service.sync(stream, "0").mode).toBe("snapshot_required");
+    expect(service.sync(stream, "2").mode).toBe("current");
+    store.close();
+  });
+
   test("classifies current/replay/expired/ahead and replays post-baseline events", () => {
     const { store, stream } = setup(); const first = store.appendEvent(stream, "turn.started", {}); const second = store.appendEvent(stream, "turn.settled", {});
     const service = new StreamService(store, 8);

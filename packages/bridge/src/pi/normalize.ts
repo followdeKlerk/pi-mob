@@ -12,14 +12,14 @@ export interface PiNormalizationContext {
 }
 
 export interface LimitedToolOutput {
-  /** Redacted inline value. Objects retain their shape unless this event is truncated. */
+  /** Bounded inline value. Objects retain their shape unless this event is truncated. */
   readonly value: unknown;
   /** Bytes retained inline across this tool call, including this event. */
   readonly retainedBytes: number;
-  /** Redacted UTF-8 bytes observed across this tool call, including this event. */
+  /** UTF-8 bytes observed across this tool call, including this event. */
   readonly totalBytes: number;
   readonly isTruncated: boolean;
-  /** SHA-256 of the redacted byte stream observed for this call. */
+  /** SHA-256 of the bounded byte stream observed for this call. */
   readonly digest?: string;
 }
 
@@ -44,7 +44,6 @@ const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 const MAX_SAFE_DEPTH = 32;
 const MAX_SAFE_ITEMS = 500;
-const PRIVATE_KEY = /path|sourceInfo|sessionFile|fullOutputPath|stack/i;
 
 /**
  * Bounds normalized tool progress/results without throwing away Pi's turn.
@@ -151,7 +150,7 @@ interface MeasuredToolValue {
 function measureToolValue(value: unknown, allowance: number, callHasher: Hash): MeasuredToolValue {
   const serialization: SerializationState = { ancestors: new WeakSet(), structurallyTruncated: false };
   const chunks = typeof value === "string"
-    ? [redactPrivatePaths(value)]
+    ? [value]
     : serializeToolValue(value, serialization, 0, false);
   const retained: Uint8Array[] = [];
   let retainedBytes = 0;
@@ -248,7 +247,7 @@ function utf8PrefixLength(bytes: Uint8Array, maximum: number): number {
 }
 
 function* serializeToolValue(value: unknown, state: SerializationState, depth: number, arrayItem: boolean): Generator<string> {
-  if (typeof value === "string") { yield JSON.stringify(redactPrivatePaths(value)); return; }
+  if (typeof value === "string") { yield JSON.stringify(value); return; }
   if (value === null) { yield "null"; return; }
   if (typeof value === "boolean") { yield value ? "true" : "false"; return; }
   if (typeof value === "number") { yield Number.isFinite(value) ? String(value) : "null"; return; }
@@ -300,7 +299,6 @@ function* serializeToolValue(value: unknown, state: SerializationState, depth: n
     let emitted = 0;
     let inspected = 0;
     for (const key of keys) {
-      if (PRIVATE_KEY.test(key)) continue;
       if (inspected >= MAX_SAFE_ITEMS) {
         state.structurallyTruncated = true;
         break;
@@ -311,7 +309,7 @@ function* serializeToolValue(value: unknown, state: SerializationState, depth: n
       catch { state.structurallyTruncated = true; item = "<unavailable>"; }
       if (typeof item === "undefined" || typeof item === "function" || typeof item === "symbol") continue;
       if (emitted > 0) yield ",";
-      yield JSON.stringify(redactPrivatePaths(key));
+      yield JSON.stringify(key);
       yield ":";
       yield* serializeToolValue(item, state, depth + 1, false);
       emitted += 1;
@@ -404,11 +402,25 @@ switch (raw.type) {
   case "message_start": {
     const message = object(raw.message);
     if (message.role !== "assistant") return [];
-    // Pi emits an empty assistant message_start before the first text_start.
-    // The text block is the real stable transcript identity; admitting both
-    // creates an empty assistant reply beside the actual response.
-    if (Array.isArray(message.content) && message.content.length === 0) return [];
-    return [event("assistant.started", sessionId, { contentBlockId: message.id ?? raw.messageId ?? "message" })];
+    // Pi can emit an assistant message_start for thinking and tool calls
+    // before the visible text block. Admit only a message that proves it has
+    // visible text, so lifecycle notifications cannot create empty cards.
+    const content = message.content;
+    const hasVisibleText = typeof content === "string"
+      ? content.length > 0
+      : Array.isArray(content) && content.some((part) => {
+        if (!part || typeof part !== "object") return false;
+        const item = part as Record<string, unknown>;
+        return item.type === "text" && typeof item.text === "string" && item.text.length > 0;
+      });
+    if (!hasVisibleText) return [];
+    const messageId = typeof message.id === "string"
+      ? message.id
+      : typeof raw.messageId === "string" ? raw.messageId : undefined;
+    return [event("assistant.started", sessionId, {
+      contentBlockId: messageId ?? "message",
+      ...(messageId ? { messageId } : {}),
+    })];
   }
   case "message_update": return normalizeMessageUpdate(raw, sessionId);
   case "message_end": {
@@ -419,7 +431,11 @@ switch (raw.type) {
     }
     // text_end already closes the streamed content block. Reuse its stable
     // first-block identity instead of creating a second `:assistant` card.
-    return [event("assistant.completed", sessionId, { contentBlockId: "0", content: safe(raw.message) })];
+    return [event("assistant.completed", sessionId, {
+      contentBlockId: typeof message.id === "string" ? message.id : "0",
+      ...(typeof message.id === "string" ? { messageId: message.id } : {}),
+      content: safe(raw.message),
+    })];
   }
   case "tool_execution_start": {
     const toolCallId = identifier(raw.toolCallId);
@@ -473,9 +489,16 @@ function normalizeMessageUpdate(raw: RawPiEvent, sessionId: string): readonly No
   const delta = object(raw.assistantMessageEvent);
   const kind = String(delta.type ?? "");
   const contentBlockId = String(delta.contentIndex ?? delta.id ?? "content");
-  if (kind === "text_start") return [event("assistant.started", sessionId, { contentBlockId })];
-  if (kind === "text_delta") return [event("assistant.delta", sessionId, { contentBlockId, text: text(delta.delta ?? delta.text) })];
-  if (kind === "text_end") return [event("assistant.completed", sessionId, { contentBlockId })];
+  const upstreamMessageId = typeof delta.messageId === "string"
+    ? delta.messageId
+    : typeof delta.message_id === "string" ? delta.message_id : undefined;
+  const identity = {
+    contentBlockId,
+    ...(upstreamMessageId ? { messageId: upstreamMessageId } : {}),
+  };
+  if (kind === "text_start") return [event("assistant.started", sessionId, identity)];
+  if (kind === "text_delta") return [event("assistant.delta", sessionId, { ...identity, text: text(delta.delta ?? delta.text) })];
+  if (kind === "text_end") return [event("assistant.completed", sessionId, identity)];
   if (kind === "thinking_start") return [event("reasoning.started", sessionId, { contentBlockId })];
   if (kind === "thinking_delta") return [event("reasoning.delta", sessionId, { contentBlockId, text: text(delta.delta ?? delta.text) })];
   if (kind === "thinking_end") return [event("reasoning.completed", sessionId, { contentBlockId })];

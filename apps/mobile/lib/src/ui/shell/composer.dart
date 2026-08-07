@@ -5,7 +5,11 @@ import 'package:flutter/services.dart';
 
 import '../../connection/connection_coordinator.dart';
 import '../../domain/prompt_send_lifecycle.dart';
+import '../../domain/session_controls.dart';
 import '../../interaction/interaction_panel.dart';
+import '../../controls/command_palette.dart';
+import '../../controls/control_view_data.dart';
+import '../../domain/command_catalogue.dart';
 import '../theme/pi_theme.dart';
 import 'shortcut_intents.dart';
 import 'motion_primitives.dart';
@@ -38,6 +42,168 @@ class Composer extends StatelessWidget {
     await coordinator.updateDraft('');
   }
 
+  CommandCatalogue _authoritativeCatalogue() {
+    final entries =
+        (coordinator.supportedCommands ?? const <SupportedCommandData>[])
+            .map(
+              (command) => CommandCatalogueEntry(
+                id: command.id,
+                title: command.title,
+                category: switch (command.category) {
+                  SupportedCommandCategory.skill =>
+                    CommandCatalogueCategory.skill,
+                  SupportedCommandCategory.template =>
+                    CommandCatalogueCategory.template,
+                  _ => CommandCatalogueCategory.extension,
+                },
+                description: command.description,
+                invocation: command.invocation,
+                available: command.enabled,
+                unavailableReason: command.disabledReason,
+                reloadRequired: command.requiresReloadAfterToggle,
+              ),
+            )
+            .toList(growable: false);
+    return CommandCatalogue(entries: entries);
+  }
+
+  Future<void> _openCommands(BuildContext context) async {
+    final target = coordinator.selectedSessionId;
+    if (target == null) return;
+    await _clearDraft();
+    if (!context.mounted) return;
+    final requestFuture = coordinator.requestCatalogue(sessionId: target);
+    await showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.all(PiSpacing.lg),
+          child: FutureBuilder<void>(
+            future: requestFuture,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const SizedBox(
+                  height: 180,
+                  child: Center(child: CircularProgressIndicator()),
+                );
+              }
+              if (snapshot.hasError)
+                return Center(
+                  child: Text('Commands unavailable: ${snapshot.error}'),
+                );
+              final commands = _authoritativeCatalogue();
+              if (commands.entries.isEmpty)
+                return const Center(child: Text('No commands are available.'));
+              return SizedBox(
+                height: MediaQuery.sizeOf(context).height * .75,
+                child: CommandPalette(
+                  catalogue: commands,
+                  onCopy: (entry) {
+                    final invocation = entry.invocation;
+                    if (invocation != null)
+                      Clipboard.setData(ClipboardData(text: invocation));
+                  },
+                  onInsert: (entry) {
+                    final invocation = entry.invocation;
+                    if (invocation == null) return;
+                    draftController.value = TextEditingValue(
+                      text: invocation,
+                      selection: TextSelection.collapsed(
+                        offset: invocation.length,
+                      ),
+                    );
+                    unawaited(coordinator.updateDraft(invocation));
+                    Navigator.of(sheetContext).pop();
+                  },
+                ),
+              );
+            },
+          ),
+        ),
+      ),
+    );
+  }
+
+  Future<void> _openModelPicker(BuildContext context) async {
+    await _clearDraft();
+    try {
+      await coordinator.requestModels();
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text('Could not load models: $error')));
+      return;
+    }
+    if (!context.mounted) return;
+    final models = coordinator.configuredModels
+        .where((model) => model.available)
+        .toList(growable: false);
+    if (models.isEmpty) {
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        const SnackBar(
+          content: Text('No models are available for this session.'),
+        ),
+      );
+      return;
+    }
+    var selected = models.first;
+    final chosen = await showDialog<ModelOption>(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          title: const Text('Change model'),
+          content: DropdownButtonFormField<String>(
+            key: const Key('model-picker'),
+            initialValue: selected.id,
+            isExpanded: true,
+            decoration: const InputDecoration(labelText: 'Model'),
+            items: [
+              for (final model in models)
+                DropdownMenuItem(
+                  value: model.id,
+                  child: Text(
+                    [
+                      if (model.provider != null) model.provider!,
+                      model.label,
+                    ].join(' · '),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+            ],
+            onChanged: (id) {
+              if (id == null) return;
+              setState(
+                () => selected = models.firstWhere((model) => model.id == id),
+              );
+            },
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('Cancel'),
+            ),
+            FilledButton(
+              key: const Key('confirm-model-change'),
+              onPressed: () => Navigator.of(dialogContext).pop(selected),
+              child: const Text('Change'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (chosen == null) return;
+    try {
+      await coordinator.setModel(chosen.id);
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
+        SnackBar(content: Text('Could not change model: $error')),
+      );
+    }
+  }
+
   Future<void> _submitOrRunCommand(BuildContext context) async {
     if (coordinator.canAbort && coordinator.draft.trim().isEmpty) {
       await coordinator.abort();
@@ -45,6 +211,12 @@ class Composer extends StatelessWidget {
     }
     final command = coordinator.draft.trim().toLowerCase();
     switch (command) {
+      case '/commands':
+        await _openCommands(context);
+        return;
+      case '/model':
+        await _openModelPicker(context);
+        return;
       case '/compact':
         await _clearDraft();
         await coordinator.compactNow();
@@ -104,10 +276,11 @@ class Composer extends StatelessWidget {
   List<_SlashCommand> _slashCommands() {
     final commands = <_SlashCommand>[
       const _SlashCommand(
-        '/model',
-        'Change the model using Pi command syntax',
+        '/commands',
+        'Show commands reported by the selected Pi session',
         'Control',
       ),
+      const _SlashCommand('/model', 'Open the model picker', 'Control'),
       const _SlashCommand(
         '/compact',
         'Compact this session context',
@@ -129,13 +302,14 @@ class Composer extends StatelessWidget {
         'Restart an unavailable Pi session',
         'Recovery',
       ),
-      for (final command in coordinator.selectedControls?.commands ?? const [])
+      for (final command
+          in coordinator.supportedCommands ?? const <SupportedCommandData>[])
         _SlashCommand(
-          '/${command.name}',
-          command.description,
+          command.invocation ?? '/${command.title}',
+          command.description ?? command.title,
           switch (command.category) {
-            'skill' => 'Skill',
-            'template' => 'Template',
+            SupportedCommandCategory.skill => 'Skill',
+            SupportedCommandCategory.template => 'Template',
             _ => 'Extension',
           },
           requiresInput: command.requiresInput,

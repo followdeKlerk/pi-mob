@@ -7,6 +7,7 @@ import { DurableBridgeRuntime } from "../src/core/runtime";
 import { BridgeStore } from "../src/core/store";
 import type { AdapterPort } from "../src/core/domain";
 
+const INSTALLATION_CREDENTIAL = "pc_test_credential";
 interface Client { ws: WebSocket; next(): Promise<Record<string,unknown>>; }
 async function connect(port: number): Promise<Client> {
   const queue: Array<Record<string,unknown>> = []; const waiters: Array<(value:Record<string,unknown>)=>void> = [];
@@ -18,7 +19,7 @@ async function connect(port: number): Promise<Client> {
 function send(client: Client, value: Record<string,unknown>): void { client.ws.send(JSON.stringify(value)); }
 function base(type: string, payload: Record<string,unknown>, extra: Record<string,unknown> = {}): Record<string,unknown> { return { protocol:{major:1,minor:0},messageId:crypto.randomUUID(),requestId:crypto.randomUUID(),type,sentAt:new Date().toISOString(),payload,...extra }; }
 async function hello(client: Client): Promise<{ connectionId: string; hostId: string }> {
-  send(client, base("hello", { mobileVersion:"1",platform:"ios",installationId:"33333333-3333-4333-8333-333333333333",requiredCapabilities:["streams.v1","commands.v1"],optionalCapabilities:[] }));
+  send(client, base("hello", { mobileVersion:"1",platform:"ios",installationId:"33333333-3333-4333-8333-333333333333",installationCredential:INSTALLATION_CREDENTIAL,requiredCapabilities:["streams.v1","commands.v1"],optionalCapabilities:[] }));
   const response = await client.next(); const payload = response.payload as Record<string,unknown>; return { connectionId: payload.connectionId as string, hostId: payload.hostId as string };
 }
 async function subscribe(client: Client, connectionId: string, hostId: string, afterCursor?: string): Promise<Record<string,unknown>[]> {
@@ -30,7 +31,7 @@ async function subscribe(client: Client, connectionId: string, hostId: string, a
 test("M4 checkpoint: lost receipt resends once and replays across restart", async () => {
   const path = join(mkdtempSync(join(tmpdir(), "pi-mob-m4-demo-")), "bridge.sqlite"); let dispatches = 0;
   const adapter: AdapterPort = { async dispatch() { dispatches += 1; await Bun.sleep(5); } };
-  let store = new BridgeStore(path); let runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion:"fixture",piVersion:"0.82.0",hostDisplayName:"fixture" });
+  let store = new BridgeStore(path); store.upsertInstallationCredential({ installationId:"33333333-3333-4333-8333-333333333333",credentialHash:new Bun.CryptoHasher("sha256").update(INSTALLATION_CREDENTIAL).digest("hex"),enrollmentSecretHash:"e".repeat(64),enrollmentSource:"seed",createdAt:Date.now(),lastSeenAt:Date.now() }); let runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion:"fixture",piVersion:"0.82.0",hostDisplayName:"fixture" });
   await runtime.start();
   let server = createBridgeServer({ runtime, port:0 });
   const first = await connect(server.port!); const identity = await hello(first); await subscribe(first, identity.connectionId, identity.hostId);

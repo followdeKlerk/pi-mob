@@ -7,7 +7,9 @@ import { BridgeStore } from "../src/core/store";
 import { DurableBridgeRuntime } from "../src/core/runtime";
 import { createBridgeServer, type BridgeServer } from "../src/core/server";
 import { OneSessionPiAdapter, type PiRpcNotificationHandler, type PiRpcRequestOptions } from "../src/pi/one-session-adapter";
+import { hashCredential } from "../src/auth/credentials";
 
+const installationCredential = (installationId: string) => `pc_test_${installationId}`;
 class FakeStreamingRpc {
   requests = 0;
   private readonly handlers = new Set<PiRpcNotificationHandler>();
@@ -67,6 +69,7 @@ describe("M6 slow-consumer continuation and replay", () => {
     const identity = store.identity(); const hostStream = `host:${identity.hostId}`;
     const sessionId = "11111111-1111-4111-8111-111111111111"; const sessionStream = `session:${sessionId}`;
     store.ensureStream(hostStream, "host"); store.ensureSession(sessionId, { sessionId, runtimeState: "idle" }); store.ensureStream(sessionStream, "session", sessionId);
+    for (const installationId of ["66666666-6666-4666-8666-666666666666", "33333333-3333-4333-8333-333333333333"]) store.upsertInstallationCredential({ installationId, credentialHash: hashCredential(installationCredential(installationId)), enrollmentSecretHash: hashCredential(`enrollment_${installationId}`, "enrollment"), enrollmentSource: "seed", createdAt: Date.now(), lastSeenAt: Date.now() });
     const rpc = new FakeStreamingRpc();
     const adapter = new OneSessionPiAdapter({
       store, rpc,
@@ -86,7 +89,7 @@ describe("M6 slow-consumer continuation and replay", () => {
         if (!upgraded) {
           const marker = bytes.indexOf("\r\n\r\n"); if (marker < 0) return;
           upgraded = true; bytes = bytes.subarray(marker + 4);
-          socket.write(websocketClientFrame(envelope("hello", { mobileVersion: "1", platform: "ios", installationId: "66666666-6666-4666-8666-666666666666", requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] })));
+          socket.write(websocketClientFrame(envelope("hello", { mobileVersion: "1", platform: "ios", installationId: "66666666-6666-4666-8666-666666666666", installationCredential: installationCredential("66666666-6666-4666-8666-666666666666"), requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] })));
         }
         const parsed = readServerFrames(bytes); bytes = parsed.rest;
         for (const message of parsed.values) {
@@ -119,7 +122,7 @@ describe("M6 slow-consumer continuation and replay", () => {
     const expectedDigest = createHash("sha256").update(JSON.stringify(expected.map((event) => [event.cursor, event.type, event.payload]))).digest("hex");
 
     const replay = await client(server);
-    replay.ws.send(JSON.stringify(envelope("hello", { mobileVersion: "1", platform: "ios", installationId: "33333333-3333-4333-8333-333333333333", requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] })));
+    replay.ws.send(JSON.stringify(envelope("hello", { mobileVersion: "1", platform: "ios", installationId: "33333333-3333-4333-8333-333333333333", installationCredential: installationCredential("33333333-3333-4333-8333-333333333333"), requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] })));
     const hello = await replay.next(); const connectionId = (hello.payload as Record<string, unknown>).connectionId as string;
     replay.ws.send(JSON.stringify(envelope("subscription.set", { streams: [{ streamId: hostStream, detail: "full", afterCursor: "0" }, { streamId: sessionStream, detail: "full", afterCursor: "0" }] }, { connectionId })));
     const replayed: Array<[string, string, Record<string, unknown>]> = [];

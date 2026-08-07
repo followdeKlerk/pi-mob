@@ -66,14 +66,23 @@ void main() {
     await db.close();
   });
 
-  test('takeControl defers selection until history synchronization', () async {
-    expect(coordinator.subscriptionSet.isEmpty, isTrue);
+  test(
+    'takeControl selects foreground immediately but gates host activation',
+    () async {
+      expect(coordinator.subscriptionSet.isEmpty, isTrue);
 
-    await coordinator.takeControl('restored-session');
+      await coordinator.takeControl('restored-session');
 
-    expect(coordinator.subscriptionSet.full?.sessionId, 'restored-session');
-    expect(coordinator.selectedSessionId, isNull);
-  });
+      expect(coordinator.subscriptionSet.full?.sessionId, 'restored-session');
+      expect(coordinator.selectedSessionId, 'restored-session');
+      expect(
+        transport.sent.where(
+          (message) => message['type'] == 'session.activate',
+        ),
+        isEmpty,
+      );
+    },
+  );
 
   test('subscription set starts empty and gains a summary row', () async {
     expect(coordinator.subscriptionSet.isEmpty, isTrue);

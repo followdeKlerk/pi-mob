@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { runDaemon, type DaemonHandle } from "../packages/bridge/src/daemon";
 import { BRIDGE_VERSION } from "../packages/bridge/src/version";
 
-export const CORE = ["streams.v1", "commands.v1", "controller_leases.v1", "session_events.v2"] as const;
+export const CORE = ["streams.v1", "commands.v1", "controller_leases.v1", "session_events.v2", "catalogue.v1"] as const;
 export const EXPECTED = { withoutFcm: [...CORE].sort(), withFcm: [...CORE, "notifications.v1"].sort() };
 const FCM = { projectId: "capability-report-project", serviceAccountEmail: "capability-report@example.invalid", privateKey: "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----" };
 export type CapabilityMatrix = { withoutFcm: string[]; withFcm: string[] };
@@ -32,7 +32,6 @@ export function checkCapabilityDocs(projectStatus: string, protocol: string, liv
   for (const [name, actual] of Object.entries(live) as [keyof CapabilityMatrix, string[]][]) {
     if (!same(project[name], actual)) throw new Error(`PROJECT_STATUS ${name} differs from live capabilities`);
     if (!same(wire[name], actual)) throw new Error(`PROTOCOL ${name} differs from live capabilities`);
-    if (actual.includes("catalogue.v1")) throw new Error(`catalogue.v1 is not production-wired (${name})`);
   }
   if (!same(project.withoutFcm, wire.withoutFcm) || !same(project.withFcm, wire.withFcm)) throw new Error("PROJECT_STATUS and PROTOCOL capability matrices disagree");
 }
@@ -89,6 +88,7 @@ const metadata = [
   ["commands.v1", "packages/bridge/src/daemon.ts", "runDaemon", "apps/mobile/lib/src/connection/connection_coordinator.dart", "command", "packages/bridge/test/capability-report.test.ts"],
   ["controller_leases.v1", "packages/bridge/src/daemon.ts", "runDaemon", "apps/mobile/lib/src/connection/connection_coordinator.dart", "lease", "packages/bridge/test/capability-report.test.ts"],
   ["session_events.v2", "packages/bridge/src/daemon.ts", "CanonicalEventTransport", "apps/mobile/lib/src/connection/connection_coordinator.dart", "session.events.subscribe", "packages/bridge/test/session-events/canonical-server-runtime.test.ts"],
+  ["catalogue.v1", "packages/bridge/src/daemon.ts", "MobileCatalogueService", "apps/mobile/lib/src/connection/connection_coordinator.dart", "requestCatalogue", "packages/bridge/test/integration/daemon-production-wiring.test.ts"],
   ["notifications.v1", "packages/bridge/src/daemon.ts", "BridgeNotificationService", "apps/mobile/lib/src/notifications/notification_controller.dart", "onBridgeReady", "packages/bridge/test/capability-report.test.ts"],
 ] as const;
 

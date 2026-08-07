@@ -591,12 +591,11 @@ String _assistantStorageKey(
   String messageId,
   String turnId,
 ) {
-  final existingForTurn = state.turnToMessage[turnId];
-  if (existingForTurn != null) return existingForTurn;
+  // Distinct wire message ids in one turn are distinct assistant messages;
+  // do not collapse them through the turn-to-message grouping pointer. Only
+  // add a local suffix when the same wire id is reused by another turn.
   final existing = state.assistantMessages[messageId];
   if (existing == null || existing.turnId == turnId) return messageId;
-  // Older bridge versions reused `sessionId:contentBlockId` across turns.
-  // Keep the old event readable by assigning the colliding turn a local key.
   return '$messageId:$turnId';
 }
 
@@ -730,22 +729,17 @@ CanonicalTranscriptState _handleAssistantCompleted(
   final messageId = _assistantStorageKey(state, wireMessageId, turnId);
   final existing = state.assistantMessages[messageId];
   if (existing == null) {
-    // Implicit create so completion-before-start is tolerated.
-    final created = CanonicalAssistantMessage(
-      messageId: messageId,
-      turnId: _requiredString(event.payload, 'turnId', event) ?? 'unknown',
-      content: const <CanonicalContentBlock>[],
-      startedAt: event.occurredAt,
-      completedAt: event.occurredAt,
-      isTerminal: true,
-    );
-    return state.copyWith(
-      assistantMessages: <String, CanonicalAssistantMessage>{
-        ...state.assistantMessages,
-        messageId: created,
-      },
-      lastAppliedSequence: event.sequence,
-      lastAppliedEventId: event.eventId,
+    // A completion without a start is an orphan lifecycle notification. Do
+    // not create a visible empty assistant: a later valid start/content event
+    // can still establish the real message identity.
+    return _record(
+      state.copyWith(
+        lastAppliedSequence: event.sequence,
+        lastAppliedEventId: event.eventId,
+      ),
+      event,
+      'orphan_assistant_completion',
+      'assistant completion arrived before its start',
     );
   }
   if (existing.isTerminal) {

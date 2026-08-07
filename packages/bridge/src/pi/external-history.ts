@@ -4,12 +4,26 @@ import {
   type SessionEntry,
   type SessionMessageEntry,
 } from "@earendil-works/pi-coding-agent";
-import { BridgeStore, type StoredEvent } from "../core/store";
+import { BridgeStore, MAX_EVENT_PAGE_SIZE, type StoredEvent } from "../core/store";
 import { RecipeActivityProjector, type RecipeActivity } from "./recipe-activity";
 import { CanonicalSessionStore, type CanonicalSessionEventRecord } from "../session-events/canonical-session-store";
-import { isCanonicalTranscriptEventType, type CanonicalEventType } from "../session-events/canonical-event";
+import type { CanonicalEventType } from "../session-events/canonical-event";
 
 const MAX_TEXT_BYTES = 48 * 1024;
+const HISTORY_SCAN_PAGE_SIZE = Math.min(32, MAX_EVENT_PAGE_SIZE);
+
+/** Iterate a stable stream prefix without materialising the whole journal. */
+function forEachStoredEvent(store: BridgeStore, streamId: string, visit: (event: StoredEvent) => void): void {
+  let afterCursor = "0";
+  let throughCursor: string | undefined;
+  while (true) {
+    const page = store.pageEvents(streamId, HISTORY_SCAN_PAGE_SIZE, afterCursor, throughCursor);
+    throughCursor ??= page.snapshotRevision;
+    for (const event of page.items) visit(event);
+    if (!page.nextAfterCursor) return;
+    afterCursor = page.nextAfterCursor;
+  }
+}
 
 /** Adapt a committed canonical record for the legacy recipe projector only. */
 export function canonicalProjectionEvent(event: CanonicalSessionEventRecord): StoredEvent {
@@ -21,6 +35,27 @@ export function canonicalProjectionEvent(event: CanonicalSessionEventRecord): St
     payload: event.payload,
     createdAt: event.createdAt,
   };
+}
+
+/** Walk the authoritative session journal selected by the caller. The
+ * production reconciliation path reads CanonicalSessionStore; the optional
+ * legacy path continues to inspect BridgeStore.events. */
+function forEachDurableSessionEvent(
+  store: BridgeStore,
+  sessionId: string,
+  canonical: CanonicalSessionStore | undefined,
+  visit: (event: StoredEvent) => void,
+): void {
+  if (canonical) {
+    let after = 0;
+    while (true) {
+      const page = canonical.readAfter(sessionId, after, 4096);
+      for (const event of page) visit(canonicalProjectionEvent(event));
+      if (page.length < 4096) return;
+      after = page.at(-1)!.sequence;
+    }
+  }
+  forEachStoredEvent(store, `session:${sessionId}`, visit);
 }
 
 function boundedText(value: string): string {
@@ -189,14 +224,14 @@ export class DurableRecipeActivityProjection {
   }
 
   private hydrate(): void {
-    for (const event of this.store.listEvents(`session:${this.sessionId}`)) {
+    forEachStoredEvent(this.store, `session:${this.sessionId}`, (event) => {
       if (event.type === "recipe.activity") {
         const key = recipeKey(event.payload);
         if (key) this.published.set(key, canonical(event.payload));
-        continue;
+        return;
       }
       this.apply(event);
-    }
+    });
     // Hydration rebuilds the in-memory projector from authoritative history.
     // Preserve the hydrated identities for an explicit backfill(), then drain
     // them so the first live append after startup only publishes that event's
@@ -334,7 +369,7 @@ export function importExternalSessionHistory(
 /** Build a snapshot of the durable tool ids already journaled for `sessionId`.
  *  Used by {@link inferOverlapAnchor} to choose the latest safe overlap
  *  between the authoritative JSONL active branch and the durable journal. */
-function durableToolFingerprints(store: BridgeStore, sessionId: string): {
+function durableToolFingerprints(store: BridgeStore, sessionId: string, canonical?: CanonicalSessionStore): {
   readonly started: Set<string>;
   readonly terminal: Set<string>;
   readonly durableEventCount: number;
@@ -342,13 +377,13 @@ function durableToolFingerprints(store: BridgeStore, sessionId: string): {
   const started = new Set<string>();
   const terminal = new Set<string>();
   let durableEventCount = 0;
-  for (const event of store.listEvents(`session:${sessionId}`)) {
+  forEachDurableSessionEvent(store, sessionId, canonical, (event) => {
     durableEventCount += 1;
     const id = event.payload.toolCallId;
-    if (typeof id !== "string") continue;
+    if (typeof id !== "string") return;
     if (event.type === "tool.started") started.add(id);
     else if (event.type === "tool.completed" || event.type === "tool.failed" || event.type === "tool.cancelled") terminal.add(id);
-  }
+  });
   return { started, terminal, durableEventCount };
 }
 
@@ -485,34 +520,36 @@ export function reconcileSessionHistoryTail(
   canonical?: { readonly sessionStore: CanonicalSessionStore },
 ): { readonly imported: number; readonly authoritativeTerminal: boolean; readonly turnOutcome: ReconciledTurnOutcome } {
   const imported = importSessionHistoryTail(store, sessionId, sourcePath, canonical);
-  const events = store.listEvents(`session:${sessionId}`);
-  const terminalTools = new Set(events
-    .filter((event) => ["tool.completed", "tool.failed", "tool.cancelled"].includes(event.type))
-    .map((event) => event.payload.toolCallId)
-    .filter((id): id is string => typeof id === "string"));
+  const terminalTools = new Set<string>();
   const startedTools = new Map<string, Record<string, unknown>>();
-  for (const event of events) {
+  const terminalTurns = new Set<string>();
+  const startedTurns = new Set<string>();
+  let authoritativeTerminal = false;
+  let latestTerminal: { readonly terminalType: "turn.settled" | "turn.aborted" | "turn.failed" | "turn.indeterminate"; readonly turnId: string; readonly cursor: string } | null = null;
+  forEachDurableSessionEvent(store, sessionId, canonical?.sessionStore, (event) => {
     if (event.type === "tool.started" && typeof event.payload.toolCallId === "string") {
       startedTools.set(event.payload.toolCallId, event.payload);
+    } else if (["tool.completed", "tool.failed", "tool.cancelled"].includes(event.type) && typeof event.payload.toolCallId === "string") {
+      terminalTools.add(event.payload.toolCallId);
     }
-  }
+    if (event.type === "turn.started" && typeof event.payload.turnId === "string") {
+      startedTurns.add(event.payload.turnId);
+    } else if (["turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate"].includes(event.type) && typeof event.payload.turnId === "string") {
+      terminalTurns.add(event.payload.turnId);
+      latestTerminal = { terminalType: event.type as "turn.settled" | "turn.aborted" | "turn.failed" | "turn.indeterminate", turnId: event.payload.turnId, cursor: event.cursor };
+    }
+    if (["tool.completed", "tool.failed", "turn.settled", "turn.failed"].includes(event.type) && event.payload.historical === true) {
+      authoritativeTerminal = true;
+    }
+  });
   const openTools = [...startedTools.entries()].filter(([id]) => !terminalTools.has(id));
-  const terminalTurns = new Set(events
-    .filter((event) => ["turn.settled", "turn.aborted", "turn.failed", "turn.indeterminate"].includes(event.type))
-    .map((event) => event.payload.turnId)
-    .filter((id): id is string => typeof id === "string"));
-  const openTurns = new Set(events
-    .filter((event) => event.type === "turn.started")
-    .map((event) => event.payload.turnId)
-    .filter((id): id is string => typeof id === "string" && !terminalTurns.has(id)));
+  const openTurns = new Set([...startedTurns].filter((id) => !terminalTurns.has(id)));
   // Resolve the reconciled active turn: the *latest* durable turn.started
   // turnId whose pair did NOT come from a previous run's older terminal.
   // For sessions with no live owner we must rely on the turn the importer
   // either left open (openTurns.first) or that was already settled earlier
   // (any durable terminal whose turnId matches a known turn.started).
-  const authoritativeTerminal = imported > 0 && (
-    events.some((event) => ["tool.completed", "tool.failed", "turn.settled", "turn.failed"].includes(event.type) && event.payload.historical === true)
-  );
+  authoritativeTerminal = imported > 0 && authoritativeTerminal;
   if (options.liveProcess) {
     // Live owner: import lands but no boundary is synthesised. The session
     // runtimeState must NOT be flipped to idle from a prior stale "running"
@@ -525,37 +562,31 @@ export function reconcileSessionHistoryTail(
     // should map? Only the latest durable terminal turn matters; older
     // events from previous runs are intentionally ignored so a session
     // whose persisted runtimeState is already correct is not re-asserted.
-    const latestTerminalTurn = latestTerminalTurnEvent(events);
+    const latestTerminalTurn = latestTerminal;
     if (!latestTerminalTurn) {
       return { imported, authoritativeTerminal, turnOutcome: { kind: "live", imported } };
     }
     return { imported, authoritativeTerminal, turnOutcome: idleOutcome(latestTerminalTurn, imported) };
   }
   // No-live owner, with at least one open tool or open turn. Synthesise the
-  // orphan boundary and report indeterminate.
-  const projection = new DurableRecipeActivityProjection(store, sessionId);
+  // orphan boundary and report indeterminate. Canonical reconciliation must
+  // never construct the legacy recipe projection.
+  const projection = canonical ? null : new DurableRecipeActivityProjection(store, sessionId);
   const appendSynthesized = (type: string, payload: Record<string, unknown>, sourceEventId: string): void => {
-    if (canonical && isCanonicalTranscriptEventType(type)) {
-      const admitted = canonical.sessionStore.append({
+    if (canonical) {
+      canonical.sessionStore.append({
         sessionId,
         type: type as CanonicalEventType,
         payload,
         sourceEventId,
       });
-      if (!admitted.deduplicated) {
-        const compatibilityEvent = store.appendEvent(
-          `session:${sessionId}`,
-          type,
-          payload,
-          admitted.event.eventId,
-        );
-        projection.applyAndPublish(compatibilityEvent);
-      }
+      // Canonical reconciliation writes only the canonical event. Do not
+      // mirror it into the legacy session stream or publish recipe.activity.
       return;
     }
-    projection.append(type, payload);
+    projection!.append(type, payload);
   };
-  store.transaction(() => {
+  const appendBoundary = (): void => {
     for (const [toolCallId, started] of openTools) {
       const turnId = typeof started.turnId === "string" ? started.turnId : undefined;
       appendSynthesized("tool.failed", {
@@ -573,7 +604,9 @@ export function reconcileSessionHistoryTail(
         sessionId, turnId, reason: "no_live_rpc", historical: true,
       }, `reconcile:${sessionId}:turn:${turnId}:no_live_rpc`);
     }
-  });
+  };
+  if (canonical) appendBoundary();
+  else store.transaction(appendBoundary);
   // The synthesized boundary is now the authoritative terminal lifecycle;
   // callers must not add a second generic exit/indeterminate event.
   const reconciledTurnId = [...openTurns][0] ?? [...terminalTurns][0] ?? null;
@@ -582,24 +615,6 @@ export function reconcileSessionHistoryTail(
     authoritativeTerminal: true,
     turnOutcome: { kind: "indeterminate", turnId: reconciledTurnId ?? "", imported, reason: "no_live_rpc" },
   };
-}
-
-/** Resolve the latest durable turn terminal event scoped to the reconciled
- *  active turn. We pair each terminal turn event with its preceding
- *  turn.started by turnId and keep the one with the largest cursor, so an
- *  unrelated old historical terminal event from a previous run cannot be
- *  mistaken for the reconciled active turn. */
-function latestTerminalTurnEvent(events: ReadonlyArray<{ readonly type: string; readonly cursor: string; readonly payload: Record<string, unknown> }>): { readonly terminalType: "turn.settled" | "turn.aborted" | "turn.failed" | "turn.indeterminate"; readonly turnId: string; readonly cursor: string } | null {
-  let best: { readonly terminalType: "turn.settled" | "turn.aborted" | "turn.failed" | "turn.indeterminate"; readonly turnId: string; readonly cursor: string } | null = null;
-  for (const event of events) {
-    if (event.type !== "turn.settled" && event.type !== "turn.aborted" && event.type !== "turn.failed" && event.type !== "turn.indeterminate") continue;
-    const turnId = typeof event.payload.turnId === "string" ? event.payload.turnId : null;
-    if (!turnId) continue;
-    if (best === null || event.cursor > best.cursor) {
-      best = { terminalType: event.type, turnId, cursor: event.cursor };
-    }
-  }
-  return best;
 }
 
 /** Map the latest terminal turn to the canonical ReconciledTurnOutcome.
@@ -656,9 +671,10 @@ function importSessionHistoryInternal(
   // durable events that already match. With an empty durable journal case 2
   // is skipped, preserving the legacy TUI-import behaviour for genuinely
   // new sessions.
-  const inferredAnchor = previousLeaf
-    ? -1
-    : inferOverlapAnchor(branch, durableToolFingerprints(store, sessionId));
+  const durable = previousLeaf ? null : durableToolFingerprints(store, sessionId, canonical?.sessionStore);
+  const inferredAnchor = durable
+    ? inferOverlapAnchor(branch, durable)
+    : -1;
   let pending: SessionEntry[];
   if (canonicalBackfill) {
     pending = branch;
@@ -672,7 +688,7 @@ function importSessionHistoryInternal(
     // anchor entry would duplicate the already-journaled assistant and
     // tool events.
     pending = branch.slice(inferredAnchor + 1);
-  } else if (prior.externalSession === true || durableToolFingerprints(store, sessionId).durableEventCount === 0) {
+  } else if (prior.externalSession === true || durable?.durableEventCount === 0) {
     // Legacy TUI import path: with no leaf marker, no inferred anchor,
     // AND an empty durable journal, fall through to the original
     // full-branch behaviour so a genuinely new external session still
@@ -687,11 +703,14 @@ function importSessionHistoryInternal(
     // than silently duplicating an unrelated history.
     pending = [];
   }
-  const projection = new DurableRecipeActivityProjection(store, sessionId);
+  // Older callers without CanonicalSessionStore intentionally retain the
+  // isolated recipe projection fallback. The normal daemon passes the
+  // canonical store and therefore leaves this null.
+  const projection = canonical ? null : new DurableRecipeActivityProjection(store, sessionId);
   const existingToolTurns = new Map<string, string>();
   const durableOpenTurns = new Set<string>();
   let latestDurableOpenTurnId: string | null = null;
-  for (const event of store.listEvents(`session:${sessionId}`)) {
+  forEachDurableSessionEvent(store, sessionId, canonical?.sessionStore, (event) => {
     if (event.type === "tool.started" && typeof event.payload.toolCallId === "string" && typeof event.payload.turnId === "string") {
       existingToolTurns.set(event.payload.toolCallId, event.payload.turnId);
     }
@@ -704,7 +723,7 @@ function importSessionHistoryInternal(
       durableOpenTurns.delete(event.payload.turnId);
       latestDurableOpenTurnId = event.payload.turnId;
     }
-  }
+  });
   // When the import resumes from an inferred anchor (no `externalHistoryLeafId`),
   // the most recent durable open turn is the one to which the resumed slice
   // belongs. Seed `currentTurnId` so a trailing assistant message does not
@@ -714,8 +733,15 @@ function importSessionHistoryInternal(
   let lastAssistantHadText = false;
   let count = 0;
   let activeEntryId = "unknown";
+  let activeEntryEventOrdinal = 0;
   const assistantContent = new Map<string, string>();
   const append = (type: string, payload: Record<string, unknown>) => {
+    // A single assistant JSONL entry can produce several events of the same
+    // normalized type (for example, two text blocks). The ordinal is scoped
+    // to the stable source entry and replayed in the same parse order, so it
+    // remains byte-stable across retries/restarts without using payload text
+    // or a generated event ID as identity.
+    activeEntryEventOrdinal += 1;
     const existingTurn = typeof payload.toolCallId === "string"
       ? existingToolTurns.get(payload.toolCallId)
       : undefined;
@@ -726,8 +752,8 @@ function importSessionHistoryInternal(
       ...(turnId ? { turnId } : {}),
       ...payload,
     };
-    if (canonical && isCanonicalTranscriptEventType(type)) {
-      const sourceEventId = `history:${sourcePath}:${activeEntryId}:${type}`;
+    if (canonical) {
+      const sourceEventId = `history:${sourcePath}:${activeEntryId}:${type}:${activeEntryEventOrdinal}`;
       let canonicalType = type as CanonicalEventType;
       let canonicalPayload = projectedPayload;
       const turn = typeof projectedPayload.turnId === "string" ? projectedPayload.turnId : currentTurnId ?? `historical:${sessionId}`;
@@ -751,25 +777,17 @@ function importSessionHistoryInternal(
       } else if (type.startsWith("tool.")) {
         canonicalPayload = { ...projectedPayload, turnId: turn };
       }
-      const admitted = canonical.sessionStore.append({
+      canonical.sessionStore.append({
         sessionId,
         type: canonicalType,
         payload: canonicalPayload,
         sourceEventId,
       });
-      if (!admitted.deduplicated) {
-        if (!canonicalBackfill) {
-          const compatibilityEvent = store.appendEvent(
-            `session:${sessionId}`,
-            type,
-            projectedPayload,
-            admitted.event.eventId,
-          );
-          projection.applyAndPublish(compatibilityEvent);
-        }
-      }
+      // Canonical history import is authoritative. In particular, do not
+      // backfill source transcript rows or derived recipe.activity rows in
+      // the legacy session stream.
     } else {
-      projection.append(type, projectedPayload);
+      projection!.append(type, projectedPayload);
     }
     if (type === "tool.started" && typeof payload.toolCallId === "string" && turnId) {
       existingToolTurns.set(payload.toolCallId, turnId);
@@ -781,13 +799,29 @@ function importSessionHistoryInternal(
     append("turn.settled", { turnId: currentTurnId });
     currentTurnId = null;
   };
+  const checkpoint = (): void => {
+    if (count === 0) return;
+    // Canonical events commit individually. Checkpoint only after a complete
+    // source entry, so a failure halfway through an entry retries its stable
+    // source IDs without skipping the entry's remaining projections.
+    store.updateSessionState(sessionId, {
+      ...prior,
+      externalHistorySourceRevision: sourceRevision,
+      externalHistoryLeafId: activeEntryId,
+      externalHistoryImportedAt: new Date().toISOString(),
+    });
+  };
 
-  // One outer transaction makes the source marker and every imported source /
-  // recipe event atomic. A crash retries the whole tail rather than publishing
-  // a partially imported history.
-  store.transaction(() => {
+  // Legacy projection imports keep their single transaction so the source
+  // marker and recipe rows remain atomic. Canonical events must not be
+  // appended inside that outer transaction: CanonicalSessionStore publishes
+  // after its own commit, while an enclosing BridgeStore rollback could
+  // otherwise publish an event that no longer exists. Canonical source IDs
+  // make these bounded per-event commits restart-idempotent.
+  const importPending = (): void => {
     for (const entry of pending) {
       activeEntryId = entry.id;
+      activeEntryEventOrdinal = 0;
       if (entry.type !== "message") continue;
       const message = (entry as SessionMessageEntry).message as unknown as Record<string, unknown>;
       const role = message.role;
@@ -814,6 +848,7 @@ function importSessionHistoryInternal(
           message: userText,
           ...(at ? { timestamp: at } : {}),
         });
+        checkpoint();
         continue;
       }
       if (role === "assistant") {
@@ -835,25 +870,34 @@ function importSessionHistoryInternal(
         // the resumed slice belongs to the same turn until a `user` role or
         // a `settleTurn` boundary moves it on.
         const content = Array.isArray(message.content) ? message.content : [];
-        for (let index = 0; index < content.length; index += 1) {
-          const raw = content[index];
-          if (!raw || typeof raw !== "object") continue;
-          const part = raw as Record<string, unknown>;
-          const contentBlockId = `${entry.id}:${index}`;
-          if (part.type === "text" && typeof part.text === "string") {
-            append("assistant.started", { contentBlockId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
-            if (part.text) append("assistant.delta", {
+        const textParts = content.filter((part): part is Record<string, unknown> =>
+          Boolean(part && typeof part === "object" && (part as Record<string, unknown>).type === "text" && typeof (part as Record<string, unknown>).text === "string"));
+        // One Pi assistant message maps to one canonical assistant identity.
+        // Thinking-only and tool-only entries remain non-rendered lifecycle
+        // data; they must not create an empty assistant card.
+        const contentBlockId = entry.id;
+        if (textParts.length > 0) {
+          append("assistant.started", { contentBlockId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
+          for (const part of textParts) {
+            const partText = boundedText(part.text as string);
+            if (partText) append("assistant.delta", {
               contentBlockId,
               assistantStepId: entry.id,
-              text: boundedText(part.text),
+              text: partText,
               ...(at ? { timestamp: at } : {}),
             });
-            append("assistant.completed", { contentBlockId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
-          } else if (part.type === "thinking") {
+          }
+          append("assistant.completed", { contentBlockId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
+        }
+        for (const [index, raw] of content.entries()) {
+          if (!raw || typeof raw !== "object") continue;
+          const part = raw as Record<string, unknown>;
+          if (part.type === "thinking") {
             // Pi's `thinking` block is private chain-of-thought, not a provider
             // display summary. Retain lifecycle only; never persist its text.
-            append("reasoning.started", { contentBlockId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
-            append("reasoning.completed", { contentBlockId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
+            const thinkingId = `${entry.id}:thinking:${index}`;
+            append("reasoning.started", { contentBlockId: thinkingId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
+            append("reasoning.completed", { contentBlockId: thinkingId, assistantStepId: entry.id, ...(at ? { timestamp: at } : {}) });
           } else if (part.type === "toolCall" && typeof part.id === "string" &&
                      typeof part.name === "string") {
             append("tool.started", {
@@ -867,6 +911,7 @@ function importSessionHistoryInternal(
             });
           }
         }
+        checkpoint();
         continue;
       }
       if (role === "toolResult" && typeof message.toolCallId === "string") {
@@ -900,6 +945,7 @@ function importSessionHistoryInternal(
             },
           } : {}),
         });
+        checkpoint();
       }
     }
     // A trailing toolResult only terminalizes the tool, NOT the parent
@@ -924,6 +970,8 @@ function importSessionHistoryInternal(
         externalHistoryImportedAt: new Date().toISOString(),
       });
     }
-  });
+  };
+  if (canonical) importPending();
+  else store.transaction(importPending);
   return count;
 }

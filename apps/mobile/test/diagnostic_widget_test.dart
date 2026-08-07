@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:drift/drift.dart' show Value;
 import 'package:drift/native.dart';
 import 'package:flutter/material.dart';
@@ -7,6 +9,8 @@ import 'package:pi_mob/src/connection/bridge_transport.dart';
 import 'package:pi_mob/src/connection/connection_coordinator.dart';
 import 'package:pi_mob/src/data/app_database.dart';
 import 'package:pi_mob/src/domain/mobile_state.dart';
+import 'package:pi_mob/src/session_events/canonical_event.dart';
+import 'package:pi_mob/src/session_events/canonical_session_manager.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
@@ -144,51 +148,88 @@ void main() {
       pendingState: 'indeterminate',
       updatedAt: DateTime.utc(2026, 7, 13),
     );
-    await database.insertEvent(
-      eventId: '44444444-4444-4444-8444-444444444444',
-      hostId: hostId,
-      streamId: 'session:$sessionId',
-      cursor: '1',
-      type: 'turn.started',
-      payloadJson:
-          '{"sessionId":"$sessionId","turnId":"turn-1","message":"Inspect output"}',
-      occurredAt: DateTime.utc(2026, 7, 13),
+    final canonicalDirectory = Directory.systemTemp.createTempSync(
+      'diagnostic-canonical-',
     );
-    await database.insertEvent(
-      eventId: '66666666-6666-4666-8666-666666666666',
-      hostId: hostId,
-      streamId: 'session:$sessionId',
-      cursor: '2',
-      type: 'tool.started',
-      payloadJson:
-          '{"sessionId":"$sessionId","turnId":"turn-1","toolCallId":"55555555-5555-4555-8555-555555555555","toolName":"read","arguments":{"path":"large.log"}}',
-      occurredAt: DateTime.utc(2026, 7, 13),
-    );
-    await database.insertEvent(
-      eventId: '77777777-7777-4777-8777-777777777777',
-      hostId: hostId,
-      streamId: 'session:$sessionId',
-      cursor: '3',
-      type: 'tool.output',
-      payloadJson:
-          '{"sessionId":"$sessionId","turnId":"turn-1","toolCallId":"55555555-5555-4555-8555-555555555555","output":"retained output","retainedBytes":5242880,"totalBytes":6291456,"isTruncated":true,"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
-      occurredAt: DateTime.utc(2026, 7, 13),
-    );
-    await database.insertEvent(
-      eventId: '88888888-8888-4888-8888-888888888888',
-      hostId: hostId,
-      streamId: 'session:$sessionId',
-      cursor: '4',
-      type: 'tool.completed',
-      payloadJson:
-          '{"sessionId":"$sessionId","turnId":"turn-1","toolCallId":"55555555-5555-4555-8555-555555555555","toolName":"read","result":{"content":"retained output","byteCount":5242880},"retainedBytes":5242880,"totalBytes":6291456,"isTruncated":true,"digest":"cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"}',
-      occurredAt: DateTime.utc(2026, 7, 13),
+    addTearDown(() {
+      if (canonicalDirectory.existsSync()) {
+        canonicalDirectory.deleteSync(recursive: true);
+      }
+    });
+    final canonicalManager = CanonicalSessionManager(
+      baseDirectoryOverride: canonicalDirectory,
     );
     final coordinator = ConnectionCoordinator(
       transport: _OfflineTransport(),
       database: database,
+      canonicalSessionManager: canonicalManager,
     );
     await coordinator.initialize(autoConnect: false);
+    // Feed the released canonical session-event path instead of legacy
+    // cached_events rows. The host capability is normally set by
+    // hello.accepted; this fixture supplies the same production state
+    // directly while keeping the transport offline.
+    await canonicalManager.updateCapabilities(
+      advertised: true,
+      hostGeneration: '1',
+    );
+    await canonicalManager.ingestWireEvents(sessionId, <CanonicalSessionEvent>[
+      CanonicalSessionEvent(
+        eventId: '44444444-4444-4444-8444-444444444444',
+        sessionId: sessionId,
+        sequence: 1,
+        type: CanonicalEventType.turnStarted,
+        occurredAt: DateTime.utc(2026, 7, 13),
+        payload: <String, Object?>{'turnId': 'turn-1'},
+      ),
+      CanonicalSessionEvent(
+        eventId: '66666666-6666-4666-8666-666666666666',
+        sessionId: sessionId,
+        sequence: 2,
+        type: CanonicalEventType.toolCallStarted,
+        occurredAt: DateTime.utc(2026, 7, 13),
+        payload: <String, Object?>{
+          'turnId': 'turn-1',
+          'toolCallId': '55555555-5555-4555-8555-555555555555',
+          'toolName': 'read',
+          'arguments': <String, Object?>{'path': 'large.log'},
+        },
+      ),
+      CanonicalSessionEvent(
+        eventId: '77777777-7777-4777-8777-777777777777',
+        sessionId: sessionId,
+        sequence: 3,
+        type: CanonicalEventType.toolProgressReplaced,
+        occurredAt: DateTime.utc(2026, 7, 13),
+        payload: <String, Object?>{
+          'turnId': 'turn-1',
+          'toolCallId': '55555555-5555-4555-8555-555555555555',
+          'progress': <String, Object?>{
+            'output': 'retained output',
+            'retainedBytes': 5242880,
+            'totalBytes': 6291456,
+            'isTruncated': true,
+            'digest':
+                'cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc',
+          },
+        },
+      ),
+      CanonicalSessionEvent(
+        eventId: '88888888-8888-4888-8888-888888888888',
+        sessionId: sessionId,
+        sequence: 4,
+        type: CanonicalEventType.toolCallCompleted,
+        occurredAt: DateTime.utc(2026, 7, 13),
+        payload: <String, Object?>{
+          'turnId': 'turn-1',
+          'toolCallId': '55555555-5555-4555-8555-555555555555',
+          'result': <String, Object?>{
+            'content': 'retained output',
+            'byteCount': 5242880,
+          },
+        },
+      ),
+    ]);
     await tester.binding.setSurfaceSize(const Size(1200, 900));
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await tester.pumpWidget(PiMobApp(coordinator: coordinator));

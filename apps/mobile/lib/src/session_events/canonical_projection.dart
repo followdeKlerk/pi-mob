@@ -31,6 +31,7 @@ import '../domain/mobile_state.dart';
 import 'journal_to_canonical.dart';
 import 'session_event_repository.dart';
 import 'session_event_synchronizer.dart';
+import 'transcript_reducer.dart';
 
 /// Result of feeding one journal event through the adapter. Returned
 /// so callers (e.g. tests) can assert on the canonical mapping.
@@ -110,26 +111,33 @@ class CanonicalProjectionFactory {
       // reducer still treats it as a snapshot because the
       // canonical-event contract forbids append-style content.
       final payload = event.payload;
-      final messageId = payload['contentBlockId'] is String
+      final wireMessageId = payload['contentBlockId'] is String
           ? payload['contentBlockId'] as String
+          : payload['answerId'] is String
+          ? payload['answerId'] as String
           : 'assistant-current';
+      // Pi's legacy delta rows do not always carry turnId. Resolve the
+      // current message first so the replacement remains attached to the
+      // turn established by assistant.started rather than creating an
+      // `unknown` orphan. A reused content-block id may already have a
+      // turn-scoped storage key; search newest-first for that mapping.
+      final existing = _assistantMessageForWireId(
+        synchronizer.state,
+        wireMessageId,
+      );
+      final messageId = existing?.messageId ?? wireMessageId;
+      final turnId = payload['turnId'] is String
+          ? payload['turnId'] as String
+          : existing?.turnId ?? 'unknown';
+      final previousContent = existing == null || existing.content.isEmpty
+          ? ''
+          : existing.content.last.text;
       final replaced = adaptAssistantDelta(
         event,
         sessionId: sessionId,
         messageId: messageId,
-        turnId: payload['turnId'] is String
-            ? payload['turnId'] as String
-            : 'unknown',
-        previousContent: synchronizer.state.assistantMessages[messageId] == null
-            ? ''
-            : ((synchronizer.state.assistantMessages[messageId]!.content.isEmpty
-                  ? ''
-                  : synchronizer
-                        .state
-                        .assistantMessages[messageId]!
-                        .content
-                        .last
-                        .text)),
+        turnId: turnId,
+        previousContent: previousContent,
       );
       await synchronizer.accept(replaced.canonical!);
     } else if (event.type == 'tool.output') {
@@ -149,6 +157,19 @@ class CanonicalProjectionFactory {
     }
     // Anything else that does not map to a canonical event is
     // intentionally dropped (matches plan §7.4).
+  }
+
+  CanonicalAssistantMessage? _assistantMessageForWireId(
+    CanonicalTranscriptState state,
+    String wireMessageId,
+  ) {
+    for (final message in state.assistantMessages.values.toList().reversed) {
+      if (message.messageId == wireMessageId ||
+          message.messageId.startsWith('$wireMessageId:')) {
+        return message;
+      }
+    }
+    return null;
   }
 
   Future<Directory> _resolveBaseDirectory() async {

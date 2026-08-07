@@ -8,7 +8,11 @@ All notable changes to Pi Mob are recorded here. Versions follow semantic versio
 - Added bounded home/GitHub workspace discovery for new chats.
 - Added date-grouped chat navigation and compact settings.
 - Suppressed notification alerts while the app is in the foreground.
-
+- Added the selected-session Pi command catalogue (`catalogue.v1`) and the `/commands` mobile palette.
+- Added the host-driven `/model` picker backed by `model.list` and `model.set`.
+- Made canonical session events the only transcript authority on the released daemon path; the normal daemon no longer constructs or backfills the legacy recipe projection.
+- Added bounded legacy event compaction after listener binding.
+- Added stable assistant message identities and diagnostics for orphan assistant completions.
 ## `0.0.1-alpha.1` — first preview
 
 First public preview of Pi Mob. The mobile app is Android-only and the bridge is a macOS x64 binary tarball. iOS is not distributed in this preview.
@@ -23,7 +27,7 @@ First public preview of Pi Mob. The mobile app is Android-only and the bridge is
 - Session activation and Pi process ownership tied to a stable `--session-id`.
 - Prompt dispatch through the correct session owner with safe rejection when no live owner exists.
 - Reconnectable shell that restores the most recent chat, drafts, and attachments.
-- Model changes through the normal `/model` command.
+- Host-driven model picker opened with `/model`, backed by `model.list` and `model.set`.
 - Per-chat transcript search and global cross-chat search.
 - Bounded workspace discovery and search under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
 - Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed, ETA, and throughput.
@@ -37,4 +41,3 @@ First public preview of Pi Mob. The mobile app is Android-only and the bridge is
 - iOS is not distributed.
 - The bridge is not production-wired for biometrics, public listeners, multi-user, or any cloud relay.
 - Per-installation 256-bit credentials are minted by the one-time enrollment route, stored only as a bridge-side hash and Android secure-storage plaintext, and enforced on hello, binary HTTP, and device registration.
-- The catalogue module is implemented in isolation but not constructed by the normal daemon; the released Android app exposes no catalogue UI.

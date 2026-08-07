@@ -7,6 +7,7 @@ function runtime(ready = true): BridgeRuntimePort {
     bridgeVersion: "fixture", piVersion: "0.82.0",
     identity: () => ({ hostId: "11111111-1111-4111-8111-111111111111", hostGeneration: "1", hostDisplayName: "fixture" }),
     ready: () => ready ? { ready: true } : { ready: false, reason: "database unavailable" },
+    verifyInstallationCredential: (installationId) => ({ kind: "valid", installationId, lastSeenAt: Date.now() }),
     subscribe: (_connection, payload) => ({ streams: (payload.streams as Array<Record<string,unknown>>).map((item) => ({ streamId: item.streamId, mode: "current" })) }),
     control: (_connection, type) => ({ type }), command: (_connection, message) => ({ state: "accepted", duplicate: false, commandId: message.commandId }),
   };
@@ -21,7 +22,7 @@ function connect(server: ReturnType<typeof createBridgeServer>): Promise<{ ws: W
     ws.onopen = () => resolve({ ws, messages, next: () => messages.length > 0 ? Promise.resolve(messages.shift()!) : new Promise((done) => waiters.push(done)) });
   });
 }
-function hello(requestId = "22222222-2222-4222-8222-222222222222"): Record<string,unknown> { return { protocol: { major: 1, minor: 0 }, messageId: crypto.randomUUID(), requestId, type: "hello", sentAt: new Date().toISOString(), payload: { mobileVersion: "1", platform: "ios", installationId: "33333333-3333-4333-8333-333333333333", requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] } }; }
+function hello(requestId = "22222222-2222-4222-8222-222222222222"): Record<string,unknown> { return { protocol: { major: 1, minor: 0 }, messageId: crypto.randomUUID(), requestId, type: "hello", sentAt: new Date().toISOString(), payload: { mobileVersion: "1", platform: "ios", installationId: "33333333-3333-4333-8333-333333333333", installationCredential: "pc_test_credential", requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] } }; }
 function send(ws: WebSocket, value: Record<string,unknown>): void { ws.send(JSON.stringify(value)); }
 function baseControl(type: string, connectionId: string, payload: Record<string,unknown>): Record<string,unknown> { return { protocol: { major:1,minor:0 }, messageId: crypto.randomUUID(), requestId: crypto.randomUUID(), connectionId, type, sentAt: new Date().toISOString(), payload }; }
 

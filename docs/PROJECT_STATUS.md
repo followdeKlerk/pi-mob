@@ -14,8 +14,8 @@ This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`
 
 | Configuration | hello.accepted.capabilities |
 | --- | --- |
-| without-FCM | `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
-| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
+| without-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
+| with-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
 
 ## Production-wired in `v0.0.2-alpha.1`
 
@@ -31,30 +31,29 @@ This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`
 | Session activation and PI process ownership tied to a stable `--session-id` | Yes |
 | Prompt dispatch through the correct session owner with safe rejection when no live owner exists | Yes |
 | Reconnectable shell that restores the most recent chat, drafts, and attachments | Yes |
-| Model changes through the normal `/model` command | Yes |
+| Model changes through the host-driven picker opened by `/model`, backed by `model.list` and `model.set` | Yes |
 | Per-chat transcript search and global cross-chat search | Yes |
 | Bounded workspace discovery and search under the normal host roots (`~/GitHub`/`~/github`, home, and the configured workspace), or explicit `--search-root` paths | Yes |
 | FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone | Yes |
 | Host diagnostic surface with explicit phases, sanitized errors, and retry actions | Yes |
-| Canonical session-event v2 transport, replay, live delivery, coordinator ingestion, canonical reducer, and chat rendering | Yes on the released daemon/mobile path; bounded legacy caches and recipe projection remain as migration compatibility |
+| Canonical session-event v2 transport, replay, live delivery, coordinator ingestion, canonical reducer, and chat rendering | Yes. The normal daemon writes transcript events only to `CanonicalSessionStore`. It compacts acknowledged legacy events in bounded batches. |
+| Selected-session Pi command catalogue and `/commands` mobile palette | Yes. The normal daemon calls that session's Pi `get_commands` RPC, strips private source metadata, and bounds the result. |
 
 The bridge may still accept internal raw Pi RPC commands for compatibility, but `raw_rpc.v1` is not advertised to the released mobile client because the mobile raw-RPC surface was removed.
 
 ### Simplification rewrite status
 
-The canonical transcript path is production-wired. The larger subtractive rewrite is **not complete**: legacy mobile cache/history structures and the bridge recipe projection remain during migration. The remaining deletion work requires parity coverage and a deliberate older-host migration; this status document does not claim that all competing storage paths have been removed.
+The canonical transcript path is production-wired. The normal daemon does not write or load the recipe projection. History reconciliation imports only canonical events. Legacy mobile caches and the isolated recipe projection remain for older-host compatibility.
 
 > Note on focus: foreground FCM alerts are suppressed while the main activity is visible. Background delivery is wired on a real phone. Tap routing and notification dedupe remain best-effort until physical-device runtime proof exists.
 
 ## Implemented in isolation, not production-wired
 The items below have code or UI in the repository, but the normal daemon does not construct the provider required to advertise them. They are not part of the released preview.
 
-- **Command catalogue** — `MobileCatalogueService` exists at the direct module path `packages/bridge/src/pi/mobile-catalogue-service.ts`, but `runDaemon` does not construct a catalogue provider, so `hello.accepted` does not advertise `catalogue.v1`. The UI affordance is therefore absent in the released Android app. It is isolated from the package root export and remains planned.
-
 ## Android release hygiene
 
 - Stable preview identity is `com.example.pi_mob` across Gradle, Kotlin packages, Firebase wiring, services, and deep links.
-- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.2-alpha.1` / code `1`, signer type, permissions, and deep-link declarations.
+- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.2-alpha.1` / code `2`, signer type, permissions, and deep-link declarations.
 
 ## Planned
 
@@ -64,7 +63,6 @@ The items below have code or UI in the repository, but the normal daemon does no
 - Public release notes after `1.0.0`.
 - Biometric unlock for the mobile app.
 - Background sync scheduler that opts in only when the app is foregrounded (no silent background work).
-- A real `MobileCatalogueService` wired through `runDaemon`, integration-tested, and the catalogue UI surface rebuilt.
 
 ## Out of scope
 

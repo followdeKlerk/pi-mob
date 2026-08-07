@@ -11,14 +11,13 @@ The Flutter Android client for Pi Mob. Pairs with a local bridge over a private 
 - Session activation and Pi process ownership tied to a stable `--session-id`.
 - Prompt dispatch through the correct session owner with safe rejection when no live owner exists.
 - Reconnectable shell that restores the most recent chat, drafts, and attachments.
-- Model changes through the normal `/model` command.
+- Host-driven model picker opened with `/model`, backed by `model.list` and `model.set`.
+- Selected-session Pi command catalogue through `/commands`, bounded and sanitized by the bridge.
 - Per-chat transcript search and global cross-chat search.
 - Bounded workspace discovery and search under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
 - Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed time, ETA, and throughput.
 - FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery works on a real phone. Foreground alerts are suppressed while the app is visible. Native tap routing and notification dedupe remain best-effort until separately proven on a physical device.
 - Host diagnostic surface with explicit phases, sanitized errors, and retry actions.
-
-> Note: the catalogue surface is implemented in the bridge codebase but the normal daemon does not construct a catalogue provider, so the released Android app does not advertise `catalogue.v1` and exposes no catalogue UI. The catalogue capability is tracked in `docs/PROJECT_STATUS.md` as "implemented in isolation, not production-wired".
 
 ## Layout
 

@@ -33,7 +33,9 @@ This is a printable end-to-end guide for the `v0.0.2-alpha.1` preview. The exact
 ## Daily use
 
 - Open the app. The most recent chat loads with the in-flight draft restored.
-- Send a prompt. The bridge dispatches it to the correct Pi session. To change models, enter `/model` in the composer; it is sent as a normal Pi command.
+- Send a prompt. The bridge dispatches it to the correct Pi session.
+- Enter `/model` in the composer to open the model picker.
+- Enter `/commands` in the composer to open the selected session's command palette.
 - Lock the phone. A notification appears when the reply arrives. Tap it to open the chat.
 - Open the burger menu to switch chats, search every chat, or change the bridge address.
 

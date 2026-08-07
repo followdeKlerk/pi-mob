@@ -7,7 +7,10 @@ import { BridgeStore } from "../src/core/store";
 import { DurableBridgeRuntime } from "../src/core/runtime";
 import { createBridgeServer } from "../src/core/server";
 import type { AdapterPort } from "../src/core/domain";
+import { hashCredential } from "../src/auth/credentials";
 
+const INSTALLATION_ID = "33333333-3333-4333-8333-333333333333";
+const INSTALLATION_CREDENTIAL = "pc_test_credential";
 const outputs: string[] = [];
 afterAll(() => { for (const path of outputs) rmSync(path, { force: true, recursive: true }); });
 
@@ -63,6 +66,7 @@ describe("M6 deterministic fault matrix", () => {
 
   test("lost accepted receipt closes real socket and duplicate reconciles one dispatch", async () => {
     const store = new BridgeStore(join(mkdtempSync(join(tmpdir(), "pi-mob-fault-live-")), "bridge.sqlite"));
+    store.upsertInstallationCredential({ installationId: INSTALLATION_ID, credentialHash: hashCredential(INSTALLATION_CREDENTIAL), enrollmentSecretHash: "e".repeat(64), enrollmentSource: "seed", createdAt: Date.now(), lastSeenAt: Date.now() });
     let dispatches = 0;
     const adapter: AdapterPort = { async dispatch() { dispatches++; } };
     const runtime = new DurableBridgeRuntime({ store, adapter, bridgeVersion: "m6", piVersion: "0.82.0", hostDisplayName: "fixture" });
@@ -125,7 +129,7 @@ async function liveClient(port: number) {
   return { ws, next: () => queue.length ? Promise.resolve(queue.shift()!) : new Promise<Record<string, unknown>>((resolve) => waiters.push(resolve)) };
 }
 async function liveHello(client: Awaited<ReturnType<typeof liveClient>>): Promise<string> {
-  client.ws.send(JSON.stringify(wire("hello", { mobileVersion: "1", platform: "ios", installationId: crypto.randomUUID(), requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] })));
+  client.ws.send(JSON.stringify(wire("hello", { mobileVersion: "1", platform: "ios", installationId: INSTALLATION_ID, installationCredential: INSTALLATION_CREDENTIAL, requiredCapabilities: ["streams.v1", "commands.v1"], optionalCapabilities: [] })));
   return String(((await client.next()).payload as Record<string, unknown>).connectionId);
 }
 

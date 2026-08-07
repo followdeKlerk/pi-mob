@@ -34,6 +34,7 @@ Responsibilities:
 - persist tokenized cursors per stream so the mobile app can replay missed events after a network blip;
 - deliver notifications by sending data-only FCM messages to the registered device for the targeted session, using a host-supplied service account;
 - expose a companion binary HTTP API at `POST /v1/attachments` (image uploads, 10 MiB cap, JPEG/PNG decode, bounded retention) and `GET /v1/exports/<id>` (generated HTML sessions). Both endpoints require the per-installation `X-Installation-Id` and `X-Installation-Credential` headers; the multipart `installationId` field is downgraded to a hint. Per-installation rate / quota and aggregate byte ceiling are checked before allocation;
+- call Pi `get_commands` for the selected session and expose a bounded, sanitized command catalogue;
 - surface explicit unavailable states when host capabilities are not advertised rather than fabricating entries.
 
 The bridge runs on the loopback interface. `runDaemon` binds the loopback listener before it runs bulk external-history reconciliation. The readiness state remains false until command recovery and reconciliation finish. The mobile client only reaches the bridge through Tailscale.
@@ -44,7 +45,7 @@ The bridge has a dedicated `CanonicalSessionStore` for user-visible session even
 
 The bridge sends replay and live events through the `session_events.v2` capability. Both paths use the same event envelope. The mobile coordinator decodes both paths through one synchronizer and one canonical projection.
 
-The chat panel uses the canonical projection as its released transcript view. Legacy history/live state remains for bounded synchronization and older operational clients. The bridge retains the recipe activity projection as a derived compatibility surface until reducer parity is proven. This is a production cutover with migration leftovers, not completion of the subtractive rewrite.
+The chat panel uses the canonical projection as its released transcript view. The normal daemon writes transcript events only to `CanonicalSessionStore`. History reconciliation also uses this store. These paths do not write normalized transcript rows or the legacy recipe projection. Legacy state remains for bounded synchronization and older operational clients. Isolated legacy adapters can still use the recipe projection until the compatibility cutoff.
 
 ## Host
 
@@ -68,7 +69,7 @@ Responsibilities:
 - request notification permission once per process, register the FCM token automatically, and fire a real notification when a reply arrives while the app is backgrounded; foreground FCM alerts are suppressed while the main activity is visible;
 - reconcile notifications back to the correct chat via the existing deep-link path.
 
-The mobile app does not run a web server. It does not cache credentials. It does not advertise services to other apps.
+The mobile app does not run a web server. It does not cache credentials. It does not advertise services to other apps. The `/commands` action requests the selected session's authoritative catalogue and opens a searchable local palette; it does not submit a chat prompt.
 
 ## Trust boundary
 

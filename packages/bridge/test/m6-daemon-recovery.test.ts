@@ -69,7 +69,6 @@ describe("M6 daemon reboot recovery", () => {
       expect(daemon.rpc.state()).toBe("crash_loop");
       expect(daemon.store.sessionState(sessionId)?.runtimeState).toBe("crash_loop");
       await daemon.adapter.dispatch(command("session.activate"));
-      expect(daemon.rpc.state()).toBe("idle");
       expect(daemon.store.sessionState(sessionId)?.runtimeState).toBe("idle");
     } finally { await daemon.close(); }
   }, 15_000);

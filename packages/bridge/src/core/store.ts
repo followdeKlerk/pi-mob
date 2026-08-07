@@ -10,6 +10,25 @@ export class StoreError extends Error {
 
 export interface StoredEvent { readonly eventId: string; readonly streamId: string; readonly cursor: string; readonly type: string; readonly payload: Record<string, unknown>; readonly createdAt: number; }
 export interface StoredEventPage { readonly items: readonly StoredEvent[]; readonly snapshotRevision: string; readonly nextBeforeCursor?: string; }
+export interface StoredEventForwardPage { readonly items: readonly StoredEvent[]; readonly snapshotRevision: string; readonly nextAfterCursor?: string; }
+export const MAX_EVENT_PAGE_SIZE = 100;
+// Maintenance transactions are deliberately bounded so live writes stay responsive.
+export const MAX_EVENT_COMPACTION_ROWS = 1000;
+export const MAX_EVENT_COMPACTION_BYTES = 4 * 1024 * 1024;
+export interface LegacyEventCompactionOptions {
+  /** Maximum legacy rows removed by one transaction. */
+  readonly maxRows?: number;
+  /** Maximum event payload bytes removed by one transaction. */
+  readonly maxBytes?: number;
+  /** Injectable wall clock used when deciding credential validity. */
+  readonly now?: number;
+}
+export interface LegacyEventCompactionResult {
+  readonly deletedRows: number;
+  readonly deletedBytes: number;
+  /** Streams with events but no valid acknowledged cursor in this batch. */
+  readonly blockedStreams: readonly string[];
+}
 export interface StoredCommand { readonly commandId: string; readonly type: string; readonly scopeKey: string; readonly streamId: string; readonly semanticHash: string; readonly payload: Record<string, unknown>; readonly state: string; readonly dispatchCount: number; }
 export type AcceptCommandResult = { readonly kind: "accepted" | "duplicate"; readonly command: StoredCommand; readonly event?: StoredEvent } | { readonly kind: "conflict" };
 export interface LeaseRecord { readonly scopeKey: string; readonly leaseId: string; readonly installationId: string; readonly connectionId: string; readonly expiresAt: number; readonly reclaimableUntil: number | null; readonly disconnectedAt: number | null; readonly revokedAt: number | null; readonly takeoverReason: string | null; }
@@ -416,12 +435,65 @@ export class BridgeStore {
     return event;
   }
   appendEvent(streamId: string, type: string, payload: Record<string, unknown>, eventId?: string): StoredEvent { return this.transaction(() => this.appendEventTx(streamId, type, payload, eventId)); }
+
+  /**
+   * Append using a caller-owned event identity. Replaying the same identity
+   * returns the exact durable row without notifying listeners or advancing
+   * the stream. Reusing it for different event content is a conflict rather
+   * than an accidental duplicate.
+   */
+  appendEventIdempotent(streamId: string, type: string, payload: Record<string, unknown>, eventId: string): StoredEvent {
+    if (!eventId) throw new StoreError("conflict", "eventId is required for idempotent append");
+    return this.transaction(() => {
+      const row = this.db.query("SELECT event_id eventId,stream_id streamId,cursor,type,payload_json payload,created_at createdAt FROM events WHERE event_id=?").get(eventId) as {
+        eventId: string; streamId: string; cursor: string; type: string; payload: string; createdAt: number;
+      } | null;
+      if (row) {
+        const existingPayload = parseObject(row.payload);
+        if (row.streamId !== streamId || row.type !== type || JSON.stringify(existingPayload) !== JSON.stringify(payload)) {
+          throw new StoreError("conflict", `event identity already exists with different content: ${eventId}`);
+        }
+        return { ...row, payload: existingPayload };
+      }
+      return this.appendEventTx(streamId, type, payload, eventId);
+    });
+  }
   streamPosition(streamId: string): { current: string; floor: string } | null { return this.db.query("SELECT current_cursor current,retention_floor floor FROM streams WHERE stream_id=?").get(streamId) as { current: string; floor: string } | null; }
   setRetentionFloor(streamId: string, floor: string): void { canonicalCursor(floor); this.transaction(() => this.db.query("UPDATE streams SET retention_floor=? WHERE stream_id=?").run(floor, streamId)); }
   listEvents(streamId: string, after = "0", through?: string): StoredEvent[] {
     canonicalCursor(after); if (through) canonicalCursor(through);
     const rows = this.db.query(`SELECT event_id eventId,stream_id streamId,cursor,type,payload_json payload,created_at createdAt FROM events WHERE stream_id=? AND (length(cursor)>length(?) OR (length(cursor)=length(?) AND cursor>?)) ${through ? "AND (length(cursor)<length(?) OR (length(cursor)=length(?) AND cursor<=?))" : ""} ORDER BY length(cursor),cursor`).all(...(through ? [streamId, after, after, after, through, through, through] : [streamId, after, after, after])) as Array<{ eventId: string; streamId: string; cursor: string; type: string; payload: string; createdAt: number }>;
     return rows.map((row) => ({ ...row, payload: parseObject(row.payload) }));
+  }
+  /**
+   * Read a bounded forward page. When `throughCursor` is omitted, the
+   * stream's current cursor is captured as the page snapshot boundary. Pass
+   * that boundary to subsequent calls to traverse a stable prefix while new
+   * events continue to arrive.
+   */
+  pageEvents(streamId: string, pageSize: number, afterCursor = "0", throughCursor?: string): StoredEventForwardPage {
+    if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > MAX_EVENT_PAGE_SIZE) {
+      throw new StoreError("conflict", `event page size must be an integer from 1 through ${MAX_EVENT_PAGE_SIZE}`);
+    }
+    canonicalCursor(afterCursor);
+    if (throughCursor !== undefined) canonicalCursor(throughCursor);
+    return this.transaction(() => {
+      const position = this.streamPosition(streamId);
+      if (!position) throw new StoreError("not_found", "stream not found");
+      const through = throughCursor ?? position.current;
+      const rows = this.db.query(`SELECT event_id eventId,stream_id streamId,cursor,type,payload_json payload,created_at createdAt FROM events WHERE stream_id=? AND (length(cursor)>length(?) OR (length(cursor)=length(?) AND cursor>?)) AND (length(cursor)<length(?) OR (length(cursor)=length(?) AND cursor<=?)) ORDER BY length(cursor),cursor LIMIT ?`).all(streamId, afterCursor, afterCursor, afterCursor, through, through, through, pageSize + 1) as Array<{ eventId: string; streamId: string; cursor: string; type: string; payload: string; createdAt: number }>;
+      const hasMore = rows.length > pageSize;
+      const items = rows.slice(0, pageSize).map((row) => ({ ...row, payload: parseObject(row.payload) }));
+      return {
+        items,
+        snapshotRevision: through,
+        ...(hasMore && items.length > 0 ? { nextAfterCursor: items[items.length - 1]!.cursor } : {}),
+      };
+    });
+  }
+  latestEvent(streamId: string): StoredEvent | null {
+    const row = this.db.query("SELECT event_id eventId,stream_id streamId,cursor,type,payload_json payload,created_at createdAt FROM events WHERE stream_id=? ORDER BY length(cursor) DESC,cursor DESC LIMIT 1").get(streamId) as { eventId: string; streamId: string; cursor: string; type: string; payload: string; createdAt: number } | null;
+    return row ? { ...row, payload: parseObject(row.payload) } : null;
   }
   pageSessionEvents(sessionId: string, pageSize: number, beforeCursor?: string): StoredEventPage {
     if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) throw new StoreError("conflict", "page size must be an integer from 1 through 100");
@@ -696,6 +768,82 @@ export class BridgeStore {
       const result = this.transitionCommand(command.commandId, [command.state], "indeterminate"); if (result) changed.push(result.command);
     }
     return changed;
+  }
+
+  /**
+   * Remove a bounded prefix of the legacy `events` journal. For each stream,
+   * only valid credentials with an existing cursor row participate in the
+   * acknowledgement floor; a credential that never subscribed to the stream
+   * does not pin its history. Revoked and expired rows are deliberately
+   * absent from that quorum. When no valid acknowledgement exists, the stream
+   * is left untouched. The delete and retention-floor update share one
+   * transaction, so a restart cannot expose a floor for rows that were not
+   * removed.
+   *
+   * This method never touches `canonical_session_events` and never advances a
+   * floor past the stream's current cursor. Decimal cursors are compared with
+   * bigint in memory rather than JavaScript Number.
+   */
+  compactLegacyEvents(options: LegacyEventCompactionOptions = {}): LegacyEventCompactionResult {
+    const maxRows = options.maxRows ?? MAX_EVENT_COMPACTION_ROWS;
+    const maxBytes = options.maxBytes ?? MAX_EVENT_COMPACTION_BYTES;
+    const at = options.now ?? this.now();
+    if (!Number.isInteger(maxRows) || maxRows < 1 || maxRows > MAX_EVENT_COMPACTION_ROWS) throw new StoreError("conflict", `event compaction rows must be an integer from 1 through ${MAX_EVENT_COMPACTION_ROWS}`);
+    if (!Number.isInteger(maxBytes) || maxBytes < 1 || maxBytes > MAX_EVENT_COMPACTION_BYTES) throw new StoreError("conflict", `event compaction bytes must be an integer from 1 through ${MAX_EVENT_COMPACTION_BYTES}`);
+    return this.transaction(() => {
+      const streams = this.db.query("SELECT stream_id streamId,current_cursor current,retention_floor floor FROM streams ORDER BY stream_id").all() as Array<{ streamId: string; current: string; floor: string }>;
+      const blockedStreams: string[] = [];
+      let deletedRows = 0;
+      let deletedBytes = 0;
+      for (const stream of streams) {
+        if (deletedRows >= maxRows || deletedBytes >= maxBytes) break;
+        const current = canonicalCursor(stream.current);
+        const floor = canonicalCursor(stream.floor);
+        // Missing cursor rows are intentionally excluded: a client that has
+        // never subscribed to this stream will receive snapshot_required when
+        // it first syncs, rather than pinning history forever.
+        const cursorRows = this.db.query(
+          "SELECT cc.cursor FROM client_cursors cc INNER JOIN installation_credentials credentials ON credentials.installation_id=cc.installation_id WHERE cc.stream_id=? AND credentials.revoked_at IS NULL AND (credentials.expires_at IS NULL OR credentials.expires_at>?) ORDER BY cc.installation_id",
+        ).all(stream.streamId, at) as Array<{ cursor: string }>;
+        const acknowledgements: bigint[] = [];
+        for (const row of cursorRows) {
+          try { acknowledgements.push(canonicalCursor(row.cursor)); }
+          catch { /* malformed durable cursors cannot authorize deletion */ }
+        }
+        if (acknowledgements.length === 0) {
+          if (this.db.query("SELECT 1 present FROM events WHERE stream_id=? LIMIT 1").get(stream.streamId)) blockedStreams.push(stream.streamId);
+          continue;
+        }
+        let safeCursor = acknowledgements.reduce((minimum, cursor) => cursor < minimum ? cursor : minimum, current);
+        if (safeCursor > current) safeCursor = current;
+        if (safeCursor <= floor) continue;
+        const remainingRows = maxRows - deletedRows;
+        const remainingBytes = maxBytes - deletedBytes;
+        const candidates = this.db.query(
+          "SELECT cursor,bytes FROM events WHERE stream_id=? AND (length(cursor)>length(?) OR (length(cursor)=length(?) AND cursor>?)) AND (length(cursor)<length(?) OR (length(cursor)=length(?) AND cursor<=?)) ORDER BY length(cursor),cursor LIMIT ?",
+        ).all(stream.streamId, stream.floor, stream.floor, stream.floor, safeCursor.toString(), safeCursor.toString(), safeCursor.toString(), remainingRows) as Array<{ cursor: string; bytes: number }>;
+        const selected: Array<{ cursor: string; bytes: number }> = [];
+        let selectedBytes = 0;
+        for (const candidate of candidates) {
+          if (selectedBytes + candidate.bytes > remainingBytes) break;
+          selected.push(candidate);
+          selectedBytes += candidate.bytes;
+        }
+        if (selected.length === 0) continue;
+        const greatestDeleted = canonicalCursor(selected[selected.length - 1]!.cursor);
+        // Candidates are ordered from the floor, so this one predicate removes
+        // exactly the selected contiguous prefix in one SQL statement.
+        this.db.query(
+          "DELETE FROM events WHERE stream_id=? AND (length(cursor)>length(?) OR (length(cursor)=length(?) AND cursor>?)) AND (length(cursor)<length(?) OR (length(cursor)=length(?) AND cursor<=?))",
+        ).run(stream.streamId, stream.floor, stream.floor, stream.floor, greatestDeleted.toString(), greatestDeleted.toString(), greatestDeleted.toString());
+        const candidateFloor = floor > greatestDeleted ? floor : greatestDeleted;
+        const newFloor = candidateFloor > current ? current : candidateFloor;
+        this.db.query("UPDATE streams SET retention_floor=? WHERE stream_id=?").run(newFloor.toString(), stream.streamId);
+        deletedRows += selected.length;
+        deletedBytes += selectedBytes;
+      }
+      return { deletedRows, deletedBytes, blockedStreams };
+    });
   }
 
   ackCursor(installationId: string, streamId: string, cursor: string): void { canonicalCursor(cursor); this.transaction(() => this.db.query("INSERT INTO client_cursors(installation_id,stream_id,cursor,updated_at) VALUES(?,?,?,?) ON CONFLICT(installation_id,stream_id) DO UPDATE SET cursor=excluded.cursor,updated_at=excluded.updated_at").run(installationId, streamId, cursor, this.now())); }

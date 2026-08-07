@@ -72,6 +72,135 @@ void main() {
   // directly so the test does not depend on FakeAsync, runAsync real-time
   // drains, or bridge fixture setup; the production path inside the
   // coordinator funnels every burst through the same [_notify] method.
+  test('catalogue responses stay scoped to the selected session', () async {
+    const secondSessionId = '66666666-6666-4666-8666-666666666666';
+    await makeReady(coordinator, transport);
+    final socket = transport.sockets.single;
+
+    final firstRequest = coordinator.requestCatalogue();
+    await eventually(
+      () => socket.sent.any(
+        (message) => message['type'] == 'catalogue.snapshot.request',
+      ),
+    );
+    final firstWire = socket.sent.lastWhere(
+      (message) => message['type'] == 'catalogue.snapshot.request',
+    );
+    socket.server(
+      response('catalogue.snapshot.result', {
+        'sessionId': sessionId,
+        'revision': 'catalogue-a',
+        'entries': [
+          {
+            'entryId': 'extension:alpha',
+            'kind': 'extension',
+            'name': 'alpha',
+            'invocation': '/alpha',
+            'source': 'pi:get_commands',
+            'availability': {'state': 'available'},
+            'enabled': true,
+            'canToggle': false,
+            'reloadRequired': false,
+            'revision': 'catalogue-a',
+          },
+        ],
+      }, requestId: firstWire['requestId'] as String),
+    );
+    await firstRequest;
+    expect(coordinator.supportedCommands!.single.title, 'alpha');
+
+    socket.server(
+      event(
+        type: 'session.summary',
+        streamId: 'host:$hostId',
+        cursor: '2',
+        eventId: '77777777-7777-4777-8777-777777777777',
+        payload: {
+          'sessionId': secondSessionId,
+          'workspaceId': workspaceId,
+          'name': 'Second',
+          'runtimeState': 'idle',
+          'queueCount': 0,
+        },
+      ),
+    );
+    await eventually(
+      () =>
+          coordinator.sessions.any((item) => item.sessionId == secondSessionId),
+    );
+    final switching = coordinator.selectSession(secondSessionId);
+    await eventually(
+      () =>
+          socket.sent
+              .where((message) => message['type'] == 'subscription.set')
+              .length >=
+          3,
+    );
+    socket.server(
+      response('subscription.accepted', {
+        'streams': [
+          {'streamId': 'host:$hostId', 'mode': 'current'},
+          {'streamId': 'session:$secondSessionId', 'mode': 'current'},
+        ],
+      }),
+    );
+    socket.server(
+      response('stream.sync.complete', {
+        'streamId': 'host:$hostId',
+        'currentCursor': '2',
+        'mode': 'current',
+      }, requestId: null),
+    );
+    socket.server(
+      response('stream.sync.complete', {
+        'streamId': 'session:$secondSessionId',
+        'currentCursor': '0',
+        'mode': 'current',
+      }, requestId: null),
+    );
+    await switching;
+    expect(coordinator.selectedSessionId, secondSessionId);
+    expect(coordinator.supportedCommands, isNull);
+
+    final secondRequest = coordinator.requestCatalogue();
+    await eventually(
+      () =>
+          socket.sent
+              .where(
+                (message) => message['type'] == 'catalogue.snapshot.request',
+              )
+              .length >=
+          2,
+    );
+    final secondWire = socket.sent.lastWhere(
+      (message) => message['type'] == 'catalogue.snapshot.request',
+    );
+    final secondPayload = secondWire['payload'] as Map<String, Object?>;
+    expect(secondPayload['sessionId'], secondSessionId);
+    socket.server(
+      response('catalogue.snapshot.result', {
+        'sessionId': secondSessionId,
+        'revision': 'catalogue-b',
+        'entries': [
+          {
+            'entryId': 'extension:beta',
+            'kind': 'extension',
+            'name': 'beta',
+            'invocation': '/beta',
+            'source': 'pi:get_commands',
+            'availability': {'state': 'available'},
+            'enabled': true,
+            'canToggle': false,
+            'reloadRequired': false,
+            'revision': 'catalogue-b',
+          },
+        ],
+      }, requestId: secondWire['requestId'] as String),
+    );
+    await secondRequest;
+    expect(coordinator.supportedCommands!.single.title, 'beta');
+  });
+
   testWidgets(
     'R11 burst coalescing drains 100 _notify calls to <= 1 notification',
     (tester) async {
@@ -2920,7 +3049,12 @@ Map<String, Object?> helloAccepted({String generation = '1'}) =>
       'bridgeVersion': 'm5',
       'piVersion': '0.82.0',
       'serverTime': '2026-07-13T00:00:00.000Z',
-      'capabilities': ['streams.v1', 'commands.v1', 'controller_leases.v1'],
+      'capabilities': [
+        'streams.v1',
+        'commands.v1',
+        'controller_leases.v1',
+        'catalogue.v1',
+      ],
       'limits': {
         'maxJsonBytes': 1048576,
         'maxAttachmentBytes': 10485760,

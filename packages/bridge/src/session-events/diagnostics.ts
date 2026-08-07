@@ -132,7 +132,7 @@ export class PiDiagnosticsSink {
       : 0;
     this.now = options.now ?? Date.now;
     this.onError = options.onError ?? (() => undefined);
-    this.serialize = options.serialize ?? ((value: unknown) => JSON.stringify(value));
+    this.serialize = options.serialize ?? ((value: unknown) => JSON.stringify(redactDiagnosticValue(value)));
     this.truncate = options.truncate ?? defaultTruncate;
     this.db = db;
     if (this.limit > 0 && db !== null) {
@@ -243,6 +243,34 @@ export class PiDiagnosticsSink {
 }
 
 type Statement = ReturnType<Database["prepare"]>;
+
+function redactDiagnosticString(value: string): string {
+  return value
+    .replace(/\bfile:\/\/[^\s"'<>),\]}]+/g, "<host-private>")
+    .replace(/[A-Za-z]:\\[^\s"'<>]+/g, "<host-private>")
+    .replace(/\\[^\s"'<>]+/g, "<host-private>")
+    .replace(/~\/[^\s"'<>]+/g, "<host-private>")
+    .replace(/(^|[\s("'=:;,\[{])\/(?!\/)[^\s"'<>),\]}]*/gm, "$1<host-private>");
+}
+
+function redactDiagnosticValue(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
+  if (depth > 8) return "<truncated>";
+  if (typeof value === "string") return redactDiagnosticString(value);
+  if (value === null || typeof value !== "object") return value;
+  if (seen.has(value)) return "<circular>";
+  seen.add(value);
+  try {
+    if (Array.isArray(value)) return value.slice(0, 500).map((item) => redactDiagnosticValue(item, depth + 1, seen));
+    const output: Record<string, unknown> = {};
+    for (const [key, item] of Object.entries(value as Record<string, unknown>).slice(0, 500)) {
+      if (/path|sourceInfo|sessionFile|fullOutputPath|stack/i.test(key)) continue;
+      output[key] = redactDiagnosticValue(item, depth + 1, seen);
+    }
+    return output;
+  } finally {
+    seen.delete(value);
+  }
+}
 
 function isRawPiEvent(value: unknown): value is RawPiEvent {
   return typeof value === "object" && value !== null && "type" in (value as Record<string, unknown>);

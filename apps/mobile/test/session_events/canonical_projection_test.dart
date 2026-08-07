@@ -155,6 +155,84 @@ void main() {
     },
   );
 
+  test(
+    'delta without turnId follows the existing content-block turn',
+    () async {
+      final factory = CanonicalProjectionFactory(
+        baseDirectoryOverride: tempDir,
+      );
+      final projection = await factory.openForSession(
+        sessionId: 's-delta',
+        bootstrap: <StreamEventState>[
+          _journalEvent(
+            cursor: 1,
+            type: 'turn.started',
+            streamId: 'session:s-delta',
+            payload: <String, Object?>{'turnId': 'turn-1'},
+          ),
+          _journalEvent(
+            cursor: 2,
+            type: 'assistant.started',
+            streamId: 'session:s-delta',
+            payload: <String, Object?>{
+              'turnId': 'turn-1',
+              'contentBlockId': 'content-1',
+            },
+          ),
+          _journalEvent(
+            cursor: 3,
+            type: 'assistant.delta',
+            streamId: 'session:s-delta',
+            payload: <String, Object?>{
+              'contentBlockId': 'content-1',
+              'text': 'resolved',
+            },
+          ),
+          _journalEvent(
+            cursor: 4,
+            type: 'turn.started',
+            streamId: 'session:s-delta',
+            payload: <String, Object?>{'turnId': 'turn-2'},
+          ),
+          _journalEvent(
+            cursor: 5,
+            type: 'assistant.started',
+            streamId: 'session:s-delta',
+            payload: <String, Object?>{
+              'turnId': 'turn-2',
+              'contentBlockId': 'content-1',
+            },
+          ),
+          _journalEvent(
+            cursor: 6,
+            type: 'assistant.delta',
+            streamId: 'session:s-delta',
+            payload: <String, Object?>{
+              'contentBlockId': 'content-1',
+              'text': 'second',
+            },
+          ),
+        ],
+      );
+
+      final state = projection.synchronizer.state;
+      final message = state.assistantMessages['content-1'];
+      expect(message, isNotNull);
+      expect(message!.turnId, 'turn-1');
+      expect(message.content.single.text, 'resolved');
+      final reused = state.assistantMessages['content-1:turn-2'];
+      expect(reused, isNotNull);
+      expect(reused!.turnId, 'turn-2');
+      expect(reused.content.single.text, 'second');
+      expect(state.assistantMessages, hasLength(2));
+      expect(
+        state.assistantMessages.keys,
+        isNot(contains('assistant-current')),
+      );
+      await projection.close();
+    },
+  );
+
   test('canonical projection tolerates out-of-order bootstraps', () async {
     final factory = CanonicalProjectionFactory(baseDirectoryOverride: tempDir);
     // Bootstrap supplies events out of canonical order: the

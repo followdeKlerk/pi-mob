@@ -15,7 +15,9 @@ All notable user-facing changes are recorded here while pi-mob remains pre-relea
 - Foreground notification suppression; background FCM delivery remains enabled.
 - Inline subagent activity presentation.
 - Canonical project-status and roadmap documentation.
-
+- Selected-session Pi command catalogue (`catalogue.v1`) with the `/commands` mobile palette and host-driven `/model` picker.
+- Canonical session events are now the only transcript authority on the released daemon path. The daemon no longer writes or loads the legacy recipe projection; older-host compatibility remains isolated.
+- Bounded legacy event compaction runs after listener binding and uses only valid, non-revoked installation acknowledgements.
 ### Changed
 
 - Pi runs with its normal execution model; the previous default bridge-owned policy extension is no longer injected.
@@ -34,8 +36,7 @@ All notable user-facing changes are recorded here while pi-mob remains pre-relea
 
 ### Known limitations
 
-- Legacy transcript caches/history synchronization and the bridge recipe projection remain during the canonical migration; the subtractive rewrite is not yet complete.
-- Advanced providers for attention, first-class agent supervision, catalogues, plans, context, file browsing, and process output are not injected by the normal daemon.
+- Advanced providers for attention, first-class agent supervision, plans, context, file browsing, and process output are not injected by the normal daemon.
 - Projection failures for malformed known events can be isolated without a visible degraded-state signal.
 - Android and macOS artifacts remain preview-signed or unsigned; version metadata is not fully aligned.
 - Current validated host build is macOS x86_64; Apple Silicon is not release-validated and iOS is not distributed.

@@ -152,8 +152,6 @@ Turn _buildAssistantTurn(
       completedAt: message.completedAt,
     ),
   );
-  final tools = _toolsForTurn(state, message.turnId);
-  items.addAll(tools);
   final errorInfo = _assistantError(turnStatus);
   return AssistantTurn(
     turnId: message.turnId,
@@ -203,38 +201,6 @@ Turn _buildToolOnlyTurn(
     errorCode: null,
     errorMessage: null,
   );
-}
-
-List<ToolItem> _toolsForTurn(CanonicalTranscriptState state, String turnId) {
-  final items = <ToolItem>[];
-  final keys =
-      state.toolCalls.keys
-          .where((key) => state.toolCalls[key]?.turnId == turnId)
-          .toList()
-        ..sort();
-  for (final key in keys) {
-    final tool = state.toolCalls[key]!;
-    final assistantMessageId = state.turnToMessage[tool.turnId];
-    final viewData = ToolCallViewData(
-      toolCallId: tool.toolCallId,
-      toolName: tool.toolName,
-      arguments: _immutableMap(tool.arguments),
-      status: _toolStatusFor(tool),
-      result: _resultMap(tool),
-      errorMessage: tool.errorMessage,
-      truncation: _truncationFor(tool),
-      startedAt: tool.startedAt,
-      finishedAt: tool.completedAt,
-    );
-    items.add(
-      ToolItem(
-        itemId: tool.toolCallId,
-        assistantStepId: assistantMessageId ?? tool.toolCallId,
-        viewData: viewData,
-      ),
-    );
-  }
-  return items;
 }
 
 Map<String, Object?>? _resultMap(CanonicalToolCall tool) {
