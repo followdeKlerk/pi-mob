@@ -12,4 +12,4 @@
 /// generated file is a build-time bug, not a runtime concern.
 library;
 
-const String kMobileAppVersion = '0.0.2-alpha.1';
+const String kMobileAppVersion = '0.0.3-alpha.1';

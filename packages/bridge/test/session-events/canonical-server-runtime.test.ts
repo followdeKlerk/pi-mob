@@ -50,7 +50,7 @@ const STATIC_HELLO_MESSAGE = {
   requestId: "00000000-0000-4000-8000-000000000001",
   sentAt: "2026-08-14T12:00:00.000Z",
   payload: {
-    mobileVersion: "0.0.2-alpha.1",
+    mobileVersion: "0.0.3-alpha.1",
     platform: "android",
     installationId: STATIC_INSTALLATION_ID,
     installationCredential: STATIC_CREDENTIAL,

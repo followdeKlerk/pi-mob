@@ -119,7 +119,7 @@ function envelope(
 
 async function authenticate(client: Client, credential: string): Promise<string> {
   client.socket.send(JSON.stringify(envelope("hello", {
-    mobileVersion: "0.0.2-alpha.1",
+    mobileVersion: "0.0.3-alpha.1",
     platform: "android",
     installationId: INSTALLATION_ID,
     installationCredential: credential,

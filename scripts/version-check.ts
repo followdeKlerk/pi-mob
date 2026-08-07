@@ -18,7 +18,7 @@
  *   - `packages/bridge/dist/release/config.sample.toml` `bridge_version = "0.0.0-m7"`
  *
  * The fix is a single source of truth at `VERSION` (canonical semver without
- * a leading `v`). The repository's release contract is `0.0.2-alpha.1`.
+ * a leading `v`). The repository's release contract is `0.0.3-alpha.1`.
  *
  * Layered model:
  *
@@ -124,7 +124,7 @@ function readTomlStringField(text: string, key: string): string | null {
 function readCanonicalVersion(files: Record<string, string>): string | null {
   const text = files[VERSION_PATH];
   if (text === undefined) return null;
-  // VERSION may contain trailing metadata lines (e.g. `androidCode: 2`).
+  // VERSION may contain trailing metadata lines (e.g. `androidCode: 3`).
   // The first non-empty line is the canonical semver; everything below
   // is metadata consumed by other readers.
   for (const line of text.split(/\r?\n/)) {

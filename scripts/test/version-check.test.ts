@@ -17,11 +17,11 @@ function runScript(): { code: number; stdout: string; stderr: string } {
   };
 }
 
-const CANONICAL = "0.0.2-alpha.1";
+const CANONICAL = "0.0.3-alpha.1";
 
 /**
  * Build a clean synthetic workspace that aligns every version source
- * with the canonical `0.0.2-alpha.1`. The bridge manifest bundle and
+ * with the canonical `0.0.3-alpha.1`. The bridge manifest bundle and
  * the Gradle/Android build still pick up `versionCode=1` from the
  * Android code fallback in `VERSION`.
  */
@@ -220,14 +220,14 @@ describe("version:check (pure checker)", () => {
     const input = apply(
       cleanInput(),
       "VERSION",
-      `${CANONICAL}\nandroidCode: 2\n`,
+      `${CANONICAL}\nandroidCode: 3\n`,
     );
-    // When VERSION declares androidCode=2 the cleanInput's pubspec
+    // When VERSION declares androidCode=3 the cleanInput's pubspec
     // build number (+1) becomes stale and must be updated alongside.
     const aligned = apply(
       input,
       "apps/mobile/pubspec.yaml",
-      `name: pi_mob\ndescription: pi-mob\nversion: ${CANONICAL}+2\n`,
+      `name: pi_mob\ndescription: pi-mob\nversion: ${CANONICAL}+3\n`,
     );
     const result = checkVersion(aligned);
     expect(result.ok).toBe(true);

@@ -6,8 +6,8 @@ const clean: AndroidReleaseInput = {
   manifest: `<manifest package="com.example.pi_mob"><uses-permission android:name="android.permission.INTERNET"/><uses-permission android:name="android.permission.POST_NOTIFICATIONS"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE"/><uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/><application><activity android:name=".MainActivity"><data android:scheme="pi-mob" android:host="session"/></activity><service android:name=".PiMobMessagingService"/></application></manifest>`,
   firebase: `"package_name": "com.example.pi_mob"`,
   kotlinPaths: ["apps/mobile/android/app/src/main/kotlin/com/example/pi_mob/MainActivity.kt", "apps/mobile/android/app/src/main/kotlin/com/example/pi_mob/PiMobMessagingService.kt"],
-  versionName: "0.0.2-alpha.1",
-  versionCode: 2,
+  versionName: "0.0.3-alpha.1",
+  versionCode: 3,
   applicationId: "com.example.pi_mob",
   namespace: "com.example.pi_mob",
   signing: "CN=Phase 5 ephemeral",
@@ -37,7 +37,7 @@ describe("android release hygiene", () => {
   });
 
   test("rejects version and permission drift", () => {
-    const result = checkAndroidRelease({ ...clean, versionCode: 2, versionName: "0.0.2", manifest: clean.manifest.replace("FOREGROUND_SERVICE_DATA_SYNC", "ACCESS_FINE_LOCATION") });
+    const result = checkAndroidRelease({ ...clean, versionCode: 3, versionName: "0.0.2", manifest: clean.manifest.replace("FOREGROUND_SERVICE_DATA_SYNC", "ACCESS_FINE_LOCATION") });
     expect(result.ok).toBe(false);
     expect(result.errors.join("\n")).toContain("versionName");
     expect(result.errors.join("\n")).toContain("permission");

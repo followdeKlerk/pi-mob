@@ -1,6 +1,12 @@
 # Changelog
 
 All notable changes to Pi Mob are recorded here. Versions follow semantic versioning. The preview line uses `0.0.x-alpha.y`.
+## `0.0.3-alpha.1` — production-wired catalogue and canonical transcript path
+
+- Added the selected-session Pi command catalogue (`catalogue.v1`) and the `/commands` mobile palette.
+- Added the host-driven `/model` picker backed by `model.list` and `model.set`.
+- Added bounded legacy event compaction after listener binding.
+- Made canonical session events the only released transcript authority; the legacy recipe projection remains isolated for older-host compatibility.
 
 ## `0.0.2-alpha.1` — canonical session events and mobile UX
 

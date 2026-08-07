@@ -18,7 +18,7 @@ describe("normal daemon capability contract", () => {
 
   test("buildReport independently proves docs parity, metadata, and row release versions", async () => {
     const report = await buildReport();
-    expect(report.releaseVersion).toBe("0.0.2-alpha.1");
+    expect(report.releaseVersion).toBe("0.0.3-alpha.1");
     expect(report.snapshots.find((item) => item.configuration === "without-fcm")?.capabilities).toEqual(WITHOUT);
     expect(report.snapshots.find((item) => item.configuration === "with-fcm")?.capabilities).toEqual(WITH);
     expect(report.capabilities.map((item) => item.capability)).toEqual([
@@ -28,7 +28,7 @@ describe("normal daemon capability contract", () => {
       expect(item.providerConstructionSource).toContain("packages/bridge/src/daemon.ts");
       expect(item.mobileEntryPoint).toContain("apps/mobile/");
       expect(item.focusedTestPath).toMatch(/^packages\/bridge\/test\/(capability-report\.test\.ts|session-events\/canonical-server-runtime\.test\.ts|integration\/daemon-production-wiring\.test\.ts)$/);
-      expect(item.releaseVersion).toBe("0.0.2-alpha.1");
+      expect(item.releaseVersion).toBe("0.0.3-alpha.1");
     }
   });
 });

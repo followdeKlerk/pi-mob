@@ -1,6 +1,21 @@
 # Changelog
 
 All notable user-facing changes are recorded here while pi-mob remains pre-release. Dates describe repository changes, not a compatibility or support promise.
+## 0.0.3-alpha.1
+
+This preview release promotes the production-wired catalogue and canonical transcript path documented on `main`.
+
+### Added
+
+- Selected-session Pi command catalogue (`catalogue.v1`) and the `/commands` mobile palette.
+- Host-driven `/model` picker backed by `model.list` and `model.set`.
+- Bounded legacy event compaction after listener binding.
+- Stable assistant message identities and diagnostics for orphan assistant completions.
+
+### Changed
+
+- The normal daemon uses canonical session events as the only released transcript authority. Legacy recipe projection support remains isolated for older-host compatibility.
+- Bounded tool results retain exact values for the authenticated mobile client. Diagnostic records and logs redact private paths.
 
 ## 0.0.2-alpha.1
 

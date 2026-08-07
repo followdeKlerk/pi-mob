@@ -5,8 +5,8 @@ import { spawnSync } from "node:child_process";
 
 export const ANDROID_APPLICATION_ID = "com.example.pi_mob";
 export const ANDROID_NAMESPACE = ANDROID_APPLICATION_ID;
-export const ANDROID_VERSION_NAME = "0.0.2-alpha.1";
-export const ANDROID_VERSION_CODE = 2;
+export const ANDROID_VERSION_NAME = "0.0.3-alpha.1";
+export const ANDROID_VERSION_CODE = 3;
 const REQUIRED_PERMISSIONS = [
   "android.permission.INTERNET",
   "android.permission.POST_NOTIFICATIONS",
