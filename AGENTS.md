@@ -15,18 +15,9 @@ Recommended order:
 
 The dated rectification and daemon-incident reports under `docs/` are historical evidence snapshots. They are not current branch instructions.
 
-## Current objective
+## Product status
 
-Move pi-mob from a working private alpha to a trustworthy beta by strengthening the production path rather than adding broad new surface area.
-
-Priority order:
-
-1. Prove the capabilities advertised by the normal daemon through a real production-wiring integration test.
-2. Bind the loopback listener before bulk external-history synchronization.
-3. Add explicit initialization phases, bounded history batches, durable checkpoints, and interruption/restart coverage.
-4. Make tolerated event-projection failures observable without disconnecting healthy clients.
-5. Wire the mobile-native providers that matter, one at a time, with end-to-end proof.
-6. Align release identity, signing, versioning, supported platforms, and upgrade documentation.
+Pi Mob is a public repository with unsupported alpha preview binaries. Treat `docs/PROJECT_STATUS.md` as the authority for capabilities, planned work, and release scope. Do not add mutable roadmap priorities to this file.
 
 ## Product boundaries
 
@@ -73,8 +64,7 @@ A schema, service class, widget, or isolated test does not prove a production fe
 
 ## Validation
 
-Run the pinned toolchain documented by CI. At minimum for bridge or protocol work:
-
+Run the pinned toolchain from repository configuration (`package.json`, `VERSION`, and Flutter project files). At minimum for bridge or protocol work:
 ```sh
 bun install --frozen-lockfile
 bun run typecheck

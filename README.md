@@ -1,7 +1,7 @@
 # Pi Mob
 
 > [!WARNING]
-> This application was built with an AI coding agent. Expect some slop, dead code, and rough edges. It is in working condition and under active development. Contributions are welcome in all forms, including bug reports, testing, documentation, design, cleanup, and code.
+> **Alpha software:** Pi Mob is under active development and has not reached stable compatibility or distribution guarantees. Bug reports and contributions are welcome.
 
 Pi Mob is the mobile control surface for a local Pi coding host. A small bridge daemon runs on your computer and exposes it to a connected Android phone over a private Tailscale network. The phone becomes a fast, low-friction way to supervise running Pi sessions, including while the phone is locked or the app is backgrounded.
 
@@ -22,11 +22,14 @@ This repository hosts:
 | [docs/PRIVACY.md](docs/PRIVACY.md) | What data Pi Mob handles, where it lives, and how it is exposed. |
 | [docs/QUICKSTART.md](docs/QUICKSTART.md) | End-to-end host and phone setup. |
 | [docs/RELEASE.md](docs/RELEASE.md) | How releases are cut, signed, and published. |
-| [docs/CHANGELOG.md](docs/CHANGELOG.md) | Per-version summaries of shipped work. |
+| [docs/RUNBOOK.md](docs/RUNBOOK.md) | Operational recovery procedures. |
+| [SECURITY.md](SECURITY.md) | Threat model and vulnerability reporting. |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Contribution rules and validation steps. |
+| [CHANGELOG.md](CHANGELOG.md) | User-visible release history. |
 | [apps/mobile/README.md](apps/mobile/README.md) | Flutter Android client. |
 | [packages/bridge/README.md](packages/bridge/README.md) | Bridge daemon. |
 
-The Android app uses the stable preview identity `com.example.pi_mob` and is published as a pre-release `v0.0.3-alpha.1` APK. Release builds use an external non-debug signer. The bridge is published as a macOS binary tarball. iOS is not distributed in this preview.
+The Android app uses the stable preview identity `com.example.pi_mob` and is published as a pre-release `v0.0.3-alpha.1` APK. Release builds use an externally supplied non-debug preview signing key; this is not a production distribution signer. The bridge is published as a macOS binary tarball. iOS is not distributed in this preview.
 
 ## What Pi Mob is
 
@@ -61,7 +64,7 @@ Verified end-to-end on a real phone and a real host:
 - **Synchronization UI** — a splash card immediately on cold launch, then a per-chat progress card with current chat, remaining count, elapsed time, ETA, and throughput.
 - **Notifications** — after the user grants OS permission, FCM token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery works on a real phone. Foreground alerts are suppressed while the app is visible. Tap routing and dedupe remain best-effort until proven on a physical device.
 - **Model control** — `/model` opens a host-driven picker backed by `model.list` and `model.set`.
-- **Command catalogue** — `/commands` opens the selected session's bounded Pi command catalogue. Private source metadata is removed before delivery.
+- **Command catalogue** — `catalogue.v1` powers `/commands` for the selected session. Private source metadata is removed before delivery.
 - **Search** — per-chat transcript search and global cross-chat search.
 - **Workspace search** — bounded workspace discovery, list, and search rooted under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
 - **Reconnectable shell** — restores the most recent chat, the in-flight draft, and attachments after reconnect or relaunch.
@@ -83,9 +86,8 @@ docs/               Architecture, protocol, privacy, status
 ```
 
 ## Privacy
-
-Pi Mob is local-first. The bridge exposes its API only on a private Tailscale tailnet. No data leaves your host other than Apple/Google push tokens required for notifications. See `docs/PRIVACY.md` for the full data-handling description.
+Pi Mob has no application cloud backend. Bridge/mobile traffic stays on your tailnet. When notifications are enabled, bounded status metadata is sent through Firebase Cloud Messaging. Chat message content is not included in FCM payloads. See `docs/PRIVACY.md` for the full data-handling description.
 
 ## Status
 
-This is a `0.0.3-alpha.1` preview. Android release builds are signed with an external non-debug keystore and fail closed without it. The bridge tarball is not code-signed or notarized. See `docs/PROJECT_STATUS.md` for the accurate picture of production-wired, planned, and out-of-scope work.
+This is a `0.0.3-alpha.1` preview. Android release builds use an externally supplied non-debug preview signing key; this is not a production distribution signer. The bridge tarball is not code-signed or notarized. See `docs/PROJECT_STATUS.md` for the accurate picture of production-wired, planned, and out-of-scope work.

@@ -51,7 +51,7 @@ describe("PiDiagnosticsSink", () => {
 
   test("redacts private paths while retaining diagnostic structure", () => {
     const { sink, db } = makeSink();
-    sink.append({ type: "tool_execution_end", result: "/Users/alice/project/file.ts", nested: { cwd: "/private/repo" } }, "session");
+    sink.append({ type: "tool_execution_end", result: "/private/repo/file.ts", nested: { cwd: "/private/repo" } }, "session");
     const row = db.query("SELECT payload_json FROM pi_event_diagnostics").get() as { payload_json: string };
     const payload = JSON.parse(row.payload_json) as { result: string; nested: { cwd: string } };
     expect(payload.result).toBe("<host-private>");

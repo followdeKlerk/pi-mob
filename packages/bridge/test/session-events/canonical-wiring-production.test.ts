@@ -112,7 +112,7 @@ describe("bridge production wiring: canonical session store is the live append p
       rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "before" } });
       rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_end", contentIndex: 0 } });
       rpc.emit({ type: "tool_execution_start", sessionId, toolCallId: "pwd", toolName: "bash", args: {} });
-      rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "pwd", toolName: "bash", result: "/Users/alice/project", isError: false });
+      rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "pwd", toolName: "bash", result: "/private/repo", isError: false });
       // Pi can emit another turn_start while it continues after a tool.
       rpc.emit({ type: "turn_start", sessionId });
       rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
@@ -129,7 +129,7 @@ describe("bridge production wiring: canonical session store is the live append p
       ]);
       const assistants = events.filter((event) => event.eventType === "assistant.started");
       expect(assistants[0]?.payload.messageId).not.toBe(assistants[1]?.payload.messageId);
-      expect(events.find((event) => event.eventType === "tool.completed")?.payload.result).toBe("/Users/alice/project");
+      expect(events.find((event) => event.eventType === "tool.completed")?.payload.result).toBe("/private/repo");
     } finally {
       adapter.close();
       store.close();
@@ -181,13 +181,13 @@ describe("bridge production wiring: canonical session store is the live append p
         },
       });
       rpc.emit({ type: "tool_execution_start", sessionId, toolCallId: "pwd", toolName: "bash", args: { command: "pwd" } });
-      rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "pwd", toolName: "bash", result: "/Users/alice/project", isError: false });
+      rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "pwd", toolName: "bash", result: "/private/repo", isError: false });
       // Pi repeats turn_start while the original command continues after a tool.
       rpc.emit({ type: "turn_start", sessionId });
       rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_start", contentIndex: 0 } });
-      rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "The working directory is /Users/alice/project" } });
+      rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_delta", contentIndex: 0, delta: "The working directory is /private/repo" } });
       rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "text_end", contentIndex: 0 } });
-      rpc.emit({ type: "message_end", sessionId, message: { role: "assistant", content: [{ type: "text", text: "The working directory is /Users/alice/project" }] } });
+      rpc.emit({ type: "message_end", sessionId, message: { role: "assistant", content: [{ type: "text", text: "The working directory is /private/repo" }] } });
       rpc.emit({ type: "agent_settled", sessionId });
 
       const events = canonical.readAfter(sessionId, 0);
@@ -198,11 +198,11 @@ describe("bridge production wiring: canonical session store is the live append p
       expect(types.filter((type) => type === "turn.settled")).toHaveLength(1);
       expect(types.indexOf("assistant.message.completed")).toBeGreaterThan(types.indexOf("assistant.started"));
       expect(events.filter((event) => event.eventType === "assistant.content.replaced")[0]?.payload.content).toEqual([
-        { kind: "text", text: "The working directory is /Users/alice/project" },
+        { kind: "text", text: "The working directory is /private/repo" },
       ]);
       const toolResults = events.filter((event) => event.eventType === "tool.completed");
       expect(toolResults).toHaveLength(1);
-      expect(toolResults[0]?.payload.result).toBe("/Users/alice/project");
+      expect(toolResults[0]?.payload.result).toBe("/private/repo");
       expect(events.filter((event) => event.eventType === "assistant.started")[0]?.payload.messageId).toBeDefined();
     } finally {
       adapter.close();

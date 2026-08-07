@@ -8,8 +8,7 @@ Start with:
 2. [`AGENTS.md`](AGENTS.md)
 3. the architecture and protocol documents relevant to your change
 
-pi-mob is a working private alpha. The current priority is proving and hardening the production path, not expanding the repository with broad new feature surfaces.
-
+Pi Mob is a public repository with unsupported alpha preview binaries. The current priority is proving and hardening the production path, not expanding the repository with broad new feature surfaces.
 ## Product scope
 
 Contributions should preserve these boundaries:
@@ -42,7 +41,7 @@ A schema, provider class, widget, or isolated unit test is not enough to call a 
 
 ## Development setup
 
-Install the pinned Bun and Flutter versions used by CI.
+Install the pinned Bun and Flutter versions from `package.json` and the Flutter project files.
 
 ```sh
 bun install --frozen-lockfile

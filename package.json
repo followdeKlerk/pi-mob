@@ -17,7 +17,7 @@
     "schema:check": "bun run scripts/schema-check.ts",
     "fixtures:check": "bun run scripts/fixtures-check.ts",
     "docs:check": "bun run scripts/docs-check.ts",
-    "phase1:doc-check": "bun run scripts/phase1-doc-check.ts",
+    "docs:consistency-check": "bun run scripts/docs-consistency-check.ts",
     "version:check": "bun run scripts/version-check.ts",
     "version:sync": "bun run scripts/sync-version.ts",
     "android:release-check": "bun run scripts/android-release-check.ts",

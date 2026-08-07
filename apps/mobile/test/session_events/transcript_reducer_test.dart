@@ -197,14 +197,14 @@ void main() {
           'turnId': turnId, 'toolCallId': 'pwd', 'toolName': 'bash', 'arguments': <String, Object?>{},
         }),
         _event(sequence: 5, type: CanonicalEventType.toolCallCompleted, payload: <String, Object?>{
-          'turnId': turnId, 'toolCallId': 'pwd', 'result': '/Users/alice/project',
+          'turnId': turnId, 'toolCallId': 'pwd', 'result': '/private/repo',
         }),
         _event(sequence: 6, type: CanonicalEventType.assistantStarted, payload: <String, Object?>{
           'turnId': turnId, 'messageId': '$turnId:assistant:1',
         }),
         _event(sequence: 7, type: CanonicalEventType.assistantContentReplaced, payload: <String, Object?>{
           'turnId': turnId, 'messageId': '$turnId:assistant:1', 'content': <Map<String, Object?>>[
-            <String, Object?>{'kind': 'text', 'text': 'The working directory is /Users/alice/project'},
+            <String, Object?>{'kind': 'text', 'text': 'The working directory is /private/repo'},
           ],
         }),
         _event(sequence: 8, type: CanonicalEventType.assistantMessageCompleted, payload: <String, Object?>{
@@ -218,7 +218,7 @@ void main() {
       for (final event in events) state = applyCanonicalEvent(state, event);
 
       expect(state.assistantMessages, hasLength(1));
-      expect(state.assistantMessages.values.single.content.single.text, contains('/Users/alice/project'));
+      expect(state.assistantMessages.values.single.content.single.text, contains('/private/repo'));
       expect(state.toolCalls, hasLength(1));
       final document = projectCanonicalToDocument(state);
       final toolCards = document.turns

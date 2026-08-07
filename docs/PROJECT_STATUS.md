@@ -53,7 +53,7 @@ The items below have code or UI in the repository, but the normal daemon does no
 ## Android release hygiene
 
 - Stable preview identity is `com.example.pi_mob` across Gradle, Kotlin packages, Firebase wiring, services, and deep links.
-- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.3-alpha.1` / code `2`, signer type, permissions, and deep-link declarations.
+- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.3-alpha.1` / code `3`, signer type, permissions, and deep-link declarations.
 
 ## Planned
 

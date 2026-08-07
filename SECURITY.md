@@ -2,9 +2,8 @@
 
 ## Supported versions
 
-pi-mob is a private alpha. Security fixes are applied to the current `main` development line. No released version currently carries a long-term support commitment.
-
-The bridge preview artifact is unsigned and may change without compatibility guarantees. Android release APKs require an operator-supplied non-debug signer. Verify checksums and release provenance before installing either artifact.
+Pi Mob is a public repository with unsupported alpha preview binaries. Security fixes are applied to the current `main` development line. No released version currently carries a long-term support commitment.
+The bridge preview artifact is unsigned and may change without compatibility guarantees. Android release APKs use an externally supplied non-debug preview signing key; this is not a production distribution signer. Verify checksums and release provenance before installing either artifact.
 
 ## Report a vulnerability
 
@@ -64,6 +63,5 @@ Use bounded synthetic fixtures whenever possible.
 The project status document tracks operational gaps that may have security implications, including:
 
 - Mandatory code-signed and notarized bridge distributable (currently unsigned).
-- Bind-loopback-before-history-recovery: today the listener is bound after the runtime has reconciled bulk external history, so a misconfigured peer could observe that work in flight.
 
 These items are tracked in [Project status and roadmap](docs/PROJECT_STATUS.md) (`Planned` and `Out of scope`) and elaborated in [Privacy](docs/PRIVACY.md) and [Architecture](docs/ARCHITECTURE.md).

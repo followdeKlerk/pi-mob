@@ -42,4 +42,9 @@ describe("android release hygiene", () => {
     expect(result.errors.join("\n")).toContain("versionName");
     expect(result.errors.join("\n")).toContain("permission");
   });
+  test("rejects camera permission drift", () => {
+    const result = checkAndroidRelease({ ...clean, manifest: clean.manifest.replace("FOREGROUND_SERVICE_DATA_SYNC", "CAMERA") });
+    expect(result.ok).toBe(false);
+    expect(result.errors.join("\n")).toContain("unexpected permission");
+  });
 });

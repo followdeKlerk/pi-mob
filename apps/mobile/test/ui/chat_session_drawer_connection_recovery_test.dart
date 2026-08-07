@@ -10,7 +10,7 @@ import 'package:pi_mob/src/ui/shell/chat_session_drawer.dart';
 /// off-rail phase (incompatible / degraded / hostUnreachable /
 /// hostDraining), the user must be able to see WHAT went wrong and
 /// attempt a recovery action without leaving the drawer. The
-/// "Issue" pill on its own is not enough for a private alpha.
+/// "Issue" pill on its own is not enough for an alpha preview.
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
 

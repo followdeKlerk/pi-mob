@@ -3,10 +3,11 @@ import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { spawnSync } from "node:child_process";
 
+const VERSION_LINES = readFileSync(new URL("../VERSION", import.meta.url), "utf8").trim().split("\n");
 export const ANDROID_APPLICATION_ID = "com.example.pi_mob";
 export const ANDROID_NAMESPACE = ANDROID_APPLICATION_ID;
-export const ANDROID_VERSION_NAME = "0.0.3-alpha.1";
-export const ANDROID_VERSION_CODE = 3;
+export const ANDROID_VERSION_NAME = VERSION_LINES[0]!.trim();
+export const ANDROID_VERSION_CODE = Number(VERSION_LINES.find((line) => line.startsWith("androidCode:"))?.split(":", 2)[1]?.trim() ?? "-1");
 const REQUIRED_PERMISSIONS = [
   "android.permission.INTERNET",
   "android.permission.POST_NOTIFICATIONS",
@@ -18,11 +19,10 @@ const ALLOWED_PERMISSIONS = new Set([
   "android.permission.POST_NOTIFICATIONS",
   "android.permission.FOREGROUND_SERVICE",
   "android.permission.FOREGROUND_SERVICE_DATA_SYNC",
-  // Merged dependency permissions: FCM, secure storage, and QR scanner.
+  // Merged dependency permissions: FCM and secure storage.
   "android.permission.ACCESS_NETWORK_STATE",
   "android.permission.WAKE_LOCK",
   "com.google.android.c2dm.permission.RECEIVE",
-  "android.permission.CAMERA",
   "com.example.pi_mob.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION",
 ]);
 const REQUIRED_MANIFEST = [".MainActivity", ".PiMobMessagingService", "pi-mob", "session"];

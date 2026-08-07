@@ -21,7 +21,7 @@ const SEQUENCE: Array<{ label: string; cmd: readonly string[]; optional: boolean
   { label: "fixtures:check", cmd: ["bun", "run", "scripts/fixtures-check.ts"], optional: false },
   { label: "schema:check", cmd: ["bun", "run", "scripts/schema-check.ts"], optional: false },
   { label: "docs:check", cmd: ["bun", "run", "scripts/docs-check.ts"], optional: false },
-  { label: "phase1:doc-check", cmd: ["bun", "run", "scripts/phase1-doc-check.ts"], optional: false },
+  { label: "docs:consistency-check", cmd: ["bun", "run", "scripts/docs-consistency-check.ts"], optional: false },
   { label: "version:check", cmd: ["bun", "run", "scripts/version-check.ts"], optional: false },
   { label: "capability-report", cmd: ["bun", "run", "scripts/capability-report.ts"], optional: false },
   { label: "security:check", cmd: ["bun", "run", "scripts/security-check.ts"], optional: false },

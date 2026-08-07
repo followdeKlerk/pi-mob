@@ -35,8 +35,7 @@ This section lists the traffic the bridge itself emits. The bridge runs on the u
 
 - Stream events for chats the user is subscribed to.
 - Notifications from the bridge only.
-- App updates are delivered through the App Store / Play Store infrastructure per the OS's normal distribution.
-
+- App updates are distributed as APK files through GitHub Releases in this preview.
 ## What is not collected
 
 - Crash reports.
@@ -67,4 +66,4 @@ This section lists the traffic the bridge itself emits. The bridge runs on the u
 
 ## Reporting a concern
 
-File a private issue using GitHub Security Advisories rather than opening a public tracker item. Coordinates are in the project README.
+File a private issue using GitHub Security Advisories rather than opening a public tracker item. See [SECURITY.md](../SECURITY.md) for reporting instructions.

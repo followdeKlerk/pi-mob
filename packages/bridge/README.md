@@ -13,10 +13,7 @@ The bridge is the host-side daemon that mediates durable streams, controller lea
 - Workspace discovery and bounded search under explicit `--search-root` paths, or the normal host defaults: `~/GitHub`, `~/github`, the home directory, and the configured workspace.
 - Host diagnostic surface with explicit phases, sanitized errors, and retry actions.
 
-> Note: the catalogue module is implemented in `packages/bridge/src/pi/mobile-catalogue-service.ts` (direct module only; it is not part of the package root export) but the normal daemon does not construct a catalogue provider, so `hello.accepted` does not advertise `catalogue.v1` and the mobile UI exposes no catalogue entry point. Tracking lives in `docs/PROJECT_STATUS.md`.
-
 ## Layout
-
 ```
 src/
   core/        runtime, server, store, journal

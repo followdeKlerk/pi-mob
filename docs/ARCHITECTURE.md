@@ -69,7 +69,7 @@ Responsibilities:
 - request notification permission once per process, register the FCM token automatically, and fire a real notification when a reply arrives while the app is backgrounded; foreground FCM alerts are suppressed while the main activity is visible;
 - reconcile notifications back to the correct chat via the existing deep-link path.
 
-The mobile app does not run a web server. It does not cache credentials. It does not advertise services to other apps. The `/commands` action requests the selected session's authoritative catalogue and opens a searchable local palette; it does not submit a chat prompt.
+The mobile app does not run a web server. It stores no host or provider credentials. It stores only its per-installation bearer credential in Android Keystore-backed secure storage. It does not advertise services to other apps. The `/commands` action requests the selected session's authoritative catalogue and opens a searchable local palette; it does not submit a chat prompt.
 
 ## Trust boundary
 

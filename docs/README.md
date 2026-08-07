@@ -8,7 +8,8 @@
 | [PRIVACY.md](PRIVACY.md) | What data Pi Mob handles, where it lives, and how it is exposed. |
 | [QUICKSTART.md](QUICKSTART.md) | End-to-end setup for the bridge and the Android app. |
 | [RELEASE.md](RELEASE.md) | How releases are cut, signed, and published. |
-| [CHANGELOG.md](CHANGELOG.md) | Per-version summaries of shipped work. |
+| [CHANGELOG.md](../CHANGELOG.md) | User-visible release history. |
+| [RUNBOOK.md](RUNBOOK.md) | Operational recovery procedures. |
 
 Capability discipline:
 

@@ -82,7 +82,7 @@ The bridge assigns a command-scoped Pi turn identifier. The client must not equa
 
 ## Controller leases
 
-A controller lease grants the holder exclusive write access to a single session for a bounded duration. The mobile app acquires a lease when the user opens a chat and releases it when the user navigates away. Leases are session-scoped, never global.
+A controller lease grants the holder exclusive write access to a single session for a bounded duration. The mobile app acquires a lease when the user opens a chat and keeps it while navigating between chats. Leases are session-scoped, never global.
 
 The bridge rejects reacquisition of an active lease with `controller_already_active`. The mobile app must restore the prior lease from the runtime rather than re-requesting it.
 
