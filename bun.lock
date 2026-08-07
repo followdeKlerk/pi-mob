@@ -24,6 +24,7 @@
         "@earendil-works/pi-ai": "0.82.0",
         "@earendil-works/pi-coding-agent": "0.82.0",
         "@pi-mob/typescript-config": "workspace:*",
+        "@sinclair/typebox": "0.34.52",
         "@types/jpeg-js": "0.3.7",
         "@types/pngjs": "6.0.5",
       },
