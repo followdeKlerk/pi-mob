@@ -2,25 +2,19 @@
 
 Pi Mob has three components: a host, a bridge, and a mobile client. Each one has a single, well-defined responsibility.
 
-```
-┌──────────────────────────────┐    ┌──────────────────────────────┐
-│ Host (your computer)         │    │ Mobile (Android phone)       │
-│  ┌───────────────┐           │    │  ┌────────────────────────┐  │
-│  │ Pi processes  │◄──────────┼────┼──┤ Flutter app            │  │
-│  │  (one per     │  durable  │    │  │  (Pi Mob)              │  │
-│  │   mobile      │  control  │    │  └────────────────────────┘  │
-│  │   session)    │  plane    │    │                              │
-│  └───────────────┘           │    │                              │
-│         ▲                    │    │                              │
-│         │  supervises         │    │                              │
-│  ┌──────┴────────────────┐   │    │                              │
-│  │ Bridge daemon          │◄──┼────┤ private tailnet (Tailscale) │
-│  │  (Bun distributable)   │   │    │                              │
-│  └────────────────────────┘   │    │                              │
-└──────────────────────────────┘    └──────────────────────────────┘
+```text
+Android mobile app
+        │
+        │ Tailscale Serve (private tailnet)
+        ▼
+Bridge daemon (loopback listener)
+        │
+        │ supervised local Pi RPC/session processes
+        ▼
+Pi processes
 ```
 
-The bridge is the only component that holds durable state outside Pi itself. The mobile app holds no business state other than local cache copies of streams and the user’s drafts.
+The bridge is the only authority for durable session state outside Pi itself. The mobile app also persists disposable cache copies of streams, drafts, and its installation credential.
 
 ## Bridge
 
@@ -32,7 +26,7 @@ Responsibilities:
 - own durable streams, command journal, and controller-lease book;
 - supervise one Pi process per mobile session and persist that session path so reconnects resume immediately;
 - persist tokenized cursors per stream so the mobile app can replay missed events after a network blip;
-- deliver notifications by sending data-only FCM messages to the registered device for the targeted session, using a host-supplied service account;
+- deliver notifications by sending bounded status-only FCM messages containing notification copy and a restricted data payload to the registered device for the targeted session, using a host-supplied service account;
 - expose a companion binary HTTP API at `POST /v1/attachments` (image uploads, 10 MiB cap, JPEG/PNG decode, bounded retention) and `GET /v1/exports/<id>` (generated HTML sessions). Both endpoints require the per-installation `X-Installation-Id` and `X-Installation-Credential` headers; the multipart `installationId` field is downgraded to a hint. Per-installation rate / quota and aggregate byte ceiling are checked before allocation;
 - call Pi `get_commands` for the selected session and expose a bounded, sanitized command catalogue;
 - surface explicit unavailable states when host capabilities are not advertised rather than fabricating entries.

@@ -1,52 +1,66 @@
 # Quick start
 
-This is a printable end-to-end guide for the `v0.0.3-alpha.1` preview. The exact files referenced here are linked from the GitHub release assets.
+This guide covers the `0.0.3-alpha.1` preview. The released bridge target is macOS x64 and the Android app is distributed as an APK through GitHub Releases.
 
 ## One-time host setup
 
-1. Install Tailscale on the host computer and on the Android phone. Sign in to the same tailnet.
-2. Download the macOS x64 bridge tarball from the GitHub release and unpack it into a stable location. The released bridge is macOS x64 only; non-macOS install paths are not produced by the release pipeline in this preview.
-3. Create the bridge's state directory. The default location is `~/.pi-mob/release/`.
-4. Configure the bridge by editing `config.toml`. Use the bundled defaults as a starting point.
-5. Run the public CLI to install the bridge under `launchd`:
+1. Install Tailscale on the host and Android phone. Sign in to the same tailnet and enable MagicDNS.
+2. Download and unpack the macOS bridge release. The release contains the `pi-mob` CLI, bridge daemon, and install assets.
+3. Run the installer. `pi-mob setup` is the only first-time configuration authority; it creates the install layout, config, LaunchAgent, and state directories:
 
    ```sh
    ./pi-mob setup --workspace /absolute/path/to/your/projects
    ```
 
-6. Generate a fresh, expiring pairing passcode from the installed bridge:
+   To enable notifications, pass the owner-only Firebase service-account file during setup:
+
+   ```sh
+   ./pi-mob setup \
+     --workspace /absolute/path/to/your/projects \
+     --fcm-service-account /absolute/path/to/service-account.json
+   ```
+
+   The installer persists only that absolute path in the owner-only install config and generated LaunchAgent. It never copies or logs the credential contents. Omit the option when notifications are not wanted; the bridge will truthfully advertise notifications as unavailable.
+4. Start or verify the installation if setup did not leave it running:
+
+   ```sh
+   ./pi-mob start
+   ./pi-mob status
+   ```
+
+5. Generate a fresh, expiring pairing passcode:
 
    ```sh
    ./pi-mob pair
    ```
 
-   `pair` checks the installed listener and owned Tailscale Serve route before issuing the challenge. It prints only the HTTPS endpoint, six-digit passcode, and expiry. If the route or listener is unavailable, it refuses without issuing a challenge. QR generation, QR scanning, and JSON pairing-payload entry are not supported.
-7. If you want notifications, drop a Firebase service-account JSON into the bridge state directory and add the absolute path to the bridge launch arguments.
+   `pair` checks the listener and owned Tailscale Serve route before issuing the challenge. Enter the HTTPS endpoint and six-digit passcode manually in the Android app. QR and JSON pairing-payload flows are unsupported.
 
 ## One-time phone setup
 
-1. Install the APK from the GitHub release on the Android phone.
-2. Open Pi Mob. Tap **Pair**, then enter the endpoint and six-digit passcode shown by the bridge.
-3. Pi Mob submits the enrollment secret to the bridge. The first successful bind mints a 256-bit installation credential stored in Android Keystore-backed secure storage and never in SQLite or logs. Subsequent reconnects reuse the credential automatically.
-4. Accept the notification permission prompt. The phone stays quiet until a reply arrives while the app is backgrounded.
+1. Install the APK from the GitHub release.
+2. Open Pi Mob, tap **Pair**, and enter the endpoint and passcode.
+3. Complete enrollment. The per-installation credential is stored in Android Keystore-backed secure storage.
+4. Accept the notification permission prompt when notifications are configured.
 
 ## Daily use
 
-- Open the app. The most recent chat loads with the in-flight draft restored.
-- Send a prompt. The bridge dispatches it to the correct Pi session.
-- Enter `/model` in the composer to open the model picker.
-- Enter `/commands` in the composer to open the selected session's command palette.
-- Lock the phone. A notification appears when the reply arrives. Tap it to open the chat.
-- Open the burger menu to switch chats, search every chat, or change the bridge address.
+- Open the app; the most recent chat and draft restore after reconnect.
+- Send prompts to the selected Pi session.
+- Enter `/model` or `/commands` in the composer for the host-backed controls.
+- Lock the phone to verify background notification delivery when FCM is configured.
+- Use the burger menu to switch chats, search chats, or change the bridge address.
 
 ## Verifying the install
 
-- The bridge exposes `/readyz` and responds with `{"status":"ready"}` once started.
-- The mobile app shows the bridge address and the current connection phase in the connection panel.
-- A locked-phone prompt/notification/tap round-trip is the canonical end-to-end test.
+- `./pi-mob status` reports lifecycle and listener readiness.
+- The bridge `/readyz` endpoint returns `{"status":"ready"}` once startup is complete.
+- The phone connection panel shows the current connection phase.
+- A locked-phone prompt/notification/tap round-trip is the canonical notification check.
 
 ## What to do if something goes wrong
 
-- The mobile app never leaves the splash card: the bridge is unreachable. Check `launchctl list | grep pi-mob` and Tailscale status.
-- Notifications never arrive: the bridge was not started with a valid service account, or the app permission was revoked. The burger menu surfaces the current state.
-- The bridge reports a connection issue: the connection panel shows the sanitized error and a retry action.
+- Setup reports Tailscale is unavailable: install/open Tailscale, sign in, enable MagicDNS, and rerun setup.
+- Status reports the listener is not ready: run `pi-mob start`, then inspect `pi-mob status` and the LaunchAgent logs.
+- Notifications are unavailable: confirm setup used an absolute owner-only service-account path and that Android notification permission is granted.
+- The phone cannot connect: confirm both devices are on the same tailnet and rerun `pi-mob pair`.

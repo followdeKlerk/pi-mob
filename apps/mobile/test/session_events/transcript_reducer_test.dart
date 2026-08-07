@@ -182,55 +182,116 @@ CanonicalSessionEvent _event({
 
 void main() {
   group('CanonicalTranscriptReducer', () {
-    test('malformed completion does not create an empty assistant or duplicate tools', () {
-      const turnId = 'turn-1';
-      var state = CanonicalTranscriptState.empty('s1');
-      final events = <CanonicalSessionEvent>[
-        _event(sequence: 1, type: CanonicalEventType.userMessageCreated, payload: <String, Object?>{
-          'turnId': turnId, 'messageId': 'user-1', 'text': 'pwd',
-        }),
-        _event(sequence: 2, type: CanonicalEventType.turnStarted, payload: <String, Object?>{'turnId': turnId}),
-        _event(sequence: 3, type: CanonicalEventType.assistantMessageCompleted, payload: <String, Object?>{
-          'turnId': turnId, 'messageId': '$turnId:0',
-        }),
-        _event(sequence: 4, type: CanonicalEventType.toolCallStarted, payload: <String, Object?>{
-          'turnId': turnId, 'toolCallId': 'pwd', 'toolName': 'bash', 'arguments': <String, Object?>{},
-        }),
-        _event(sequence: 5, type: CanonicalEventType.toolCallCompleted, payload: <String, Object?>{
-          'turnId': turnId, 'toolCallId': 'pwd', 'result': '/private/repo',
-        }),
-        _event(sequence: 6, type: CanonicalEventType.assistantStarted, payload: <String, Object?>{
-          'turnId': turnId, 'messageId': '$turnId:assistant:1',
-        }),
-        _event(sequence: 7, type: CanonicalEventType.assistantContentReplaced, payload: <String, Object?>{
-          'turnId': turnId, 'messageId': '$turnId:assistant:1', 'content': <Map<String, Object?>>[
-            <String, Object?>{'kind': 'text', 'text': 'The working directory is /private/repo'},
-          ],
-        }),
-        _event(sequence: 8, type: CanonicalEventType.assistantMessageCompleted, payload: <String, Object?>{
-          'turnId': turnId, 'messageId': '$turnId:assistant:1',
-        }),
-        _event(sequence: 9, type: CanonicalEventType.assistantMessageCompleted, payload: <String, Object?>{
-          'turnId': turnId, 'messageId': '$turnId:assistant',
-        }),
-        _event(sequence: 10, type: CanonicalEventType.turnSettled, payload: <String, Object?>{'turnId': turnId}),
-      ];
-      for (final event in events) state = applyCanonicalEvent(state, event);
+    test(
+      'malformed completion does not create an empty assistant or duplicate tools',
+      () {
+        const turnId = 'turn-1';
+        var state = CanonicalTranscriptState.empty('s1');
+        final events = <CanonicalSessionEvent>[
+          _event(
+            sequence: 1,
+            type: CanonicalEventType.userMessageCreated,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'messageId': 'user-1',
+              'text': 'pwd',
+            },
+          ),
+          _event(
+            sequence: 2,
+            type: CanonicalEventType.turnStarted,
+            payload: <String, Object?>{'turnId': turnId},
+          ),
+          _event(
+            sequence: 3,
+            type: CanonicalEventType.assistantMessageCompleted,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'messageId': '$turnId:0',
+            },
+          ),
+          _event(
+            sequence: 4,
+            type: CanonicalEventType.toolCallStarted,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'toolCallId': 'pwd',
+              'toolName': 'bash',
+              'arguments': <String, Object?>{},
+            },
+          ),
+          _event(
+            sequence: 5,
+            type: CanonicalEventType.toolCallCompleted,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'toolCallId': 'pwd',
+              'result': '/private/repo',
+            },
+          ),
+          _event(
+            sequence: 6,
+            type: CanonicalEventType.assistantStarted,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'messageId': '$turnId:assistant:1',
+            },
+          ),
+          _event(
+            sequence: 7,
+            type: CanonicalEventType.assistantContentReplaced,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'messageId': '$turnId:assistant:1',
+              'content': <Map<String, Object?>>[
+                <String, Object?>{
+                  'kind': 'text',
+                  'text': 'The working directory is /private/repo',
+                },
+              ],
+            },
+          ),
+          _event(
+            sequence: 8,
+            type: CanonicalEventType.assistantMessageCompleted,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'messageId': '$turnId:assistant:1',
+            },
+          ),
+          _event(
+            sequence: 9,
+            type: CanonicalEventType.assistantMessageCompleted,
+            payload: <String, Object?>{
+              'turnId': turnId,
+              'messageId': '$turnId:assistant',
+            },
+          ),
+          _event(
+            sequence: 10,
+            type: CanonicalEventType.turnSettled,
+            payload: <String, Object?>{'turnId': turnId},
+          ),
+        ];
+        for (final event in events) state = applyCanonicalEvent(state, event);
 
-      expect(state.assistantMessages, hasLength(1));
-      expect(state.assistantMessages.values.single.content.single.text, contains('/private/repo'));
-      expect(state.toolCalls, hasLength(1));
-      final document = projectCanonicalToDocument(state);
-      final toolCards = document.turns
-          .whereType<AssistantTurn>()
-          .expand((turn) => turn.items)
-          .whereType<ToolItem>()
-          .toList();
-      expect(toolCards, hasLength(1));
-      expect(document.turns.whereType<AssistantTurn>().length, 2);
-      expect(state.diagnostics, hasLength(2));
-    });
-
+        expect(state.assistantMessages, hasLength(1));
+        expect(
+          state.assistantMessages.values.single.content.single.text,
+          contains('/private/repo'),
+        );
+        expect(state.toolCalls, hasLength(1));
+        final document = projectCanonicalToDocument(state);
+        final toolCards = document.turns
+            .whereType<AssistantTurn>()
+            .expand((turn) => turn.items)
+            .whereType<ToolItem>()
+            .toList();
+        expect(toolCards, hasLength(1));
+        expect(document.turns.whereType<AssistantTurn>().length, 2);
+        expect(state.diagnostics, hasLength(2));
+      },
+    );
 
     test('reused Pi content-block IDs do not hide a later reply', () {
       var state = CanonicalTranscriptState.empty('s1');

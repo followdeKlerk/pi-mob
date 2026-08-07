@@ -9,6 +9,7 @@ import {
   loadFcmServiceAccount,
   parseCliArgs,
   parseFcmServiceAccountJson,
+  resolveFcmServiceAccountPath,
   UnavailableApnsTransport,
 } from "../src/daemon";
 
@@ -76,6 +77,13 @@ describe("M15 production FCM daemon configuration", () => {
       "fcm",
     ]);
     store.close();
+  });
+
+  test("daemon invocation resolves the installed config path unless explicitly overridden", () => {
+    const configured = "/private/pi-mob/firebase-service-account.json";
+    expect(resolveFcmServiceAccountPath(null, { fcmServiceAccount: configured })).toBe(configured);
+    expect(resolveFcmServiceAccountPath("/private/override.json", { fcmServiceAccount: configured })).toBe("/private/override.json");
+    expect(resolveFcmServiceAccountPath(null, null)).toBeNull();
   });
 
   test("accepts an absolute credential path and APNs remains unavailable", async () => {

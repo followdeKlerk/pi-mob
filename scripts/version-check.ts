@@ -120,6 +120,12 @@ function readTomlStringField(text: string, key: string): string | null {
   return match ? match[1]! : null;
 }
 
+/** Reads the first concrete current release version from a public Markdown document. */
+function readMarkdownCurrentVersion(text: string): string | null {
+  const match = /\bv?(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)\b/.exec(text);
+  return match ? match[1]! : null;
+}
+
 /** Reads the canonical version from the VERSION file. */
 function readCanonicalVersion(files: Record<string, string>): string | null {
   const text = files[VERSION_PATH];
@@ -282,6 +288,14 @@ const FIELD_RULES: ReadonlyArray<{ file: string; rule: FieldRule }> = [
       },
     },
   },
+  ...["README.md", "CHANGELOG.md", "docs/PROJECT_STATUS.md", "docs/PROTOCOL.md", "docs/QUICKSTART.md"].map((file) => ({
+    file,
+    rule: {
+      field: "current release version",
+      read: (files: Record<string, string>) => readMarkdownCurrentVersion(files[file] ?? ""),
+      expected: (canonical: string) => canonical,
+    },
+  })),
 ];
 
 /**
@@ -390,6 +404,11 @@ const EXECUTABLE_FILES: ReadonlyArray<string> = [
   "apps/mobile/lib/main.dart",
   "apps/mobile/lib/src/connection/connection_coordinator.dart",
   "apps/mobile/lib/src/data/app_database.dart",
+  "README.md",
+  "CHANGELOG.md",
+  "docs/PROJECT_STATUS.md",
+  "docs/PROTOCOL.md",
+  "docs/QUICKSTART.md",
 ];
 
 function main(): number {

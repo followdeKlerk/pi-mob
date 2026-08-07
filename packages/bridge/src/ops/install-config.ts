@@ -38,6 +38,8 @@ export interface BridgeInstallConfig {
   readonly hostname: string;
   readonly port: number;
   readonly tailscaleServe: boolean;
+  /** Optional owner-only Google service-account path for FCM. */
+  readonly fcmServiceAccount?: string;
 }
 
 /** Thrown when an install-config value fails validation. */
@@ -56,6 +58,7 @@ export interface DefaultInstallConfigOptions {
   readonly hostname?: string;
   readonly environment?: InstallEnvironment;
   readonly tailscaleServe?: boolean;
+  readonly fcmServiceAccount?: string;
 }
 
 const LOOPBACK_HOSTS = new Set(["127.0.0.1", "::1", "localhost"]);
@@ -79,6 +82,7 @@ export function defaultInstallConfig(options: DefaultInstallConfigOptions): Brid
     hostname,
     port,
     tailscaleServe: options.tailscaleServe ?? true,
+    ...(options.fcmServiceAccount !== undefined ? { fcmServiceAccount: options.fcmServiceAccount } : {}),
   };
 }
 
@@ -124,6 +128,13 @@ export function validateInstallConfig(value: unknown): BridgeInstallConfig {
     assertAbsolute(String(key), value_);
     assertNoTraversal(String(key), value_);
   }
+  if (value.fcmServiceAccount !== undefined) {
+    if (typeof value.fcmServiceAccount !== "string" || value.fcmServiceAccount.length === 0) {
+      throw new InstallConfigValidationError("fcm_service_account", "fcmServiceAccount must be an absolute path");
+    }
+    assertAbsolute("fcmServiceAccount", value.fcmServiceAccount);
+    assertNoTraversal("fcmServiceAccount", value.fcmServiceAccount);
+  }
   validatePort(value.port);
   validateHostname(value.hostname as string);
   if (typeof value.tailscaleServe !== "boolean") {
@@ -143,6 +154,7 @@ export function validateInstallConfig(value: unknown): BridgeInstallConfig {
     hostname: value.hostname as string,
     port: value.port,
     tailscaleServe: value.tailscaleServe,
+    ...(value.fcmServiceAccount !== undefined ? { fcmServiceAccount: value.fcmServiceAccount as string } : {}),
   };
 }
 
@@ -169,6 +181,7 @@ export function formatInstallConfig(config: BridgeInstallConfig): string {
   lines.push(`hostname = ${tomlString(config.hostname)}`);
   lines.push(`port = ${config.port}`);
   lines.push(`tailscale_serve = ${config.tailscaleServe ? "true" : "false"}`);
+  if (config.fcmServiceAccount !== undefined) lines.push(`fcm_service_account = ${tomlString(config.fcmServiceAccount)}`);
   return `${lines.join("\n")}\n`;
 }
 
@@ -181,6 +194,10 @@ export function writeInstallConfig(path: string, config: BridgeInstallConfig, fs
   for (const key of ["piExecutable", "bridgeExecutable", "stateRoot", "logRoot", "backupRoot", "secretsRoot"] as const) {
     assertAbsolute(key, config[key]);
     assertNoTraversal(key, config[key]);
+  }
+  if (config.fcmServiceAccount !== undefined) {
+    assertAbsolute("fcmServiceAccount", config.fcmServiceAccount);
+    assertNoTraversal("fcmServiceAccount", config.fcmServiceAccount);
   }
   fs.writeFile(path, formatInstallConfig(config), FILE_MODE);
   fs.chmod(path, FILE_MODE);
@@ -284,6 +301,7 @@ const TOML_KEY_MAP: Record<string, string> = {
   backup_root: "backupRoot",
   secrets_root: "secretsRoot",
   tailscale_serve: "tailscaleServe",
+  fcm_service_account: "fcmServiceAccount",
 };
 
 function parseTomlValue(text: string): unknown {

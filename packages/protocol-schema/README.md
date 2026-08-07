@@ -13,7 +13,7 @@ For feature availability, inspect:
 3. the production-wiring integration tests;
 4. [`docs/PROJECT_STATUS.md`](../../docs/PROJECT_STATUS.md).
 
-The production core includes streams, durable commands, controller leases, and raw RPC. Optional schemas for an unwired provider must remain capability-gated.
+The production core includes streams, durable commands, and controller leases. Raw RPC remains an internal compatibility surface; optional schemas for an unwired provider must remain capability-gated.
 
 Git integration is out of product scope. Do not add new Git commands, controls, events, or capability claims. Existing experimental Git definitions may be removed only after compatibility and fixture dependencies are reviewed.
 

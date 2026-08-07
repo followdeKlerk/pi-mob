@@ -1,8 +1,9 @@
 # Project status
 
-This document is the canonical capability map for Pi Mob. It uses three terms precisely:
+This document is the canonical capability map for Pi Mob. It uses four terms precisely:
 
 - **Production-wired** — the normal daemon constructs it, the bridge handshake advertises it, the mobile app exercises it, and a focused integration test covers the actual construction path.
+- **Implemented, not production-wired** — code or UI exists, but the released daemon path does not supply or advertise it.
 - **Planned** — accepted as future work.
 - **Out of scope** — intentionally not planned.
 
@@ -28,7 +29,7 @@ This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`
 | Session list, rename, create, and delete | Yes |
 | Per-session history import with bounded batches, durable checkpoints, and restart coverage | Yes |
 | Controller leases that survive navigation and reopen quickly | Yes |
-| Session activation and PI process ownership tied to a stable `--session-id` | Yes |
+| Session activation and Pi process ownership tied to a stable `--session-id` | Yes |
 | Prompt dispatch through the correct session owner with safe rejection when no live owner exists | Yes |
 | Reconnectable shell that restores the most recent chat, drafts, and attachments | Yes |
 | Model changes through the host-driven picker opened by `/model`, backed by `model.list` and `model.set` | Yes |
@@ -47,12 +48,9 @@ The canonical transcript path is production-wired. The normal daemon does not wr
 
 > Note on focus: foreground FCM alerts are suppressed while the main activity is visible. Background delivery is wired on a real phone. Tap routing and notification dedupe remain best-effort until physical-device runtime proof exists.
 
-## Implemented in isolation, not production-wired
-The items below have code or UI in the repository, but the normal daemon does not construct the provider required to advertise them. They are not part of the released preview.
-
 ## Android release hygiene
 
-- Stable preview identity is `com.example.pi_mob` across Gradle, Kotlin packages, Firebase wiring, services, and deep links.
+- Permanent Android application ID is `com.example.pi_mob`; it is retained because Firebase wiring, installed APK upgrades, services, and deep links already use it.
 - Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.3-alpha.1` / code `3`, signer type, permissions, and deep-link declarations.
 
 ## Planned
@@ -60,7 +58,7 @@ The items below have code or UI in the repository, but the normal daemon does no
 - Code-signed bridge distributable for macOS. (Non-macOS hosts are not a released target; see "Out of scope".)
 - Notarized macOS bundle.
 - iOS distribution.
-- Public release notes after `1.0.0`.
+- Stable release notes after `1.0.0`.
 - Biometric unlock for the mobile app.
 - Background sync scheduler that opts in only when the app is foregrounded (no silent background work).
 

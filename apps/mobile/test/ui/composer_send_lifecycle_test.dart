@@ -100,9 +100,7 @@ void main() {
     expect(
       find.descendant(
         of: find.byKey(const Key('slash-command-results')),
-        matching: find.textContaining(
-          'Open the model picker',
-        ),
+        matching: find.textContaining('Open the model picker'),
       ),
       findsOneWidget,
     );

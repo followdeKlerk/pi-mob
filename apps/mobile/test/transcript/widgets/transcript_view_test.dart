@@ -119,7 +119,9 @@ void main() {
     expect(list.controller, isNotNull);
   });
 
-  testWidgets('user messages render without delivery indicators', (tester) async {
+  testWidgets('user messages render without delivery indicators', (
+    tester,
+  ) async {
     await tester.pumpWidget(
       _app(
         TranscriptView(

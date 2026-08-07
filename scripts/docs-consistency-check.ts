@@ -27,6 +27,13 @@ if (!status.includes(`version \`${version}\` / code \`${ANDROID_VERSION_CODE}\``
 requireText("README.md", "Alpha software:");
 requireText("README.md", "bounded status metadata is sent through Firebase Cloud Messaging");
 requireText("README.md", "catalogue.v1");
+requireText("README.md", "There is no Pi Mob cloud service that receives repository content");
+requireText("docs/PROJECT_STATUS.md", "It uses four terms precisely:");
+requireText("docs/PROJECT_STATUS.md", "Permanent Android application ID is `com.example.pi_mob`");
+requireText("docs/ARCHITECTURE.md", "bounded status-only FCM messages containing notification copy");
+requireText("docs/QUICKSTART.md", "--fcm-service-account");
+requireText("docs/RELEASE.md", "first stable release");
+requireText("packages/protocol-schema/README.md", "internal compatibility surface");
 requireText("docs/README.md", "[RUNBOOK.md](RUNBOOK.md)");
 requireText("docs/PRIVACY.md", "[SECURITY.md](../SECURITY.md)");
 requireText("apps/mobile/android/app/src/main/AndroidManifest.xml", 'android:label="Pi Mob"');
@@ -40,6 +47,8 @@ forbidText("SECURITY.md", /private alpha|listener is bound after|bind-loopback-b
 forbidText("AGENTS.md", /Current objective|Priority order|documented by CI|Bind the loopback listener before/i, "mutable or stale project status");
 forbidText("CONTRIBUTING.md", /private alpha|versions used by CI/i, "stale project or toolchain wording");
 forbidText("packages/bridge/README.md", /does not construct.*catalogue|does not advertise.*catalogue/i, "stale catalogue capability claim");
+forbidText("docs/ARCHITECTURE.md", /data-only FCM/i, "stale FCM transport wording");
+forbidText("README.md", /does not see or proxy your repositories/i, "absolute repository visibility claim");
 
 if (!existsSync(join(ROOT, "docs/PRIVACY.md"))) failures.push("docs/PRIVACY.md: missing");
 if (failures.length > 0) {

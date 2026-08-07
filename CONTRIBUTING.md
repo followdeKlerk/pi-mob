@@ -77,7 +77,7 @@ flutter test
 Documentation-only validation:
 
 ```sh
-bun run docs:check
+bun run docs
 ```
 
 If a required host, SDK, credential, or service is unavailable, record that limitation. Do not claim a check passed when it was not run.

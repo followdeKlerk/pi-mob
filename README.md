@@ -33,7 +33,7 @@ The Android app uses the stable preview identity `com.example.pi_mob` and is pub
 
 ## What Pi Mob is
 
-Pi Mob is a thin, durable, reconnectable phone surface for one local Pi host. It is not a SaaS, not a multi-tenant product, and not a public relay. It does not see or proxy your repositories.
+Pi Mob is a thin, durable, reconnectable phone surface for one local Pi host. It is not a SaaS, not a multi-tenant product, and not a public relay. There is no Pi Mob cloud service that receives repository content; workspace discovery and search run locally on the host.
 
 The bridge:
 

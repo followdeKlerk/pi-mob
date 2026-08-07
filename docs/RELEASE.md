@@ -2,7 +2,7 @@
 
 ## Versioning
 
-Pi Mob uses semantic versioning. The preview line uses `0.0.x-alpha.y` for the first ship. The first public release will be `1.0.0`.
+Pi Mob uses semantic versioning. The preview line uses `0.0.x-alpha.y` for the first ship. The first stable release will be `1.0.0`.
 
 | Release type | Audience | Signing | Notes |
 | --- | --- | --- | --- |

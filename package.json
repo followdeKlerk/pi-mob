@@ -17,6 +17,7 @@
     "schema:check": "bun run scripts/schema-check.ts",
     "fixtures:check": "bun run scripts/fixtures-check.ts",
     "docs:check": "bun run scripts/docs-check.ts",
+    "docs": "bun run docs:check && bun run docs:consistency-check",
     "docs:consistency-check": "bun run scripts/docs-consistency-check.ts",
     "version:check": "bun run scripts/version-check.ts",
     "version:sync": "bun run scripts/sync-version.ts",

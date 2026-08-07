@@ -122,6 +122,7 @@ export const CLI_HELP = [
   "",
   "Commands:",
   "  setup       guided first-time setup (start with --workspace PATH)",
+  "              optional FCM: --fcm-service-account /absolute/path.json",
   "  start       idempotently start the configured bridge and owned Serve route",
   "  stop        idempotently stop the bridge and remove its owned Serve route",
   "  status      compact lifecycle, Serve, and pairing readiness",
@@ -687,10 +688,23 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
     throw new CliArgsError("flag_invalid", `--environment must be 'dev' or 'release' (got ${JSON.stringify(environmentRaw)})`);
   }
   const tailscaleServe = getFlagBoolean(args, "tailscale-serve", true);
+  const envFileEnabled = getFlagBoolean(args, "env-file", true);
   const launchAgentLabel = getFlagString(args, "launch-agent-label") ?? DEFAULT_LAUNCH_AGENT_LABEL;
   const launchAgentsRoot = requireAbsolute("launch-agents-root", getFlagStringRequired(args, "launch-agents-root"));
-  const envFileEnabled = getFlagBoolean(args, "env-file", true);
   const paths = buildInstallPaths({ installRoot, launchAgentLabel, launchAgentsRoot });
+  const fcmServiceAccountFlag = getFlagString(args, "fcm-service-account");
+  let fcmServiceAccount = fcmServiceAccountFlag === undefined
+    ? undefined
+    : requireAbsolute("fcm-service-account", fcmServiceAccountFlag);
+  if (fcmServiceAccount === undefined && deps.fs.exists(paths.configFile)) {
+    fcmServiceAccount = readInstallConfig(paths.configFile, deps.fs).fcmServiceAccount;
+  }
+  if (fcmServiceAccount !== undefined) {
+    if (!deps.fs.exists(fcmServiceAccount)) throw new CliArgsError("artifact_missing", "FCM service-account file was not found");
+    const stat = deps.fs.stat(fcmServiceAccount);
+    if (!stat.isFile) throw new CliArgsError("flag_invalid", "FCM service-account path must be a regular file");
+    if ((stat.mode & 0o077) !== 0) throw new CliArgsError("flag_invalid", "FCM service-account file must be owner-only (mode 0600 or stricter)");
+  }
   if (bridgeArtifact !== null) {
     const expectedBridge = `${paths.binRoot}/bridge-daemon`;
     if (bridgeExecutable !== expectedBridge) {
@@ -709,6 +723,7 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
     hostname,
     environment: environmentRaw,
     tailscaleServe,
+    ...(fcmServiceAccount !== undefined ? { fcmServiceAccount } : {}),
   });
 
   // Capture before any filesystem write. A failed capture leaves the install
@@ -727,6 +742,7 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
       "--config", paths.configFile,
       "--workspace", workspaceRoot,
       "--session-dir", piSessionDir,
+      ...(fcmServiceAccount !== undefined ? ["--fcm-service-account", fcmServiceAccount] : []),
     ],
     workingDirectory: workspaceRoot,
     environment: capturedEnv,

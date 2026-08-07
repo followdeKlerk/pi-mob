@@ -9,7 +9,7 @@ The bridge is the host-side daemon that mediates durable streams, controller lea
 - Controller leases that survive navigation and reopen quickly.
 - Session activation and Pi process ownership tied to a stable `--session-id`.
 - Per-session history import with bounded batches, durable checkpoints, and restart coverage.
-- FCM notification dispatch using a host-supplied service account, with deduplication by `notificationId`. The host advertises `notifications.v1` only when the operator supplied a valid Firebase service account at startup; until then the truthful state is "Notifications unavailable".
+- FCM notification dispatch using a host-supplied service account, with durable deduplication by source event identity; `notificationId` is generated for client delivery. The host advertises `notifications.v1` only when the operator supplied a valid Firebase service account at startup; until then the truthful state is "Notifications unavailable".
 - Workspace discovery and bounded search under explicit `--search-root` paths, or the normal host defaults: `~/GitHub`, `~/github`, the home directory, and the configured workspace.
 - Host diagnostic surface with explicit phases, sanitized errors, and retry actions.
 
@@ -54,7 +54,6 @@ The bridge accepts a TOML config file via `--config`. The CLI flags take precede
 
 Before submitting changes:
 
-- `bun install --frozen-lockfile`
 - `bun install --frozen-lockfile`
 - `bun run typecheck`
 - `bun run schema:check`

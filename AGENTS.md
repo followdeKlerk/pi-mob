@@ -85,7 +85,7 @@ flutter test
 For documentation-only changes:
 
 ```sh
-bun run docs:check
+bun run docs
 ```
 
 Record any unavailable toolchain or host-only validation explicitly. Never invent successful output.

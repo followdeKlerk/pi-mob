@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
+import { chmodSync, mkdtempSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createNodeFileSystemPort, type ClockPort } from "../src/ops/ports";
@@ -49,6 +49,22 @@ describe("M7 operations CLI", () => {
     // Phase 4: no policy extension is injected.
     expect(plist).not.toContain("--extension");
     expect(plist).not.toMatch(/(?:bash|sh)<\/string>\s*<string>-c/);
+  });
+
+  test("install persists the FCM service-account path and passes it to launchd", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-mob-m7-fcm-install-"));
+    const workspace = join(root, "workspace"); const sessions = join(root, "sessions");
+    mkdirSync(workspace); mkdirSync(sessions);
+    const serviceAccount = join(root, "service-account.json");
+    writeFileSync(serviceAccount, "{\"type\":\"service_account\"}"); chmodSync(serviceAccount, 0o600);
+    writeFileSync(join(root, "pi"), "fixture"); writeFileSync(join(root, "bridge"), "fixture");
+    const result = await handleInstall(parseArgs(["install", "--install-root", join(root, "install"), "--launch-agents-root", join(root, "LaunchAgents"), "--pi-executable", join(root, "pi"), "--bridge-executable", join(root, "bridge"), "--workspace", workspace, "--pi-session-dir", sessions, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "8788", "--hostname", "127.0.0.1", "--environment", "release", "--fcm-service-account", serviceAccount]), deps([], fakeLifecycle()));
+    expect(result.config.fcmServiceAccount).toBe(serviceAccount);
+    const config = createNodeFileSystemPort().readFile(result.paths.configFile).toString();
+    const plist = createNodeFileSystemPort().readFile(result.plistPath).toString();
+    expect(config).toContain(`fcm_service_account = "${serviceAccount}"`);
+    expect(plist).toContain("--fcm-service-account"); expect(plist).toContain(serviceAccount);
+    expect(config).not.toContain("service_account.json\":");
   });
 
   test("setup detects and guides missing Tailscale without installing or running tailscale up", async () => {

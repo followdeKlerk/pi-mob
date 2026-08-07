@@ -7,6 +7,8 @@ import { BRIDGE_VERSION } from "../packages/bridge/src/version";
 
 export const CORE = ["streams.v1", "commands.v1", "controller_leases.v1", "session_events.v2", "catalogue.v1"] as const;
 export const EXPECTED = { withoutFcm: [...CORE].sort(), withFcm: [...CORE, "notifications.v1"].sort() };
+const ROOT = new URL("..", import.meta.url).pathname;
+const projectPath = (path: string): string => join(ROOT, path);
 const FCM = { projectId: "capability-report-project", serviceAccountEmail: "capability-report@example.invalid", privateKey: "-----BEGIN PRIVATE KEY-----\nplaceholder\n-----END PRIVATE KEY-----" };
 export type CapabilityMatrix = { withoutFcm: string[]; withFcm: string[] };
 export type Snapshot = { configuration: "with-fcm" | "without-fcm"; capabilities: string[] };
@@ -96,15 +98,15 @@ export async function buildReport(): Promise<Report> {
   const snapshots = [await snapshot("with-fcm"), await snapshot("without-fcm")];
   const live = { withoutFcm: snapshots.find((s) => s.configuration === "without-fcm")!.capabilities, withFcm: snapshots.find((s) => s.configuration === "with-fcm")!.capabilities };
   if (!same(live.withoutFcm, EXPECTED.withoutFcm) || !same(live.withFcm, EXPECTED.withFcm)) throw new Error("live normal-daemon capability drift");
-  checkCapabilityDocs(await Bun.file("docs/PROJECT_STATUS.md").text(), await Bun.file("docs/PROTOCOL.md").text(), live);
+  checkCapabilityDocs(await Bun.file(projectPath("docs/PROJECT_STATUS.md")).text(), await Bun.file(projectPath("docs/PROTOCOL.md")).text(), live);
   const capabilities = metadata.map(([capability, sourceFile, sourceSymbol, mobileFile, mobileSymbol, focusedTestPath]) => {
-    if (!existsSync(sourceFile) || !readFileSync(sourceFile, "utf8").includes(sourceSymbol)) throw new Error(`invalid provider source metadata for ${capability}`);
-    if (!existsSync(mobileFile) || !readFileSync(mobileFile, "utf8").includes(mobileSymbol)) throw new Error(`invalid mobile metadata for ${capability}`);
-    if (!existsSync(focusedTestPath)) throw new Error(`missing focused test metadata for ${capability}`);
+    if (!existsSync(projectPath(sourceFile)) || !readFileSync(projectPath(sourceFile), "utf8").includes(sourceSymbol)) throw new Error(`invalid provider source metadata for ${capability}`);
+    if (!existsSync(projectPath(mobileFile)) || !readFileSync(projectPath(mobileFile), "utf8").includes(mobileSymbol)) throw new Error(`invalid mobile metadata for ${capability}`);
+    if (!existsSync(projectPath(focusedTestPath))) throw new Error(`missing focused test metadata for ${capability}`);
     return { capability, providerConstructionSource: `${sourceFile}: ${sourceSymbol}`, mobileEntryPoint: `${mobileFile}: ${mobileSymbol}`, focusedTestPath, releaseVersion: BRIDGE_VERSION };
   });
   return { releaseVersion: BRIDGE_VERSION, snapshots, capabilities };
 }
 type Report = { releaseVersion: string; snapshots: Snapshot[]; capabilities: Array<Record<string, string>> };
-if (import.meta.main) { const report = await buildReport(); await mkdir("reports", { recursive: true }); await writeFile("reports/capabilities.json", `${JSON.stringify(report, null, 2)}\n`); console.log(`capability-report ok (${report.snapshots.map((s) => `${s.configuration}:${s.capabilities.join(",")}`).join("; ")})`); }
+if (import.meta.main) { const report = await buildReport(); await mkdir(projectPath("reports"), { recursive: true }); await writeFile(projectPath("reports/capabilities.json"), `${JSON.stringify(report, null, 2)}\n`); console.log(`capability-report ok (${report.snapshots.map((s) => `${s.configuration}:${s.capabilities.join(",")}`).join("; ")})`); }
 export { snapshot };

@@ -955,6 +955,14 @@ export function parseCliArgs(argv: readonly string[]): CliArgs {
 
 const USAGE = `usage: daemon --workspace <abs path> [--config <abs path> | --executable <abs path>] [--extension <abs path>] [--port N] [--state-dir <abs path>] [--session-dir <abs path>] [--display-name <str>] [--search-root <abs path>] [--fcm-service-account <abs path>]`;
 
+/** Selects the explicit CLI path first, then the owner-only install config path. */
+export function resolveFcmServiceAccountPath(
+  explicitPath: string | null,
+  installed: { readonly fcmServiceAccount?: string } | null,
+): string | null {
+  return explicitPath ?? installed?.fcmServiceAccount ?? null;
+}
+
 export async function main(argv: readonly string[]): Promise<number> {
   let args: CliArgs;
   try { args = parseCliArgs(argv); }
@@ -972,9 +980,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     return args.help ? 0 : 2;
   }
   let fcmConfig: FcmConfig | null = null;
-  if (args.fcmServiceAccount) {
+  const fcmServiceAccount = resolveFcmServiceAccountPath(args.fcmServiceAccount, installed);
+  if (fcmServiceAccount) {
     try {
-      const loaded = loadFcmServiceAccount(args.fcmServiceAccount);
+      const loaded = loadFcmServiceAccount(fcmServiceAccount);
       fcmConfig = { projectId: loaded.projectId, serviceAccountEmail: loaded.serviceAccountEmail, privateKey: loaded.privateKey };
     } catch (error) {
       process.stderr.write(`${(error as Error).message}\n`);
