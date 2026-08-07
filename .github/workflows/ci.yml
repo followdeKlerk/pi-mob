@@ -17,6 +17,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.3.14
+      - uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.44.4
+          channel: stable
+          cache: true
+      - working-directory: apps/mobile
+        run: flutter pub get
       - run: bun install --frozen-lockfile
       - run: bun run all
 
