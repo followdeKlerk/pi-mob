@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-/** Checks documentation against current repository facts. */
+/** Checks stable documentation facts against repository metadata. */
 
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -13,44 +13,51 @@ function requireText(path: string, text: string): void {
   if (!read(path).includes(text)) failures.push(`${path}: missing ${JSON.stringify(text)}`);
 }
 
-function forbidText(path: string, pattern: RegExp, description: string): void {
-  if (pattern.test(read(path))) failures.push(`${path}: ${description}`);
-}
-
 const version = read("VERSION").split("\n", 1)[0]!.trim();
 if (version !== ANDROID_VERSION_NAME) failures.push(`VERSION and Android version differ: ${version} vs ${ANDROID_VERSION_NAME}`);
-const pubspec = read("apps/mobile/pubspec.yaml");
-if (!pubspec.includes(`version: ${version}+${ANDROID_VERSION_CODE}`)) failures.push("apps/mobile/pubspec.yaml: version metadata drift");
-const status = read("docs/PROJECT_STATUS.md");
-if (!status.includes(`version \`${version}\` / code \`${ANDROID_VERSION_CODE}\``)) failures.push("docs/PROJECT_STATUS.md: release metadata drift");
+if (!read("apps/mobile/pubspec.yaml").includes(`version: ${version}+${ANDROID_VERSION_CODE}`)) {
+  failures.push("apps/mobile/pubspec.yaml: version metadata drift");
+}
+
+const requiredDocs = [
+  "README.md",
+  "CONTRIBUTING.md",
+  "SECURITY.md",
+  "CHANGELOG.md",
+  "docs/PROJECT_STATUS.md",
+  "docs/QUICKSTART.md",
+  "docs/ARCHITECTURE.md",
+  "docs/PROTOCOL.md",
+  "docs/PRIVACY.md",
+  "apps/mobile/README.md",
+  "packages/bridge/README.md",
+  "packages/protocol-schema/README.md",
+];
+for (const path of requiredDocs) {
+  if (!existsSync(join(ROOT, path))) failures.push(`${path}: missing`);
+}
+
+for (const path of ["docs/README.md", "docs/RELEASE.md", "docs/RUNBOOK.md", "packages/protocol-fixtures/README.md"]) {
+  if (existsSync(join(ROOT, path))) failures.push(`${path}: redundant document restored`);
+}
 
 requireText("README.md", "Alpha software:");
-requireText("README.md", "bounded status metadata is sent through Firebase Cloud Messaging");
-requireText("README.md", "catalogue.v1");
-requireText("README.md", "There is no Pi Mob cloud service that receives repository content");
-requireText("docs/PROJECT_STATUS.md", "It uses four terms precisely:");
-requireText("docs/PROJECT_STATUS.md", "Permanent Android application ID is `com.example.pi_mob`");
-requireText("docs/ARCHITECTURE.md", "bounded status-only FCM messages containing notification copy");
+requireText("README.md", "Firebase Cloud Messaging");
+requireText("docs/PROJECT_STATUS.md", "**Production-wired**");
+requireText("docs/PROJECT_STATUS.md", "**Implemented, not production-wired**");
+requireText("docs/PROJECT_STATUS.md", "**Planned**");
+requireText("docs/PROJECT_STATUS.md", "**Out of scope**");
+requireText("docs/PROJECT_STATUS.md", "| without-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |");
+requireText("docs/PROJECT_STATUS.md", "| with-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |");
+requireText("docs/PROJECT_STATUS.md", `version \`${version}\` / code \`${ANDROID_VERSION_CODE}\``);
 requireText("docs/QUICKSTART.md", "--fcm-service-account");
-requireText("docs/RELEASE.md", "first stable release");
-requireText("packages/protocol-schema/README.md", "internal compatibility surface");
-requireText("docs/README.md", "[RUNBOOK.md](RUNBOOK.md)");
+requireText("docs/PROTOCOL.md", "exact message authority");
 requireText("docs/PRIVACY.md", "[SECURITY.md](../SECURITY.md)");
+requireText("CONTRIBUTING.md", "storePassword");
+requireText("packages/bridge/README.md", "Before recovery, stop the bridge");
+requireText("packages/protocol-schema/README.md", "They do not prove that the normal daemon constructs an optional provider");
 requireText("apps/mobile/android/app/src/main/AndroidManifest.xml", 'android:label="Pi Mob"');
 
-forbidText("README.md", /Apple\/Google push tokens|No data leaves your host other than/i, "privacy summary omits bounded FCM status metadata");
-forbidText("docs/PRIVACY.md", /App Store \/ Play Store|App Store\/Play Store/i, "unsupported store distribution claim");
-forbidText("docs/PRIVACY.md", /Coordinates are in the project README/i, "dead security-reporting pointer");
-forbidText("docs/ARCHITECTURE.md", /mobile app does not cache credentials/i, "credential-storage contradiction");
-forbidText("docs/PROTOCOL.md", /releases it when the user navigates away/i, "stale lease lifecycle claim");
-forbidText("SECURITY.md", /private alpha|listener is bound after|bind-loopback-before-history/i, "stale security state");
-forbidText("AGENTS.md", /Current objective|Priority order|documented by CI|Bind the loopback listener before/i, "mutable or stale project status");
-forbidText("CONTRIBUTING.md", /private alpha|versions used by CI/i, "stale project or toolchain wording");
-forbidText("packages/bridge/README.md", /does not construct.*catalogue|does not advertise.*catalogue/i, "stale catalogue capability claim");
-forbidText("docs/ARCHITECTURE.md", /data-only FCM/i, "stale FCM transport wording");
-forbidText("README.md", /does not see or proxy your repositories/i, "absolute repository visibility claim");
-
-if (!existsSync(join(ROOT, "docs/PRIVACY.md"))) failures.push("docs/PRIVACY.md: missing");
 if (failures.length > 0) {
   for (const failure of failures) console.error(`docs-consistency-check: ${failure}`);
   process.exit(1);

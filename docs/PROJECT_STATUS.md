@@ -1,85 +1,70 @@
 # Project status
 
-This document is the canonical capability map for Pi Mob. It uses four terms precisely:
+Pi Mob is an unsupported alpha preview. This file is the canonical capability and scope map.
 
-- **Production-wired** — the normal daemon constructs it, the bridge handshake advertises it, the mobile app exercises it, and a focused integration test covers the actual construction path.
-- **Implemented, not production-wired** — code or UI exists, but the released daemon path does not supply or advertise it.
-- **Planned** — accepted as future work.
-- **Out of scope** — intentionally not planned.
+Use these terms precisely:
 
-A library, a class, or an isolated test never proves a production feature. Capability discipline is enforced.
+- **Production-wired** — the normal daemon constructs it, the handshake advertises it, the mobile app exercises it, and a focused integration test covers the construction path.
+- **Implemented, not production-wired** — code or UI exists, but the normal daemon does not supply or advertise it.
+- **Planned** — accepted future work.
+- **Out of scope** — work that is intentionally not planned.
+
+A schema, class, widget, or isolated test does not prove production wiring.
 
 ## Normal daemon capability matrix
 
-This is the exact `hello.accepted.capabilities` contract produced by `runDaemon`.
+This is the exact `hello.accepted.capabilities` contract from `runDaemon`.
 
-| Configuration | hello.accepted.capabilities |
+| Configuration | `hello.accepted.capabilities` |
 | --- | --- |
 | without-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
 | with-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
 
 ## Production-wired in `v0.0.3-alpha.1`
 
-| Capability | Verified end-to-end |
-| --- | --- |
-| Manual pairing via HTTPS MagicDNS endpoint and one-time six-digit passcode (passcode mints the per-installation bearer credential); QR and JSON pairing-payload flows are removed and unsupported | Yes |
-| Per-installation bearer credential on `hello`, `POST /v1/attachments`, `GET /v1/exports/<id>`, and `device.register` with constant-time hash verification and host-side revocation | Yes |
-| Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed time, ETA, and throughput | Yes |
-| Stream subscription with durable cursor, replay, and live delivery | Yes |
-| Session list, rename, create, and delete | Yes |
-| Per-session history import with bounded batches, durable checkpoints, and restart coverage | Yes |
-| Controller leases that survive navigation and reopen quickly | Yes |
-| Session activation and Pi process ownership tied to a stable `--session-id` | Yes |
-| Prompt dispatch through the correct session owner with safe rejection when no live owner exists | Yes |
-| Reconnectable shell that restores the most recent chat, drafts, and attachments | Yes |
-| Model changes through the host-driven picker opened by `/model`, backed by `model.list` and `model.set` | Yes |
-| Per-chat transcript search and global cross-chat search | Yes |
-| Bounded workspace discovery and search under the normal host roots (`~/GitHub`/`~/github`, home, and the configured workspace), or explicit `--search-root` paths | Yes |
-| FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery on a real phone | Yes |
-| Host diagnostic surface with explicit phases, sanitized errors, and retry actions | Yes |
-| Canonical session-event v2 transport, replay, live delivery, coordinator ingestion, canonical reducer, and chat rendering | Yes. The normal daemon writes transcript events only to `CanonicalSessionStore`. It compacts acknowledged legacy events in bounded batches. |
-| Selected-session Pi command catalogue and `/commands` mobile palette | Yes. The normal daemon calls that session's Pi `get_commands` RPC, strips private source metadata, and bounds the result. |
+- Manual pairing with an HTTPS endpoint and one-time passcode.
+- Per-installation authentication for the WebSocket, attachments, exports, and device registration.
+- Durable stream replay and live delivery.
+- Session list, rename, create, delete, activation, and supervised Pi ownership.
+- Bounded history import with durable checkpoints.
+- Session-scoped controller leases.
+- Prompt routing to the live session owner.
+- Restoration of the recent chat, drafts, and attachments after reconnect.
+- Host-driven model selection through `/model`.
+- Per-chat, cross-chat, and bounded workspace search.
+- Cold-launch and per-chat synchronization progress.
+- Host diagnostics with bounded, sanitized errors.
+- Canonical session-event v2 replay, live delivery, reduction, and rendering.
+- The selected-session Pi command catalogue through `/commands`.
+- FCM registration and background notifications when `notifications.v1` is available.
 
-The bridge may still accept internal raw Pi RPC commands for compatibility, but `raw_rpc.v1` is not advertised to the released mobile client because the mobile raw-RPC surface was removed.
+The normal daemon stores released transcript events in `CanonicalSessionStore`. It keeps isolated legacy paths for older-host compatibility.
 
-### Simplification rewrite status
+Internal raw Pi RPC commands can remain available for compatibility. The released mobile client does not receive `raw_rpc.v1`.
 
-The canonical transcript path is production-wired. The normal daemon does not write or load the recipe projection. History reconciliation imports only canonical events. Legacy mobile caches and the isolated recipe projection remain for older-host compatibility.
+Physical-device evidence covers background FCM delivery. Notification tap routing and deduplication remain best-effort.
 
-> Note on focus: foreground FCM alerts are suppressed while the main activity is visible. Background delivery is wired on a real phone. Tap routing and notification dedupe remain best-effort until physical-device runtime proof exists.
+## Release facts
 
-## Android release hygiene
-
-- Permanent Android application ID is `com.example.pi_mob`; it is retained because Firebase wiring, installed APK upgrades, services, and deep links already use it.
-- Release signing is fail-closed and requires credentials supplied outside the repository. Artifact checks verify identity, version `0.0.3-alpha.1` / code `3`, signer type, permissions, and deep-link declarations.
+- The Android application ID is `com.example.pi_mob`.
+- Release signing is fail-closed and uses credentials outside the repository.
+- Artifact checks verify version `0.0.3-alpha.1` / code `3`, identity, signer type, permissions, and deep links.
+- The released bridge target is macOS x64. The bridge is not code-signed or notarized.
 
 ## Planned
 
-- Code-signed bridge distributable for macOS. (Non-macOS hosts are not a released target; see "Out of scope".)
-- Notarized macOS bundle.
+- Code-signed and notarized macOS bridge distribution.
 - iOS distribution.
 - Stable release notes after `1.0.0`.
-- Biometric unlock for the mobile app.
-- Background sync scheduler that opts in only when the app is foregrounded (no silent background work).
+- Biometric unlock.
+- A foreground-opt-in background synchronization scheduler.
 
 ## Out of scope
 
-- Public internet exposure. The bridge always runs on a private Tailscale tailnet.
-- Multi-user tenancy, accounts, billing, or shared workspaces.
-- Cloud-hosted bridge. The bridge runs on hardware you control.
-- Git status, commit, push, or any other repository action.
-- Voice calls, video, or anything outside Pi’s normal execution model.
-- Server-side rendering of chat content. The phone renders the projections.
-- Analytics, telemetry, or crash reporting to third-party services.
-
-## Capability discipline
-
-Before claiming a feature is shipped, the change must satisfy:
-
-1. The normal daemon constructs the provider.
-2. The `hello.accepted` handshake advertises the capability.
-3. The mobile app exercises the capability on the released path.
-4. A focused integration test covers the actual construction path.
-5. Documentation and release metadata claim no more than the test proves.
-
-If any of these is missing, the capability is at best “implemented, not production-wired” and must be reported as such.
+- Public listeners, public Internet exposure, and Tailscale Funnel.
+- Multi-user tenancy, accounts, billing, and shared workspaces.
+- A cloud-hosted bridge.
+- Git status, commit, push, CI summaries, and repository actions.
+- Voice, video, and behavior outside Pi's normal execution model.
+- Server-side chat rendering.
+- Third-party analytics, telemetry, and crash reporting.

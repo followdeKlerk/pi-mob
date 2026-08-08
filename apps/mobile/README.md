@@ -1,39 +1,21 @@
-# Pi Mob — Android app
+# Pi Mob Android app
 
-The Flutter Android client for Pi Mob. Pairs with a local bridge over a private Tailscale network.
-
-## What is production-wired
-
-- Stream subscription with durable cursor, replay, and live delivery.
-- Session list, rename, create, and delete.
-- Per-session history import with bounded batches, durable checkpoints, and restart coverage.
-- Controller leases that survive navigation and reopen quickly.
-- Session activation and Pi process ownership tied to a stable `--session-id`.
-- Prompt dispatch through the correct session owner with safe rejection when no live owner exists.
-- Reconnectable shell that restores the most recent chat, drafts, and attachments.
-- Host-driven model picker opened with `/model`, backed by `model.list` and `model.set`.
-- Selected-session Pi command catalogue through `/commands`, bounded and sanitized by the bridge.
-- Per-chat transcript search and global cross-chat search.
-- Bounded workspace discovery and search under the host defaults (`~/GitHub`/`~/github`, home, and the configured workspace) or explicit search roots.
-- Cold-launch splash card and per-chat sync progress with current chat, remaining count, elapsed time, ETA, and throughput.
-- FCM notifications: after the user grants OS permission, token registration and rotation are automatic when the host advertises `notifications.v1`; background delivery works on a real phone. Foreground alerts are suppressed while the app is visible. Native tap routing and notification dedupe remain best-effort until separately proven on a physical device.
-- Host diagnostic surface with explicit phases, sanitized errors, and retry actions.
+This Flutter app connects to the local bridge through private Tailscale Serve. See [Project status](../../docs/PROJECT_STATUS.md) for current capabilities.
 
 ## Layout
 
-```
+```text
 lib/
-  connection/        transport, coordinator, durable projection
-  domain/            state and reducers
-  notifications/     notification controller and FCM adapter
-  pairing/           Endpoint and passcode pairing screen
-  ui/                screens, shell, theme, primitives
-test/
-  ...
-android/            Android project
+  connection/       transport and coordination
+  domain/           state and reducers
+  notifications/    FCM and Android notifications
+  pairing/          manual pairing
+  ui/               screens and controls
+test/                focused tests
+android/             Android project
 ```
 
-## Building
+## Build
 
 ```sh
 flutter pub get
@@ -42,35 +24,19 @@ cd android
   -PreleaseProperties=/absolute/path/to/external-release.properties
 ```
 
-The release build fails when the external signing properties are absent. The
-properties file must contain `storeFile`, `storePassword`, `keyAlias`, and
-`keyPassword`. Use an ephemeral keystore in `/tmp` for local verification only.
+The external properties file must contain `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. The release build fails when these values are absent. Use an ephemeral keystore in `/tmp` for local checks.
 
-The release APK is produced at `build/app/outputs/flutter-apk/app-release.apk`.
+The APK is written to `build/app/outputs/flutter-apk/app-release.apk`.
 
-## Verification
+## Check changes
 
-Before submitting changes:
-
-- `flutter analyze --no-fatal-infos`
-- `flutter test` for the focused tests you changed
-
-The mobile app uses focused regression tests only. Broad Flutter suites are not part of the preview workflow.
+```sh
+flutter analyze --no-fatal-infos
+flutter test
+```
 
 ## Permissions
 
-| Permission | Reason |
-| --- | --- |
-| `INTERNET` | contact the bridge over the user's private tailnet. |
-| `POST_NOTIFICATIONS` | surface replies with system notifications. |
-| `FOREGROUND_SERVICE` | permit the status foreground service. |
-| `FOREGROUND_SERVICE_DATA_SYNC` | classify the status foreground service. |
+The app requests Internet access and Android notification service permissions. It does not request camera, location, contacts, microphone, or general storage access.
 
-The app does not request camera access. Pairing uses only the manually entered HTTPS endpoint and one-time six-digit passcode printed by `pi-mob pair`; QR generation/scanning and JSON pairing-payload entry are removed and unsupported. It does not request location, contacts, microphone, or general storage access.
-
-## What is not in the app
-
-- Voice or video.
-- Browser. The app does not embed a web view.
-- File picker beyond the existing attachment path.
-- Cloud account. The app has no user account and no sign-in flow.
+Pairing uses a manually entered HTTPS endpoint and one-time passcode from `pi-mob pair`. QR and JSON pairing flows are unsupported.

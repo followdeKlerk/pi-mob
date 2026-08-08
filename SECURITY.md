@@ -1,67 +1,35 @@
 # Security policy
 
-## Supported versions
+## Support
 
-Pi Mob is a public repository with unsupported alpha preview binaries. Security fixes are applied to the current `main` development line. No released version currently carries a long-term support commitment.
-The bridge preview artifact is unsigned and may change without compatibility guarantees. Android release APKs use an externally supplied non-debug preview signing key; this is not a production distribution signer. Verify checksums and release provenance before installing either artifact.
+Pi Mob provides unsupported alpha preview binaries. Security fixes target the current `main` line. The bridge preview is unsigned. The Android APK uses an external preview signing key, not a production distribution signer.
+
+Verify release checksums and provenance before installation.
 
 ## Report a vulnerability
 
-Use GitHub's private vulnerability-reporting feature for this repository.
+Use GitHub private vulnerability reporting for this repository. Do not put credentials, exploits, private host details, transcripts, or source content in public issues.
 
-Do not disclose vulnerabilities, credentials, exploit details, private host information, transcripts, or source content in public issues.
+Include the minimum reproduction data. Use synthetic data when possible.
 
-Include only the minimum reproduction information needed. Wait for a private response before sharing sensitive logs or artifacts.
+## Security boundary
 
-## Security model
+Pi Mob is designed for one owner on a private Tailscale network. The supported setup provides these protections:
 
-pi-mob is designed for one owner operating devices inside a private Tailscale network.
+- The bridge binds to loopback and uses private Tailscale Serve for remote access.
+- The bridge authenticates installations and validates bounded protocol payloads.
+- The host records state-changing commands before dispatch.
+- Controller leases limit conflicting mobile writes.
+- Provider credentials, repositories, and authoritative Pi state stay on the host.
 
-### Intended protections
+Pi Mob does not provide:
 
-- The bridge binds to loopback.
-- Private remote reachability is provided by Tailscale Serve.
-- Host identity can be pinned during pairing and reconnect.
-- Protocol envelopes and bounded payloads are validated.
-- State-changing commands are durably recorded before dispatch.
-- Semantic command IDs reduce duplicate mutation risk.
-- Controller leases prevent conflicting mobile mutations.
-- Slow-consumer buffering, request rate, replay payloads, attachments, and output are bounded.
-- Provider credentials, repositories, and authoritative Pi state remain on the host.
+- public Internet or Tailscale Funnel hardening;
+- multi-user authorization;
+- an operating-system sandbox around Pi;
+- protection from a compromised owner device, account, tailnet, extension, or credential;
+- exactly-once execution inside Pi or external tools.
 
-### Not provided
+Pi runs with the owner's normal execution model and captured login environment. Operator extensions run with the host user's authority.
 
-- Public Internet hardening.
-- Tailscale Funnel support.
-- Multi-user authorization, roles, or tenancy.
-- An operating-system sandbox around Pi or its tools.
-- Protection from a compromised owner account, host, phone, tailnet, Pi extension, or provider credential.
-- Exactly-once execution inside Pi or external tools.
-- A security boundary between raw RPC and the owner. Raw RPC is an advanced trusted-owner surface.
-
-Pi runs with the owner's normal execution model and captured login environment. A custom extension supplied by the operator executes with the host user's authority.
-
-## Out-of-scope Git surface
-
-Git integration is not part of the product roadmap. Do not report the absence of Git status, commit, push, CI summaries, or repository controls as a security defect. Security issues in unused experimental Git modules are still welcome when they affect the shipped build, shared dependencies, or repository tooling.
-
-## Sensitive information
-
-Never submit these in public reports:
-
-- API keys, private keys, service-account JSON, or environment values;
-- device or push tokens;
-- private Tailscale names, host IDs, or installation IDs when avoidable;
-- prompts, answers, transcripts, raw tool output, or repository content;
-- private filesystem paths;
-- unredacted production databases or Pi session files.
-
-Use bounded synthetic fixtures whenever possible.
-
-## Current hardening gaps
-
-The project status document tracks operational gaps that may have security implications, including:
-
-- Mandatory code-signed and notarized bridge distributable (currently unsigned).
-
-These items are tracked in [Project status and roadmap](docs/PROJECT_STATUS.md) (`Planned` and `Out of scope`) and elaborated in [Privacy](docs/PRIVACY.md) and [Architecture](docs/ARCHITECTURE.md).
+Git product actions are out of scope. See [Project status](docs/PROJECT_STATUS.md) for the current scope and planned signing work. See [Privacy](docs/PRIVACY.md) for data handling.

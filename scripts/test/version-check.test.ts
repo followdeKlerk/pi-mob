@@ -45,10 +45,8 @@ function cleanInput(): Record<string, string> {
     "apps/mobile/lib/main.dart": "// main.dart\n",
     "apps/mobile/lib/src/connection/connection_coordinator.dart": "// coordinator\n",
     "apps/mobile/lib/src/data/app_database.dart": "// app database\n",
-    "README.md": `# Pi Mob\n\nThis is v${CANONICAL}.\n`,
     "CHANGELOG.md": `## ${CANONICAL}\n`,
     "docs/PROJECT_STATUS.md": `## Production-wired in ${CANONICAL}\n`,
-    "docs/PROTOCOL.md": `Shipped in ${CANONICAL}.\n`,
     "docs/QUICKSTART.md": `The ${CANONICAL} preview.\n`,
   };
 }
@@ -91,10 +89,10 @@ describe("version:check (pure checker)", () => {
   });
 
   test("flags drift in current-version-bearing Markdown", () => {
-    const input = apply(cleanInput(), "docs/PROTOCOL.md", "Shipped in 0.0.2-alpha.1.\n");
+    const input = apply(cleanInput(), "CHANGELOG.md", "## 0.0.2-alpha.1\n");
     const result = checkVersion(input);
     expect(result.ok).toBe(false);
-    expect(result.drifts).toContainEqual(expect.objectContaining({ file: "docs/PROTOCOL.md", field: "current release version", observed: "0.0.2-alpha.1", expected: CANONICAL }));
+    expect(result.drifts).toContainEqual(expect.objectContaining({ file: "CHANGELOG.md", field: "current release version", observed: "0.0.2-alpha.1", expected: CANONICAL }));
   });
 
   test("flags a missing VERSION file", () => {

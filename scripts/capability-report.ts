@@ -29,13 +29,11 @@ export function parseCapabilityMatrix(text: string): CapabilityMatrix {
 }
 
 function same(a: readonly string[], b: readonly string[]): boolean { return JSON.stringify([...a].sort()) === JSON.stringify([...b].sort()); }
-export function checkCapabilityDocs(projectStatus: string, protocol: string, live: CapabilityMatrix): void {
-  const project = parseCapabilityMatrix(projectStatus); const wire = parseCapabilityMatrix(protocol);
+export function checkCapabilityDocs(projectStatus: string, live: CapabilityMatrix): void {
+  const project = parseCapabilityMatrix(projectStatus);
   for (const [name, actual] of Object.entries(live) as [keyof CapabilityMatrix, string[]][]) {
     if (!same(project[name], actual)) throw new Error(`PROJECT_STATUS ${name} differs from live capabilities`);
-    if (!same(wire[name], actual)) throw new Error(`PROTOCOL ${name} differs from live capabilities`);
   }
-  if (!same(project.withoutFcm, wire.withoutFcm) || !same(project.withFcm, wire.withFcm)) throw new Error("PROJECT_STATUS and PROTOCOL capability matrices disagree");
 }
 
 async function snapshot(configuration: Snapshot["configuration"]): Promise<Snapshot> {
@@ -98,7 +96,7 @@ export async function buildReport(): Promise<Report> {
   const snapshots = [await snapshot("with-fcm"), await snapshot("without-fcm")];
   const live = { withoutFcm: snapshots.find((s) => s.configuration === "without-fcm")!.capabilities, withFcm: snapshots.find((s) => s.configuration === "with-fcm")!.capabilities };
   if (!same(live.withoutFcm, EXPECTED.withoutFcm) || !same(live.withFcm, EXPECTED.withFcm)) throw new Error("live normal-daemon capability drift");
-  checkCapabilityDocs(await Bun.file(projectPath("docs/PROJECT_STATUS.md")).text(), await Bun.file(projectPath("docs/PROTOCOL.md")).text(), live);
+  checkCapabilityDocs(await Bun.file(projectPath("docs/PROJECT_STATUS.md")).text(), live);
   const capabilities = metadata.map(([capability, sourceFile, sourceSymbol, mobileFile, mobileSymbol, focusedTestPath]) => {
     if (!existsSync(projectPath(sourceFile)) || !readFileSync(projectPath(sourceFile), "utf8").includes(sourceSymbol)) throw new Error(`invalid provider source metadata for ${capability}`);
     if (!existsSync(projectPath(mobileFile)) || !readFileSync(projectPath(mobileFile), "utf8").includes(mobileSymbol)) throw new Error(`invalid mobile metadata for ${capability}`);

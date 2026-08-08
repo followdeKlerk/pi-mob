@@ -1,47 +1,22 @@
 # Contributing
 
-Thanks for contributing to pi-mob.
+Pi Mob is an unsupported alpha preview. Keep changes small and preserve the product boundaries in [AGENTS.md](AGENTS.md).
 
-Start with:
+Read these files first:
 
-1. [`docs/PROJECT_STATUS.md`](docs/PROJECT_STATUS.md)
-2. [`AGENTS.md`](AGENTS.md)
-3. the architecture and protocol documents relevant to your change
+1. [Project status](docs/PROJECT_STATUS.md)
+2. [Architecture](docs/ARCHITECTURE.md)
+3. [Protocol](docs/PROTOCOL.md)
 
-Pi Mob is a public repository with unsupported alpha preview binaries. The current priority is proving and hardening the production path, not expanding the repository with broad new feature surfaces.
-## Product scope
+## Scope
 
-Contributions should preserve these boundaries:
+The host owns repositories, credentials, Pi processes, and durable state. The Android app is a control and presentation surface. Private Tailscale Serve is the supported remote path.
 
-- the host owns repositories, provider credentials, Pi processes, and durable state;
-- the Android app is a reconnectable control and presentation surface;
-- private Tailscale Serve is the supported remote path;
-- public exposure and multi-user tenancy are not supported;
-- Pi keeps its normal execution model;
-- **Git integration is out of scope**.
+Do not add public exposure, multi-user tenancy, or Git product actions. Update `docs/PROJECT_STATUS.md` when production wiring or accepted scope changes.
 
-Do not add Git status, commit, push, CI summaries, repository actions, or Git roadmap work. A focused removal of unused experimental Git code is acceptable when dependency and compatibility impact is understood.
+## Setup
 
-## Capability discipline
-
-Use these labels in code reviews and documentation:
-
-- **Production-wired** — constructed by the normal daemon and reachable from the released mobile path.
-- **Implemented, not production-wired** — code or UI exists, but the default daemon does not provide it.
-- **Planned** — accepted remaining work.
-- **Out of scope** — intentionally not planned.
-
-A schema, provider class, widget, or isolated unit test is not enough to call a feature shipped. New capability work should include:
-
-1. production daemon construction;
-2. handshake advertisement;
-3. coordinator and mobile flow;
-4. real integration coverage;
-5. accurate documentation and release metadata.
-
-## Development setup
-
-Install the pinned Bun and Flutter versions from `package.json` and the Flutter project files.
+Use the pinned tool versions in the repository.
 
 ```sh
 bun install --frozen-lockfile
@@ -50,13 +25,13 @@ cd apps/mobile && flutter pub get
 
 ## Validation
 
-Full repository checkpoint:
+Run the checks that apply to your change.
 
 ```sh
 bun run all
 ```
 
-Focused bridge and protocol validation:
+For bridge or protocol changes:
 
 ```sh
 bun run typecheck
@@ -66,7 +41,7 @@ bun test
 bun run build
 ```
 
-Mobile validation:
+For mobile changes:
 
 ```sh
 cd apps/mobile
@@ -74,37 +49,32 @@ flutter analyze --no-fatal-infos
 flutter test
 ```
 
-Documentation-only validation:
+For documentation changes:
 
 ```sh
 bun run docs
 ```
 
-If a required host, SDK, credential, or service is unavailable, record that limitation. Do not claim a check passed when it was not run.
+Record unavailable tools or host checks. Do not claim that an unrun check passed.
 
-## Change expectations
+## Generated protocol files
 
-- Keep changes focused and reviewable.
-- Add regression coverage for behavioural fixes.
-- Prefer production-path integration tests over isolated feature claims.
-- Preserve durable command, replay, controller-lease, and indeterminate-state guarantees.
-- Do not fix startup readiness by merely increasing a timeout.
-- Keep unknown forward-compatible events tolerant, but make malformed known-event degradation bounded and observable.
-- Update `docs/PROJECT_STATUS.md` whenever production wiring, known gaps, or accepted roadmap scope changes.
+Change the source definitions and generators. Do not edit generated schemas or fixtures by hand.
 
-## Protocol and generated files
+## Sensitive data
 
-Protocol schemas and fixture corpora are generated artifacts. Change source definitions and generators, then run the generation and check commands. Do not hand-edit generated output.
+Do not commit credentials, keys, device tokens, private paths, production logs, databases, transcripts, or raw tool output. Report vulnerabilities through [SECURITY.md](SECURITY.md).
 
-Consider compatibility before removing existing protocol types, including unused experimental surfaces. Git is out of roadmap scope, but cleanup still requires dependency analysis.
+## Preview releases
 
-## Security and privacy
+Set the release version in `VERSION`. Increase the Android version code for each APK release.
 
-Do not commit:
+Build the bridge and APK from the same revision. Supply Android signing values through an external properties file with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Do not store that file or its keystore in the repository.
 
-- credentials, private keys, service-account files, or device tokens;
-- private host paths or environment values;
-- production logs or databases;
-- prompts, answers, transcripts, raw tool output, or repository content.
+Preview artifacts include an APK, a macOS bridge tarball, and their `.sha256` files. Verify an asset with:
 
-Report vulnerabilities through [SECURITY.md](SECURITY.md).
+```sh
+shasum -a 256 -c <asset>.sha256
+```
+
+The APK build fails when signing values are absent. The preview bridge remains unsigned and is not notarized.

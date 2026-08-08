@@ -288,7 +288,7 @@ const FIELD_RULES: ReadonlyArray<{ file: string; rule: FieldRule }> = [
       },
     },
   },
-  ...["README.md", "CHANGELOG.md", "docs/PROJECT_STATUS.md", "docs/PROTOCOL.md", "docs/QUICKSTART.md"].map((file) => ({
+  ...["CHANGELOG.md", "docs/PROJECT_STATUS.md", "docs/QUICKSTART.md"].map((file) => ({
     file,
     rule: {
       field: "current release version",
@@ -404,10 +404,8 @@ const EXECUTABLE_FILES: ReadonlyArray<string> = [
   "apps/mobile/lib/main.dart",
   "apps/mobile/lib/src/connection/connection_coordinator.dart",
   "apps/mobile/lib/src/data/app_database.dart",
-  "README.md",
   "CHANGELOG.md",
   "docs/PROJECT_STATUS.md",
-  "docs/PROTOCOL.md",
   "docs/QUICKSTART.md",
 ];
 

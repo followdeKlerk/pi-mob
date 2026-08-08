@@ -1,36 +1,33 @@
-# @pi-mob/protocol-schema
+# Pi Mob protocol schema and fixtures
 
-Canonical TypeBox schemas, TypeScript types, command metadata, event ownership, capability names, limits, and generated JSON Schema for the pi-mob wire protocol.
+This package contains TypeBox schemas, TypeScript types, command metadata, capability names, limits, and generated JSON Schema.
+
+The shared fixture corpus is in `packages/protocol-fixtures`. It checks TypeScript and Flutter acceptance of the same protocol shapes.
 
 ## Authority boundary
 
-This package defines what messages are valid. It does **not** prove that every valid optional capability is available from the normal daemon.
+Schemas and fixtures define and check valid messages. They do not prove that the normal daemon constructs an optional provider or that the mobile release can use it.
 
-For feature availability, inspect:
+Use these sources for availability:
 
-1. providers passed by `packages/bridge/src/daemon.ts` to `DurableBridgeRuntime`;
-2. capabilities returned by `hello.accepted`;
-3. the production-wiring integration tests;
-4. [`docs/PROJECT_STATUS.md`](../../docs/PROJECT_STATUS.md).
+1. providers constructed by `packages/bridge/src/daemon.ts`;
+2. capabilities in `hello.accepted`;
+3. production-wiring integration tests;
+4. [Project status](../../docs/PROJECT_STATUS.md).
 
-The production core includes streams, durable commands, and controller leases. Raw RPC remains an internal compatibility surface; optional schemas for an unwired provider must remain capability-gated.
-
-Git integration is out of product scope. Do not add new Git commands, controls, events, or capability claims. Existing experimental Git definitions may be removed only after compatibility and fixture dependencies are reviewed.
+Raw RPC is an internal compatibility surface. Git integration is out of product scope.
 
 ## Development
 
 ```sh
 bun run --cwd packages/protocol-schema test
+bun run --cwd packages/protocol-fixtures test
 bun run schema:check
+bun run fixtures:check
 ```
 
-Edit source definitions and generators rather than generated artifacts. After changes, regenerate schemas and update the shared fixture corpus and Flutter parity validation.
+Change source definitions and generators. Do not edit generated schemas or fixtures by hand.
 
-Protocol changes should preserve:
+Protocol changes must preserve closed envelopes, explicit bounds, command idempotency metadata, decimal cursors, event ownership, and explicit capability absence.
 
-- closed outer envelopes and explicit bounds;
-- semantic command idempotency metadata;
-- canonical decimal cursors;
-- host/session event ownership;
-- forward-compatible raw Pi event payloads;
-- explicit capability absence.
+When a shape changes, add valid and invalid fixtures as applicable. Run TypeScript validation and Flutter fixture parity checks. Update [Project status](../../docs/PROJECT_STATUS.md) only when the production capability boundary changes.
