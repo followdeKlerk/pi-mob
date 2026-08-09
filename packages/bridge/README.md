@@ -1,41 +1,48 @@
 # Pi Mob bridge
 
-The bridge supervises local Pi sessions and connects them to the Android app. See [Project status](../../docs/PROJECT_STATUS.md) for current capabilities.
+The bridge supervises local OMP sessions and connects them to the Android app. See [Project status](../../docs/PROJECT_STATUS.md) for current capabilities.
 
 ## Layout
 
 ```text
 src/
   core/           runtime, server, store, journal
-  pi/             supervised Pi RPC client
+  omp/            OMP RPC client and session lifecycle
+  backend/        backend-neutral contracts and process transport
+  pi/             legacy-named adapter and normalization compatibility
   notifications/  FCM adapter and outbox
-  daemon.ts       CLI entry point
 test/              bridge tests
 ```
 
+The normal daemon constructs `OmpSession` instances only. The `src/pi/` directory retains legacy internal names while shared adapter code is cut over; it is not a production Pi backend.
+
 ## Build
+
+From the repository root:
 
 ```sh
 bun install --frozen-lockfile
 bun run build
 ```
 
-The Bun standalone executable is written to `dist/bridge-daemon`.
+The Bun standalone executable is written to `packages/bridge/dist/bridge-daemon`.
 
 ## Run
 
 The released target is macOS x64. The `pi-mob` CLI installs and supervises the daemon with `launchd`.
 
 ```sh
-./pi-mob setup --workspace /path/to/your/projects
-./pi-mob pair
+./bin/pi-mob setup --workspace /path/to/your/projects
+./bin/pi-mob pair
 ```
 
-`pair` prints an HTTPS endpoint, six-digit passcode, and expiry. Enter them in the Android app. Public listeners, Tailscale Funnel, QR pairing, and JSON pairing are unsupported.
+The bridge accepts install TOML through `--config`; overlapping explicit daemon flags take precedence. The release bundle includes `config.sample.toml`, and `pi-mob setup` writes the installed `release/config.toml`. Setup requires an absolute OMP executable path and fails when `omp` is unavailable.
 
-The bridge accepts TOML configuration through `--config`. CLI flags override file values. See the bundled `config.toml` for supported keys.
+In an interactive terminal, `pair` prints an HTTPS endpoint, six-digit passcode, and expiry for manual entry in the Android app. `--json` is diagnostic CLI output, not a mobile pairing-import flow. Public listeners, Tailscale Funnel, QR pairing, and JSON-import pairing are unsupported.
 
 ## Check changes
+
+From the repository root:
 
 ```sh
 bun install --frozen-lockfile

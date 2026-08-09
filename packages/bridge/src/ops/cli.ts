@@ -15,10 +15,10 @@
  *   - **Destructive-action gated.** `update`, `rollback`, and `uninstall`
  *     require both an explicit `--confirm` flag and an explicit mode flag.
  *     The CLI refuses to dispatch without either of them.
- *   - **Pi-session-preserving.** The `uninstall` flow never removes the
- *     Pi session directory by default. The caller must opt in via
- *     `--remove-pi-session-dir=true`; even `uninstall --mode=full` keeps
- *     Pi sessions intact.
+ *   - **Session-preserving.** The `uninstall` flow never removes the
+ *     OMP session directory by default. The caller must opt in via
+ *     `--remove-omp-session-dir=true`; even `uninstall --mode=full` keeps
+ *     OMP sessions intact.
  *
  * The CLI is split into three layers:
  *
@@ -77,7 +77,7 @@ import {
   type UninstallMode,
   type UninstallPaths,
 } from "./uninstall";
-import { runDoctor, type PiProbe, type PushProbe } from "./doctor";
+import { runDoctor, type OmpProbe, type PushProbe } from "./doctor";
 
 // ---------------------------------------------------------------------------
 // Public type surface
@@ -116,7 +116,7 @@ export const CLI_COMMANDS: readonly CliCommand[] = [
 
 /** Help text for the top-level CLI. */
 export const CLI_HELP = [
-  "pi-mob bridge ops CLI",
+  "pi-mob bridge ops CLI (OMP backend)",
   "",
   "Usage: pi-mob <command> [flags]",
   "",
@@ -180,10 +180,10 @@ export interface TailscaleState {
 export interface SetupDefaults {
   readonly installRoot: string;
   readonly launchAgentsRoot: string;
-  readonly piExecutable: string | null;
+  readonly ompExecutable: string | null;
   readonly sourceCliExecutable: string;
   readonly sourceBridgeExecutable: string;
-  readonly piSessionDir: string;
+  readonly ompSessionDir: string;
   readonly bridgeVersion: string;
   readonly protocolVersion: string;
   readonly port?: number;
@@ -205,9 +205,8 @@ export interface CliDeps {
   readonly hostIdentity?: (databasePath: string) => { readonly hostId: string };
   /** Issues a one-time enrollment challenge after the bridge store exists. */
   readonly enrollmentChallenge?: (databasePath: string) => { readonly passcode: string; readonly expiresAt: number };
-  /** Optional Pi integration; if absent, the doctor Pi probe reports warn. */
-  readonly piProbe?: PiProbe;
-  /** Optional push integration; if absent, the doctor push probe reports warn. */
+  /** Optional OMP integration; if absent, the doctor OMP probe reports warn. */
+  readonly ompProbe?: OmpProbe;
   readonly pushProbe?: PushProbe;
   /** True when stdout is an interactive terminal; omitted means machine mode. */
   readonly interactive?: boolean;
@@ -334,8 +333,8 @@ export interface CliUninstallResult {
   readonly mode: UninstallMode;
   readonly removed: readonly string[];
   readonly preserved: readonly string[];
-  readonly piSessionDir: string;
-  readonly piSessionDirRemoved: boolean;
+  readonly ompSessionDir: string;
+  readonly ompSessionDirRemoved: boolean;
   readonly timestamp: string;
 }
 
@@ -560,18 +559,18 @@ function configForLifecycle(args: ParsedCommand, deps: CliDeps): { paths: Instal
 
 function setupInstallArgs(args: ParsedCommand, defaults: SetupDefaults): ParsedCommand {
   const workspace = requireAbsolute("workspace", getFlagStringRequired(args, "workspace"));
-  if (!defaults.piExecutable) {
-    throw new CliArgsError("pi_not_found", "Pi CLI was not found; install Pi, ensure `pi` is on PATH, then rerun pi-mob setup --workspace <path>");
+  if (!defaults.ompExecutable) {
+    throw new CliArgsError("omp_not_found", "OMP executable was not found; install OMP, ensure `omp` is on PATH, then rerun pi-mob setup --workspace <path>");
   }
   const flags = new Map(args.flags);
   const put = (key: string, value: string): void => { if (!flags.has(key)) flags.set(key, value); };
   put("install-root", defaults.installRoot);
   put("launch-agents-root", defaults.launchAgentsRoot);
-  put("pi-executable", defaults.piExecutable);
+  put("omp-executable", defaults.ompExecutable);
   put("bridge-executable", `${defaults.installRoot}/release/bin/bridge-daemon`);
   put("bridge-source", defaults.sourceBridgeExecutable);
   put("workspace", workspace);
-  put("pi-session-dir", defaults.piSessionDir);
+  put("omp-session-dir", defaults.ompSessionDir);
   put("bridge-version", defaults.bridgeVersion);
   put("protocol-version", defaults.protocolVersion);
   put("port", String(defaults.port ?? 8788));
@@ -663,17 +662,13 @@ export interface InstallArgs extends ParsedCommand {
 /** Builds the install payload and writes everything to disk atomically. */
 export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise<InstallResult> {
   assertCommand(args, "install");
-
-  // Phase 1 — validate every flag and build the in-memory payload before
-  // any filesystem write happens. A validation failure here leaves the
-  // install root untouched so the user can fix and retry.
   const installRoot = requireAbsolute("install-root", getFlagStringRequired(args, "install-root"));
-  const piExecutable = requireAbsolute("pi-executable", getFlagStringRequired(args, "pi-executable"));
+  const ompExecutable = requireAbsolute("omp-executable", getFlagStringRequired(args, "omp-executable"));
   const bridgeExecutable = requireAbsolute("bridge-executable", getFlagStringRequired(args, "bridge-executable"));
   const bridgeSourceFlag = getFlagString(args, "bridge-source");
   const bridgeSource = bridgeSourceFlag === undefined ? null : requireAbsolute("bridge-source", bridgeSourceFlag);
   const workspaceRoot = requireAbsolute("workspace", getFlagStringRequired(args, "workspace"));
-  const piSessionDir = requireAbsolute("pi-session-dir", getFlagStringRequired(args, "pi-session-dir"));
+  const ompSessionDir = requireAbsolute("omp-session-dir", getFlagStringRequired(args, "omp-session-dir"));
   let bridgeArtifact: Buffer | null = null;
   if (bridgeSource !== null) {
     if (!deps.fs.exists(bridgeSource)) throw new CliArgsError("artifact_missing", `bridge source not found: ${bridgeSource}`);
@@ -712,10 +707,9 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
     }
   }
 
-  // defaultInstallConfig validates port + hostname + absolute paths.
   const config = defaultInstallConfig({
     paths,
-    piExecutable,
+    ompExecutable,
     bridgeExecutable,
     bridgeVersion,
     protocolVersion,
@@ -732,8 +726,6 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
 
   // Validate the LaunchAgent spec by rendering it. renderPlist throws on
   // any spec violation (no-shell, absolute paths, Background process type).
-  // The bridge no longer injects a default policy extension; Pi runs
-  // with no --extension flag unless the operator supplies one.
   const plistSpec: LaunchAgentSpec = {
     label: paths.launchAgentLabel,
     program: bridgeExecutable,
@@ -741,7 +733,7 @@ export async function handleInstall(args: ParsedCommand, deps: CliDeps): Promise
       bridgeExecutable,
       "--config", paths.configFile,
       "--workspace", workspaceRoot,
-      "--session-dir", piSessionDir,
+      "--omp-session-dir", ompSessionDir,
       ...(fcmServiceAccount !== undefined ? ["--fcm-service-account", fcmServiceAccount] : []),
     ],
     workingDirectory: workspaceRoot,
@@ -950,7 +942,7 @@ export async function handleDoctor(args: ParsedCommand, deps: CliDeps): Promise<
     serveDriver: deps.serveDriver,
     ...(deps.databaseIntegrity ? { databaseIntegrity: deps.databaseIntegrity } : {}),
     ...(deps.processProbe ? { processProbe: () => deps.processProbe!(config.port) } : {}),
-    ...(deps.piProbe !== undefined ? { piProbe: deps.piProbe } : {}),
+    ...(deps.ompProbe !== undefined ? { ompProbe: deps.ompProbe } : {}),
     ...(deps.pushProbe !== undefined ? { pushProbe: deps.pushProbe } : {}),
   };
   return runDoctor({ config, paths, ports });
@@ -1141,43 +1133,38 @@ const UNINSTALL_MODES: readonly UninstallMode[] = [
 ];
 
 /**
- * Plans and executes an uninstall. The Pi session directory is **always**
- * preserved unless `--remove-pi-session-dir=true` is explicitly passed;
- * even `--mode=full` keeps Pi sessions intact by default.
+ * Plans and executes an uninstall. The OMP session directory is **always**
+ * preserved unless `--remove-omp-session-dir=true` is explicitly passed;
+ * even `--mode=full` keeps OMP sessions intact by default.
  */
 export async function handleUninstall(args: ParsedCommand, deps: CliDeps): Promise<CliUninstallResult> {
   assertCommand(args, "uninstall");
   requireConfirm(args, deps);
   const paths = loadInstallPaths(args);
-  const piSessionDir = requireAbsolute("pi-session-dir", getFlagStringRequired(args, "pi-session-dir"));
+  const ompSessionDir = requireAbsolute("omp-session-dir", getFlagStringRequired(args, "omp-session-dir"));
   const modeRaw = getFlagStringRequired(args, "mode");
   if (!UNINSTALL_MODES.includes(modeRaw as UninstallMode)) {
-    throw new CliArgsError(
-      "flag_invalid",
-      `--mode must be one of ${UNINSTALL_MODES.join("|")} (got ${JSON.stringify(modeRaw)})`,
-    );
+    throw new CliArgsError("flag_invalid", `--mode must be one of ${UNINSTALL_MODES.join(", ")}`);
   }
   const mode = modeRaw as UninstallMode;
-  // Pi sessions retained by default — opt-in only.
-  const removePiSessionDir = getFlagBoolean(args, "remove-pi-session-dir", false);
-
+  const removeOmpSessionDir = getFlagBoolean(args, "remove-omp-session-dir", false);
   if (!deps.lifecycle) throw new CliArgsError("lifecycle_unavailable", "uninstall requires a production lifecycle driver");
   await deps.lifecycle.stopAndRemoveService();
   await deps.lifecycle.removeOwnedServe();
-  const uninstallPaths: UninstallPaths = { ...paths, piSessionDir };
+  const uninstallPaths: UninstallPaths = { ...paths, ompSessionDir };
   const result = executeUninstall({
     mode,
     paths: uninstallPaths,
     fs: deps.fs,
     clock: deps.clock,
-    removePiSessionDir,
+    removeOmpSessionDir,
   });
   return {
     mode: result.mode,
     removed: result.removed,
     preserved: result.preserved,
-    piSessionDir: result.plan.piSessionDir,
-    piSessionDirRemoved: result.piSessionDirRemoved,
+    ompSessionDir: result.plan.ompSessionDir,
+    ompSessionDirRemoved: result.ompSessionDirRemoved,
     timestamp: result.timestamp,
   };
 }

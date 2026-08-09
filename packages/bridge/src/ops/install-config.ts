@@ -7,7 +7,7 @@
  * and read-only policy land in M8.
  *
  * Path invariants:
- *   - `piExecutable` is absolute; the daemon refuses relative Pi paths.
+ *   - `ompExecutable` is absolute; the daemon refuses relative OMP paths.
  *   - `stateRoot`, `logRoot`, `backupRoot`, `secretsRoot` are absolute.
  *   - `port` is a valid loopback TCP port (1..65535) when used by the bridge.
  *   - `hostname` is loopback (`127.0.0.1` or `::1`); plain-LAN hosts are
@@ -29,7 +29,7 @@ export interface BridgeInstallConfig {
   readonly environment: InstallEnvironment;
   readonly bridgeVersion: string;
   readonly protocolVersion: string;
-  readonly piExecutable: string;
+  readonly ompExecutable: string;
   readonly bridgeExecutable: string;
   readonly stateRoot: string;
   readonly logRoot: string;
@@ -41,7 +41,6 @@ export interface BridgeInstallConfig {
   /** Optional owner-only Google service-account path for FCM. */
   readonly fcmServiceAccount?: string;
 }
-
 /** Thrown when an install-config value fails validation. */
 export class InstallConfigValidationError extends InstallConfigError {
   override readonly name: string = "InstallConfigValidationError";
@@ -50,7 +49,7 @@ export class InstallConfigValidationError extends InstallConfigError {
 /** Default install config used when the user does not override values. */
 export interface DefaultInstallConfigOptions {
   readonly paths: InstallPaths;
-  readonly piExecutable: string;
+  readonly ompExecutable: string;
   readonly bridgeExecutable: string;
   readonly bridgeVersion: string;
   readonly protocolVersion: string;
@@ -73,7 +72,7 @@ export function defaultInstallConfig(options: DefaultInstallConfigOptions): Brid
     environment: options.environment ?? "release",
     bridgeVersion: options.bridgeVersion,
     protocolVersion: options.protocolVersion,
-    piExecutable: options.piExecutable,
+    ompExecutable: options.ompExecutable,
     bridgeExecutable: options.bridgeExecutable,
     stateRoot: options.paths.stateRoot,
     logRoot: options.paths.logRoot,
@@ -101,7 +100,7 @@ export function validateInstallConfig(value: unknown): BridgeInstallConfig {
   const requiredStrings: readonly (keyof BridgeInstallConfig)[] = [
     "bridgeVersion",
     "protocolVersion",
-    "piExecutable",
+    "ompExecutable",
     "bridgeExecutable",
     "stateRoot",
     "logRoot",
@@ -116,7 +115,7 @@ export function validateInstallConfig(value: unknown): BridgeInstallConfig {
     }
   }
   const absPaths: readonly (keyof BridgeInstallConfig)[] = [
-    "piExecutable",
+    "ompExecutable",
     "bridgeExecutable",
     "stateRoot",
     "logRoot",
@@ -145,7 +144,7 @@ export function validateInstallConfig(value: unknown): BridgeInstallConfig {
     environment,
     bridgeVersion: value.bridgeVersion as string,
     protocolVersion: value.protocolVersion as string,
-    piExecutable: value.piExecutable as string,
+    ompExecutable: value.ompExecutable as string,
     bridgeExecutable: value.bridgeExecutable as string,
     stateRoot: value.stateRoot as string,
     logRoot: value.logRoot as string,
@@ -172,7 +171,7 @@ export function formatInstallConfig(config: BridgeInstallConfig): string {
   lines.push(`environment = ${tomlString(config.environment)}`);
   lines.push(`bridge_version = ${tomlString(config.bridgeVersion)}`);
   lines.push(`protocol_version = ${tomlString(config.protocolVersion)}`);
-  lines.push(`pi_executable = ${tomlString(config.piExecutable)}`);
+  lines.push(`omp_executable = ${tomlString(config.ompExecutable)}`);
   lines.push(`bridge_executable = ${tomlString(config.bridgeExecutable)}`);
   lines.push(`state_root = ${tomlString(config.stateRoot)}`);
   lines.push(`log_root = ${tomlString(config.logRoot)}`);
@@ -191,7 +190,7 @@ export function writeInstallConfig(path: string, config: BridgeInstallConfig, fs
   // defensively so writes cannot smuggle in untyped data.
   validatePort(config.port);
   validateHostname(config.hostname);
-  for (const key of ["piExecutable", "bridgeExecutable", "stateRoot", "logRoot", "backupRoot", "secretsRoot"] as const) {
+  for (const key of ["ompExecutable", "bridgeExecutable", "stateRoot", "logRoot", "backupRoot", "secretsRoot"] as const) {
     assertAbsolute(key, config[key]);
     assertNoTraversal(key, config[key]);
   }
@@ -289,12 +288,11 @@ function parseTomlSubset(source: string): Record<string, unknown> {
   return out;
 }
 
-/** Snake-case TOML key → camelCase object key. */
 const TOML_KEY_MAP: Record<string, string> = {
   schema_version: "schemaVersion",
   bridge_version: "bridgeVersion",
   protocol_version: "protocolVersion",
-  pi_executable: "piExecutable",
+  omp_executable: "ompExecutable",
   bridge_executable: "bridgeExecutable",
   state_root: "stateRoot",
   log_root: "logRoot",

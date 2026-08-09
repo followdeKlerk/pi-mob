@@ -1,0 +1,4 @@
+schema: spec-driven
+created: 2026-08-08
+goal: Make OMP the sole production execution backend and remove Pi runtime
+  dependencies after explicit session migration.

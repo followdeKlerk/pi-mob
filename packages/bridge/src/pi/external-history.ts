@@ -1,13 +1,33 @@
 import { readFileSync, statSync } from "node:fs";
-import {
-  parseSessionEntries,
-  type SessionEntry,
-  type SessionMessageEntry,
-} from "@earendil-works/pi-coding-agent";
 import { BridgeStore, MAX_EVENT_PAGE_SIZE, type StoredEvent } from "../core/store";
 import { RecipeActivityProjector, type RecipeActivity } from "./recipe-activity";
 import { CanonicalSessionStore, type CanonicalSessionEventRecord } from "../session-events/canonical-session-store";
 import type { CanonicalEventType } from "../session-events/canonical-event";
+
+interface SessionEntry {
+  readonly type: string;
+  readonly id: string;
+  readonly parentId?: string | null;
+  readonly timestamp?: unknown;
+  readonly message?: unknown;
+}
+
+type SessionMessageEntry = SessionEntry & { readonly type: "message"; readonly message: unknown };
+
+function parseSessionEntries(raw: string): SessionEntry[] {
+  const entries: SessionEntry[] = [];
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) continue;
+    try {
+      const value = JSON.parse(line) as unknown;
+      if (value && typeof value === "object" && !Array.isArray(value)) {
+        const entry = value as Record<string, unknown>;
+        if (typeof entry.type === "string" && typeof entry.id === "string") entries.push(entry as unknown as SessionEntry);
+      }
+    } catch { /* malformed historical lines are ignored by the bounded importer */ }
+  }
+  return entries;
+}
 
 const MAX_TEXT_BYTES = 48 * 1024;
 const HISTORY_SCAN_PAGE_SIZE = Math.min(32, MAX_EVENT_PAGE_SIZE);

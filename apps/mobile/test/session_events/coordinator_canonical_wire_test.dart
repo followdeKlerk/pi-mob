@@ -123,6 +123,60 @@ void main() {
       expect(state.assistantMessages['a-1']!.isTerminal, isTrue);
     },
   );
+  test(
+    'bounded replay pages request the next page from the durable cursor',
+    () async {
+      await makeReadyCanonical(
+        coordinator,
+        transport,
+        advertiseCanonical: true,
+      );
+      final socket = transport.sockets.single;
+      await coordinator.selectPrimarySession(sessionId);
+      await eventually(
+        () => socket.sent.any(
+          (message) => message['type'] == 'session.events.subscribe',
+        ),
+      );
+      final initialSubscribeCount = socket.sent
+          .where((message) => message['type'] == 'session.events.subscribe')
+          .length;
+      final firstRequestId =
+          socket.sent.lastWhere(
+                (message) => message['type'] == 'session.events.subscribe',
+              )['requestId']
+              as String;
+      socket.server(
+        canonicalReplay(
+          firstRequestId,
+          sessionId,
+          events: <Map<String, Object?>>[
+            turnStartedEvent(
+              sequence: 1,
+              eventId: 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
+            ),
+          ],
+          latestSequence: 2,
+          complete: false,
+        ),
+      );
+      await eventually(
+        () =>
+            coordinator.canonicalLastAppliedSequence(sessionId) == 1 &&
+            socket.sent
+                    .where(
+                      (message) =>
+                          message['type'] == 'session.events.subscribe',
+                    )
+                    .length >
+                initialSubscribeCount,
+      );
+      final subscribes = socket.sent
+          .where((message) => message['type'] == 'session.events.subscribe')
+          .toList();
+      expect((subscribes.last['payload'] as Map)['afterSequence'], 1);
+    },
+  );
 
   test(
     'live session.event envelopes stream into the synchronizer after subscribe',
@@ -304,11 +358,14 @@ Map<String, Object?> canonicalReplay(
   String requestId,
   String targetSessionId, {
   required List<Map<String, Object?>> events,
+  int? latestSequence,
+  bool complete = true,
 }) => response('session.events.replay.result', <String, Object?>{
   'sessionId': targetSessionId,
   'events': events,
-  'latestSequence': events.isEmpty ? 0 : events.last['sequence'] as int,
-  'complete': true,
+  'latestSequence':
+      latestSequence ?? (events.isEmpty ? 0 : events.last['sequence'] as int),
+  'complete': complete,
 }, requestId: requestId);
 
 Map<String, Object?> canonicalLive(

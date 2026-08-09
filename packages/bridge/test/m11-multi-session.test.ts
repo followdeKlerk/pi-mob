@@ -21,9 +21,9 @@ const SESSION_E = "eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee";
 const servers: Array<ReturnType<typeof createBridgeServer>> = [];
 const stores: BridgeStore[] = [];
 
-function startRuntime(): { store: BridgeStore; server: ReturnType<typeof createBridgeServer> } {
+function startRuntime(now = Date.now()): { store: BridgeStore; server: ReturnType<typeof createBridgeServer> } {
   const path = join(mkdtempSync(join(tmpdir(), "pi-mob-m11-")), "bridge.sqlite");
-  const store = new BridgeStore(path);
+  const store = new BridgeStore(path, () => now);
   const adapter: AdapterPort = { async dispatch() {} };
   for (const installationId of [INSTALLATION_A, INSTALLATION_B, INSTALLATION_C]) {
     store.upsertInstallationCredential({ installationId, credentialHash: hashCredential(installationCredential(installationId)), enrollmentSecretHash: hashCredential(`enrollment_${installationId}`, "enrollment"), enrollmentSource: "seed", createdAt: Date.now(), lastSeenAt: Date.now() });
@@ -38,14 +38,14 @@ function startRuntime(): { store: BridgeStore; server: ReturnType<typeof createB
   return { store, server };
 }
 
-interface Client { readonly ws: WebSocket; readonly inbox: Record<string, unknown>[]; readonly waiters: Array<(value: Record<string, unknown>) => void>; }
+interface Client { readonly ws: WebSocket; readonly inbox: Record<string, unknown>[]; readonly waiters: Array<(value: Record<string, unknown>) => void>; helloAccepted: Record<string, unknown>; }
 function makeClient(server: ReturnType<typeof createBridgeServer>, installationId: string): Promise<{ client: Client; connectionId: string }> {
   return new Promise((resolve, reject) => {
     const inbox: Record<string, unknown>[] = [];
     const waiters: Array<(value: Record<string, unknown>) => void> = [];
     const ws = new WebSocket(`ws://127.0.0.1:${server.port}/v1/ws`, { perMessageDeflate: false });
     const client: Client = {
-      ws, inbox, waiters,
+      ws, inbox, waiters, helloAccepted: {},
     };
     ws.onmessage = (event) => {
       const value = JSON.parse(String(event.data)) as Record<string, unknown>;
@@ -62,9 +62,18 @@ function makeClient(server: ReturnType<typeof createBridgeServer>, installationI
       })));
       const next = (): void => {
         const value = inbox.shift();
-        if (value && value.type === "hello.accepted") resolve({ client, connectionId: (value.payload as Record<string, unknown>).connectionId as string });
+        if (value && value.type === "hello.accepted") {
+          client.helloAccepted = value.payload as Record<string, unknown>;
+          resolve({ client, connectionId: client.helloAccepted.connectionId as string });
+        }
         else if (value) { next(); return; }
-        else waiters.push((v) => { if (v.type === "hello.accepted") resolve({ client, connectionId: (v.payload as Record<string, unknown>).connectionId as string }); else inbox.push(v); });
+        else waiters.push((v) => {
+          if (v.type === "hello.accepted") {
+            client.helloAccepted = v.payload as Record<string, unknown>;
+            resolve({ client, connectionId: client.helloAccepted.connectionId as string });
+          }
+          else inbox.push(v);
+        });
       };
       next();
     };
@@ -185,6 +194,48 @@ describe("M11 paginated session.list with opaque revision-bound token", () => {
     const result = await page(client, connectionId, { filter: "needs_attention", pageSize: 50 });
     const ids = items(result).map((i) => i.sessionId).sort();
     expect(ids).toEqual([SESSION_B, SESSION_C].sort());
+    client.ws.close();
+  });
+
+  test("hides inactive sessions older than seven days while retaining active and durable state", async () => {
+    const now = Date.parse("2026-08-08T12:00:00.000Z");
+    const { store, server } = startRuntime(now);
+    const stale = now - (8 * 24 * 60 * 60 * 1000);
+    const cutoff = now - (7 * 24 * 60 * 60 * 1000);
+    store.addSessionSummary(SESSION_A, { name: "stale", runtimeState: "stopped", lastActivityAt: new Date(stale).toISOString() });
+    store.addSessionSummary(SESSION_B, { name: "active", runtimeState: "running", lastActivityAt: new Date(stale).toISOString() });
+    store.addSessionSummary(SESSION_C, { name: "boundary", runtimeState: "stopped", lastActivityAt: new Date(cutoff).toISOString() });
+    store.addSessionSummary(SESSION_D, { name: "attention", runtimeState: "stopped", attentionState: "needs_attention", lastActivityAt: new Date(stale).toISOString() });
+    store.addSessionSummary(SESSION_E, { name: "queued", runtimeState: "stopped", queueCount: 1, lastActivityAt: new Date(stale).toISOString() });
+    const { client, connectionId } = await makeClient(server, INSTALLATION_A);
+    expect(client.helloAccepted.sessionVisibilityCutoff).toBe(new Date(cutoff).toISOString());
+
+    const result = await page(client, connectionId, { pageSize: 50 });
+    expect(items(result).map((item) => item.sessionId).sort()).toEqual([SESSION_B, SESSION_C, SESSION_D, SESSION_E].sort());
+    expect(store.sessionExists(SESSION_A)).toBe(true);
+    expect(store.sessionState(SESSION_A)?.name).toBe("stale");
+
+    send(client, envelope("subscription.set", {
+      streams: [{ streamId: `host:${store.identity().hostId}`, detail: "full" }],
+    }, connectionId));
+    const messages: Record<string, unknown>[] = [];
+    while (true) {
+      const message = await next(client);
+      if (message.type === "stream.sync.complete") break;
+      messages.push(message);
+    }
+    const wire = JSON.stringify(messages);
+    expect(wire.includes(SESSION_A)).toBe(false);
+    expect(wire.includes(SESSION_B)).toBe(true);
+    expect(wire.includes(SESSION_C)).toBe(true);
+    store.changeSessionSummary(SESSION_A, { name: "still stale" });
+    store.changeSessionSummary(SESSION_B, { name: "active again" });
+    const firstLive = await next(client);
+    const secondLive = await next(client);
+    expect(firstLive.type).toBe("host.state");
+    expect(JSON.stringify(firstLive)).not.toContain(SESSION_A);
+    expect(secondLive.type).toBe("session.summary");
+    expect((secondLive.payload as Record<string, unknown>).sessionId).toBe(SESSION_B);
     client.ws.close();
   });
 

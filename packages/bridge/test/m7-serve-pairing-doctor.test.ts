@@ -50,7 +50,7 @@ import {
   DoctorInputError,
   runDoctor,
   type DoctorReport,
-  type PiProbe,
+  type OmpProbe,
   type PushProbe,
 } from "../src/ops/doctor";
 
@@ -187,7 +187,7 @@ function newPaths(): InstallPaths {
 function newConfig(): BridgeInstallConfig {
   return defaultInstallConfig({
     paths: newPaths(),
-    piExecutable: "/opt/pi/0.82.0/bin/pi",
+    ompExecutable: "/opt/omp/0.82.0/bin/omp",
     bridgeExecutable: "/opt/pi-mob/release/bin/bridge",
     bridgeVersion: "0.0.0-m7",
     protocolVersion: "1.0",
@@ -211,14 +211,14 @@ function seededFs(): InMemoryFileSystem {
   fs.seedFile(paths.plistPath, 0o600);
   fs.seedFile(`${paths.stateRoot}/bridge.sqlite`, 0o600, 1_700_000_000_000);
   fs.seedFile(`${paths.backupRoot}/bridge.backup`, 0o600, 1_699_900_000_000);
-  // Seed the Pi executable so the Pi probe can confirm it exists.
-  fs.mkdir("/opt/pi/0.82.0/bin", { recursive: true, mode: 0o755 });
-  fs.seedFile("/opt/pi/0.82.0/bin/pi", 0o755);
+  // Seed the OMP executable so the OMP probe can confirm it exists.
+  fs.mkdir("/opt/omp/0.82.0/bin", { recursive: true, mode: 0o755 });
+  fs.seedFile("/opt/omp/0.82.0/bin/omp", 0o755);
   return fs;
 }
 
-const stubPi: PiProbe = {
-  executablePath: () => "/opt/pi/0.82.0/bin/pi",
+const stubOmp: OmpProbe = {
+  executablePath: () => "/opt/omp/0.82.0/bin/omp",
   versionString: () => "0.82.0",
   lastExitCode: () => 0,
   crashLoopDetected: () => false,
@@ -407,7 +407,7 @@ describe("doctor", () => {
     const report = await runDoctor({
       config: newConfig(),
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp },
     });
     expect(report.schemaVersion).toBe(1);
     expect(report.redacted).toBe(true);
@@ -417,7 +417,7 @@ describe("doctor", () => {
     expect(DOCTOR_PROBE_NAMES).toContain("serve");
     expect(DOCTOR_PROBE_NAMES).toContain("database");
     expect(DOCTOR_PROBE_NAMES).toContain("backup");
-    expect(DOCTOR_PROBE_NAMES).toContain("pi");
+    expect(DOCTOR_PROBE_NAMES).toContain("omp");
     expect(DOCTOR_PROBE_NAMES).toContain("environment");
     expect(DOCTOR_PROBE_NAMES).toContain("process");
     expect(DOCTOR_PROBE_NAMES).toContain("storage");
@@ -433,7 +433,7 @@ describe("doctor", () => {
     const report = await runDoctor({
       config: newConfig(),
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi, pushProbe: push, databaseIntegrity: () => ({ ok: true }), processProbe: () => ({ loaded: true, listenerReady: true }) },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp, pushProbe: push, databaseIntegrity: () => ({ ok: true }), processProbe: () => ({ loaded: true, listenerReady: true }) },
     });
     expect(report.overall).toBe("ok");
     for (const probe of report.probes) {
@@ -453,7 +453,7 @@ describe("doctor", () => {
     const report = await runDoctor({
       config: newConfig(),
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp },
     });
     const serve = report.probes.find((probe) => probe.name === "serve")!;
     expect(serve.status).toBe("fail");
@@ -469,7 +469,7 @@ describe("doctor", () => {
     const report = await runDoctor({
       config: newConfig(),
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp },
     });
     const database = report.probes.find((probe) => probe.name === "database")!;
     expect(database.status).toBe("warn");
@@ -483,24 +483,24 @@ describe("doctor", () => {
     const report = await runDoctor({
       config: newConfig(),
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp },
     });
     const config = report.probes.find((probe) => probe.name === "config")!;
     expect(config.status).toBe("fail");
   });
 
-  test("pi crash loop fails the pi probe", async () => {
+  test("OMP crash loop fails the OMP probe", async () => {
     const fs = seededFs();
     const driver = new InMemoryServeDriver();
     await applyServeRoute({ driver, tcpPort: 8788 });
-    const crashPi: PiProbe = { ...stubPi, crashLoopDetected: () => true };
+    const crashOmp: OmpProbe = { ...stubOmp, crashLoopDetected: () => true };
     const report = await runDoctor({
       config: newConfig(),
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: crashPi },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: crashOmp },
     });
-    const pi = report.probes.find((probe) => probe.name === "pi")!;
-    expect(pi.status).toBe("fail");
+    const omp = report.probes.find((probe) => probe.name === "omp")!;
+    expect(omp.status).toBe("fail");
   });
 
   test("push not configured warns but does not fail overall", async () => {
@@ -510,7 +510,7 @@ describe("doctor", () => {
     const report = await runDoctor({
       config: newConfig(),
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi, databaseIntegrity: () => ({ ok: true }), processProbe: () => ({ loaded: true, listenerReady: true }) },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp, databaseIntegrity: () => ({ ok: true }), processProbe: () => ({ loaded: true, listenerReady: true }) },
     });
     const push = report.probes.find((probe) => probe.name === "push")!;
     expect(push.status).toBe("warn");
@@ -530,7 +530,7 @@ describe("doctor", () => {
     const report: DoctorReport = await runDoctor({
       config,
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi, pushProbe: push },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp, pushProbe: push },
     });
     const blob = JSON.stringify(report);
     // Provider-shaped credentials must not leak; lastError is hashed.
@@ -548,12 +548,13 @@ describe("doctor", () => {
 
   test("rejects unsupported config schemaVersion before any probe runs", async () => {
     const fs = seededFs();
+    const driver = new InMemoryServeDriver();
     const config = newConfig();
     const tampered = { ...config, schemaVersion: 99 as unknown as 1 };
     await expect(runDoctor({
       config: tampered,
       paths: newPaths(),
-      ports: { fs, clock: fixedClock(), piProbe: stubPi },
+      ports: { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp },
     })).rejects.toThrow(DoctorInputError);
   });
 
@@ -561,7 +562,7 @@ describe("doctor", () => {
     const fs = seededFs();
     const driver = new InMemoryServeDriver();
     await applyServeRoute({ driver, tcpPort: 8788 });
-    const ports = { fs, clock: fixedClock(), serveDriver: driver, piProbe: stubPi };
+    const ports = { fs, clock: fixedClock(), serveDriver: driver, ompProbe: stubOmp };
     const first = await runDoctor({ config: newConfig(), paths: newPaths(), ports });
     const second = await runDoctor({ config: newConfig(), paths: newPaths(), ports });
     expect(JSON.stringify(first)).toBe(JSON.stringify(second));

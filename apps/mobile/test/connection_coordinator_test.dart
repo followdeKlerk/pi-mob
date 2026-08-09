@@ -66,6 +66,47 @@ void main() {
     await database.close();
   });
 
+  test(
+    'server visibility cutoff hides stale inactive sessions but keeps local state',
+    () async {
+      const staleSessionId = '66666666-6666-4666-8666-666666666666';
+      await makeReady(
+        coordinator,
+        transport,
+        sessionVisibilityCutoff: '2026-07-06T00:00:00.000Z',
+      );
+      final socket = transport.sockets.single;
+      socket.server(
+        event(
+          type: 'session.summary',
+          streamId: 'host:$hostId',
+          cursor: '2',
+          eventId: '66666666-6666-4666-8666-666666666661',
+          payload: {
+            'sessionId': staleSessionId,
+            'name': 'Old session',
+            'runtimeState': 'stopped',
+            'queueCount': 0,
+            'lastActivityAt': '2026-07-01T00:00:00.000Z',
+          },
+        ),
+      );
+      var persisted = false;
+      for (var attempt = 0; attempt < 30 && !persisted; attempt += 1) {
+        persisted = (await database.allSessions()).any(
+          (row) => row.sessionId == staleSessionId,
+        );
+        if (!persisted)
+          await Future<void>.delayed(const Duration(milliseconds: 10));
+      }
+      expect(persisted, isTrue);
+      expect(
+        coordinator.sessions.any((item) => item.sessionId == staleSessionId),
+        isFalse,
+      );
+    },
+  );
+
   // R11 — burst-coalescing frame budget. Calling the [_notify] coalescer
   // 100 times in a tight loop must drain to at most one listener
   // notification per Flutter frame. The frame-coalescer seam is exercised
@@ -1858,6 +1899,10 @@ void main() {
       expect(coordinator.selectedControls?.compactionPhase.name, 'running');
 
       await coordinator.setModel('anthropic/sonnet');
+      final modelCommand = socket.sent.lastWhere(
+        (message) => message['type'] == 'model.set',
+      );
+      expect(modelCommand['payload'], containsPair('provider', 'anthropic'));
       await coordinator.setThinking('high');
       await coordinator.setAutoRetry(true);
       await coordinator.abortRetry();
@@ -1889,7 +1934,14 @@ void main() {
         ),
       );
       await eventually(() => coordinator.selectedRuntimeState == 'running');
-      await expectLater(coordinator.setModel('x'), throwsStateError);
+      final modelSetCount = socket.sent
+          .where((message) => message['type'] == 'model.set')
+          .length;
+      await coordinator.setModel('anthropic/sonnet');
+      expect(
+        socket.sent.where((message) => message['type'] == 'model.set').length,
+        modelSetCount + 1,
+      );
     },
   );
 
@@ -2844,12 +2896,15 @@ void main() {
 
 Future<void> makeReady(
   ConnectionCoordinator coordinator,
-  FakeBridgeTransport transport,
-) async {
+  FakeBridgeTransport transport, {
+  String? sessionVisibilityCutoff,
+}) async {
   await coordinator.initialize(autoConnect: false);
   await coordinator.connect('https://fixture.test');
   final socket = transport.sockets.single;
-  socket.server(helloAccepted());
+  socket.server(
+    helloAccepted(sessionVisibilityCutoff: sessionVisibilityCutoff),
+  );
   await eventually(
     () => socket.sent.any((message) => message['type'] == 'subscription.set'),
   );
@@ -3040,31 +3095,35 @@ List<String> streamIds(Map<String, Object?> subscription) =>
         .map((item) => (item as Map)['streamId'] as String)
         .toList();
 
-Map<String, Object?> helloAccepted({String generation = '1'}) =>
-    response('hello.accepted', {
-      'connectionId': connectionId,
-      'hostId': hostId,
-      'hostGeneration': generation,
-      'hostDisplayName': 'Fixture host',
-      'bridgeVersion': 'm5',
-      'piVersion': '0.82.0',
-      'serverTime': '2026-07-13T00:00:00.000Z',
-      'capabilities': [
-        'streams.v1',
-        'commands.v1',
-        'controller_leases.v1',
-        'catalogue.v1',
-      ],
-      'limits': {
-        'maxJsonBytes': 1048576,
-        'maxAttachmentBytes': 10485760,
-        'maxAttachmentsPerPrompt': 4,
-        'maxPromptAttachmentBytes': 26214400,
-        'maxQueuedFollowUps': 10,
-        'maxSessionPageSize': 100,
-        'maxBackgroundSessionSubscriptions': 5,
-      },
-    });
+Map<String, Object?> helloAccepted({
+  String generation = '1',
+  String? sessionVisibilityCutoff,
+}) => response('hello.accepted', {
+  'connectionId': connectionId,
+  'hostId': hostId,
+  'hostGeneration': generation,
+  'hostDisplayName': 'Fixture host',
+  'bridgeVersion': 'm5',
+  'piVersion': '0.82.0',
+  'serverTime': '2026-07-13T00:00:00.000Z',
+  if (sessionVisibilityCutoff != null)
+    'sessionVisibilityCutoff': sessionVisibilityCutoff,
+  'capabilities': [
+    'streams.v1',
+    'commands.v1',
+    'controller_leases.v1',
+    'catalogue.v1',
+  ],
+  'limits': {
+    'maxJsonBytes': 1048576,
+    'maxAttachmentBytes': 10485760,
+    'maxAttachmentsPerPrompt': 4,
+    'maxPromptAttachmentBytes': 26214400,
+    'maxQueuedFollowUps': 10,
+    'maxSessionPageSize': 100,
+    'maxBackgroundSessionSubscriptions': 5,
+  },
+});
 
 Map<String, Object?> event({
   required String type,

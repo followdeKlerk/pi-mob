@@ -61,11 +61,14 @@ export interface BridgeRuntimePort {
    *  rejection on every miss. */
   verifyInstallationCredential?(installationId: string, plaintext: string, now?: number): CredentialVerificationResult;
   bindEnrollment?(installationId: string, passcode: string): BindOutcome;
-  /** Additive optional capabilities; absence must remain explicit to clients. */
-  optionalCapabilities?(): readonly string[];
   subscribe(connection: ConnectionContext, payload: Record<string, unknown>): Promise<SubscriptionResult> | SubscriptionResult;
   control(connection: ConnectionContext, type: string, payload: Record<string, unknown>): Promise<Record<string, unknown> | void> | Record<string, unknown> | void;
   command(connection: ConnectionContext, message: Record<string, unknown>): Promise<Record<string, unknown>> | Record<string, unknown>;
+  optionalCapabilities?(): readonly string[];
+  /** Mobile-facing catalogue boundary. Durable host state is never deleted. */
+  sessionVisibilityCutoff?(): string;
+  /** Redacts stale host catalogue events without creating cursor gaps. */
+  mobileEvent?(event: { eventId: string; streamId: string; cursor: string; type: string; payload: Record<string, unknown> }): { eventId: string; streamId: string; cursor: string; type: string; payload: Record<string, unknown> };
   onEvent?(listener: (event: { eventId: string; streamId: string; cursor: string; type: string; payload: Record<string, unknown> }) => void): () => void;
   /**
    * Phase 4 — register a listener for canonical session-event live
@@ -266,10 +269,20 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
             // server envelope) and updates the socket's canonical
             // subscription set.
             if (type === "session.events.subscribe") {
-              const subscribeSessionId = typeof (result as { __canonicalSubscribeSessionId?: unknown }).__canonicalSubscribeSessionId === "string"
-                ? (result as { __canonicalSubscribeSessionId: string }).__canonicalSubscribeSessionId
-                : null;
-              if (subscribeSessionId) ws.data.canonicalSubscriptions.add(subscribeSessionId);
+              const routingHint = result.__canonicalSubscribeSessionId;
+              const subscribeSessionId = typeof routingHint === "string" ? routingHint : null;
+              const resultPayload = result.payload;
+              const replayComplete = resultPayload !== null &&
+                typeof resultPayload === "object" &&
+                "complete" in resultPayload &&
+                resultPayload.complete === true;
+              if (subscribeSessionId) {
+                if (replayComplete) ws.data.canonicalSubscriptions.add(subscribeSessionId);
+                else ws.data.canonicalSubscriptions.delete(subscribeSessionId);
+              }
+              // The transport keeps the durable subscription in replay
+              // mode and buffers commits until the client catches up.
+              if (subscribeSessionId && replayComplete) ws.data.canonicalSubscriptions.add(subscribeSessionId);
               // `__canonicalSubscribeSessionId` is an internal routing hint;
               // never expose it on the strict replay-result wire envelope.
               const wireResult = { ...(result as Record<string, unknown>) };
@@ -352,15 +365,28 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
     if (required.some((item) => typeof item !== "string" || !capabilities.includes(item))) { sendError(ws, "unsupported_capability", "A required capability is unsupported.", message.requestId); ws.close(1002, "capability"); return; }
     if (!validateFixture({ name: "live", kind: "hello", valid: true, message })) { sendError(ws, "invalid_message", "Hello does not match the protocol schema.", message.requestId); return; }
     ws.data.installationId = installationId; ws.data.hello = true;
-    send(ws, envelope("hello.accepted", { connectionId: ws.data.connectionId, hostId: identity.hostId, hostGeneration: identity.hostGeneration, hostDisplayName: identity.hostDisplayName, bridgeVersion: runtime.bridgeVersion, piVersion: runtime.piVersion, serverTime: new Date().toISOString(), capabilities, limits: LIMITS }, message.requestId));
+    const visibilityCutoff = runtime.sessionVisibilityCutoff?.();
+    send(ws, envelope("hello.accepted", {
+      connectionId: ws.data.connectionId,
+      hostId: identity.hostId,
+      hostGeneration: identity.hostGeneration,
+      hostDisplayName: identity.hostDisplayName,
+      bridgeVersion: runtime.bridgeVersion,
+      piVersion: runtime.piVersion,
+      serverTime: new Date().toISOString(),
+      capabilities,
+      limits: LIMITS,
+      ...(typeof visibilityCutoff === "string" ? { sessionVisibilityCutoff: visibilityCutoff } : {}),
+    }, message.requestId));
   }
   function consumeToken(data: SocketData): boolean { const now = Date.now(); data.tokens = Math.min(20, data.tokens + (now - data.tokenAt) * 0.01); data.tokenAt = now; if (data.tokens < 1) return false; data.tokens -= 1; return true; }
 
   options.runtime.onEvent?.((event) => {
+    const mobileEvent = options.runtime.mobileEvent?.(event) ?? event;
     for (const socket of sockets) {
       if (!socket.data.subscriptions.has(event.streamId)) continue;
-      if (socket.data.syncing) socket.data.pendingEvents.push(event);
-      else if (socket.data.synchronized) sendLiveEvent(socket, event);
+      if (socket.data.syncing) socket.data.pendingEvents.push(mobileEvent);
+      else if (socket.data.synchronized) sendLiveEvent(socket, mobileEvent);
     }
   });
   options.runtime.onCanonicalLiveEvent?.((event) => {

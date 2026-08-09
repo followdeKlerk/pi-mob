@@ -470,13 +470,16 @@ class _TurnView extends StatelessWidget {
     final text = Theme.of(context).textTheme;
     if (turn is AssistantTurn) {
       final assistant = turn as AssistantTurn;
+      final showAssistantStatus = assistant.toolItems.isEmpty;
       final statusLabel = assistant.completedWithNoResponse
           ? 'Completed with no response'
           : assistant.status.name;
       return Semantics(
         container: true,
         liveRegion: assistant.isTerminal,
-        label: 'Assistant turn $statusLabel',
+        label: showAssistantStatus
+            ? 'Assistant turn $statusLabel'
+            : 'Assistant turn',
         child: Padding(
           padding: const EdgeInsets.symmetric(vertical: PiSpacing.sm),
           child: Column(
@@ -515,26 +518,27 @@ class _TurnView extends StatelessWidget {
                       ),
                     ),
                   ),
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  _contentInset,
-                  PiSpacing.sm,
-                  _contentInset,
-                  PiSpacing.xs,
-                ),
-                child: Align(
-                  alignment: Alignment.centerRight,
-                  child: Text(
-                    statusLabel,
-                    key: assistant.completedWithNoResponse
-                        ? Key('assistant-no-response-${assistant.turnId}')
-                        : null,
-                    style: text.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+              if (showAssistantStatus)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(
+                    _contentInset,
+                    PiSpacing.sm,
+                    _contentInset,
+                    PiSpacing.xs,
+                  ),
+                  child: Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      statusLabel,
+                      key: assistant.completedWithNoResponse
+                          ? Key('assistant-no-response-${assistant.turnId}')
+                          : null,
+                      style: text.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ),
                 ),
-              ),
             ],
           ),
         ),

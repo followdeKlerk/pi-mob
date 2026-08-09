@@ -58,6 +58,20 @@ enum ConnectionPhase {
   rePairRequired,
 }
 
+const Set<String> _mobileActiveRuntimeStates = <String>{
+  'starting',
+  'idle',
+  'running',
+  'waiting_for_input',
+  'retry_wait',
+  'compacting',
+  'stopping',
+  'crashed',
+  'crash_loop',
+  'incompatible',
+  'indeterminate',
+};
+
 enum SessionCreationPhase { idle, creating, created, failed }
 
 @immutable
@@ -409,6 +423,9 @@ final class ConnectionCoordinator extends ChangeNotifier
   String? bridgeVersion;
   String? piVersion;
   String protocolVersion = '1.0';
+
+  /// Server-authoritative lower bound for inactive session visibility.
+  DateTime? sessionVisibilityCutoff;
   String? selectedWorkspaceId;
   String? selectedSessionId;
   String? leaseId;
@@ -713,8 +730,22 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
   }
 
+  bool _isSessionVisible(SessionState session) {
+    final cutoff = sessionVisibilityCutoff;
+    if (cutoff == null) return true;
+    if (_mobileActiveRuntimeStates.contains(session.runtimeState) ||
+        session.unreadState == 'needs_attention' ||
+        session.queueCount > 0) {
+      return true;
+    }
+    final activity = session.lastActivityAt;
+    return activity != null && !activity.isBefore(cutoff);
+  }
+
   bool _isActiveChat(String sessionId) {
-    if (!_sessions.containsKey(sessionId) ||
+    final session = _sessions[sessionId];
+    if (session == null ||
+        !_isSessionVisible(session) ||
         _locallyDeletedSessionIds.contains(sessionId)) {
       return false;
     }
@@ -1302,7 +1333,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     return _sendSessionControl('model.set', <String, Object?>{
       'modelId': modelId,
       if (selected?.provider != null) 'provider': selected!.provider,
-    }, idleOnly: true);
+    });
   }
 
   Future<void> setThinking(String level) => _sendSessionControl(
@@ -1641,6 +1672,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     hostDisplayName = null;
     bridgeVersion = null;
     piVersion = null;
+    sessionVisibilityCutoff = null;
     selectedWorkspaceId = null;
     selectedSessionId = null;
     leaseId = null;
@@ -2900,6 +2932,10 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (_pairingCompleter case final pairing? when !pairing.isCompleted) {
       pairing.complete();
     }
+    final rawVisibilityCutoff = payload['sessionVisibilityCutoff'];
+    sessionVisibilityCutoff = rawVisibilityCutoff is String
+        ? DateTime.tryParse(rawVisibilityCutoff)?.toUtc()
+        : null;
     hostDisplayName = payload['hostDisplayName'] as String?;
     bridgeVersion = payload['bridgeVersion'] as String?;
     piVersion = payload['piVersion'] as String?;
@@ -2990,6 +3026,9 @@ final class ConnectionCoordinator extends ChangeNotifier
         lastSeenAt: Value(_now()),
       ),
     );
+    if (sessionVisibilityCutoff != null) {
+      await _searchIndexer.rebuildHost(newHostId);
+    }
     await _subscribe();
   }
 
@@ -3095,6 +3134,12 @@ final class ConnectionCoordinator extends ChangeNotifier
         message,
         sessionId: sessionId,
       );
+      // Canonical replay responses are bounded by the protocol array
+      // limit. Continue from the manager's durable cursor until the
+      // bridge marks the replay complete.
+      if (payload['complete'] == false) {
+        await _subscribeCanonical(sessionId);
+      }
     } on Object {
       // A malformed or locally unwritable canonical replay must not tear
       // down the host connection and clear the session list. Keep the

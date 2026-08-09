@@ -14,7 +14,6 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "bun test",
-    "m3:contract": "bun run cmd/m3-contract.ts",
     "daemon": "bun run src/daemon.ts",
     "build:smoke": "bun build --compile --no-compile-autoload-dotenv --no-compile-autoload-bunfig --outfile ./dist/bridge-smoke ./src/smoke.ts"
   },
@@ -25,8 +24,6 @@
     "pngjs": "7.0.0"
   },
   "devDependencies": {
-    "@earendil-works/pi-ai": "0.82.0",
-    "@earendil-works/pi-coding-agent": "0.82.0",
     "@pi-mob/typescript-config": "workspace:*",
     "@types/jpeg-js": "0.3.7",
     "@types/pngjs": "6.0.5",

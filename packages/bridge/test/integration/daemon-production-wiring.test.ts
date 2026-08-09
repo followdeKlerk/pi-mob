@@ -11,19 +11,15 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { TypeCompiler } from "@sinclair/typebox/compiler";
-import { ResponseSchema } from "@pi-mob/protocol-schema";
 import { runDaemon, type DaemonHandle } from "../../src/daemon";
 import { generateInstallationCredential, hashCredential } from "../../src/auth/credentials";
 
 const INSTALLATION_ID = "11111111-1111-4111-8111-111111111111";
 const SESSION_ID = "22222222-2222-4222-8222-222222222222";
-const SESSION_TWO_ID = "33333333-3333-4333-8333-333333333333";
 const BASELINE_CAPABILITIES = [
-  "catalogue.v1",
   "commands.v1",
   "controller_leases.v1",
   "session_events.v2",
@@ -73,23 +69,6 @@ async function nextMessage(
   throw new Error("timed out waiting for WebSocket message");
 }
 
-function writeCataloguePi(root: string): string {
-  const executable = join(root, "fake-pi-catalogue.ts");
-  writeFileSync(executable, `#!${Bun.which("bun")}
-import { createInterface } from "node:readline";
-const sessionId = process.argv[process.argv.indexOf("--session-id") + 1] ?? "unknown";
-const input = createInterface({ input: process.stdin });
-for await (const line of input) {
-  const request = JSON.parse(line);
-  if (request.type !== "get_commands") continue;
-  const second = sessionId.includes("33333333");
-  const name = second ? "second-command" : "first-command";
-  process.stdout.write(JSON.stringify({ id: request.id, type: "response", command: "get_commands", success: true, data: { commands: [{ name, description: second ? "second" : "first", source: "extension", sourceInfo: { path: "/private/secret.ts" } }] } }) + "\\n");
-}
-`, { mode: 0o700 });
-  chmodSync(executable, 0o700);
-  return executable;
-}
 
 async function closeClient(client: Client): Promise<void> {
   if (client.socket.readyState === WebSocket.CLOSED) return;
@@ -147,53 +126,12 @@ function replayEvents(message: Record<string, unknown>): Array<Record<string, un
 }
 
 describe("normal daemon production wiring: canonical session events", () => {
-  test("selected-session catalogue is production-wired, sanitized, and isolated", async () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-mob-daemon-catalogue-"));
-    temporaryDirectories.push(root);
-    const stateDir = join(root, "state");
-    const sessionDir = join(root, "pi-sessions");
-    const executable = writeCataloguePi(root);
-    const credential = generateInstallationCredential();
-    let daemon: DaemonHandle | undefined;
-    let client: Client | undefined;
-    try {
-      daemon = await runDaemon({ workspace: root, executable, stateDir, sessionDir, bridgeVersion: "test" });
-      daemon.store.upsertInstallationCredential({ installationId: INSTALLATION_ID, credentialHash: hashCredential(credential), enrollmentSecretHash: hashCredential("test-enrollment", "enrollment"), enrollmentSource: "manual", createdAt: Date.now(), lastSeenAt: Date.now() });
-      for (const sessionId of [SESSION_ID, SESSION_TWO_ID]) {
-        daemon.store.ensureSession(sessionId, { sessionId, name: sessionId, runtimeState: "stopped", attentionState: "none", piSessionPath: null });
-        daemon.store.ensureStream(`session:${sessionId}`, "session", sessionId);
-      }
-      client = await openClient(daemon.server.port!);
-      const connectionId = await authenticate(client, credential);
-      const request = crypto.randomUUID();
-      client.socket.send(JSON.stringify(envelope("catalogue.snapshot.request", { requestId: request, sessionId: SESSION_ID }, connectionId, request)));
-      const first = await nextMessage(client, (message) => message.type === "catalogue.snapshot.result" && message.requestId === request);
-      const responses = TypeCompiler.Compile(ResponseSchema);
-      expect(responses.Check(first)).toBe(true);
-      expect(first.type).toBe("catalogue.snapshot.result");
-      expect((first.payload as Record<string, unknown>).sessionId).toBe(SESSION_ID);
-      const firstEntries = (first.payload as Record<string, unknown>).entries as Array<Record<string, unknown>>;
-      expect(firstEntries[0]).toMatchObject({ entryId: "extension:first-command", name: "first-command", invocation: "/first-command" });
-      expect(JSON.stringify(first)).not.toContain("sourceInfo");
-
-      const secondRequest = crypto.randomUUID();
-      client.socket.send(JSON.stringify(envelope("catalogue.snapshot.request", { requestId: secondRequest, sessionId: SESSION_TWO_ID }, connectionId, secondRequest)));
-      const second = await nextMessage(client, (message) => message.type === "catalogue.snapshot.result" && message.requestId === secondRequest);
-      expect(responses.Check(second)).toBe(true);
-      expect((second.payload as Record<string, unknown>).sessionId).toBe(SESSION_TWO_ID);
-      expect(((second.payload as Record<string, unknown>).entries as Array<Record<string, unknown>>)[0]?.name).toBe("second-command");
-      expect(JSON.stringify(second)).not.toContain("sourceInfo");
-    } finally {
-      if (client) await closeClient(client);
-      if (daemon) await daemon.close();
-    }
-  });
 
   test("auth, replay/live ordering, reconnect cursors, and durable restart replay", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-daemon-wiring-"));
     temporaryDirectories.push(root);
     const stateDir = join(root, "state");
-    const sessionDir = join(root, "pi-sessions");
+    const ompSessionDir = join(root, "pi-sessions");
     const credential = generateInstallationCredential();
     let daemon: DaemonHandle | undefined;
     let client: Client | undefined;
@@ -201,9 +139,9 @@ describe("normal daemon production wiring: canonical session events", () => {
     try {
       daemon = await runDaemon({
         workspace: root,
-        executable: process.execPath,
+        ompExecutable: process.execPath,
         stateDir,
-        sessionDir,
+        ompSessionDir,
         bridgeVersion: "test",
       });
       daemon.store.upsertInstallationCredential({
@@ -286,9 +224,9 @@ describe("normal daemon production wiring: canonical session events", () => {
       // not an in-memory runtime, is the restart authority.
       daemon = await runDaemon({
         workspace: root,
-        executable: process.execPath,
+        ompExecutable: process.execPath,
         stateDir,
-        sessionDir,
+        ompSessionDir,
         bridgeVersion: "test",
       });
       client = await openClient(daemon.server.port!);

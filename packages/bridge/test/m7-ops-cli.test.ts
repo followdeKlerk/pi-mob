@@ -25,27 +25,27 @@ function fakeLifecycle(calls: string[] = [], state = { launchAgentLoaded: true, 
 function setupDefaults(root: string): SetupDefaults {
   return {
     installRoot: join(root, "install"), launchAgentsRoot: join(root, "LaunchAgents"),
-    piExecutable: join(root, "pi"), sourceCliExecutable: join(root, "pi-mob"),
+    ompExecutable: join(root, "omp"), sourceCliExecutable: join(root, "pi-mob"),
     sourceBridgeExecutable: join(root, "bridge"),
-    piSessionDir: join(root, "sessions"),
+    ompSessionDir: join(root, "sessions"),
     bridgeVersion: "0.1.0", protocolVersion: "1.0", port: 9443,
   };
 }
 
 describe("M7 operations CLI", () => {
-  test("install writes a no-shell LaunchAgent with config, workspace, and sessions (no policy extension)", async () => {
+  test("install writes a no-shell LaunchAgent with OMP config, workspace, and sessions", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-m7-cli-"));
-    const files = ["pi", "bridge"];
+    const files = ["omp", "bridge"];
     for (const file of files) writeFileSync(join(root, file), "fixture");
-    const workspace = join(root, "workspace"); const sessions = join(root, "pi-sessions");
+    const workspace = join(root, "workspace"); const sessions = join(root, "omp-sessions");
     mkdirSync(workspace); mkdirSync(sessions);
-    const args = parseArgs(["install", "--install-root", join(root, "install"), "--launch-agents-root", join(root, "LaunchAgents"), "--pi-executable", join(root, "pi"), "--bridge-executable", join(root, "bridge"), "--workspace", workspace, "--pi-session-dir", sessions, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "8788", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]);
+    const args = parseArgs(["install", "--install-root", join(root, "install"), "--launch-agents-root", join(root, "LaunchAgents"), "--omp-executable", join(root, "omp"), "--bridge-executable", join(root, "bridge"), "--workspace", workspace, "--omp-session-dir", sessions, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "8788", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]);
     const lifecycleCalls: string[] = [];
     const result = await handleInstall(args, deps([], fakeLifecycle(lifecycleCalls)));
     expect(lifecycleCalls).toEqual(["install"]);
     const plist = createNodeFileSystemPort().readFile(result.plistPath).toString("utf8");
     expect(plist).toContain("--config"); expect(plist).toContain("--workspace");
-    expect(plist).toContain("--session-dir");
+    expect(plist).toContain("--omp-session-dir");
     // Phase 4: no policy extension is injected.
     expect(plist).not.toContain("--extension");
     expect(plist).not.toMatch(/(?:bash|sh)<\/string>\s*<string>-c/);
@@ -57,8 +57,8 @@ describe("M7 operations CLI", () => {
     mkdirSync(workspace); mkdirSync(sessions);
     const serviceAccount = join(root, "service-account.json");
     writeFileSync(serviceAccount, "{\"type\":\"service_account\"}"); chmodSync(serviceAccount, 0o600);
-    writeFileSync(join(root, "pi"), "fixture"); writeFileSync(join(root, "bridge"), "fixture");
-    const result = await handleInstall(parseArgs(["install", "--install-root", join(root, "install"), "--launch-agents-root", join(root, "LaunchAgents"), "--pi-executable", join(root, "pi"), "--bridge-executable", join(root, "bridge"), "--workspace", workspace, "--pi-session-dir", sessions, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "8788", "--hostname", "127.0.0.1", "--environment", "release", "--fcm-service-account", serviceAccount]), deps([], fakeLifecycle()));
+    writeFileSync(join(root, "omp"), "fixture"); writeFileSync(join(root, "bridge"), "fixture");
+    const result = await handleInstall(parseArgs(["install", "--install-root", join(root, "install"), "--launch-agents-root", join(root, "LaunchAgents"), "--omp-executable", join(root, "omp"), "--bridge-executable", join(root, "bridge"), "--workspace", workspace, "--omp-session-dir", sessions, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "8788", "--hostname", "127.0.0.1", "--environment", "release", "--fcm-service-account", serviceAccount]), deps([], fakeLifecycle()));
     expect(result.config.fcmServiceAccount).toBe(serviceAccount);
     const config = createNodeFileSystemPort().readFile(result.paths.configFile).toString();
     const plist = createNodeFileSystemPort().readFile(result.plistPath).toString();
@@ -83,9 +83,9 @@ describe("M7 operations CLI", () => {
   test("setup installs with workspace-centered defaults only after Tailscale and MagicDNS are ready", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-m7-setup-"));
     const defaults = setupDefaults(root); const calls: string[] = [];
-    for (const file of [defaults.piExecutable!, defaults.sourceCliExecutable, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    for (const file of [defaults.ompExecutable!, defaults.sourceCliExecutable, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
     mkdirSync("/tmp/pi-mob-m7-workspace", { recursive: true });
-    mkdirSync(defaults.piSessionDir);
+    mkdirSync(defaults.ompSessionDir);
     const result = await handleSetup(parseArgs(["setup", "--workspace", "/tmp/pi-mob-m7-workspace"]), {
       ...deps([], fakeLifecycle(calls)), setupDefaults: defaults,
       tailscaleProbe: async () => ({ installed: true, loggedIn: true, magicDnsName: "studio.tail.ts.net" }),
@@ -120,10 +120,10 @@ describe("M7 operations CLI", () => {
   test("start and stop are idempotent lifecycle commands using the configured port", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-m7-life-")); const calls: string[] = [];
     const defaults = setupDefaults(root);
-    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
-    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
+    for (const file of [defaults.ompExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.ompSessionDir);
     const lifecycle = fakeLifecycle(calls);
-    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], lifecycle));
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--omp-executable", defaults.ompExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--omp-session-dir", defaults.ompSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], lifecycle));
     const started = await handleStart(parseArgs(["start", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot]), deps([], lifecycle));
     const stopped = await handleStop(parseArgs(["stop", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot]), deps([], lifecycle));
     expect(started.port).toBe(9443); expect(started.alreadyRunning).toBe(true);
@@ -140,10 +140,10 @@ describe("M7 operations CLI", () => {
 
   test("status reports configured port, owned Serve, and only canonical pairing", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-m7-status-ready-")); const defaults = setupDefaults(root);
-    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
-    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
+    for (const file of [defaults.ompExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.ompSessionDir);
     const lifecycle = fakeLifecycle([]);
-    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], lifecycle));
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--omp-executable", defaults.ompExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--omp-session-dir", defaults.ompSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], lifecycle));
     const ownedServe: ServeDriver = { async listRoutes() { return [{ source: { tcp: { port: 9443 } }, handlers: [{ kind: "forward", address: "http://127.0.0.1:9443" }], annotations: { "pi-mob.bridge/owner": "pi-mob-bridge" } }]; }, async setRoutes() {} };
     const result = await handleStatus(parseArgs(["status", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot]), { ...deps([], lifecycle), serveDriver: ownedServe });
     expect(result).toMatchObject({ installed: true, launchAgentLoaded: true, listenerReady: true, ownedServePresent: true, ownedServePort: 9443, pairingAvailable: false, pairingEndpoint: null });
@@ -160,9 +160,9 @@ describe("M7 operations CLI", () => {
   test("pair uses the installed config, live Serve route, identity, and fresh enrollment challenge", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-cli-"));
     const defaults = setupDefaults(root);
-    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
-    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
-    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    for (const file of [defaults.ompExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.ompSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--omp-executable", defaults.ompExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--omp-session-dir", defaults.ompSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
     const passcode = "123456";
     const result = await handlePair(parseArgs(["pair", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot]), {
       ...deps([]),
@@ -178,9 +178,9 @@ describe("M7 operations CLI", () => {
   test("pair emits only endpoint, passcode, and expiry on an interactive terminal", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-human-"));
     const defaults = setupDefaults(root);
-    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
-    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
-    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    for (const file of [defaults.ompExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.ompSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--omp-executable", defaults.ompExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--omp-session-dir", defaults.ompSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
     const result = await runCli({
       ...deps(["pair", "--install-root", defaults.installRoot]),
       interactive: true,
@@ -202,9 +202,9 @@ describe("M7 operations CLI", () => {
   test("pair keeps structured JSON output when stdout is not a TTY or --json is used", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-json-"));
     const defaults = setupDefaults(root);
-    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
-    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
-    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    for (const file of [defaults.ompExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.ompSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--omp-executable", defaults.ompExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--omp-session-dir", defaults.ompSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
     const base = {
       ...deps(["pair", "--install-root", defaults.installRoot, "--json"]),
       tailscaleProbe: async () => ({ installed: true, loggedIn: true, magicDnsName: "studio.tail.ts.net" }),
@@ -225,9 +225,9 @@ describe("M7 operations CLI", () => {
   test("pair refuses without a ready listener and owned Serve route", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-pair-unready-"));
     const defaults = setupDefaults(root);
-    for (const file of [defaults.piExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
-    mkdirSync(join(root, "workspace")); mkdirSync(defaults.piSessionDir);
-    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--pi-executable", defaults.piExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--pi-session-dir", defaults.piSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
+    for (const file of [defaults.ompExecutable!, defaults.sourceBridgeExecutable]) writeFileSync(file, "fixture");
+    mkdirSync(join(root, "workspace")); mkdirSync(defaults.ompSessionDir);
+    await handleInstall(parseArgs(["install", "--install-root", defaults.installRoot, "--launch-agents-root", defaults.launchAgentsRoot, "--omp-executable", defaults.ompExecutable!, "--bridge-executable", defaults.sourceBridgeExecutable, "--workspace", join(root, "workspace"), "--omp-session-dir", defaults.ompSessionDir, "--bridge-version", "0.1.0", "--protocol-version", "1.0", "--port", "9443", "--hostname", "127.0.0.1", "--environment", "release", "--path-dir", "/usr/bin"]), deps([], fakeLifecycle()));
     let issued = false;
     await expect(handlePair(parseArgs(["pair", "--install-root", defaults.installRoot]), {
       ...deps([]),
@@ -242,15 +242,15 @@ describe("M7 operations CLI", () => {
 
   test("destructive lifecycle commands fail closed without a production driver", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-m7-uninstall-"));
-    const args = parseArgs(["uninstall", "--install-root", root, "--pi-session-dir", join(root, "sessions"), "--mode", "retain_data", "--confirm"]);
+    const args = parseArgs(["uninstall", "--install-root", root, "--omp-session-dir", join(root, "sessions"), "--mode", "retain_data", "--confirm"]);
     await expect(handleUninstall(args, deps([]))).rejects.toThrow(/lifecycle driver/);
   });
 
-  test("uninstall stops service and removes only owned Serve before preserving Pi sessions", async () => {
+  test("uninstall stops service and removes only owned Serve before preserving OMP sessions", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-m7-uninstall-")); const calls: string[] = [];
     const lifecycle = fakeLifecycle(calls);
-    const args = parseArgs(["uninstall", "--install-root", root, "--pi-session-dir", join(root, "sessions"), "--mode", "retain_data", "--confirm"]);
+    const args = parseArgs(["uninstall", "--install-root", root, "--omp-session-dir", join(root, "sessions"), "--mode", "retain_data", "--confirm"]);
     const result = await handleUninstall(args, deps([], lifecycle));
-    expect(calls).toEqual(["service", "serve"]); expect(result.piSessionDirRemoved).toBe(false);
+    expect(calls).toEqual(["service", "serve"]); expect(result.ompSessionDirRemoved).toBe(false);
   });
 });

@@ -15,7 +15,7 @@ Use these sources for availability:
 3. production-wiring integration tests;
 4. [Project status](../../docs/PROJECT_STATUS.md).
 
-Raw RPC is an internal compatibility surface. Git integration is out of product scope.
+Raw OMP RPC is host-internal. `pi.rpc.request` and `raw_rpc.v1` remain legacy compatibility identifiers, but the normal daemon does not advertise `raw_rpc.v1` and the released mobile client does not use it. The mobile protocol remains backend-neutral, and Git integration is out of product scope.
 
 ## Development
 

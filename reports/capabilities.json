@@ -1,0 +1,61 @@
+{
+  "releaseVersion": "0.0.3-alpha.1",
+  "snapshots": [
+    {
+      "configuration": "with-fcm",
+      "capabilities": [
+        "commands.v1",
+        "controller_leases.v1",
+        "notifications.v1",
+        "session_events.v2",
+        "streams.v1"
+      ]
+    },
+    {
+      "configuration": "without-fcm",
+      "capabilities": [
+        "commands.v1",
+        "controller_leases.v1",
+        "session_events.v2",
+        "streams.v1"
+      ]
+    }
+  ],
+  "capabilities": [
+    {
+      "capability": "streams.v1",
+      "providerConstructionSource": "packages/bridge/src/daemon.ts: runDaemon",
+      "mobileEntryPoint": "apps/mobile/lib/src/connection/connection_coordinator.dart: capability",
+      "focusedTestPath": "packages/bridge/test/capability-report.test.ts",
+      "releaseVersion": "0.0.3-alpha.1"
+    },
+    {
+      "capability": "commands.v1",
+      "providerConstructionSource": "packages/bridge/src/daemon.ts: runDaemon",
+      "mobileEntryPoint": "apps/mobile/lib/src/connection/connection_coordinator.dart: command",
+      "focusedTestPath": "packages/bridge/test/capability-report.test.ts",
+      "releaseVersion": "0.0.3-alpha.1"
+    },
+    {
+      "capability": "controller_leases.v1",
+      "providerConstructionSource": "packages/bridge/src/daemon.ts: runDaemon",
+      "mobileEntryPoint": "apps/mobile/lib/src/connection/connection_coordinator.dart: lease",
+      "focusedTestPath": "packages/bridge/test/capability-report.test.ts",
+      "releaseVersion": "0.0.3-alpha.1"
+    },
+    {
+      "capability": "session_events.v2",
+      "providerConstructionSource": "packages/bridge/src/daemon.ts: CanonicalEventTransport",
+      "mobileEntryPoint": "apps/mobile/lib/src/connection/connection_coordinator.dart: session.events.subscribe",
+      "focusedTestPath": "packages/bridge/test/session-events/canonical-server-runtime.test.ts",
+      "releaseVersion": "0.0.3-alpha.1"
+    },
+    {
+      "capability": "notifications.v1",
+      "providerConstructionSource": "packages/bridge/src/daemon.ts: BridgeNotificationService",
+      "mobileEntryPoint": "apps/mobile/lib/src/notifications/notification_controller.dart: onBridgeReady",
+      "focusedTestPath": "packages/bridge/test/capability-report.test.ts",
+      "releaseVersion": "0.0.3-alpha.1"
+    }
+  ]
+}

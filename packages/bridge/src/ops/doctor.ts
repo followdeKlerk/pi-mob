@@ -36,7 +36,7 @@ export const DOCTOR_PROBE_NAMES = [
   "serve",
   "database",
   "backup",
-  "pi",
+  "omp",
   "environment",
   "process",
   "storage",
@@ -77,10 +77,10 @@ export interface DoctorPorts {
   /** Confirms launchd service and loopback listener state in production. */
   readonly processProbe?: () => { loaded: boolean; listenerReady: boolean };
   /**
-   * Optional Pi integration. When omitted, the Pi probe reports
+   * Optional OMP integration. When omitted, the OMP probe reports
    * `unknown`. Tests inject a stub that returns structured facts.
    */
-  readonly piProbe?: PiProbe;
+  readonly ompProbe?: OmpProbe;
   /**
    * Optional push integration. When omitted, the push probe reports
    * `not_configured` (which is acceptable for MVP).
@@ -88,8 +88,8 @@ export interface DoctorPorts {
   readonly pushProbe?: PushProbe;
 }
 
-/** Structured Pi facts used by the Pi probe. */
-export interface PiProbe {
+/** Structured OMP facts used by the OMP probe. */
+export interface OmpProbe {
   executablePath(): string;
   versionString(): string | null;
   lastExitCode(): number | null;
@@ -163,7 +163,7 @@ async function runProbe(name: DoctorProbeName, ctx: DoctorContext): Promise<Doct
     case "serve": return probeServe(ctx);
     case "database": return probeDatabase(ctx);
     case "backup": return probeBackup(ctx);
-    case "pi": return probePi(ctx);
+    case "omp": return probeOmp(ctx);
     case "environment": return probeEnvironment(ctx);
     case "process": return probeProcess(ctx);
     case "storage": return probeStorage(ctx);
@@ -402,42 +402,42 @@ function probeBackup(ctx: DoctorContext): DoctorProbe {
 }
 
 // ---------------------------------------------------------------------------
-// pi probe
+// omp probe
 // ---------------------------------------------------------------------------
 
-function probePi(ctx: DoctorContext): DoctorProbe {
+function probeOmp(ctx: DoctorContext): DoctorProbe {
   const details: Record<string, string | number | boolean | null> = {
-    executablePath: relativeSafePath(ctx.paths.installRoot, ctx.config.piExecutable),
+    executablePath: relativeSafePath(ctx.paths.installRoot, ctx.config.ompExecutable),
     executableExists: false,
     crashLoop: false,
   };
   let status: DoctorStatus = "ok";
-  let summary = "pi integration not configured";
-  const probe = ctx.ports.piProbe;
+  let summary = "OMP integration not configured";
+  const probe = ctx.ports.ompProbe;
   if (probe === undefined) {
     status = "warn";
-    summary = "pi probe not provided";
-    return { name: "pi", status, summary, details };
+    summary = "OMP probe not provided";
+    return { name: "omp", status, summary, details };
   }
   const execPath = probe.executablePath();
   if (ctx.ports.fs.exists(execPath)) {
     details.executableExists = true;
   } else {
     status = "fail";
-    summary = "pi executable missing";
+    summary = "OMP executable missing";
   }
   const version = probe.versionString();
   if (version !== null) details.version = safeIdentifier(version);
-  const lastExit = probe.lastExitCode();
-  if (lastExit !== null) details.lastExitCode = lastExit;
+  const exitCode = probe.lastExitCode();
+  if (exitCode !== null) details.lastExitCode = exitCode;
   if (probe.crashLoopDetected()) {
     details.crashLoop = true;
     status = "fail";
-    summary = "pi crash loop detected";
+    summary = "OMP crash loop detected";
   } else if (status === "ok") {
-    summary = `pi executable ${details.executableExists ? "present" : "missing"}`;
+    summary = `OMP executable ${details.executableExists ? "present" : "missing"}`;
   }
-  return { name: "pi", status, summary, details };
+  return { name: "omp", status, summary, details };
 }
 
 // ---------------------------------------------------------------------------
@@ -504,7 +504,7 @@ function probeProcess(ctx: DoctorContext): DoctorProbe {
     status = "warn";
     summary = "LaunchAgent plist present; live process probe unavailable";
   }
-  if (ctx.ports.piProbe?.crashLoopDetected()) {
+  if (ctx.ports.ompProbe?.crashLoopDetected()) {
     details.crashLoop = true;
     status = "fail";
     summary = "supervisor reports crash loop";

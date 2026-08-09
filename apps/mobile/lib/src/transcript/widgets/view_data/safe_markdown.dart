@@ -1,9 +1,11 @@
 /// A dependency-free safe subset of Markdown for final-answer rendering.
 ///
-/// The parser handles only the features the transcript needs:
+/// The parser handles the standard chat-Markdown features the transcript needs:
 ///
+///   * ATX (`#`) and setext (`===` / `---`) headings.
 ///   * Code blocks (fenced with triple backticks, optional language tag).
 ///   * Paragraphs separated by blank lines.
+///   * Block quotes and horizontal rules.
 ///   * Bullet lists (lines starting with `- ` or `* `).
 ///   * Ordered lists (lines starting with `1. `, `2. `, ...).
 ///   * Inline emphasis: `**bold**` and `_italic_` / `*italic*`.
@@ -37,6 +39,13 @@ class SafeMarkdownParagraph extends SafeMarkdownBlock {
   final List<SafeMarkdownInline> children;
 }
 
+/// A level 1–6 heading.
+class SafeMarkdownHeading extends SafeMarkdownBlock {
+  const SafeMarkdownHeading({required this.level, required this.children});
+  final int level;
+  final List<SafeMarkdownInline> children;
+}
+
 /// A fenced code block.
 class SafeMarkdownCodeBlock extends SafeMarkdownBlock {
   const SafeMarkdownCodeBlock(this.code, {this.language});
@@ -54,6 +63,17 @@ class SafeMarkdownBulletList extends SafeMarkdownBlock {
 class SafeMarkdownOrderedList extends SafeMarkdownBlock {
   const SafeMarkdownOrderedList(this.items);
   final List<List<SafeMarkdownInline>> items;
+}
+
+/// A quoted sequence of Markdown blocks.
+class SafeMarkdownBlockQuote extends SafeMarkdownBlock {
+  const SafeMarkdownBlockQuote(this.blocks);
+  final List<SafeMarkdownBlock> blocks;
+}
+
+/// A thematic break.
+class SafeMarkdownHorizontalRule extends SafeMarkdownBlock {
+  const SafeMarkdownHorizontalRule();
 }
 
 /// Inline AST nodes.
@@ -108,10 +128,35 @@ SafeMarkdownDocument parseSafeMarkdown(String source) {
   while (i < lines.length) {
     final line = lines[i];
 
-    // Skip blank lines between blocks.
     if (line.trim().isEmpty) {
       i++;
       continue;
+    }
+
+    final atxHeading = _parseAtxHeading(line);
+    if (atxHeading != null) {
+      blocks.add(
+        SafeMarkdownHeading(
+          level: atxHeading.$1,
+          children: _parseInline(atxHeading.$2),
+        ),
+      );
+      i++;
+      continue;
+    }
+
+    if (i + 1 < lines.length) {
+      final setextLevel = _setextLevel(lines[i + 1]);
+      if (setextLevel != null) {
+        blocks.add(
+          SafeMarkdownHeading(
+            level: setextLevel,
+            children: _parseInline(line.trim()),
+          ),
+        );
+        i += 2;
+        continue;
+      }
     }
 
     // Fenced code block: ```lang?\n...\n```
@@ -124,7 +169,6 @@ SafeMarkdownDocument parseSafeMarkdown(String source) {
         buffer.add(lines[i]);
         i++;
       }
-      // Skip closing fence if present; do not error if missing.
       if (i < lines.length) i++;
       blocks.add(
         SafeMarkdownCodeBlock(
@@ -135,7 +179,26 @@ SafeMarkdownDocument parseSafeMarkdown(String source) {
       continue;
     }
 
-    // Bullet list: lines starting with `- ` or `* `.
+    if (_isHorizontalRule(line)) {
+      blocks.add(const SafeMarkdownHorizontalRule());
+      i++;
+      continue;
+    }
+
+    if (_isBlockQuoteLine(line)) {
+      final quotedLines = <String>[];
+      while (i < lines.length && _isBlockQuoteLine(lines[i])) {
+        quotedLines.add(_stripBlockQuote(lines[i]));
+        i++;
+      }
+      blocks.add(
+        SafeMarkdownBlockQuote(
+          parseSafeMarkdown(quotedLines.join('\n')).blocks,
+        ),
+      );
+      continue;
+    }
+
     if (_isBulletLine(line)) {
       final items = <List<SafeMarkdownInline>>[];
       while (i < lines.length && _isBulletLine(lines[i])) {
@@ -146,7 +209,6 @@ SafeMarkdownDocument parseSafeMarkdown(String source) {
       continue;
     }
 
-    // Ordered list: lines starting with `\d+. `.
     if (_isOrderedLine(line)) {
       final items = <List<SafeMarkdownInline>>[];
       while (i < lines.length && _isOrderedLine(lines[i])) {
@@ -157,14 +219,11 @@ SafeMarkdownDocument parseSafeMarkdown(String source) {
       continue;
     }
 
-    // Paragraph: collect consecutive non-blank, non-fenced, non-list lines.
     final paragraphLines = <String>[line];
     i++;
     while (i < lines.length &&
         lines[i].trim().isNotEmpty &&
-        !lines[i].trimLeft().startsWith('```') &&
-        !_isBulletLine(lines[i]) &&
-        !_isOrderedLine(lines[i])) {
+        !_startsBlock(lines, i)) {
       paragraphLines.add(lines[i]);
       i++;
     }
@@ -174,6 +233,53 @@ SafeMarkdownDocument parseSafeMarkdown(String source) {
   return SafeMarkdownDocument(
     blocks: List<SafeMarkdownBlock>.unmodifiable(blocks),
   );
+}
+
+(int, String)? _parseAtxHeading(String line) {
+  final match = RegExp(
+    r'^ {0,3}(#{1,6})(?:[ \t]+(.*)|[ \t]*)$',
+  ).firstMatch(line);
+  if (match == null) return null;
+  final content = (match.group(2) ?? '')
+      .replaceFirst(RegExp(r'[ \t]+#+[ \t]*$'), '')
+      .trimRight();
+  return (match.group(1)!.length, content);
+}
+
+int? _setextLevel(String line) {
+  final compact = line.trim().replaceAll(RegExp(r'\s'), '');
+  if (compact.length < 3) return null;
+  if (compact.split('').every((character) => character == '=')) return 1;
+  if (compact.split('').every((character) => character == '-')) return 2;
+  return null;
+}
+
+bool _isHorizontalRule(String line) {
+  if (line.length - line.trimLeft().length > 3) return false;
+  final compact = line.trim().replaceAll(RegExp(r'\s'), '');
+  if (compact.length < 3) return false;
+  final marker = compact[0];
+  if (marker != '-' && marker != '*' && marker != '_') return false;
+  return compact.split('').every((character) => character == marker);
+}
+
+bool _isBlockQuoteLine(String line) => line.trimLeft().startsWith('>');
+
+String _stripBlockQuote(String line) {
+  final trimmed = line.trimLeft();
+  final content = trimmed.substring(1);
+  return content.startsWith(' ') ? content.substring(1) : content;
+}
+
+bool _startsBlock(List<String> lines, int index) {
+  final line = lines[index];
+  return _parseAtxHeading(line) != null ||
+      line.trimLeft().startsWith('```') ||
+      _isHorizontalRule(line) ||
+      _isBlockQuoteLine(line) ||
+      _isBulletLine(line) ||
+      _isOrderedLine(line) ||
+      (index + 1 < lines.length && _setextLevel(lines[index + 1]) != null);
 }
 
 bool _isBulletLine(String line) {
@@ -369,10 +475,14 @@ List<Widget> buildSafeMarkdownWidgets(
   required Color blockBackground,
   SafeMarkdownLinkTap? onLinkTap,
 }) {
-  InlineSpan buildInline(SafeMarkdownInline inline) {
+  InlineSpan buildInline(
+    SafeMarkdownInline inline, [
+    TextStyle? activeBaseStyle,
+  ]) {
+    final activeStyle = activeBaseStyle ?? baseStyle;
     switch (inline) {
       case SafeMarkdownText(:final text):
-        return TextSpan(text: text, style: baseStyle);
+        return TextSpan(text: text, style: activeStyle);
       case SafeMarkdownInlineCode(:final code):
         return TextSpan(
           text: code,
@@ -381,11 +491,11 @@ List<Widget> buildSafeMarkdownWidgets(
       case SafeMarkdownEmphasis(:final kind, :final children):
         final merged = switch (kind) {
           SafeMarkdownEmphasisKind.bold =>
-            (baseStyle ?? const TextStyle()).copyWith(
+            (activeStyle ?? const TextStyle()).copyWith(
               fontWeight: FontWeight.bold,
             ),
           SafeMarkdownEmphasisKind.italic =>
-            (baseStyle ?? const TextStyle()).copyWith(
+            (activeStyle ?? const TextStyle()).copyWith(
               fontStyle: FontStyle.italic,
             ),
         };
@@ -406,7 +516,7 @@ List<Widget> buildSafeMarkdownWidgets(
       case SafeMarkdownLink(:final children, :final url):
         final style =
             (linkStyle ??
-                    (baseStyle ?? const TextStyle()).copyWith(
+                    (activeStyle ?? const TextStyle()).copyWith(
                       color: Colors.blue,
                       decoration: TextDecoration.underline,
                     ))
@@ -524,9 +634,44 @@ Widget _renderBlock(
   SafeMarkdownBlock block, {
   TextStyle? baseStyle,
   required Color blockBackground,
-  required InlineSpan Function(SafeMarkdownInline inline) buildInline,
+  required InlineSpan Function(
+    SafeMarkdownInline inline, [
+    TextStyle? activeBaseStyle,
+  ])
+  buildInline,
 }) {
   switch (block) {
+    case SafeMarkdownHeading(:final level, :final children):
+      final bodySize = baseStyle?.fontSize ?? 16;
+      final scale = switch (level) {
+        1 => 1.75,
+        2 => 1.5,
+        3 => 1.3,
+        4 => 1.15,
+        5 => 1.05,
+        _ => 1.0,
+      };
+      final headingStyle = (baseStyle ?? const TextStyle()).copyWith(
+        fontSize: bodySize * scale,
+        fontWeight: level <= 4 ? FontWeight.w700 : FontWeight.w600,
+        height: 1.25,
+      );
+      return Semantics(
+        header: true,
+        child: Padding(
+          padding: level <= 2
+              ? const EdgeInsets.only(top: PiSpacing.md, bottom: PiSpacing.xs)
+              : const EdgeInsets.only(top: PiSpacing.sm, bottom: PiSpacing.xs),
+          child: Text.rich(
+            TextSpan(
+              style: headingStyle,
+              children: children
+                  .map((inline) => buildInline(inline, headingStyle))
+                  .toList(growable: false),
+            ),
+          ),
+        ),
+      );
     case SafeMarkdownParagraph(:final children):
       return Padding(
         padding: const EdgeInsets.symmetric(vertical: PiSpacing.xs),
@@ -627,6 +772,44 @@ Widget _renderBlock(
                 ),
               ),
           ],
+        ),
+      );
+    case SafeMarkdownBlockQuote(:final blocks):
+      final quoteColor = baseStyle?.color ?? Colors.grey;
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: PiSpacing.xs),
+        child: Container(
+          padding: const EdgeInsets.only(left: PiSpacing.md),
+          decoration: BoxDecoration(
+            border: Border(
+              left: BorderSide(
+                color: quoteColor.withValues(alpha: 0.45),
+                width: 3,
+              ),
+            ),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: blocks
+                .map(
+                  (quotedBlock) => _renderBlock(
+                    quotedBlock,
+                    baseStyle: baseStyle?.copyWith(fontStyle: FontStyle.italic),
+                    blockBackground: blockBackground,
+                    buildInline: buildInline,
+                  ),
+                )
+                .toList(growable: false),
+          ),
+        ),
+      );
+    case SafeMarkdownHorizontalRule():
+      return Padding(
+        padding: const EdgeInsets.symmetric(vertical: PiSpacing.sm),
+        child: Divider(
+          height: 1,
+          color: (baseStyle?.color ?? Colors.grey).withValues(alpha: 0.35),
         ),
       );
   }

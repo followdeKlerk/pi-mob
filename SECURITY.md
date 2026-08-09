@@ -20,16 +20,16 @@ Pi Mob is designed for one owner on a private Tailscale network. The supported s
 - The bridge authenticates installations and validates bounded protocol payloads.
 - The host records state-changing commands before dispatch.
 - Controller leases limit conflicting mobile writes.
-- Provider credentials, repositories, and authoritative Pi state stay on the host.
+- Provider credentials, repositories, and authoritative OMP state stay on the host.
 
 Pi Mob does not provide:
 
 - public Internet or Tailscale Funnel hardening;
 - multi-user authorization;
-- an operating-system sandbox around Pi;
+- an operating-system sandbox around OMP;
 - protection from a compromised owner device, account, tailnet, extension, or credential;
-- exactly-once execution inside Pi or external tools.
+- exactly-once execution inside OMP or external tools.
 
-Pi runs with the owner's normal execution model and captured login environment. Operator extensions run with the host user's authority.
+OMP runs with the owner's normal execution model and captured login environment. Operator extensions run with the host user's authority.
 
 Git product actions are out of scope. See [Project status](docs/PROJECT_STATUS.md) for the current scope and planned signing work. See [Privacy](docs/PRIVACY.md) for data handling.

@@ -9,7 +9,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -23,11 +23,6 @@ import {
   createBridgeServer,
   type AdapterPort,
 } from "../src";
-import {
-  DurableRecipeActivityProjection,
-  importExternalSessionHistory,
-  reconcileSessionHistoryTail,
-} from "../src/pi/external-history";
 import { canonicalizeOrThrow, deriveRootId } from "../src/core/workspace-policy";
 import { generateInstallationCredential, hashCredential } from "../src/auth/credentials";
 
@@ -36,13 +31,17 @@ class FakeRpc implements PiRpcClient {
   readonly responses = new Map<string, unknown>();
   readonly notifications = new Set<(raw: unknown) => void>();
   failWith: Error | null = null;
+  beforeReturn: (() => void) | null = null;
   retries = 0;
   requestAttempts = 0;
+  lifecycle = "running";
+  lifecycleState(): string { return this.lifecycle; }
   async manualRetry(): Promise<void> { this.retries += 1; }
   async request(opts: PiRpcRequestOptions): Promise<unknown> {
     this.requestAttempts += 1;
     if (this.failWith) throw this.failWith;
     this.requests.push(opts);
+    this.beforeReturn?.();
     const key = `${opts.method}:${opts.id ?? ""}`;
     if (this.responses.has(key)) return this.responses.get(key);
     return { echoed: opts.method, id: opts.id ?? null, params: opts.params ?? null };
@@ -55,11 +54,17 @@ class FakeRpc implements PiRpcClient {
   emit(raw: PiRpcNotification | Record<string, unknown>): void {
     for (const fn of this.notifications) fn(raw);
   }
-  reset(): void { this.requests.length = 0; this.responses.clear(); this.failWith = null; this.requestAttempts = 0; }
+  reset(): void {
+    this.requests.length = 0;
+    this.responses.clear();
+    this.failWith = null;
+    this.beforeReturn = null;
+    this.requestAttempts = 0;
+  }
 }
 
 class StoppedLegacyRpc extends FakeRpc {
-  lifecycleState(): string { return "stopped"; }
+  override lifecycleState(): string { return "stopped"; }
 }
 
 class SessionScopedFakeRpc extends FakeRpc {
@@ -67,7 +72,10 @@ class SessionScopedFakeRpc extends FakeRpc {
   starts = 0;
   constructor(readonly sessionPath: string) { super(); }
   async start(): Promise<void> { this.starts += 1; this.state = "idle"; }
-  lifecycleState(): string { return this.state; }
+  override lifecycleState(): string { return this.state; }
+}
+class CrashedSessionScopedFakeRpc extends SessionScopedFakeRpc {
+  override state = "crashed";
 }
 
 const trackedTempDirs = new Set<string>();
@@ -80,7 +88,6 @@ function trackedTempDir(prefix: string): string {
 
 function setup(opts: {
   workspace?: Partial<ConstructorParameters<typeof OneSessionPiAdapter>[0]["workspace"]>;
-  reconcileHistory?: ConstructorParameters<typeof OneSessionPiAdapter>[0]["reconcileHistory"];
 } = {}): {
   store: BridgeStore;
   rpc: FakeRpc;
@@ -104,7 +111,6 @@ function setup(opts: {
     },
     newSessionId: deterministicIdGenerator("sess"),
     now: () => 1_700_000_000_000,
-    ...(opts.reconcileHistory ? { reconcileHistory: opts.reconcileHistory } : {}),
   });
   return { store, rpc, adapter, hostStream: `host:${identity.hostId}` };
 }
@@ -129,44 +135,6 @@ describe("OneSessionPiAdapter", () => {
     expect(item.lastSeenAt).toBe("2023-11-14T22:13:20.000Z");
   });
 
-  test("session.create captures Pi get_state sessionFile and restore recovers its missed terminal tail", async () => {
-    const directory = mkdtempSync(join(tmpdir(), "pi-mob-rpc-session-file-"));
-    const sessionPath = join(directory, "authoritative.jsonl");
-    writeFileSync(sessionPath, JSON.stringify({ type: "session", id: "pi-session", version: 1 }) + "\n");
-    const calls: Array<{ sessionId: string; liveProcess: boolean }> = [];
-    const { store, rpc, adapter, hostStream } = setup({
-      reconcileHistory: (sessionId, liveProcess) => {
-        calls.push({ sessionId, liveProcess });
-        return reconcileSessionHistoryTail(store, sessionId, sessionPath, { liveProcess });
-      },
-    });
-    rpc.responses.set("get_state:", { data: { sessionFile: sessionPath, model: "fixture" } });
-    await adapter.dispatch(makeCommand("rpc-session-create", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
-    const sessionId = store.sessionStates()[0]!.sessionId as string;
-    expect(store.sessionState(sessionId)?.piSessionPath).toBe(sessionPath);
-    expect(store.sessionState(sessionId)?.externalSession).not.toBe(true);
-    expect(store.listEvents(`session:${sessionId}`).some((event) => JSON.stringify(event.payload).includes(sessionPath))).toBe(false);
-
-    store.appendEvent(`session:${sessionId}`, "turn.started", { sessionId, turnId: "turn-rpc", commandId: "rpc-session-create", deliveryMode: "immediate" });
-    store.appendEvent(`session:${sessionId}`, "tool.started", { sessionId, turnId: "turn-rpc", toolCallId: "tool-rpc", toolName: "bash", arguments: { command: "fixture" } });
-    writeFileSync(sessionPath, [
-      { type: "session", id: "pi-session", version: 1 },
-      { type: "message", id: "user-rpc", parentId: null, message: { role: "user", content: [{ type: "text", text: "run" }] } },
-      { type: "message", id: "assistant-rpc", parentId: "user-rpc", message: { role: "assistant", content: [{ type: "toolCall", id: "tool-rpc", name: "bash", arguments: { command: "fixture" } }] } },
-      { type: "message", id: "result-rpc", parentId: "assistant-rpc", message: { role: "toolResult", toolCallId: "tool-rpc", toolName: "bash", isError: false, content: [{ type: "text", text: "done" }] } },
-      { type: "message", id: "final-rpc", parentId: "result-rpc", message: { role: "assistant", content: [{ type: "text", text: "finished" }] } },
-    ].map((entry) => JSON.stringify(entry)).join("\n") + "\n");
-    store.updateSessionState(sessionId, { ...(store.sessionState(sessionId) ?? {}), runtimeState: "stopped" });
-    await adapter.dispatch(makeCommand("rpc-session-restore", "session.activate", `session:${sessionId}`, `session:${sessionId}`, { sessionId }));
-    const events = store.listEvents(`session:${sessionId}`);
-    expect(events.filter((event) => event.type === "tool.completed" && event.payload.toolCallId === "tool-rpc")).toHaveLength(1);
-    expect(events.filter((event) => event.type === "turn.settled")).toHaveLength(1);
-    expect(events.some((event) => event.type === "turn.indeterminate")).toBe(false);
-    expect(calls).toContainEqual({ sessionId, liveProcess: true });
-    adapter.close();
-    store.close();
-    rmSync(directory, { recursive: true, force: true });
-  });
 
   test("session.create creates a UUID session, registers a stream, and emits host + session metadata", async () => {
     const { store, adapter, hostStream } = setup();
@@ -185,6 +153,7 @@ describe("OneSessionPiAdapter", () => {
     expect(summary.policyMode).toBe("full");
     expect(summary.name).toBe("first");
     expect(summary.runtimeState).toBe("idle");
+    expect(typeof summary.lastActivityAt).toBe("string");
     const sessionId = summary.sessionId as string;
     expect(store.sessionExists(sessionId)).toBe(true);
     expect(store.streamPosition(`session:${sessionId}`)).not.toBeNull();
@@ -286,6 +255,7 @@ describe("OneSessionPiAdapter", () => {
     expect(store.listEvents(`session:${sessionId}`).some((event) => event.type === "context.state")).toBe(true);
 
     rpc.reset();
+    rpc.lifecycle = "idle";
     for (const [type, payload, method] of [
       ["model.set", { modelId: "anthropic/sonnet" }, "set_model"],
       ["thinking.set", { level: "high" }, "set_thinking_level"],
@@ -305,7 +275,29 @@ describe("OneSessionPiAdapter", () => {
 
     await expect(adapter.dispatch(makeCommand("unavailable-model", "model.set", `session:${sessionId}`, `session:${sessionId}`, { sessionId, modelId: "x" }))).rejects.toThrow("model.set provider unavailable");
     store.updateSessionState(sessionId, { ...store.sessionState(sessionId), runtimeState: "running" });
-    await expect(adapter.dispatch(makeCommand("blocked-model", "model.set", `session:${sessionId}`, `session:${sessionId}`, { sessionId, modelId: "x" }))).rejects.toThrow("requires an idle session");
+    rpc.beforeReturn = () => {
+      rpc.beforeReturn = null;
+      store.updateSessionState(sessionId, {
+        ...store.sessionState(sessionId),
+        runtimeState: "idle",
+      });
+    };
+    await adapter.dispatch(makeCommand("running-model", "model.set", `session:${sessionId}`, `session:${sessionId}`, {
+      sessionId,
+      modelId: "anthropic/sonnet",
+    }));
+    expect(rpc.requests.at(-1)).toMatchObject({
+      method: "set_model",
+      params: { provider: "anthropic", modelId: "anthropic/sonnet" },
+    });
+    expect(store.sessionState(sessionId)?.runtimeState).toBe("idle");
+    const finalModelSetCount = rpc.requests.filter((request) => request.method === "set_model").length;
+    rpc.lifecycle = "running";
+    await expect(adapter.dispatch(makeCommand("active-model", "model.set", `session:${sessionId}`, `session:${sessionId}`, {
+      sessionId,
+      modelId: "anthropic/sonnet",
+    }))).rejects.toThrow("model.set requires a session between turns");
+    expect(rpc.requests.filter((request) => request.method === "set_model")).toHaveLength(finalModelSetCount);
   });
 
   test("prompt.submit immediate calls RPC prompt and turn.abort calls RPC abort", async () => {
@@ -388,6 +380,48 @@ describe("OneSessionPiAdapter", () => {
     store.close();
   });
 
+  test("prompt.submit retries a crashed session owner", async () => {
+    const store = new BridgeStore(join(trackedTempDir("pi-mob-crashed-restore-"), "bridge.sqlite"));
+    const identity = store.identity();
+    const hostStream = `host:${identity.hostId}`;
+    const sessionId = "4a87582e-2222-4222-8222-222222222222";
+    const sessionPath = join(trackedTempDir("pi-mob-session-path-"), "session.jsonl");
+    store.ensureStream(hostStream, "host");
+    const crashed = new CrashedSessionScopedFakeRpc(sessionPath);
+    const adapter = new OneSessionPiAdapter({
+      store,
+      createRpc: () => crashed,
+      workspace: {
+        workspaceId: "11111111-1111-4111-8111-111111111111",
+        rootPath: trackedTempDir("pi-mob-workspaces-"),
+        displayName: "example",
+        fingerprint: "fingerprint-fixture",
+        policyMode: "full",
+      },
+      now: () => 1_700_000_000_000,
+    });
+    store.ensureSession(sessionId, {
+      sessionId,
+      workspaceId: "ws",
+      runtimeState: "stopped",
+      attentionState: "none",
+      piSessionPath: sessionPath,
+    });
+    store.ensureStream(`session:${sessionId}`, "session", sessionId);
+
+    await adapter.dispatch(makeCommand("prompt-crashed-retry", "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, {
+      sessionId,
+      deliveryMode: "immediate",
+      message: "retry this chat",
+      attachmentIds: [],
+    }));
+
+    expect(crashed.starts).toBe(1);
+    expect(crashed.requests.map((request) => request.method)).toEqual(["prompt"]);
+    adapter.close();
+    store.close();
+  });
+
   test("prompt.submit steer dispatches while follow_up remains bridge-owned", async () => {
     const { store, rpc, adapter, hostStream } = setup();
     await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
@@ -431,106 +465,30 @@ describe("OneSessionPiAdapter", () => {
     expect(JSON.stringify(curatedEvents)).not.toContain("/private/repo");
   });
 
-  test("durably projects recipe activity, suppresses curated reasoning deltas, and dedupes restart replay", async () => {
-    const { store, adapter, hostStream, rpc } = setup();
-    await adapter.dispatch(makeCommand("create-recipe", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
-    const sessionId = (store.listEvents(hostStream).find((event) => event.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
-    await adapter.dispatch(makeCommand("turn-recipe", "prompt.submit", `session:${sessionId}`, `session:${sessionId}`, {
-      sessionId, deliveryMode: "immediate", message: "run", attachmentIds: [],
-    }));
 
-    const publishedAfterCommit: boolean[] = [];
-    const detach = store.onEvent((event) => {
-      if (event.type !== "recipe.activity") return;
-      publishedAfterCommit.push(store.listEvents(event.streamId).some((stored) => stored.eventId === event.eventId));
-    });
-    rpc.emit({ type: "turn_start", sessionId });
-    rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "thinking_start", contentIndex: 0 } });
-    rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "thinking_delta", contentIndex: 0, delta: "private chain of thought" } });
-    rpc.emit({ type: "message_update", sessionId, assistantMessageEvent: { type: "thinking_end", contentIndex: 0 } });
-    rpc.emit({ type: "tool_execution_start", sessionId, toolCallId: "tool-r1", toolName: "bash", args: { command: "printf ok" } });
-    rpc.emit({ type: "tool_execution_update", sessionId, toolCallId: "tool-r1", partialResult: "ok" });
-    rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "tool-r1", toolName: "bash", result: "ok", isError: false });
-    // RPC replay of the same terminal update must not create another recipe
-    // snapshot even though the normalized source event is still journaled.
-    rpc.emit({ type: "tool_execution_end", sessionId, toolCallId: "tool-r1", toolName: "bash", result: "ok", isError: false });
-    rpc.emit({ type: "agent_settled", sessionId });
-    detach();
 
-    const streamId = `session:${sessionId}`;
-    const events = store.listEvents(streamId);
-    const recipes = events.filter((event) => event.type === "recipe.activity");
-    expect(recipes.filter((event) => (event.payload as Record<string, unknown>).activityId === "0")).toHaveLength(2);
-    expect(recipes.filter((event) => (event.payload as Record<string, unknown>).activityId === "tool-r1")).toHaveLength(2);
-    expect(recipes.at(-1)?.payload).toMatchObject({
-      kind: "tool", activityId: "tool-r1", status: "completed", output: "ok",
-    });
-    expect(publishedAfterCommit.every(Boolean)).toBe(true);
-    expect(JSON.stringify(events.filter((event) => event.type !== "pi.rpc.event"))).not.toContain("private chain of thought");
-    expect(events.some((event) => event.type === "reasoning.delta")).toBe(false);
-
-    const beforeRestart = recipes.length;
-    adapter.close();
-    const restarted = new OneSessionPiAdapter({
-      store,
-      rpc,
-      workspace: {
-        workspaceId: "11111111-1111-4111-8111-111111111111",
-        rootPath: "/private/example/repo",
-        displayName: "example",
-        fingerprint: "fingerprint-fixture",
-        policyMode: "full",
+  test("persists a safe visible failure when Pi rejects a provider request", async () => {
+    const { store, adapter, hostStream } = setup();
+    await adapter.dispatch(makeCommand("c1", "session.create", hostStream, hostStream, { workspaceId: "ws", policyMode: "full" }));
+    const sessionId = (store.listEvents(hostStream).find((e) => e.type === "session.summary")!.payload as Record<string, unknown>).sessionId as string;
+    const rpc = adapter.rpc as FakeRpc;
+    rpc.emit({
+      type: "message_end",
+      sessionId,
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "API key not valid: secret details",
       },
-      now: () => 1_700_000_000_000,
     });
-    expect(store.listEvents(streamId).filter((event) => event.type === "recipe.activity")).toHaveLength(beforeRestart);
-    restarted.close();
-  });
-
-  test("external history emits recipe activity without persisting private thinking", () => {
-    const directory = mkdtempSync(join(tmpdir(), "pi-mob-r1-history-"));
-    const source = join(directory, "session.jsonl");
-    const sessionId = "77777777-7777-4777-8777-777777777777";
-    const store = new BridgeStore(join(directory, "bridge.sqlite"), () => Date.parse("2026-01-01T00:00:10.000Z"));
-    store.ensureSession(sessionId, { externalSession: true });
-    store.ensureStream(`session:${sessionId}`, "session", sessionId);
-    writeFileSync(source, [
-      { type: "session", id: sessionId, version: 1 },
-      { type: "message", id: "user-1", parentId: null, timestamp: "2026-01-01T00:00:00.000Z", message: { role: "user", content: [{ type: "text", text: "run" }] } },
-      { type: "message", id: "assistant-1", parentId: "user-1", timestamp: "2026-01-01T00:00:01.000Z", message: { role: "assistant", content: [
-        { type: "thinking", thinking: "historical private chain of thought" },
-        { type: "toolCall", id: "history-tool", name: "bash", arguments: { command: "printf ok" } },
-      ] } },
-      { type: "message", id: "result-1", parentId: "assistant-1", timestamp: "2026-01-01T00:00:03.000Z", message: { role: "toolResult", toolCallId: "history-tool", toolName: "bash", content: [{ type: "text", text: "ok" }], isError: false } },
-    ].map((entry) => JSON.stringify(entry)).join("\n"));
-
-    expect(importExternalSessionHistory(store, sessionId, source)).toBeGreaterThan(0);
-    const events = store.listEvents(`session:${sessionId}`);
-    expect(events.some((event) => event.type === "recipe.activity")).toBe(true);
-    expect(events.some((event) => event.type === "reasoning.delta")).toBe(false);
-    expect(JSON.stringify(events)).not.toContain("historical private chain of thought");
-    const latestTool = events.filter((event) => event.type === "recipe.activity" && event.payload.activityId === "history-tool").at(-1)!;
-    expect(latestTool.payload).toMatchObject({ status: "completed", output: "ok" });
-    expect((latestTool.payload.timing as Record<string, unknown>).durationMs).toBe(2000);
-    expect(importExternalSessionHistory(store, sessionId, source)).toBe(0);
-  });
-
-  test("history/live overlap dedupes recipe snapshots by stable identity", () => {
-    const store = new BridgeStore(join(mkdtempSync(join(tmpdir(), "pi-mob-r1-overlap-")), "bridge.sqlite"), () => Date.parse("2026-01-01T00:00:00.000Z"));
-    const sessionId = "88888888-8888-4888-8888-888888888888";
-    store.ensureSession(sessionId);
-    store.ensureStream(`session:${sessionId}`, "session", sessionId);
-    const projection = new DurableRecipeActivityProjection(store, sessionId);
-    projection.append("turn.started", { sessionId, turnId: "turn-1" });
-    projection.append("tool.started", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", arguments: { file: "README.md" }, historical: true });
-    projection.append("tool.completed", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", result: "ok", historical: true });
-    const beforeOverlap = store.listEvents(`session:${sessionId}`).filter((event) => event.type === "recipe.activity");
-
-    projection.append("tool.started", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", arguments: { file: "README.md" } });
-    projection.append("tool.completed", { sessionId, turnId: "turn-1", toolCallId: "same-tool", toolName: "read", result: "ok" });
-    const afterOverlap = store.listEvents(`session:${sessionId}`).filter((event) => event.type === "recipe.activity");
-    expect(afterOverlap).toHaveLength(beforeOverlap.length);
-    expect(afterOverlap.at(-1)?.payload).toEqual(beforeOverlap.at(-1)?.payload);
+    const failure = store.listEvents(`session:${sessionId}`).find((event) => event.type === "turn.failed");
+    expect(failure?.payload).toMatchObject({
+      sessionId,
+      errorCode: "provider_error",
+      errorMessage: "The model provider rejected the request. Check the configured provider credentials and retry.",
+    });
+    expect(JSON.stringify(failure?.payload)).not.toContain("secret details");
   });
 
   test("shared RPC binds one notification listener across durable sessions", async () => {

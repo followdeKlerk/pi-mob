@@ -14,7 +14,9 @@ A major mismatch closes the connection with `unsupported_protocol`. Minor revisi
 
 The bridge advertises available capabilities in `hello.accepted`. The client requests required and optional capabilities in `hello`. See [Project status](PROJECT_STATUS.md) for the exact normal-daemon capability matrix.
 
-Internal raw Pi RPC can remain available for older integrations. The released client does not receive `raw_rpc.v1`.
+`hello.accepted` may include `sessionVisibilityCutoff`, an ISO-8601 UTC timestamp. The mobile session catalogue and host-stream session summaries omit inactive sessions older than this cutoff; active, attention, and queued sessions remain visible. Durable session rows, session streams, and history are retained independently.
+
+Internal backend RPC can remain available for older integrations. The released client does not receive `raw_rpc.v1`.
 
 ## Connection flow
 
@@ -31,11 +33,11 @@ The bridge uses `invalid_auth`, `re_pair_required`, or `unsupported_protocol` wh
 
 Streams use host or session scope. A persisted cursor lets the client request missed events.
 
-Commands use a semantic `commandId`. The bridge records a command before dispatch and reports `completed`, `failed`, or `cancelled`. The bridge command ID is not the Pi turn ID.
+Commands use a semantic `commandId`. The bridge records a command before dispatch and reports `completed`, `failed`, or `cancelled`. The bridge command ID is not the OMP turn or message ID.
 
 Controller leases give one holder bounded write access to a session. The mobile app restores an active session lease instead of reacquiring it.
 
-Canonical session events use one sequence per session. The bridge stores events before delivery. The client rejects sequence gaps and requests replay.
+Canonical session events use one sequence per session. The bridge stores events before delivery. Replay responses are bounded pages; `complete: false` means the client must resubscribe with its last applied sequence before live delivery is enabled. The client rejects sequence gaps and requests replay.
 
 Replacement fields, such as `partialResult`, replace prior state. They are not deltas unless the schema marks them as deltas.
 

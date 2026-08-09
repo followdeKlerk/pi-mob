@@ -25,9 +25,9 @@ describe("daemon host draining lifecycle", () => {
     try {
       const daemon = await runDaemon({
         workspace: root,
-        executable: "/bin/sh",
+        ompExecutable: "/bin/sh",
         stateDir,
-        sessionDir: join(root, "sessions"),
+        ompSessionDir: join(root, "sessions"),
         environment: { HOME: root, PATH: process.env.PATH ?? "/usr/bin:/bin" },
       });
       await daemon.close();

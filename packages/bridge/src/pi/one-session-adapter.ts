@@ -31,14 +31,14 @@
 import { createHash } from "node:crypto";
 import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
 import { basename, isAbsolute, relative, resolve, sep } from "node:path";
-import type { StoredCommand } from "../core/store";
+import type { StoredCommand, StoredEvent } from "../core/store";
 import type { BridgeStore } from "../core/store";
 import { IndeterminateDispatchError } from "../core/domain";
 import type { AttachmentStore } from "../core/attachments";
 import { canonicalizeOrThrow, deriveRootId, enumerateWorkspaceDirectories, searchWorkspaceDirectories } from "../core/workspace-policy";
 import { normalizePiEvent, ToolOutputLimiter } from "./normalize";
 import { handleRawRpcRequest } from "./raw-rpc";
-import { DurableRecipeActivityProjection, canonicalProjectionEvent } from "./external-history";
+// CanonicalSessionStore is the sole transcript authority in the daemon.
 import type { CanonicalSessionStore } from "../session-events/canonical-session-store";
 import { normalizeCommandCatalogue } from "./command-catalogue";
 import { ExportRegistry, ExportRegistryInvalidInputError, type ExportMetadata } from "./export-registry";
@@ -201,18 +201,6 @@ export interface OneSessionAdapterOptions {
   readonly notificationService?: NotificationService;
   /** Host-wide configured catalogue discovered without starting a session. */
   readonly hostModels?: ReadonlyArray<Record<string, unknown>>;
-  /** Reconcile Pi-owned JSONL at authoritative session lifecycle boundaries. */
-  readonly reconcileHistory?: (sessionId: string, liveProcess: boolean) => { readonly authoritativeTerminal: boolean };
-  /**
-   * Optional diagnostics sink for raw Pi events. The rewrite slice
-   * removes raw Pi events from the user-visible session stream; raw
-   * events still flow into this sink for support / forensic use. The
-   * sink is intentionally absent from the transcript and from the
-   * schema fixtures, so a bridge without it simply drops raw events
-   * (the existing behaviour). When omitted, the adapter falls back to
-   * an in-memory sink that records nothing; production wiring
-   * constructed by `runDaemon` injects a durable sink.
-   */
   readonly diagnosticsSink?: PiDiagnosticsSinkLike;
   /**
    * Legacy canonical facade used only by older injected integrations and
@@ -296,7 +284,6 @@ export class OneSessionPiAdapter {
     { detach: () => void; refs: number }
   >();
   private readonly toolOutputLimiter = new ToolOutputLimiter();
-  private readonly recipeProjections = new Map<string, DurableRecipeActivityProjection>();
   private readonly supervisor: ProcessSupervisor;
   private readonly reuseExistingOnCreate: boolean;
   private lastUsedSessionId: string | null = null;
@@ -308,7 +295,6 @@ export class OneSessionPiAdapter {
   private readonly attachmentStore: AttachmentStore | null;
   private readonly notificationService: NotificationService | null;
   private readonly hostModels: ReadonlyArray<Record<string, unknown>>;
-  private readonly reconcileHistory: ((sessionId: string, liveProcess: boolean) => { readonly authoritativeTerminal: boolean }) | null;
   private readonly diagnosticsSink: PiDiagnosticsSinkLike | null;
   private readonly canonicalEventStore: CanonicalEventStore | null;
   private readonly canonicalSessionStore: CanonicalSessionStore | null;
@@ -331,7 +317,6 @@ export class OneSessionPiAdapter {
     this.attachmentStore = options.attachmentStore ?? null;
     this.notificationService = options.notificationService ?? null;
     this.hostModels = (options.hostModels ?? []).map((model) => ({ ...model }));
-    this.reconcileHistory = options.reconcileHistory ?? null;
     this.diagnosticsSink = options.diagnosticsSink ?? null;
     this.canonicalEventStore = options.canonicalEventStore ?? null;
     this.canonicalSessionStore = options.canonicalSessionStore ?? null;
@@ -341,6 +326,7 @@ export class OneSessionPiAdapter {
     this.exportRegistry = options.exportRegistry ?? null;
     const identity = this.store.identity();
     this.hostStream = `host:${identity.hostId}`;
+    this.store.ensureStream(this.hostStream, "host");
     if (options.supervisor) {
       this.supervisor = options.supervisor;
     } else {
@@ -383,57 +369,40 @@ export class OneSessionPiAdapter {
       this.supervisor.register(id, "stopped");
       const rpc = this.resolveRpc(id);
       this.bindSession(id);
-      // A restored adapter may already be attached to a live RPC process.
-      // Only synthesize orphan terminal state when no live owner exists.
-      const rpcState = rpc.lifecycleState?.();
-      const liveProcess = rpcState !== undefined &&
-        ["idle", "running", "waiting_for_input", "compacting"].includes(rpcState);
-      this.reconcileHistory?.(id, liveProcess);
-      // The normal daemon owns the canonical session log. It must not
-      // hydrate or backfill the legacy recipe projection, since doing so
-      // creates duplicate transcript rows in the compatibility stream.
-      if (!this.canonicalSessionStore) this.recipeProjection(id).backfill();
+      if (rpc.lifecycleState?.() === "crashed") {
+        this.store.updateSessionState(id, {
+          ...record,
+          runtimeState: "indeterminate",
+          attentionState: "needs_attention",
+        });
+        continue;
+      }
+      if (record.lifecycleState === "soft_deleted" || record.lifecycleState === "purged") continue;
+      // Re-emit a complete summary on restart so clients can repair older
+      // summaries that predate the activity timestamp field.
+      this.appendSessionSummary(id, {
+        ...record,
+        change: "reconciled",
+      });
     }
   }
 
-  private recipeProjection(sessionId: string): DurableRecipeActivityProjection {
-    let projection = this.recipeProjections.get(sessionId);
-    if (!projection) {
-      projection = new DurableRecipeActivityProjection(this.store, sessionId);
-      this.recipeProjections.set(sessionId, projection);
-    }
-    return projection;
-  }
 
   private appendNormalizedEvent(
     sessionId: string,
     type: string,
     payload: Record<string, unknown>,
     sourceEventId?: string,
-  ): import("../core/store").StoredEvent {
-    try {
-      if (this.canonicalSessionStore) {
-        if (isCanonicalTranscriptEventType(type)) {
-          return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
-        }
-        // Operational events are not transcript authority. Keep them on the
-        // ordinary BridgeStore stream without constructing the legacy recipe
-        // projection in the production path.
-        return sourceEventId
-          ? this.store.appendEventIdempotent(`session:${sessionId}`, type, payload, sourceEventId)
-          : this.store.appendEvent(`session:${sessionId}`, type, payload);
-      }
-      if (this.canonicalEventStore) {
-        return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
-      }
-      // Explicitly injected older adapters retain the legacy projection.
-      return this.recipeProjection(sessionId).append(type, payload);
-    } catch (error) {
-      // The durable projection rebuilds itself after rollback; dropping the
-      // cached wrapper also protects a later retry after a store repair.
-      this.recipeProjections.delete(sessionId);
-      throw error;
+  ): StoredEvent {
+    if (this.canonicalSessionStore && isCanonicalTranscriptEventType(type)) {
+      return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
     }
+    if (this.canonicalEventStore) {
+      return this.appendNormalizedEventViaCanonicalStore(sessionId, type, payload, sourceEventId);
+    }
+    return sourceEventId
+      ? this.store.appendEventIdempotent(`session:${sessionId}`, type, payload, sourceEventId)
+      : this.store.appendEvent(`session:${sessionId}`, type, payload);
   }
 
   /**
@@ -484,11 +453,15 @@ export class OneSessionPiAdapter {
         payload: canonicalPayload,
         ...(sourceEventId ? { sourceEventId } : {}),
       });
-      // Return a normalized StoredEvent-shaped view to notification/status
-      // handling, without persisting a source transcript or derived recipe
-      // row in the legacy stream.
-      const canonicalEvent = canonicalProjectionEvent(committed.event);
-      return { ...canonicalEvent, type, payload };
+      const canonicalEvent = committed.event;
+      return {
+        eventId: canonicalEvent.eventId,
+        streamId,
+        cursor: String(canonicalEvent.sequence),
+        type,
+        payload,
+        createdAt: canonicalEvent.createdAt,
+      };
     }
     if (this.canonicalEventStore) {
       const result = this.canonicalEventStore.append(sessionId, {
@@ -498,20 +471,19 @@ export class OneSessionPiAdapter {
       });
       const storedEvent = result.events[0] ?? this.store.latestEvent(streamId);
       if (!storedEvent) throw new Error(`canonical event store returned no persisted event for ${type}`);
-      // This branch is intentionally retained for older injected adapters;
-      // those adapters continue to receive the isolated recipe fallback.
-      if (!result.deduplicated) this.recipeProjection(sessionId).applyAndPublish(storedEvent);
       return storedEvent;
     }
-    return this.recipeProjection(sessionId).append(type, payload);
+    throw new Error("canonical session store is unavailable");
   }
 
   /** Detach all RPC listeners. Idempotent. */
+  async drain(): Promise<void> {
+    await this.supervisor.drain();
+  }
   close(): void {
     for (const fn of this.globalDetach) fn();
     this.globalDetach.clear();
     this.notificationBindings.clear();
-    this.recipeProjections.clear();
     for (const entry of this.sessions.values()) entry.detach();
     this.sessions.clear();
   }
@@ -742,8 +714,8 @@ export class OneSessionPiAdapter {
   private async ensureRpcStarted(rpc: PiRpcClient): Promise<void> {
     if (!this.createRpc || !rpc.start) return;
     const lifecycle = rpc.lifecycleState?.();
-    if (lifecycle !== "stopped" && this.startedRpcs.has(rpc)) return;
-    if (lifecycle !== undefined && lifecycle !== "stopped") {
+    if (lifecycle !== "stopped" && lifecycle !== "crashed" && this.startedRpcs.has(rpc)) return;
+    if (lifecycle !== undefined && lifecycle !== "stopped" && lifecycle !== "crashed") {
       this.startedRpcs.add(rpc);
       return;
     }
@@ -873,6 +845,11 @@ export class OneSessionPiAdapter {
     const queueCount = Number.isInteger(candidateQueueCount) && Number(candidateQueueCount) >= 0
       ? Number(candidateQueueCount)
       : 0;
+    const lastActivityAt = typeof patch.lastActivityAt === "string"
+      ? patch.lastActivityAt
+      : typeof prior.lastActivityAt === "string"
+      ? prior.lastActivityAt
+      : new Date(this.now()).toISOString();
     this.store.appendEvent(this.hostStream, "session.summary", {
       ...patch,
       sessionId,
@@ -888,6 +865,7 @@ export class OneSessionPiAdapter {
         : prior.workspaceRelativePath,
       runtimeState,
       queueCount,
+      lastActivityAt,
     });
   }
 
@@ -1041,6 +1019,7 @@ export class OneSessionPiAdapter {
       displayName: workspaceDisplayName,
       workspaceRelativePath,
       createdAt,
+      lastActivityAt: createdAt,
       createdByCommandId: command.commandId,
       change: "added",
     });
@@ -1119,9 +1098,6 @@ export class OneSessionPiAdapter {
     if (lifecycle !== undefined && !["idle", "running", "waiting_for_input", "compacting"].includes(lifecycle)) {
       throw new Error("Pi process unavailable; session owner did not activate");
     }
-    // Reconcile after the process is live: an open JSONL turn is not orphaned
-    // merely because the bridge is restoring its connection.
-    this.reconcileHistory?.(sessionId, true);
     if (rpc.manualRetry &&
         (!rpc.lifecycleState || rpc.lifecycleState() !== "idle")) {
       await rpc.manualRetry();
@@ -1259,9 +1235,6 @@ export class OneSessionPiAdapter {
     const sessionId = String(command.payload.sessionId ?? "");
     const modelId = String(command.payload.modelId ?? "");
     const state = this.store.sessionState(sessionId) ?? {};
-    if (state.runtimeState !== "idle" && state.runtimeState !== "stopped") {
-      throw new Error("model.set requires an idle session");
-    }
     const candidates = [
       ...(Array.isArray(state.availableModels) ? state.availableModels : []),
       ...this.hostModels,
@@ -1275,12 +1248,18 @@ export class OneSessionPiAdapter {
       ? match.provider
       : null;
     if (!provider) throw new Error("model.set provider unavailable");
+    const lifecycle = this.resolveRpc(sessionId).lifecycleState?.();
+    if (lifecycle === "starting" || lifecycle === "running" || lifecycle === "waiting_for_input" ||
+        lifecycle === "compacting" || lifecycle === "indeterminate") {
+      throw new Error("model.set requires a session between turns");
+    }
     await this.handleSessionControl(
       command,
       "set_model",
       "model.state",
       { provider, modelId },
-      true,
+      false,
+      { provider, modelId },
     );
   }
 
@@ -1290,6 +1269,7 @@ export class OneSessionPiAdapter {
     eventType: "model.state" | "retry.state" | "compaction.state",
     statePatch: Record<string, unknown>,
     idleOnly = false,
+    paramsOverride?: Readonly<Record<string, unknown>>,
   ): Promise<void> {
     const sessionId = String(command.payload.sessionId ?? "");
     const prior = this.store.sessionState(sessionId);
@@ -1297,9 +1277,11 @@ export class OneSessionPiAdapter {
     if (idleOnly && prior.runtimeState !== "idle" && prior.runtimeState !== "stopped") {
       throw new Error(`${command.type} requires an idle session`);
     }
-    const params = command.type === "steering_mode.set" || command.type === "follow_up_mode.set"
-      ? { mode: command.payload.enabled === true ? "all" : "one-at-a-time" }
-      : Object.fromEntries(Object.entries(command.payload).filter(([key]) => key !== "sessionId"));
+    const params = paramsOverride ?? (
+      command.type === "steering_mode.set" || command.type === "follow_up_mode.set"
+        ? { mode: command.payload.enabled === true ? "all" : "one-at-a-time" }
+        : Object.fromEntries(Object.entries(command.payload).filter(([key]) => key !== "sessionId"))
+    );
     await this.rawRpc(sessionId, method, params, { commandId: command.commandId });
     const patch = {
       sessionId,
@@ -1307,7 +1289,8 @@ export class OneSessionPiAdapter {
       ...(command.type === "model.set" ? { modelId: command.payload.modelId } : {}),
       ...(command.type === "thinking.set" ? { thinkingLevel: command.payload.level } : {}),
     };
-    this.store.updateSessionState(sessionId, { ...prior, ...patch });
+    const current = this.store.sessionState(sessionId) ?? prior;
+    this.store.updateSessionState(sessionId, { ...current, ...patch });
     this.store.appendEvent(`session:${sessionId}`, eventType, patch);
   }
 

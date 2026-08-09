@@ -389,10 +389,25 @@ export function normalizePiEvent(raw: RawPiEvent, context: PiNormalizationContex
   return normalizeCuratedPiEvent(raw, context);
 }
 
+function normalizeAssistantFailure(message: Record<string, unknown>, sessionId: string): NormalizedPiEvent | null {
+  const stopReason = typeof message.stopReason === "string" ? message.stopReason : "";
+  if (stopReason !== "error" && typeof message.errorMessage !== "string") return null;
+  return event("turn.failed", sessionId, {
+    errorCode: "provider_error",
+    errorMessage: "The model provider rejected the request. Check the configured provider credentials and retry.",
+  });
+}
+
 function normalizeCuratedPiEvent(raw: RawPiEvent, context: PiNormalizationContext): readonly NormalizedPiEvent[] { const sessionId = context.sessionId;
 switch (raw.type) {
   case "agent_start": return [event("session.state", sessionId, { runtimeState: "running" })];
-  case "agent_end": return [event("session.state", sessionId, { runtimeState: raw.willRetry === true ? "retrying" : "finishing" })];
+  case "agent_end": {
+    if (raw.isTerminal === true) {
+      context.toolOutputLimiter?.reset();
+      return [event("turn.settled", sessionId, {})];
+    }
+    return [event("session.state", sessionId, { runtimeState: raw.willRetry === true ? "retrying" : "finishing" })];
+  }
   case "agent_settled": {
     context.toolOutputLimiter?.reset();
     return [event("turn.settled", sessionId, {})];
@@ -402,6 +417,8 @@ switch (raw.type) {
   case "message_start": {
     const message = object(raw.message);
     if (message.role !== "assistant") return [];
+    const failure = normalizeAssistantFailure(message, sessionId);
+    if (failure) return [failure];
     // Pi can emit an assistant message_start for thinking and tool calls
     // before the visible text block. Admit only a message that proves it has
     // visible text, so lifecycle notifications cannot create empty cards.
@@ -426,6 +443,8 @@ switch (raw.type) {
   case "message_end": {
     const message = object(raw.message);
     if (message.role !== "assistant") return [];
+    const failure = normalizeAssistantFailure(message, sessionId);
+    if (failure) return [failure];
     if (message.stopReason === "aborted") {
       return [event("turn.aborted", sessionId, { reason: "aborted" })];
     }

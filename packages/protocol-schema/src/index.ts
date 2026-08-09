@@ -2816,6 +2816,7 @@ const ResponsePayloads = {
 			bridgeVersion: Type.String(),
 			piVersion: Type.String(),
 			serverTime: Type.String({ pattern: ISO_UTC_PATTERN }),
+			sessionVisibilityCutoff: Type.Optional(Type.String({ pattern: ISO_UTC_PATTERN })),
 			capabilities: Type.Array(Type.String()),
 			limits: Type.Object(
 				{

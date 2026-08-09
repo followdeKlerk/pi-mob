@@ -3177,7 +3177,14 @@ void _validateResponsePayload(String type, Map<String, Object?> payload) {
         payload['serverTime'],
       );
     }
-    _strings(payload, 'capabilities');
+    final cutoff = payload['sessionVisibilityCutoff'];
+    if (cutoff != null && (!_timestamp.hasMatch(cutoff.toString()))) {
+      throw ProtocolValidationException(
+        'sessionVisibilityCutoff',
+        'UTC RFC3339 timestamp',
+        cutoff,
+      );
+    }
     final limits = _object(payload, 'limits');
     for (final key in const <String>[
       'maxJsonBytes',

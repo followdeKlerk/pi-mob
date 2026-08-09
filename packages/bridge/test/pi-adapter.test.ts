@@ -33,8 +33,9 @@ describe("exact Pi 0.82.0 command adapter", () => {
 
 describe("Pi event normalization", () => {
   const context = { sessionId: "session" };
-  test("agent_settled is the only settled boundary", () => {
+  test("settles Pi and terminal OMP boundaries without changing Pi pre-settlement behavior", () => {
     expect(normalizePiEvent({ type: "agent_end", willRetry: false }, context).map((item) => item.type)).not.toContain("turn.settled");
+    expect(normalizePiEvent({ type: "agent_end", isTerminal: true, messages: [] }, context).map((item) => item.type)).toEqual(["turn.settled"]);
     // Rewrite slice: raw Pi events are routed through the diagnostics sink,
     // NOT the user-visible session stream. The curated output is the only
     // shape the transcript authority sees.
@@ -49,6 +50,26 @@ describe("Pi event normalization", () => {
     expect(normalizePiEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "Hi" }] } }, context)).toEqual([
       { type: "assistant.completed", payload: { sessionId: "session", contentBlockId: "0", content: { role: "assistant", content: [{ type: "text", text: "Hi" }] } } },
     ]);
+  });
+
+  test("surfaces provider failures without leaking provider diagnostics", () => {
+    const raw = {
+      type: "message_end",
+      message: {
+        role: "assistant",
+        content: [],
+        stopReason: "error",
+        errorMessage: "API key not valid: secret details",
+      },
+    };
+    expect(normalizePiEvent(raw, context)).toEqual([{
+      type: "turn.failed",
+      payload: {
+        sessionId: "session",
+        errorCode: "provider_error",
+        errorMessage: "The model provider rejected the request. Check the configured provider credentials and retry.",
+      },
+    }]);
   });
 
   test("covers lifecycle, content, tools, queue, retry, compaction, and extension UI", () => {

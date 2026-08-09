@@ -4,7 +4,7 @@ import { ControllerLeaseService, DurableCommandService, StreamService, type Adap
 import type { BridgeRuntimePort, ConnectionContext, CredentialVerificationResult, SubscriptionMessage, SubscriptionResult } from "./server";
 import { generateInstallationCredential, verifyCredential } from "../auth/credentials";
 import { bindEnrollment, type BindOutcome } from "../auth/enrollment";
-import { type BridgeStore, StoreError, type LeaseMutation } from "./store";
+import { type BridgeStore, StoreError, isMobileSessionVisible, mobileSessionVisibilityCutoff, type LeaseMutation, type StoredEvent } from "./store";
 import { WorkspaceFileError, type WorkspaceFileService, type FileReference } from "./workspace-files";
 import {
   AuthoritativeProcessRegistry,
@@ -203,9 +203,33 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     this.canonicalEventTransport = options.canonicalEventTransport ?? null;
   }
   async start(): Promise<{ resumed: number; indeterminate: number }> {
-    const recovered = await this.commands.recover(); this.readyState = true; return recovered;
+    const recovered = await this.commands.recover();
+    this.readyState = true;
+    // Replay after a prior graceful stop can contain host.draining. Publish
+    // the current readiness state so reconnecting clients clear that stale
+    // lifecycle marker before rendering the catalogue.
+    this.options.store.appendEvent(`host:${this.identity().hostId}`, "host.state", { ready: true });
+    return recovered;
   }
   onEvent(listener: Parameters<BridgeStore["onEvent"]>[0]): () => void { return this.options.store.onEvent(listener); }
+  sessionVisibilityCutoff(): string { return mobileSessionVisibilityCutoff(this.options.store.now()); }
+  mobileEvent(event: StoredEvent): StoredEvent {
+    const hostStream = `host:${this.identity().hostId}`;
+    if (event.streamId !== hostStream || event.type !== "session.summary") return event;
+    const sessionId = typeof event.payload.sessionId === "string" ? event.payload.sessionId : "";
+    if (!sessionId || isMobileSessionVisible(event.payload, this.options.store.now())) return event;
+    // Preserve the host-stream cursor so mobile continuity remains strict,
+    // while replacing stale catalogue data with a harmless host heartbeat.
+    return { ...event, type: "host.state", payload: { ready: this.ready().ready } };
+  }
+  private mobileSnapshot(state: Record<string, unknown>): Record<string, unknown> {
+    if (state.scope !== "host" || !Array.isArray(state.sessions)) return state;
+    const now = this.options.store.now();
+    return {
+      ...state,
+      sessions: state.sessions.filter((item): item is Record<string, unknown> => !!item && typeof item === "object" && isMobileSessionVisible(item as Record<string, unknown>, now)),
+    };
+  }
   /**
    * Phase 4 — register a listener for canonical session-event live
    * pushes. The runtime forwards events from the dedicated canonical
@@ -275,7 +299,19 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
     const accepted: Record<string, unknown>[] = []; const messages: SubscriptionMessage[] = [];
     for (const request of streams) {
       let sync;
-      try { sync = this.streams.sync(request.streamId, request.afterCursor); }
+      if (request.streamId.startsWith("session:") && !this.options.store.isSessionVisibleToMobile(request.streamId.slice("session:".length))) {
+        messages.push({ type: "error", payload: { code: "stream_not_found", message: "Stream cannot be synchronized.", retryable: false, details: { streamId: request.streamId } } });
+        continue;
+      }
+      try {
+        const isHostStream = request.streamId === hostStreamId;
+        sync = this.streams.sync(
+          request.streamId,
+          request.afterCursor,
+          isHostStream ? (event) => this.mobileEvent(event) : undefined,
+          isHostStream ? (state) => this.mobileSnapshot(state) : undefined,
+        );
+      }
       catch (error) {
         const code = error instanceof Error && error.name === "CursorInvalidError" ? "cursor_invalid" : "stream_not_found";
         messages.push({ type: "error", payload: { code, message: "Stream cannot be synchronized.", retryable: false, details: { streamId: request.streamId } } });
@@ -377,8 +413,8 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       ? payload.afterSequence
       : 0;
     if (!sessionId) throw new RuntimeProtocolError("invalid_message", "sessionId is required");
-    if (!this.options.store.sessionExists(sessionId)) {
-      throw new RuntimeProtocolError("session_not_found", "session is not provisioned");
+    if (!this.options.store.isSessionVisibleToMobile(sessionId)) {
+      throw new RuntimeProtocolError("session_not_found", "session not found");
     }
     const replay = this.canonicalEventTransport.subscribe(
       connection.connectionId,
@@ -388,9 +424,6 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       // we never collect live events into the control response.
       () => undefined,
     );
-    if (!replay.complete) {
-      throw new RuntimeProtocolError("invalid_state", "canonical replay detected a sequence gap; client must rebuild");
-    }
     const requestId = typeof payload.__requestId === "string" && payload.__requestId.length > 0
       ? payload.__requestId
       : crypto.randomUUID().toLowerCase();
@@ -759,7 +792,6 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
         : {}),
     };
   }
-
   private sessionHistoryPage(payload: Record<string, unknown>): Record<string, unknown> {
     const sessionId = String(payload.sessionId ?? "");
     const pageSize = payload.pageSize;
@@ -767,6 +799,7 @@ export class DurableBridgeRuntime implements BridgeRuntimePort {
       throw new RuntimeProtocolError("invalid_message", "pageSize must be an integer from 1 through 100");
     }
     if (!this.options.store.sessionExists(sessionId)) throw new RuntimeProtocolError("session_not_found", "session not found");
+    if (!this.options.store.isSessionVisibleToMobile(sessionId)) throw new RuntimeProtocolError("session_not_found", "session not found");
     const rawToken = payload.pageToken;
     let beforeCursor: string | undefined;
     if (rawToken !== null && rawToken !== undefined) {

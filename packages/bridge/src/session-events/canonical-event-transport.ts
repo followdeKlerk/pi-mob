@@ -75,11 +75,12 @@ export interface CanonicalEventTransportOptions {
 }
 
 /**
- * Default batch size. 256 is well under the protocol-schema
- * `maxItems: 1024` cap so a single replay response never exceeds
- * the schema bound.
+ * Replay pages stay below the bridge's 1 MiB outbound JSON limit even
+ * when replacement-content events carry large snapshots. The client
+ * still enforces the protocol's independent 1024-item maximum.
  */
 const DEFAULT_REPLAY_BATCH_SIZE = 256;
+const DEFAULT_REPLAY_MAX_BYTES = 512 * 1024;
 
 /**
  * Default pending-event ceiling during the replay window. The
@@ -172,71 +173,91 @@ export class CanonicalEventTransport {
       perSession = new Map();
       this.subscriptions.set(connectionId, perSession);
     }
-    const subscription: CanonicalEventSubscription = {
-      sessionId,
-      lastAppliedSequence: afterSequence,
-      replayInFlight: true,
-      pending: [],
-      onEvent,
-      ...(onReplayComplete ? { onReplayComplete } : {}),
-    };
-    perSession.set(sessionId, subscription);
-    // Read the durable replay in bounded batches, then flush any
-    // events that committed during the replay window in strict
-    // sequence order. The flush is mandatory: if we skipped it the
-    // client would observe a gap at `afterSequence + 1` whenever a
-    // commit landed during the replay.
-    const replay: CanonicalWireEvent[] = [];
-    let cursor = afterSequence;
-    while (true) {
-      const page = this.store.readAfter(sessionId, cursor, this.replayBatchSize);
-      if (page.length === 0) break;
-      for (const record of page) {
-        if (record.sequence !== cursor + 1) {
-          // Internal gap detected: abort the replay with whatever
-          // we already have so the client can request a full
-          // rebuild. Returning `complete: false` tells the client
-          // to reset its local cache for this session.
-          subscription.replayInFlight = false;
-          return {
-            sessionId,
-            events: replay,
-            latestSequence: this.store.latestSequence(sessionId),
-            complete: false,
-          };
-        }
-        cursor = record.sequence;
-        replay.push(toWireEvent(record));
-        subscription.lastAppliedSequence = record.sequence;
-      }
-      if (page.length < this.replayBatchSize) break;
-    }
-    // Flush the pending buffer in strict sequence order.
-    const drained = subscription.pending
-      .slice()
-      .sort((left, right) => left.sequence - right.sequence);
-    for (const record of drained) {
-      if (record.sequence <= cursor) continue;
-      if (record.sequence !== cursor + 1) {
-        subscription.replayInFlight = false;
-        return {
+    const existing = perSession.get(sessionId);
+    const subscription: CanonicalEventSubscription = existing?.replayInFlight
+      ? existing
+      : {
           sessionId,
-          events: replay,
-          latestSequence: this.store.latestSequence(sessionId),
-          complete: false,
+          lastAppliedSequence: afterSequence,
+          replayInFlight: true,
+          pending: [],
+          onEvent,
+          ...(onReplayComplete ? { onReplayComplete } : {}),
         };
+    if (existing?.replayInFlight) {
+      if (afterSequence !== existing.lastAppliedSequence) {
+        throw new Error("canonical replay cursor does not match the active replay");
+      }
+      subscription.onEvent = onEvent;
+      if (onReplayComplete) subscription.onReplayComplete = onReplayComplete;
+    } else {
+      perSession.set(sessionId, subscription);
+    }
+    // Return one bounded page. The client repeats the same subscription
+    // with the returned cursor until `complete` is true. Keeping the
+    // subscription in replay mode across those requests lets the
+    // transport buffer post-commit events instead of exposing a gap.
+    const page = this.store.readAfter(sessionId, afterSequence, this.replayBatchSize);
+    const replay: CanonicalWireEvent[] = [];
+    let replayBytes = 0;
+    let cursor = afterSequence;
+    const appendRecord = (record: CanonicalSessionEventRecord): boolean => {
+      const wire = toWireEvent(record);
+      const bytes = Buffer.byteLength(JSON.stringify(wire));
+      if (
+        replay.length > 0 &&
+        replayBytes + bytes > DEFAULT_REPLAY_MAX_BYTES
+      ) {
+        return false;
       }
       cursor = record.sequence;
-      replay.push(toWireEvent(record));
+      replay.push(wire);
+      replayBytes += bytes;
       subscription.lastAppliedSequence = record.sequence;
+      return true;
+    };
+    for (const record of page) {
+      if (record.sequence !== cursor + 1) {
+        subscription.replayInFlight = false;
+        throw new Error("canonical replay detected a sequence gap");
+      }
+      if (!appendRecord(record)) break;
     }
-    subscription.pending.length = 0;
-    subscription.replayInFlight = false;
+    // Only drain buffered events when the durable page is short. If the
+    // page filled the item or byte bound, the next request must first
+    // read the missing durable range and then merge any buffered tail.
+    if (
+      replay.length === page.length &&
+      replay.length < this.replayBatchSize
+    ) {
+      const drained = subscription.pending
+        .slice()
+        .sort((left, right) => left.sequence - right.sequence);
+      const retained: CanonicalSessionEventRecord[] = [];
+      for (const record of drained) {
+        if (record.sequence <= cursor) continue;
+        if (record.sequence !== cursor + 1) {
+          subscription.replayInFlight = false;
+          throw new Error("canonical replay detected a sequence gap");
+        }
+        if (!appendRecord(record)) {
+          retained.push(record);
+          continue;
+        }
+      }
+      subscription.pending = retained;
+    }
+    const latestSequence = this.store.latestSequence(sessionId);
+    const complete =
+      subscription.pending.every((record) => record.sequence <= cursor) &&
+      cursor >= latestSequence;
+    subscription.replayInFlight = !complete;
+    if (complete) subscription.onReplayComplete?.();
     return {
       sessionId,
       events: replay,
-      latestSequence: this.store.latestSequence(sessionId),
-      complete: true,
+      latestSequence,
+      complete,
     };
   }
 

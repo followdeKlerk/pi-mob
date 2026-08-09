@@ -3,9 +3,9 @@
 > [!WARNING]
 > **Alpha software:** Pi Mob is an unsupported preview. Compatibility and distribution can change.
 
-Pi Mob connects an Android phone to Pi on your Mac. A local bridge supervises Pi sessions and exposes them through private Tailscale Serve.
+Pi Mob connects an Android phone to OMP on your Mac. A local bridge supervises OMP sessions and exposes them through private Tailscale Serve.
 
-The host keeps repositories, provider credentials, Pi processes, and durable session state. Pi Mob has no application cloud backend.
+The host keeps repositories, provider credentials, OMP processes, and durable session state. Pi Mob has no application cloud backend.
 
 ## Start
 

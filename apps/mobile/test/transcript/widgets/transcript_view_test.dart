@@ -86,38 +86,47 @@ void main() {
     expect(find.byKey(const Key('load-older-transcript')), findsNothing);
   });
 
-  testWidgets('renders one RepaintBoundary + stable ValueKey per turn', (
-    tester,
-  ) async {
-    final doc = _document([
-      _assistantTurn(
-        turnId: 'a',
-        assistantStepId: 's1',
-        items: [
-          ToolItem(
-            itemId: 'call-1',
-            assistantStepId: 's1',
-            viewData: ToolCallViewData(
-              toolCallId: 'call-1',
-              toolName: BuiltInToolName.read,
-              arguments: const <String, Object?>{'path': '/tmp/x'},
-              status: TranscriptToolStatus.completed,
-              result: const <String, Object?>{'content': 'hi', 'byteCount': 2},
+  testWidgets(
+    'renders one RepaintBoundary + stable ValueKey per turn and one tool status',
+    (tester) async {
+      final doc = _document([
+        _assistantTurn(
+          turnId: 'a',
+          assistantStepId: 's1',
+          items: [
+            ToolItem(
+              itemId: 'call-1',
+              assistantStepId: 's1',
+              viewData: ToolCallViewData(
+                toolCallId: 'call-1',
+                toolName: BuiltInToolName.read,
+                arguments: const <String, Object?>{'path': '/tmp/x'},
+                status: TranscriptToolStatus.completed,
+                result: const <String, Object?>{
+                  'content': 'hi',
+                  'byteCount': 2,
+                },
+              ),
             ),
-          ),
-        ],
-      ),
-    ]);
+          ],
+        ),
+      ]);
 
-    await tester.pumpWidget(_app(TranscriptView(document: doc)));
-    expect(find.byType(RepaintBoundary), findsWidgets);
-    // The list itself is keyed and addressable.
-    final listFinder = find.byKey(const Key('transcript-list'));
-    expect(listFinder, findsOneWidget);
-    // The list's scroll controller is wired up so the FAB has a hook.
-    final list = tester.widget<ListView>(listFinder);
-    expect(list.controller, isNotNull);
-  });
+      await tester.pumpWidget(_app(TranscriptView(document: doc)));
+      expect(find.byType(RepaintBoundary), findsWidgets);
+      // The list itself is keyed and addressable.
+      final listFinder = find.byKey(const Key('transcript-list'));
+      expect(listFinder, findsOneWidget);
+      // The list's scroll controller is wired up so the FAB has a hook.
+      final list = tester.widget<ListView>(listFinder);
+      expect(list.controller, isNotNull);
+
+      // ToolCard owns the lifecycle label; the assistant footer must not
+      // repeat it for a tool-bearing turn.
+      expect(find.text('Completed'), findsOneWidget);
+      expect(find.text('completed'), findsNothing);
+    },
+  );
 
   testWidgets('user messages render without delivery indicators', (
     tester,

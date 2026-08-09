@@ -21,10 +21,10 @@ Pi Mob is a public repository with unsupported alpha preview binaries. Treat `do
 
 ## Product boundaries
 
-- The host owns repositories, provider credentials, Pi processes, and durable session state.
+- The host owns repositories, provider credentials, OMP processes, and durable session state.
 - The Android app is a reconnectable mobile control and presentation surface.
 - The bridge owns durable delivery, controller leases, bounded host operations, and process supervision.
-- Pi retains its normal execution model; the bridge does not impose a default host policy extension.
+- OMP retains its normal execution model; the bridge does not impose a default host policy extension.
 - Private Tailscale Serve exposure is supported. Public listeners and Funnel are not.
 - Multi-user tenancy is not part of the product.
 
@@ -35,7 +35,6 @@ Do not implement, wire, advertise, or add roadmap work for Git status, commit, p
 Experimental Git-related modules may be removed in a focused cleanup after confirming that shared protocol and test dependencies are unaffected. Do not expand them.
 
 ## Capability discipline
-
 Use these terms precisely:
 
 - **Production-wired:** constructed by the normal daemon and reachable from the released mobile path.

@@ -10,7 +10,7 @@ Read these files first:
 
 ## Scope
 
-The host owns repositories, credentials, Pi processes, and durable state. The Android app is a control and presentation surface. Private Tailscale Serve is the supported remote path.
+The host owns repositories, credentials, OMP processes, and durable state. The Android app is a control and presentation surface. Private Tailscale Serve is the supported remote path.
 
 Do not add public exposure, multi-user tenancy, or Git product actions. Update `docs/PROJECT_STATUS.md` when production wiring or accepted scope changes.
 
@@ -71,10 +71,10 @@ Set the release version in `VERSION`. Increase the Android version code for each
 
 Build the bridge and APK from the same revision. Supply Android signing values through an external properties file with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Do not store that file or its keystore in the repository.
 
-Preview artifacts include an APK, a macOS bridge tarball, and their `.sha256` files. Verify an asset with:
+Preview artifacts include an APK and a macOS bridge bundle. The bridge bundle includes `checksums.txt`; from the unpacked bundle root, verify it with:
 
 ```sh
-shasum -a 256 -c <asset>.sha256
+shasum -a 256 -c checksums.txt
 ```
 
 The APK build fails when signing values are absent. The preview bridge remains unsigned and is not notarized.

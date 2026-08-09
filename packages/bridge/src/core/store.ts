@@ -12,6 +12,39 @@ export interface StoredEvent { readonly eventId: string; readonly streamId: stri
 export interface StoredEventPage { readonly items: readonly StoredEvent[]; readonly snapshotRevision: string; readonly nextBeforeCursor?: string; }
 export interface StoredEventForwardPage { readonly items: readonly StoredEvent[]; readonly snapshotRevision: string; readonly nextAfterCursor?: string; }
 export const MAX_EVENT_PAGE_SIZE = 100;
+// Mobile catalogue and transcript discovery are intentionally bounded. This
+// is a presentation boundary only: durable session rows and event journals
+// remain available to host-side recovery and explicit retention work.
+export const MOBILE_SESSION_VISIBILITY_WINDOW_MS = 7 * 24 * 60 * 60 * 1000;
+const MOBILE_ACTIVE_RUNTIME_STATES = new Set([
+  "starting",
+  "idle",
+  "running",
+  "waiting_for_input",
+  "retry_wait",
+  "compacting",
+  "stopping",
+  "crashed",
+  "crash_loop",
+  "incompatible",
+  "indeterminate",
+]);
+export function isMobileSessionVisible(summary: Record<string, unknown>, now = Date.now()): boolean {
+  const runtimeState = typeof summary.runtimeState === "string" ? summary.runtimeState : "";
+  if (MOBILE_ACTIVE_RUNTIME_STATES.has(runtimeState)) return true;
+  if (summary.attentionState === "needs_attention") return true;
+  if (Number.isInteger(summary.queueCount) && Number(summary.queueCount) > 0) return true;
+  const rawActivity = summary.lastActivityAt;
+  const activity = typeof rawActivity === "number"
+    ? rawActivity
+    : typeof rawActivity === "string"
+      ? Date.parse(rawActivity)
+      : Number(summary.createdAt ?? 0);
+  return Number.isFinite(activity) && now - activity <= MOBILE_SESSION_VISIBILITY_WINDOW_MS;
+}
+export function mobileSessionVisibilityCutoff(now = Date.now()): string {
+  return new Date(now - MOBILE_SESSION_VISIBILITY_WINDOW_MS).toISOString();
+}
 // Maintenance transactions are deliberately bounded so live writes stay responsive.
 export const MAX_EVENT_COMPACTION_ROWS = 1000;
 export const MAX_EVENT_COMPACTION_BYTES = 4 * 1024 * 1024;
@@ -82,11 +115,39 @@ export interface StoredInstallationCredential {
 export type LeaseMutation =
   | { readonly action: "acquire" | "takeover"; readonly scopeKey: string; readonly installationId: string; readonly connectionId: string; readonly now?: number }
   | { readonly action: "release"; readonly scopeKey: string; readonly installationId: string; readonly connectionId: string; readonly now?: number };
+/** Backend reference retained for daemon/runtime use; never merged into sessionState(). */
+export interface StoredBackendSession {
+  readonly bridgeSessionId: string;
+  readonly backendKind: string;
+  readonly backendSessionId: string;
+  readonly backendSessionFile: string;
+  readonly createdAt: number;
+  readonly updatedAt: number;
+}
+
+export type BackendMigrationState = "running" | "completed" | "failed" | "indeterminate";
+export type BackendMigrationOutcome = "succeeded" | "failed" | "unknown";
+
+/** Durable migration bookkeeping. `reason` is bounded and report-safe. */
+export interface StoredBackendMigration {
+  readonly bridgeSessionId: string;
+  readonly migrationId: string;
+  readonly fromBackendKind: string;
+  readonly toBackendKind: string;
+  readonly state: BackendMigrationState;
+  readonly outcome: BackendMigrationOutcome | null;
+  readonly reason: string | null;
+  readonly attempt: number;
+  readonly retryable: boolean;
+  readonly startedAt: number;
+  readonly completedAt: number | null;
+  readonly updatedAt: number;
+}
 
 /**
- * Two-step migration. v1 = original M6 durable schema. v2 adds the M8
- * workspace trust + host policy state tables. Upgrading from a pre-M8
- * store applies v2 additively (the v1 tables are unchanged).
+ * Additive migration chain. v1 is the original M6 durable schema; each
+ * subsequent version adds only its own tables/indexes and preserves prior
+ * schemas and checksums.
  */
 const MIGRATION_V1 = `
 CREATE TABLE IF NOT EXISTS schema_migrations(version INTEGER PRIMARY KEY, checksum TEXT NOT NULL, applied_at INTEGER NOT NULL);
@@ -176,6 +237,47 @@ CREATE TABLE IF NOT EXISTS enrollment_secrets(
 );
 `;
 const MIGRATION_V5_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2 + MIGRATION_V3 + MIGRATION_V4 + MIGRATION_V5).digest("hex");
+/**
+ * v6 additions (OMP cutover). Backend references are deliberately separate
+ * from the mobile-facing session JSON so private backend paths cannot leak
+ * through protocol projections. Migration rows are one-per-bridge-session:
+ * a migration id is an idempotency key, while the state/outcome columns make
+ * interrupted work explicit and recoverable.
+ */
+const MIGRATION_V6 = `
+CREATE TABLE IF NOT EXISTS session_backend_refs(
+  bridge_session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+  backend_kind TEXT NOT NULL CHECK(length(backend_kind) BETWEEN 1 AND 32),
+  backend_session_id TEXT NOT NULL CHECK(length(backend_session_id) BETWEEN 1 AND 256),
+  backend_session_file TEXT NOT NULL CHECK(length(backend_session_file) BETWEEN 1 AND 4096),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(backend_kind,backend_session_id)
+);
+CREATE TABLE IF NOT EXISTS session_migrations(
+  bridge_session_id TEXT PRIMARY KEY REFERENCES sessions(session_id) ON DELETE CASCADE,
+  migration_id TEXT NOT NULL CHECK(length(migration_id) BETWEEN 1 AND 256),
+  from_backend_kind TEXT NOT NULL CHECK(length(from_backend_kind) BETWEEN 1 AND 32),
+  to_backend_kind TEXT NOT NULL CHECK(length(to_backend_kind) BETWEEN 1 AND 32),
+  state TEXT NOT NULL CHECK(state IN ('running','completed','failed','indeterminate')),
+  outcome TEXT CHECK(outcome IN ('succeeded','failed','unknown')),
+  reason TEXT,
+  attempt INTEGER NOT NULL CHECK(attempt >= 1),
+  retryable INTEGER NOT NULL DEFAULT 0 CHECK(retryable IN (0,1)),
+  started_at INTEGER NOT NULL,
+  completed_at INTEGER,
+  updated_at INTEGER NOT NULL,
+  UNIQUE(migration_id),
+  CHECK(
+    (state='running' AND outcome IS NULL AND completed_at IS NULL) OR
+    (state='completed' AND outcome='succeeded' AND completed_at IS NOT NULL) OR
+    (state='failed' AND outcome='failed' AND completed_at IS NOT NULL) OR
+    (state='indeterminate' AND outcome='unknown' AND completed_at IS NULL)
+  )
+);
+CREATE INDEX IF NOT EXISTS session_migrations_state ON session_migrations(state,updated_at);
+`;
+const MIGRATION_V6_CHECKSUM = new Bun.CryptoHasher("sha256").update(MIGRATION_V1 + MIGRATION_V2 + MIGRATION_V3 + MIGRATION_V4 + MIGRATION_V5 + MIGRATION_V6).digest("hex");
 
 function canonicalCursor(value: string): bigint {
   if (!/^(0|[1-9][0-9]*)$/.test(value)) throw new StoreError("conflict", "cursor is not canonical");
@@ -184,6 +286,16 @@ function canonicalCursor(value: string): bigint {
 function uuid(): string { return crypto.randomUUID().toLowerCase(); }
 function parseObject(json: string): Record<string, unknown> { return JSON.parse(json) as Record<string, unknown>; }
 
+function boundedIdentifier(value: string, name: string, max = 256): string {
+  if (typeof value !== "string" || value.length < 1 || value.length > max || /[\u0000-\u001f\u007f]/.test(value)) {
+    throw new StoreError("conflict", `${name} is invalid`);
+  }
+  return value;
+}
+function reportSafeReason(value: string | null | undefined): string | null {
+  if (value === undefined || value === null) return null;
+  return value.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 500);
+}
 export class BridgeStore {
   private db: Database;
   private writable = true;
@@ -249,6 +361,14 @@ export class BridgeStore {
       this.transactionOn(db, () => {
         db.exec(MIGRATION_V5);
         db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(5,?,?)").run(MIGRATION_V5_CHECKSUM, this.now());
+      });
+    }
+    const existingV6 = db.query("SELECT checksum FROM schema_migrations WHERE version=6").get() as { checksum: string } | null;
+    if (existingV6 && existingV6.checksum !== MIGRATION_V6_CHECKSUM) throw new StoreError("corrupt", "migration checksum mismatch (v6)");
+    if (!existingV6) {
+      this.transactionOn(db, () => {
+        db.exec(MIGRATION_V6);
+        db.query("INSERT INTO schema_migrations(version,checksum,applied_at) VALUES(6,?,?)").run(MIGRATION_V6_CHECKSUM, this.now());
       });
     }
   }
@@ -410,6 +530,178 @@ export class BridgeStore {
   sessionState(sessionId: string): Record<string, unknown> | null {
     const row = this.db.query("SELECT state_json state FROM sessions WHERE session_id=?").get(sessionId) as { state: string } | null;
     return row ? parseObject(row.state) : null;
+  }
+  isSessionVisibleToMobile(sessionId: string, now = this.now()): boolean {
+    const row = this.db.query("SELECT state_json state,created_at createdAt FROM sessions WHERE session_id=?").get(sessionId) as { state: string; createdAt: number } | null;
+    if (!row) return false;
+    const state = parseObject(row.state);
+    if (state.lifecycleState === "purged") return false;
+    return isMobileSessionVisible({ ...state, createdAt: state.createdAt ?? row.createdAt }, now);
+  }
+
+  ensureBackendSession(input: {
+    readonly bridgeSessionId: string;
+    readonly backendKind: string;
+    readonly backendSessionId: string;
+    readonly backendSessionFile: string;
+    readonly at?: number;
+  }): StoredBackendSession {
+    const bridgeSessionId = boundedIdentifier(input.bridgeSessionId, "bridge session ID");
+    const backendKind = boundedIdentifier(input.backendKind, "backend kind", 32);
+    const backendSessionId = boundedIdentifier(input.backendSessionId, "backend session ID");
+    const backendSessionFile = boundedIdentifier(input.backendSessionFile, "backend session file", 4096);
+    const at = input.at ?? this.now();
+    return this.transaction(() => {
+      const session = this.db.query("SELECT 1 FROM sessions WHERE session_id=?").get(bridgeSessionId);
+      if (!session) this.db.query("INSERT INTO sessions(session_id,state_json,created_at,updated_at) VALUES(?,?,?,?)").run(bridgeSessionId, "{}", at, at);
+      const existing = this.db.query(
+        "SELECT bridge_session_id AS bridgeSessionId,backend_kind AS backendKind,backend_session_id AS backendSessionId,backend_session_file AS backendSessionFile,created_at AS createdAt,updated_at AS updatedAt FROM session_backend_refs WHERE bridge_session_id=?",
+      ).get(bridgeSessionId) as StoredBackendSession | null;
+      if (existing) {
+        if (existing.backendKind !== backendKind || existing.backendSessionFile !== backendSessionFile) throw new StoreError("conflict", "bridge session backend reference conflicts");
+        const owner = this.db.query("SELECT bridge_session_id AS bridgeSessionId FROM session_backend_refs WHERE backend_kind=? AND backend_session_id=?").get(backendKind, backendSessionId) as { bridgeSessionId: string } | null;
+        if (owner && owner.bridgeSessionId !== bridgeSessionId) throw new StoreError("conflict", "backend session reference is already assigned");
+        if (existing.backendSessionId === backendSessionId) return existing;
+        this.db.query("UPDATE session_backend_refs SET backend_session_id=?,updated_at=? WHERE bridge_session_id=?").run(backendSessionId, at, bridgeSessionId);
+        return this.backendSession(bridgeSessionId) ?? (() => { throw new StoreError("io", "backend reference missing after update"); })();
+      }
+      const owner = this.db.query("SELECT bridge_session_id AS bridgeSessionId FROM session_backend_refs WHERE backend_kind=? AND backend_session_id=?").get(backendKind, backendSessionId) as { bridgeSessionId: string } | null;
+      if (owner && owner.bridgeSessionId !== bridgeSessionId) throw new StoreError("conflict", "backend session reference is already assigned");
+      this.db.query("INSERT INTO session_backend_refs(bridge_session_id,backend_kind,backend_session_id,backend_session_file,created_at,updated_at) VALUES(?,?,?,?,?,?)").run(
+        bridgeSessionId, backendKind, backendSessionId, backendSessionFile, at, at,
+      );
+      return this.backendSession(bridgeSessionId) ?? (() => { throw new StoreError("io", "backend reference missing after insert"); })();
+    });
+  }
+
+  /** Daemon-only backend identity/reference; never merged into sessionState(). */
+  backendSession(bridgeSessionId: string): StoredBackendSession | null {
+    const id = boundedIdentifier(bridgeSessionId, "bridge session ID");
+    return this.db.query(
+      "SELECT bridge_session_id AS bridgeSessionId,backend_kind AS backendKind,backend_session_id AS backendSessionId,backend_session_file AS backendSessionFile,created_at AS createdAt,updated_at AS updatedAt FROM session_backend_refs WHERE bridge_session_id=?",
+    ).get(id) as StoredBackendSession | null;
+  }
+
+  beginBackendMigration(input: {
+    readonly bridgeSessionId: string;
+    readonly migrationId: string;
+    readonly fromBackendKind: string;
+    readonly toBackendKind: string;
+    readonly retryable?: boolean;
+    readonly at?: number;
+  }): StoredBackendMigration {
+    const bridgeSessionId = boundedIdentifier(input.bridgeSessionId, "bridge session ID");
+    const migrationId = boundedIdentifier(input.migrationId, "migration ID");
+    const fromBackendKind = boundedIdentifier(input.fromBackendKind, "source backend kind", 32);
+    const toBackendKind = boundedIdentifier(input.toBackendKind, "target backend kind", 32);
+    if (fromBackendKind === toBackendKind) throw new StoreError("conflict", "migration source and target backends must differ");
+    const at = input.at ?? this.now();
+    return this.transaction(() => {
+      if (!this.sessionExists(bridgeSessionId)) throw new StoreError("not_found", "session not found");
+      const existing = this.db.query(
+        "SELECT bridge_session_id AS bridgeSessionId,migration_id AS migrationId,from_backend_kind AS fromBackendKind,to_backend_kind AS toBackendKind,state,outcome,reason,attempt,retryable,started_at AS startedAt,completed_at AS completedAt,updated_at AS updatedAt FROM session_migrations WHERE bridge_session_id=?",
+      ).get(bridgeSessionId) as (Omit<StoredBackendMigration, "retryable"> & { retryable: number }) | null;
+      if (existing) {
+        if (existing.migrationId !== migrationId || existing.fromBackendKind !== fromBackendKind || existing.toBackendKind !== toBackendKind) throw new StoreError("conflict", "bridge session already has a different migration");
+        return { ...existing, retryable: Boolean(existing.retryable) };
+      }
+      if (this.db.query("SELECT 1 FROM session_migrations WHERE migration_id=?").get(migrationId)) throw new StoreError("conflict", "migration ID is already in use");
+      this.db.query(
+        "INSERT INTO session_migrations(bridge_session_id,migration_id,from_backend_kind,to_backend_kind,state,outcome,reason,attempt,retryable,started_at,completed_at,updated_at) VALUES(?,?,?,?,?,?,?,?,?,?,NULL,?)",
+      ).run(bridgeSessionId, migrationId, fromBackendKind, toBackendKind, "running", null, null, 1, input.retryable === true ? 1 : 0, at, at);
+      return this.backendMigration(bridgeSessionId) ?? (() => { throw new StoreError("io", "migration row missing after insert"); })();
+    });
+  }
+
+  backendMigration(bridgeSessionId: string): StoredBackendMigration | null {
+    const id = boundedIdentifier(bridgeSessionId, "bridge session ID");
+    const row = this.db.query(
+      "SELECT bridge_session_id AS bridgeSessionId,migration_id AS migrationId,from_backend_kind AS fromBackendKind,to_backend_kind AS toBackendKind,state,outcome,reason,attempt,retryable,started_at AS startedAt,completed_at AS completedAt,updated_at AS updatedAt FROM session_migrations WHERE bridge_session_id=?",
+    ).get(id) as (Omit<StoredBackendMigration, "retryable"> & { retryable: number }) | null;
+    return row ? { ...row, retryable: Boolean(row.retryable) } : null;
+  }
+
+  completeBackendMigration(input: {
+    readonly bridgeSessionId: string;
+    readonly migrationId: string;
+    readonly outcome: "succeeded" | "failed";
+    readonly reason?: string | null;
+    readonly retryable?: boolean;
+    readonly at?: number;
+  }): StoredBackendMigration {
+    const id = boundedIdentifier(input.bridgeSessionId, "bridge session ID");
+    const migrationId = boundedIdentifier(input.migrationId, "migration ID");
+    const at = input.at ?? this.now();
+    return this.transaction(() => {
+      const prior = this.backendMigration(id);
+      if (!prior || prior.migrationId !== migrationId) throw new StoreError("not_found", "migration not found");
+      if (prior.state === "indeterminate") throw new StoreError("conflict", "indeterminate migration requires explicit recovery");
+      if (prior.state === "completed" || prior.state === "failed") {
+        if (prior.outcome === input.outcome) return prior;
+        throw new StoreError("conflict", "migration outcome conflicts with durable outcome");
+      }
+      const state: BackendMigrationState = input.outcome === "succeeded" ? "completed" : "failed";
+      this.db.query("UPDATE session_migrations SET state=?,outcome=?,reason=?,retryable=?,completed_at=?,updated_at=? WHERE bridge_session_id=? AND migration_id=? AND state='running'").run(
+        state, input.outcome, reportSafeReason(input.reason), input.outcome === "failed" && input.retryable === true ? 1 : 0, at, at, id, migrationId,
+      );
+      return this.backendMigration(id) ?? (() => { throw new StoreError("io", "migration row missing after completion"); })();
+    });
+  }
+
+  markBackendMigrationIndeterminate(input: { readonly bridgeSessionId: string; readonly migrationId: string; readonly reason: string; readonly at?: number }): StoredBackendMigration {
+    const id = boundedIdentifier(input.bridgeSessionId, "bridge session ID");
+    const migrationId = boundedIdentifier(input.migrationId, "migration ID");
+    const reason = reportSafeReason(input.reason) ?? "migration outcome is unknown";
+    const at = input.at ?? this.now();
+    return this.transaction(() => {
+      const prior = this.backendMigration(id);
+      if (!prior || prior.migrationId !== migrationId) throw new StoreError("not_found", "migration not found");
+      if (prior.state === "indeterminate") return prior;
+      if (prior.state !== "running") throw new StoreError("conflict", "terminal migration cannot become indeterminate");
+      this.db.query("UPDATE session_migrations SET state='indeterminate',outcome='unknown',reason=?,completed_at=NULL,updated_at=? WHERE bridge_session_id=? AND migration_id=? AND state='running'").run(reason, at, id, migrationId);
+      return this.backendMigration(id) ?? (() => { throw new StoreError("io", "migration row missing after transition"); })();
+    });
+  }
+
+  recoverBackendMigration(input: {
+    readonly bridgeSessionId: string;
+    readonly migrationId: string;
+    readonly outcome: "succeeded" | "failed";
+    readonly reason: string;
+    readonly retryable?: boolean;
+    readonly at?: number;
+  }): StoredBackendMigration {
+    const id = boundedIdentifier(input.bridgeSessionId, "bridge session ID");
+    const migrationId = boundedIdentifier(input.migrationId, "migration ID");
+    const at = input.at ?? this.now();
+    return this.transaction(() => {
+      const prior = this.backendMigration(id);
+      if (!prior || prior.migrationId !== migrationId) throw new StoreError("not_found", "migration not found");
+      if (prior.state !== "indeterminate") {
+        if (prior.outcome === input.outcome) return prior;
+        throw new StoreError("conflict", "migration is not indeterminate");
+      }
+      const state: BackendMigrationState = input.outcome === "succeeded" ? "completed" : "failed";
+      this.db.query("UPDATE session_migrations SET state=?,outcome=?,reason=?,retryable=?,completed_at=?,updated_at=? WHERE bridge_session_id=? AND migration_id=? AND state='indeterminate'").run(
+        state, input.outcome, reportSafeReason(input.reason), input.outcome === "failed" && input.retryable === true ? 1 : 0, at, at, id, migrationId,
+      );
+      return this.backendMigration(id) ?? (() => { throw new StoreError("io", "migration row missing after recovery"); })();
+    });
+  }
+
+  retryBackendMigration(input: { readonly bridgeSessionId: string; readonly migrationId: string; readonly at?: number }): StoredBackendMigration {
+    const id = boundedIdentifier(input.bridgeSessionId, "bridge session ID");
+    const migrationId = boundedIdentifier(input.migrationId, "migration ID");
+    const at = input.at ?? this.now();
+    return this.transaction(() => {
+      const prior = this.backendMigration(id);
+      if (!prior || prior.migrationId !== migrationId) throw new StoreError("not_found", "migration not found");
+      if (prior.state === "running") return prior;
+      if (prior.state === "indeterminate") throw new StoreError("conflict", "indeterminate migration requires explicit recovery");
+      if (prior.state !== "failed" || !prior.retryable) throw new StoreError("conflict", "migration is not retryable");
+      this.db.query("UPDATE session_migrations SET state='running',outcome=NULL,reason=NULL,attempt=attempt+1,completed_at=NULL,updated_at=? WHERE bridge_session_id=? AND migration_id=? AND state='failed' AND retryable=1").run(at, id, migrationId);
+      return this.backendMigration(id) ?? (() => { throw new StoreError("io", "migration row missing after retry"); })();
+    });
   }
   sessionStates(): Array<Record<string, unknown>> {
     const rows = this.db.query("SELECT session_id sessionId,state_json state FROM sessions ORDER BY created_at,session_id").all() as Array<{ sessionId: string; state: string }>;
@@ -624,6 +916,7 @@ export class BridgeStore {
       });
       if (input.parentSessionId !== undefined) rows = rows.filter((row) => (row.parentSessionId ?? null) === input.parentSessionId && row.lifecycleState !== "purged");
       else rows = rows.filter((row) => row.lifecycleState !== "purged");
+      rows = rows.filter((row) => isMobileSessionVisible(row, this.now()));
       if (filter === "needs_attention") rows = rows.filter((row) => row.attentionState === "needs_attention");
       else if (filter !== "all") rows = rows.filter((row) => row.attentionState === filter || row.runtimeState === filter);
       if (query.length > 0) rows = rows.filter((row) => {
@@ -749,7 +1042,7 @@ export class BridgeStore {
     });
   }
   command(commandId: string): StoredCommand | null {
-    const row = this.db.query("SELECT command_id commandId,type,scope_key scopeKey,stream_id streamId,semantic_hash semanticHash,payload_json payload,state,dispatch_count dispatchCount FROM commands WHERE command_id=?").get(commandId) as (Omit<StoredCommand, "payload"> & { payload: string }) | null;
+    const row = this.db.query("SELECT command_id commandId,type,scope_key scopeKey,stream_id streamId,semantic_hash semanticHash,payload_json payload,state,dispatch_count dispatchCount,created_at createdAt,updated_at updatedAt FROM commands WHERE command_id=?").get(commandId) as (Omit<StoredCommand, "payload"> & { payload: string }) | null;
     return row ? { ...row, payload: parseObject(row.payload) } : null;
   }
   transitionCommand(commandId: string, from: readonly string[], to: string): { command: StoredCommand; event: StoredEvent } | null {
@@ -757,7 +1050,7 @@ export class BridgeStore {
       const command = this.command(commandId); if (!command || !from.includes(command.state)) return null;
       const dispatch = to === "dispatched" ? 1 : 0;
       this.db.query("UPDATE commands SET state=?,dispatch_count=dispatch_count+?,updated_at=? WHERE command_id=?").run(to, dispatch, this.now(), commandId);
-      const event = this.appendEventTx(command.streamId, "command.state", { commandId, commandType: command.type, state: to, errorCode: null });
+      const event = this.appendEventTx(command.streamId, "command.state", { commandId, commandType: command.type, state: to });
       return { command: this.command(commandId)!, event };
     });
   }

@@ -48,14 +48,16 @@ describe("normal daemon legacy event maintenance", () => {
     const records: Array<{ event: string; fields?: Record<string, string | number | boolean | null | undefined> }> = [];
     const daemon = await runDaemon({
       workspace: root,
-      executable: process.execPath,
+      ompExecutable: process.execPath,
       stateDir,
-      sessionDir: join(root, "sessions"),
+      ompSessionDir: join(root, "sessions"),
       logger: { log(record) { records.push(record); } },
     });
     try {
-      expect(daemon.store.listEvents(hostStream)).toEqual([]);
-      expect(daemon.store.streamPosition(hostStream)).toMatchObject({ current: "2", floor: "2" });
+      expect(daemon.store.listEvents(hostStream)).toMatchObject([
+        { cursor: "3", type: "host.state", payload: { ready: true } },
+      ]);
+      expect(daemon.store.streamPosition(hostStream)).toMatchObject({ current: "3", floor: "2" });
       expect(records.some((record) => record.event === "legacy-event-compaction" && record.fields?.deletedRows === 2)).toBe(true);
     } finally {
       await daemon.close();
@@ -93,26 +95,29 @@ describe("normal daemon legacy event maintenance", () => {
     const records: Array<{ event: string; fields?: Record<string, string | number | boolean | null | undefined> }> = [];
     const daemon = await runDaemon({
       workspace: root,
-      executable: process.execPath,
+      ompExecutable: process.execPath,
       stateDir,
-      sessionDir: join(root, "sessions"),
+      ompSessionDir: join(root, "sessions"),
       logger: { log(record) { records.push(record); } },
     });
     try {
       // Runtime readiness is established before best-effort maintenance runs.
       expect(daemon.runtime.ready().ready).toBe(true);
-      await waitFor(() => daemon.store.listEvents(hostStream).length === 0);
-      expect(daemon.store.streamPosition(hostStream)).toMatchObject({ current: "1005", floor: "1005" });
+      await waitFor(() => daemon.store.listEvents(hostStream).every((event) => event.type !== "legacy"));
+      expect(daemon.store.streamPosition(hostStream)).toMatchObject({ current: "1006", floor: "1005" });
       const batches = records.filter((record) => record.event === "legacy-event-compaction");
       expect(batches.some((record) => record.fields?.deletedRows === 1000)).toBe(true);
       expect(batches.some((record) => record.fields?.deletedRows === 5)).toBe(true);
 
       const streams = new StreamService(daemon.store);
       expect(streams.sync(hostStream, "0").mode).toBe("snapshot_required");
-      expect(streams.sync(hostStream, "1005").mode).toBe("current");
+      expect(streams.sync(hostStream, "1005")).toMatchObject({
+        mode: "replay",
+        events: [{ cursor: "1006", type: "host.state", payload: { ready: true } }],
+      });
       daemon.store.appendEvent(hostStream, "live", { reconnect: true }, "live-after-compaction");
-      expect(streams.sync(hostStream, "1005").mode).toBe("replay");
-      expect(streams.sync(hostStream, "1005").events.map((event) => event.eventId)).toEqual(["live-after-compaction"]);
+      expect(streams.sync(hostStream, "1006").mode).toBe("replay");
+      expect(streams.sync(hostStream, "1006").events.map((event) => event.eventId)).toEqual(["live-after-compaction"]);
     } finally {
       await daemon.close();
     }

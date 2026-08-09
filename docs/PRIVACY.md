@@ -6,7 +6,7 @@ Pi Mob has no application cloud backend. The supported setup runs the bridge on 
 
 The host can store:
 
-- Pi conversation history;
+- OMP conversation history and host-private session references;
 - bridge events, commands, leases, and registered-device rows;
 - bounded JPEG or PNG attachments in `<state-dir>/attachments`;
 - expiring HTML exports in `<state-dir>/exports`;
@@ -47,7 +47,7 @@ The WebSocket, attachments, exports, and device registration authenticate the in
 
 Forgetting a host removes that host's mobile cache, address, and credential. Android uninstall removes app-owned local data. A host-side device row can remain until FCM failure or operator cleanup.
 
-The default bridge uninstall mode retains the state directory. Use `--mode=remove_state` or `--mode=full` to remove bridge state. Pi session data remains unless you also pass `--remove-pi-session-dir=true`.
+The default bridge uninstall mode retains the state directory. Use `--mode=remove_state` or `--mode=full` to remove bridge state. OMP session data remains unless you also pass `--remove-omp-session-dir=true`.
 
 Review the command output before deletion and keep a protected backup when recovery is necessary.
 

@@ -93,7 +93,12 @@ export class StreamService {
     if (streams.filter((stream) => stream.detail === "full" && stream.streamId.startsWith("session:")).length > 1) throw new StoreError("conflict", "only one full session subscription is allowed");
     if (streams.filter((stream) => stream.detail === "summary").length > 5) throw new StoreError("conflict", "too many summary subscriptions");
   }
-  sync(streamId: string, afterCursor?: string): StreamSync {
+  sync(
+    streamId: string,
+    afterCursor?: string,
+    transformEvent: (event: StoredEvent) => StoredEvent = (event) => event,
+    transformSnapshot: (state: Record<string, unknown>) => Record<string, unknown> = (state) => state,
+  ): StreamSync {
     const position = this.store.streamPosition(streamId); if (!position) throw new StoreError("not_found", "stream not found");
     try { if (afterCursor !== undefined) compareDecimalCursors(afterCursor, position.current); }
     catch { throw new CursorInvalidError("cursor is not a canonical decimal string"); }
@@ -101,10 +106,10 @@ export class StreamService {
       const replay = this.store.readReplay(streamId, afterCursor);
       if (compareDecimalCursors(afterCursor, replay.current) === 0) return { mode: "current", events: [], currentCursor: replay.current };
       const invalid = compareDecimalCursors(afterCursor, replay.floor) < 0 || compareDecimalCursors(afterCursor, replay.current) > 0;
-      if (!invalid) return { mode: "replay", events: replay.events, currentCursor: replay.current };
+      if (!invalid) return { mode: "replay", events: replay.events.map(transformEvent), currentCursor: replay.current };
     }
     const snapshot = this.store.captureSnapshot(streamId);
-    const json = JSON.stringify(snapshot.state); const parts: Record<string, unknown>[] = [];
+    const json = JSON.stringify(transformSnapshot(snapshot.state)); const parts: Record<string, unknown>[] = [];
     let fragment = ""; let fragmentBytes = 0;
     for (const character of json) {
       const bytes = new TextEncoder().encode(character).byteLength;
@@ -114,7 +119,7 @@ export class StreamService {
     if (fragment.length > 0) parts.push({ index: parts.length, json: fragment });
     if (parts.length === 0) parts.push({ index: 0, json: "{}" });
     const replay = this.store.readReplay(streamId, snapshot.baseline);
-    return { mode: "snapshot_required", baseline: snapshot.baseline, snapshotParts: parts, events: replay.events, currentCursor: replay.current };
+    return { mode: "snapshot_required", baseline: snapshot.baseline, snapshotParts: parts, events: replay.events.map(transformEvent), currentCursor: replay.current };
   }
   ack(installationId: string, cursors: Readonly<Record<string, string>>): void { for (const [streamId, cursor] of Object.entries(cursors)) this.store.ackCursor(installationId, streamId, cursor); }
 }

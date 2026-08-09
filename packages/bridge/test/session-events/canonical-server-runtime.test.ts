@@ -186,6 +186,43 @@ describe("canonical session-event runtime: capability, subscribe, and live push"
       expect(replay).not.toHaveProperty('__canonicalSubscribeSessionId');
     } finally { close(); }
   });
+  test("returns a bounded incomplete page for a replay that needs pagination", async () => {
+    for (let index = 1; index <= 300; index += 1) {
+      canonical.append({
+        sessionId,
+        type: "assistant.content.replaced",
+        payload: { messageId: `message-${index}`, content: [{ kind: "text", text: `chunk-${index}` }] },
+        eventId: crypto.randomUUID().toLowerCase(),
+        occurredAt: "2026-08-14T12:00:00.000Z",
+      });
+    }
+    const { socket, messages, close } = openSocket(baseUrl);
+    try {
+      const opened = new Promise<void>((resolve, reject) => {
+        socket.addEventListener("open", () => resolve(), { once: true });
+        socket.addEventListener("error", () => reject(new Error("socket error")), { once: true });
+      });
+      await opened;
+      socket.send(JSON.stringify(STATIC_HELLO_MESSAGE));
+      const hello = await nextMessage(messages, (value) => value.type === "hello.accepted");
+      const connectionId = (hello.payload as { connectionId: string }).connectionId;
+      const subscribeRequestId = "00000000-0000-4000-8000-0000000000ac";
+      socket.send(JSON.stringify({
+        type: "session.events.subscribe",
+        protocol: { major: 1, minor: 0 },
+        messageId: subscribeRequestId,
+        requestId: subscribeRequestId,
+        connectionId,
+        sentAt: "2026-08-14T12:00:00.000Z",
+        payload: { sessionId, afterSequence: 0 },
+      }));
+      const replay = await nextMessage(messages, (value) => value.type === "session.events.replay.result" && value.requestId === subscribeRequestId);
+      const replayPayload = replay.payload as { events: ReadonlyArray<Record<string, unknown>>; latestSequence: number; complete: boolean };
+      expect(replayPayload.events.length).toBe(256);
+      expect(replayPayload.latestSequence).toBe(300);
+      expect(replayPayload.complete).toBe(false);
+    } finally { close(); }
+  });
 
   test("committed canonical event is delivered as a live session.event envelope after subscribe", async () => {
     const { socket, messages, close } = openSocket(baseUrl);

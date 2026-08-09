@@ -198,9 +198,20 @@ class Composer extends StatelessWidget {
       await coordinator.setModel(chosen.id);
     } on Object catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.maybeOf(context)?.showSnackBar(
-        SnackBar(content: Text('Could not change model: $error')),
+      final detail = error.toString().replaceFirst(
+        RegExp(r'^(StateError|Exception):\s*'),
+        '',
       );
+      final message =
+          detail.contains('requires a session between turns') ||
+              detail.contains('requires an idle session')
+          ? 'Finish or stop the current response before changing models.'
+          : detail.contains('provider unavailable')
+          ? 'That model provider is not available on the host.'
+          : 'Could not change model: $detail';
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(message)));
     }
   }
 

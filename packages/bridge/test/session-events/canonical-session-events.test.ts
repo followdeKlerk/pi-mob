@@ -294,6 +294,64 @@ describe("canonical session-event transport: replay + live identical shape", () 
       transport.close();
     } finally { cleanup(directory); }
   });
+  test("bounds large replays and resumes the same subscription", () => {
+    const { store, directory } = newStore();
+    try {
+      const sessionId = crypto.randomUUID().toLowerCase();
+      store.addSessionSummary(sessionId, { name: "test" });
+      const canonical = new CanonicalSessionStore(store);
+      const transport = new CanonicalEventTransport({ store: canonical });
+      for (let index = 1; index <= 260; index += 1) {
+        canonical.append({
+          sessionId,
+          type: "assistant.delta",
+          payload: { deltaIndex: index },
+          eventId: `large-${index}`,
+          occurredAt: new Date(Date.UTC(2026, 7, 14, 12, 0, index % 60)).toISOString(),
+        });
+      }
+      const first = transport.subscribe("conn-1", sessionId, 0, () => undefined);
+      expect(first.events).toHaveLength(256);
+      expect(first.events[0]?.sequence).toBe(1);
+      expect(first.events.at(-1)?.sequence).toBe(256);
+      expect(first.complete).toBe(false);
+      const second = transport.subscribe("conn-1", sessionId, 256, () => undefined);
+      expect(second.events.map((event) => event.sequence)).toEqual([257, 258, 259, 260]);
+      expect(second.complete).toBe(true);
+      transport.close();
+    } finally { cleanup(directory); }
+  });
+  test("bounds replacement-heavy replays by encoded bytes", () => {
+    const { store, directory } = newStore();
+    try {
+      const sessionId = crypto.randomUUID().toLowerCase();
+      store.addSessionSummary(sessionId, { name: "test" });
+      const canonical = new CanonicalSessionStore(store);
+      const transport = new CanonicalEventTransport({ store: canonical });
+      const content = "x".repeat(10_000);
+      for (let index = 1; index <= 100; index += 1) {
+        canonical.append({
+          sessionId,
+          type: "assistant.content.replaced",
+          payload: { messageId: "m1", turnId: "t1", content },
+          eventId: `replacement-${index}`,
+          occurredAt: new Date(Date.UTC(2026, 7, 14, 12, 0, index % 60)).toISOString(),
+        });
+      }
+      const first = transport.subscribe("conn-1", sessionId, 0, () => undefined);
+      expect(first.events.length).toBeLessThan(100);
+      expect(first.complete).toBe(false);
+      const second = transport.subscribe(
+        "conn-1",
+        sessionId,
+        first.events.at(-1)!.sequence,
+        () => undefined,
+      );
+      expect(second.events[0]?.sequence).toBe(first.events.at(-1)!.sequence + 1);
+      expect(second.complete).toBe(true);
+      transport.close();
+    } finally { cleanup(directory); }
+  });
 
   test("duplicate live events are silently dropped", () => {
     const { store, directory } = newStore();

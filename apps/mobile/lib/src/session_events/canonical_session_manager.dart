@@ -265,10 +265,9 @@ class CanonicalSessionManager extends ChangeNotifier {
     );
   }
 
-  /// Decodes and ingests a `session.events.replay.result` envelope.
-  /// When the replay signals an internal gap or duplicate sequence,
-  /// the manager resets the local cache and rebuilds from the
-  /// provided events.
+  /// Decodes and ingests one bounded `session.events.replay.result`
+  /// page. The coordinator requests the next page when `complete` is
+  /// false; a false value is pagination, not a cache-corruption signal.
   Future<CanonicalIngestSummary> ingestReplay(
     Object? wireMessage, {
     required String sessionId,
@@ -287,10 +286,7 @@ class CanonicalSessionManager extends ChangeNotifier {
         wrongSession: 0,
       );
     }
-    final binding = await ensureSession(sessionId);
-    if (binding != null && !decoded.complete) {
-      await binding.synchronizer.resetAndReplay();
-    }
+    await ensureSession(sessionId);
     return ingestWireEvents(decoded.sessionId, decoded.events);
   }
 

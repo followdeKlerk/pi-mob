@@ -15,9 +15,6 @@
  *   3. The `StoredEvent` returned to the adapter and the notification
  *      classifier carries the canonical sequence metadata recorded by
  *      the facade.
- *   4. Explicitly injected older adapters still retain the isolated
- *      recipe.activity fallback when they provide the legacy facade
- *      without `CanonicalSessionStore`.
  *   5. When the canonical facade rejects a type (closed-set guard),
  *      the adapter still throws and the journal does not record the
  *      rejected event.
@@ -46,10 +43,6 @@ class FakeRpc {
 const workspaceId = "55555555-5555-4555-8555-555555555555";
 const sessionId = "77777777-7777-4777-8777-777777777777";
 
-function deterministicSessionId(): () => string {
-  let counter = 0;
-  return () => `00000000-0000-4000-8000-${(++counter).toString().padStart(12, "0")}`;
-}
 
 describe("bridge production wiring: canonical session store is the live append path", () => {
   test("normal canonical admission does not write source transcript or recipe rows", () => {
@@ -521,116 +514,5 @@ describe("bridge production wiring: canonical session store is the live append p
     }
   });
 
-  test("explicit older facade adapter still publishes isolated recipe.activity fallback", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "canonical-wiring-recipe-"));
-    const store = new BridgeStore(join(dir, "bridge.sqlite"));
-    const identity = store.identity();
-    store.ensureStream(`host:${identity.hostId}`, "host");
-    store.ensureSession(sessionId, { sessionId, workspaceId, policyMode: "full", runtimeState: "idle" });
-    const streamId = `session:${sessionId}`;
-    store.ensureStream(streamId, "session", sessionId);
 
-    const canonicalStore = new CanonicalEventStore({ store });
-    const rpc = new FakeRpc();
-    const adapter = new OneSessionPiAdapter({
-      store,
-      rpc,
-      canonicalEventStore: canonicalStore,
-      workspace: {
-        workspaceId,
-        rootPath: dir,
-        displayName: "canonical-wiring-recipe",
-        fingerprint: "canonical-wiring-recipe",
-        policyMode: "full",
-      },
-      newSessionId: deterministicSessionId(),
-    });
-
-    try {
-      // Drive the full prompt.submit lifecycle so the adapter
-      // establishes an active turn. Without `turnId` on the tool
-      // payload the durable recipe projection will not publish a
-      // derived `recipe.activity` event.
-      await adapter.dispatch({
-        commandId: "create-recipe",
-        type: "session.create",
-        scopeKey: `host:${identity.hostId}`,
-        streamId: `host:${identity.hostId}`,
-        semanticHash: "h",
-        state: "accepted",
-        dispatchCount: 0,
-        payload: { workspaceId, policyMode: "full" },
-      } as never);
-      const summary = store.listEvents(`host:${identity.hostId}`).find((event) => event.type === "session.summary");
-      const createdSessionId = (summary?.payload as Record<string, unknown>).sessionId as string;
-      await adapter.dispatch({
-        commandId: "prompt-recipe",
-        type: "prompt.submit",
-        scopeKey: `session:${createdSessionId}`,
-        streamId: `session:${createdSessionId}`,
-        semanticHash: "h",
-        state: "accepted",
-        dispatchCount: 0,
-        payload: {
-          sessionId: createdSessionId,
-          deliveryMode: "immediate",
-          message: "run",
-          attachmentIds: [],
-        },
-      } as never).catch(() => undefined);
-
-      rpc.emit({ type: "turn_start", sessionId: createdSessionId, turnIndex: 1 });
-      rpc.emit({ type: "tool_execution_start", sessionId: createdSessionId, toolCallId: "tool-r1", toolName: "read", args: { path: "/tmp/x" } });
-      rpc.emit({ type: "tool_execution_update", sessionId: createdSessionId, toolCallId: "tool-r1", partialResult: "ok" });
-      rpc.emit({ type: "tool_execution_end", sessionId: createdSessionId, toolCallId: "tool-r1", toolName: "read", result: "ok", isError: false });
-      rpc.emit({ type: "agent_settled", sessionId: createdSessionId });
-
-      const events = store.listEvents(`session:${createdSessionId}`);
-      const recipes = events.filter((event) => event.type === "recipe.activity");
-      expect(recipes.length).toBeGreaterThanOrEqual(1);
-      // Canonical metadata is never stamped on recipe.activity (it is
-      // a derived projection written by the recipe projection).
-      expect(recipes.some((event) => typeof event.payload.canonicalSequence === "number")).toBe(false);
-    } finally {
-      adapter.close();
-      store.close();
-    }
-  });
-
-  test("adapter without canonical store still uses the legacy recipe projection path", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "canonical-wiring-legacy-"));
-    const store = new BridgeStore(join(dir, "bridge.sqlite"));
-    store.ensureStream(`host:${store.identity().hostId}`, "host");
-    store.ensureSession(sessionId, { sessionId, workspaceId, policyMode: "full", runtimeState: "idle" });
-    store.ensureStream(`session:${sessionId}`, "session", sessionId);
-
-    const rpc = new FakeRpc();
-    const adapter = new OneSessionPiAdapter({
-      store,
-      rpc,
-      // Intentionally no canonicalEventStore — the legacy path must
-      // remain functional for focused unit tests that do not yet
-      // construct the facade.
-      workspace: {
-        workspaceId,
-        rootPath: dir,
-        displayName: "canonical-wiring-legacy",
-        fingerprint: "canonical-wiring-legacy",
-        policyMode: "full",
-      },
-    });
-
-    try {
-      rpc.emit({ type: "turn_start", sessionId, turnIndex: 1 });
-      rpc.emit({ type: "agent_settled", sessionId });
-      const events = store.listEvents(`session:${sessionId}`);
-      expect(events.some((event) => event.type === "turn.started")).toBe(true);
-      expect(events.some((event) => event.type === "turn.settled")).toBe(true);
-      // Legacy path does not stamp canonicalSequence metadata.
-      expect(events.some((event) => typeof event.payload.canonicalSequence === "number")).toBe(false);
-    } finally {
-      adapter.close();
-      store.close();
-    }
-  });
 });

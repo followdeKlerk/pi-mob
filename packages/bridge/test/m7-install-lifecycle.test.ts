@@ -422,7 +422,7 @@ describe("install-config", () => {
   test("defaultInstallConfig produces a valid, loopback-only config", () => {
     const config = defaultInstallConfig({
       paths: basePaths(),
-    piExecutable: "/opt/pi/0.82.0/bin/pi",
+      ompExecutable: "/opt/omp/0.82.0/bin/omp",
       bridgeExecutable: "/opt/pi-mob/release/bin/bridge",
       bridgeVersion: "0.0.0-m7",
       protocolVersion: "1.0",
@@ -430,7 +430,7 @@ describe("install-config", () => {
     expect(config.schemaVersion).toBe(1);
     expect(config.hostname).toBe("127.0.0.1");
     expect(config.port).toBeGreaterThan(0);
-    for (const key of ["piExecutable", "bridgeExecutable", "stateRoot", "logRoot",
+    for (const key of ["ompExecutable", "bridgeExecutable", "stateRoot", "logRoot",
       "backupRoot", "secretsRoot"] as const) {
       expect(config[key].startsWith("/")).toBe(true);
     }
@@ -439,7 +439,7 @@ describe("install-config", () => {
   test("defaultInstallConfig rejects non-loopback hostname", () => {
     expect(() => defaultInstallConfig({
       paths: basePaths(),
-      piExecutable: "/opt/pi/bin/pi",
+      ompExecutable: "/opt/omp/bin/omp",
       bridgeExecutable: "/opt/pi-mob/bin/bridge",
       bridgeVersion: "0",
       protocolVersion: "1.0",
@@ -450,7 +450,7 @@ describe("install-config", () => {
   test("validateInstallConfig rejects bad port", () => {
     expect(() => defaultInstallConfig({
       paths: basePaths(),
-      piExecutable: "/opt/pi/bin/pi",
+      ompExecutable: "/opt/omp/bin/omp",
       bridgeExecutable: "/opt/pi-mob/bin/bridge",
       bridgeVersion: "0",
       protocolVersion: "1.0",
@@ -462,7 +462,7 @@ describe("install-config", () => {
     const paths = basePaths();
     const config = defaultInstallConfig({
       paths,
-      piExecutable: "/opt/pi/bin/pi",
+      ompExecutable: "/opt/omp/bin/omp",
       bridgeExecutable: "/opt/pi-mob/bin/bridge",
       bridgeVersion: "0.0.0-m7",
       protocolVersion: "1.0",
@@ -478,7 +478,7 @@ describe("install-config", () => {
     ensureInstallPaths(paths, fs);
     const config = defaultInstallConfig({
       paths,
-      piExecutable: "/opt/pi/bin/pi",
+      ompExecutable: "/opt/omp/bin/omp",
       bridgeExecutable: "/opt/pi-mob/bin/bridge",
       bridgeVersion: "0.0.0-m7",
       protocolVersion: "1.0",
@@ -496,7 +496,7 @@ describe("install-config", () => {
     ensureInstallPaths(paths, fs);
     const config = defaultInstallConfig({
       paths,
-      piExecutable: "/opt/pi/bin/pi",
+      ompExecutable: "/opt/omp/bin/omp",
       bridgeExecutable: "/opt/pi-mob/bin/bridge",
       bridgeVersion: "0",
       protocolVersion: "1.0",
@@ -512,7 +512,7 @@ describe("install-config", () => {
       `environment = "release"`,
       `bridge_version = "0"`,
       `protocol_version = "1.0"`,
-      `pi_executable = "/opt/pi/bin/pi"`,
+      `omp_executable = "/opt/omp/bin/omp"`,
       `bridge_executable = "/opt/pi-mob/bin/bridge"`,
       `state_root = "/opt/../etc/state"`,
       `log_root = "/opt/pi-mob/release/logs"`,
@@ -528,7 +528,7 @@ describe("install-config", () => {
   test("validateInstallConfig rejects non-loopback hostname", () => {
     const json = {
       schemaVersion: 1, environment: "release", bridgeVersion: "0", protocolVersion: "1.0",
-      piExecutable: "/opt/pi/bin/pi", bridgeExecutable: "/opt/pi-mob/bin/bridge",
+      ompExecutable: "/opt/omp/bin/omp", bridgeExecutable: "/opt/pi-mob/bin/bridge",
       stateRoot: "/opt/pi-mob/release/state", logRoot: "/opt/pi-mob/release/logs",
       backupRoot: "/opt/pi-mob/release/backups", secretsRoot: "/opt/pi-mob/release/secrets",
       hostname: "0.0.0.0", port: 8788, tailscaleServe: true,
@@ -543,7 +543,7 @@ describe("install-config", () => {
       `environment = "release"`,
       `bridge_version = "0"`,
       `protocol_version = "1.0"`,
-      `pi_executable = "/opt/pi/bin/pi"`,
+      `omp_executable = "/opt/omp/bin/omp"`,
       `bridge_executable = "/opt/pi-mob/bin/bridge"`,
       `state_root = "/opt/pi-mob/release/state"`,
       `log_root = "/opt/pi-mob/release/logs"`,
@@ -988,12 +988,12 @@ describe("rollback", () => {
 // ---------------------------------------------------------------------------
 
 describe("uninstall", () => {
-  function basePaths(piSessionDir: string) {
+  function basePaths(ompSessionDir: string) {
     const base = buildInstallPaths({ installRoot: absoluteInstallRoot("uninst") });
-    return { ...base, piSessionDir };
+    return { ...base, ompSessionDir };
   }
 
-  test("planUninstall retain_data preserves state, secrets, logs, backups, and the Pi session dir", () => {
+  test("planUninstall retain_data preserves state, secrets, logs, backups, and the OMP session dir", () => {
     const paths = basePaths("/Users/test/pi-mob-sessions");
     const plan = planUninstall({
       mode: "retain_data",
@@ -1009,11 +1009,11 @@ describe("uninstall", () => {
     expect(plan.preserve).toContain(paths.logRoot);
     expect(plan.preserve).toContain(paths.backupRoot);
     expect(plan.preserve).toContain(paths.envFile);
-    expect(plan.preserve).toContain(paths.piSessionDir);
-    expect(plan.piSessionDirRemoved).toBe(false);
+    expect(plan.preserve).toContain(paths.ompSessionDir);
+    expect(plan.ompSessionDirRemoved).toBe(false);
   });
 
-  test("planUninstall remove_state removes state, secrets, logs, backups; preserves Pi session dir", () => {
+  test("planUninstall remove_state removes state, secrets, logs, backups; preserves OMP session dir", () => {
     const paths = basePaths("/Users/test/pi-mob-sessions");
     const plan = planUninstall({
       mode: "remove_state",
@@ -1027,11 +1027,11 @@ describe("uninstall", () => {
     expect(plan.remove).toContain(paths.backupRoot);
     expect(plan.remove).toContain(paths.envFile);
     expect(plan.remove).toContain(paths.installRoot);
-    expect(plan.preserve).toContain(paths.piSessionDir);
-    expect(plan.piSessionDirRemoved).toBe(false);
+    expect(plan.preserve).toContain(paths.ompSessionDir);
+    expect(plan.ompSessionDirRemoved).toBe(false);
   });
 
-  test("planUninstall full still preserves the Pi session dir by default", () => {
+  test("planUninstall full still preserves the OMP session dir by default", () => {
     const paths = basePaths("/Users/test/pi-mob-sessions");
     const plan = planUninstall({
       mode: "full",
@@ -1042,21 +1042,21 @@ describe("uninstall", () => {
     expect(plan.remove).toContain(paths.installRoot);
     expect(plan.remove).toContain(paths.binRoot);
     expect(plan.remove).toContain(paths.plistPath);
-    expect(plan.preserve).toContain(paths.piSessionDir);
-    expect(plan.piSessionDirRemoved).toBe(false);
+    expect(plan.preserve).toContain(paths.ompSessionDir);
+    expect(plan.ompSessionDirRemoved).toBe(false);
   });
 
-  test("planUninstall full + removePiSessionDir removes the Pi session dir", () => {
+  test("planUninstall full + removeOmpSessionDir removes the OMP session dir", () => {
     const paths = basePaths("/Users/test/pi-mob-sessions");
     const plan = planUninstall({
       mode: "full",
       paths,
       fs: newFs(),
       clock: systemClock(),
-      removePiSessionDir: true,
+      removeOmpSessionDir: true,
     });
-    expect(plan.remove).toContain(paths.piSessionDir);
-    expect(plan.piSessionDirRemoved).toBe(true);
+    expect(plan.remove).toContain(paths.ompSessionDir);
+    expect(plan.ompSessionDirRemoved).toBe(true);
   });
 
   test("executeUninstall actually removes the planned files and reports them", () => {
@@ -1067,7 +1067,7 @@ describe("uninstall", () => {
     fs.writeFile(paths.plistPath, Buffer.from("<plist/>"), 0o600);
     fs.writeFile(`${paths.binRoot}/bridge`, Buffer.from("binary"), 0o600);
     fs.writeFile(paths.configFile, formatInstallConfig(defaultInstallConfig({
-      paths, piExecutable: "/opt/pi/bin/pi", bridgeExecutable: "/opt/pi-mob/bin/bridge",
+      paths, ompExecutable: "/opt/omp/bin/omp", bridgeExecutable: "/opt/pi-mob/bin/bridge",
       bridgeVersion: "0", protocolVersion: "1.0",
     })), 0o600);
     const result = executeUninstall({
@@ -1079,57 +1079,57 @@ describe("uninstall", () => {
     expect(result.removed).toContain(paths.plistPath);
     expect(result.removed).toContain(paths.binRoot);
     expect(result.removed).toContain(paths.configFile);
-    expect(result.piSessionDirRemoved).toBe(false);
+    expect(result.ompSessionDirRemoved).toBe(false);
     expect(fs.exists(paths.stateRoot)).toBe(true);
     expect(fs.exists(paths.secretsRoot)).toBe(true);
     expect(fs.exists(paths.logRoot)).toBe(true);
     expect(fs.exists(paths.backupRoot)).toBe(true);
   });
 
-  test("executeUninstall full mode does not remove the Pi session dir", () => {
+  test("executeUninstall full mode does not remove the OMP session dir", () => {
     const fs = newFs();
     const paths = basePaths("/Users/test/pi-mob-sessions");
     ensureInstallPaths(paths, fs);
     fs.writeFile(`${paths.binRoot}/bridge`, Buffer.from("binary"), 0o600);
     // pretend the Pi session dir exists on a different root
-    fs.mkdir(paths.piSessionDir, { recursive: true, mode: 0o700 });
-    fs.writeFile(`${paths.piSessionDir}/session-1.json`, Buffer.from("{}"), 0o600);
+    fs.mkdir(paths.ompSessionDir, { recursive: true, mode: 0o700 });
+    fs.writeFile(`${paths.ompSessionDir}/session-1.json`, Buffer.from("{}"), 0o600);
     const result = executeUninstall({
       mode: "full",
       paths,
       fs,
       clock: systemClock(),
     });
-    expect(fs.exists(paths.piSessionDir)).toBe(true);
-    expect(fs.exists(`${paths.piSessionDir}/session-1.json`)).toBe(true);
-    expect(result.piSessionDirRemoved).toBe(false);
+    expect(fs.exists(paths.ompSessionDir)).toBe(true);
+    expect(fs.exists(`${paths.ompSessionDir}/session-1.json`)).toBe(true);
+    expect(result.ompSessionDirRemoved).toBe(false);
   });
 
-  test("executeUninstall with removePiSessionDir=true removes the Pi session dir", () => {
+  test("executeUninstall with removeOmpSessionDir=true removes the OMP session dir", () => {
     const fs = newFs();
     const paths = basePaths("/Users/test/pi-mob-sessions");
     ensureInstallPaths(paths, fs);
-    fs.mkdir(paths.piSessionDir, { recursive: true, mode: 0o700 });
-    fs.writeFile(`${paths.piSessionDir}/session-1.json`, Buffer.from("{}"), 0o600);
+    fs.mkdir(paths.ompSessionDir, { recursive: true, mode: 0o700 });
+    fs.writeFile(`${paths.ompSessionDir}/session-1.json`, Buffer.from("{}"), 0o600);
     const result = executeUninstall({
       mode: "full",
       paths,
       fs,
       clock: systemClock(),
-      removePiSessionDir: true,
+      removeOmpSessionDir: true,
     });
-    expect(fs.exists(paths.piSessionDir)).toBe(false);
-    expect(result.piSessionDirRemoved).toBe(true);
-    expect(result.removed).toContain(paths.piSessionDir);
+    expect(fs.exists(paths.ompSessionDir)).toBe(false);
+    expect(result.ompSessionDirRemoved).toBe(true);
+    expect(result.removed).toContain(paths.ompSessionDir);
   });
 
   test("planUninstall refuses filesystem roots as recursive removal targets", () => {
     const paths = { ...basePaths("/Users/test/pi-mob-sessions"), installRoot: "/" };
     expect(() => planUninstall({ mode: "full", paths, fs: newFs(), clock: systemClock() })).toThrow(/too broad/);
-    expect(() => planUninstall({ mode: "full", paths: { ...basePaths("/Users/test/pi-mob-sessions"), piSessionDir: "/" }, removePiSessionDir: true, fs: newFs(), clock: systemClock() })).toThrow(/too broad/);
+    expect(() => planUninstall({ mode: "full", paths: { ...basePaths("/Users/test/pi-mob-sessions"), ompSessionDir: "/" }, removeOmpSessionDir: true, fs: newFs(), clock: systemClock() })).toThrow(/too broad/);
   });
 
-  test("planUninstall refuses non-absolute Pi session dir", () => {
+  test("planUninstall refuses non-absolute OMP session dir", () => {
     const paths = basePaths("relative/pi-sessions");
     expect(() => planUninstall({
       mode: "retain_data",
@@ -1169,7 +1169,7 @@ describe("ops barrel composition", () => {
     fs.writeFile(`${paths.binRoot}/bridge`, Buffer.from("bridge-1.0.0"), 0o600);
     const initialConfig = defaultInstallConfig({
       paths,
-      piExecutable: "/opt/pi/bin/pi",
+      ompExecutable: "/opt/omp/bin/omp",
       bridgeExecutable: `${paths.binRoot}/bridge`,
       bridgeVersion: "1.0.0",
       protocolVersion: "1.0",

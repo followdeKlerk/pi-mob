@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
 import { buildReport, snapshot } from "../../../scripts/capability-report";
 
-const WITHOUT = ["catalogue.v1", "commands.v1", "controller_leases.v1", "session_events.v2", "streams.v1"];
-const WITH = ["catalogue.v1", "commands.v1", "controller_leases.v1", "notifications.v1", "session_events.v2", "streams.v1"];
+const WITHOUT = ["commands.v1", "controller_leases.v1", "session_events.v2", "streams.v1"];
+const WITH = ["commands.v1", "controller_leases.v1", "notifications.v1", "session_events.v2", "streams.v1"];
 
 describe("normal daemon capability contract", () => {
-  test("without-FCM live path returns the exact set including catalogue", async () => {
+  test("without-FCM live path withholds the OMP command catalogue", async () => {
     const result = await snapshot("without-fcm");
     expect(result.capabilities).toEqual(WITHOUT);
   });
 
-  test("with-FCM live path returns the exact set including catalogue and notifications", async () => {
+  test("with-FCM live path advertises only configured notifications", async () => {
     const result = await snapshot("with-fcm");
     expect(result.capabilities).toEqual(WITH);
     expect(result.capabilities).toContain("notifications.v1");
@@ -22,7 +22,7 @@ describe("normal daemon capability contract", () => {
     expect(report.snapshots.find((item) => item.configuration === "without-fcm")?.capabilities).toEqual(WITHOUT);
     expect(report.snapshots.find((item) => item.configuration === "with-fcm")?.capabilities).toEqual(WITH);
     expect(report.capabilities.map((item) => item.capability)).toEqual([
-      "streams.v1", "commands.v1", "controller_leases.v1", "session_events.v2", "catalogue.v1", "notifications.v1",
+      "streams.v1", "commands.v1", "controller_leases.v1", "session_events.v2", "notifications.v1",
     ]);
     for (const item of report.capabilities) {
       expect(item.providerConstructionSource).toContain("packages/bridge/src/daemon.ts");

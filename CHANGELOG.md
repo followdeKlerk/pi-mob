@@ -4,9 +4,11 @@ This file records user-visible preview changes. It does not promise compatibilit
 
 ## 0.0.3-alpha.1
 
-- Added the selected-session `/commands` catalogue and the host-driven `/model` picker.
+- Replaced the normal daemon's Pi subprocess backend with supervised, resumable OMP sessions while preserving stable bridge session IDs.
+- Added the selected-session `/commands` catalogue UI (not production-wired by the normal daemon) and the host-driven `/model` picker.
 - Made canonical session events the released transcript path.
 - Improved bounded legacy cleanup, tool-result handling, and diagnostics.
+- Surfaced a bounded, actionable transcript error when a provider rejects a turn instead of leaving an empty assistant reply.
 
 ## 0.0.2-alpha.1
 
