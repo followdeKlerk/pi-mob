@@ -17,7 +17,7 @@
 import { mkdirSync, writeFileSync, chmodSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { createWorkspace, spawnBridgePi, spawnDirectPi } from "./harness";
+import { createWorkspace, HAS_PI_BINARY, spawnBridgePi, spawnDirectPi } from "./harness";
 
 const FAKE_TOOL_OUTPUT = "fake-tool-invoked";
 
@@ -40,7 +40,9 @@ function envWithFakeTool(binDir: string): Record<string, string> {
   };
 }
 
-describe("integration: PATH parity (fake executable reachable on both sides)", () => {
+const realPiDescribe = HAS_PI_BINARY ? describe : describe.skip;
+
+realPiDescribe("integration: PATH parity (fake executable reachable on both sides)", () => {
   test("direct Pi can resolve the fake tool via raw RPC bash", async () => {
     const bin = createFakeToolDir();
     const ws = createWorkspace("pi-mob-path-direct-");

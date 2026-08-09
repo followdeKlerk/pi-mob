@@ -21,6 +21,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createWorkspace,
+  HAS_PI_BINARY,
   spawnBridgeAdapter,
   spawnBridgePi,
   spawnDirectPi,
@@ -45,6 +46,8 @@ const RAW_METHODS: ReadonlyArray<{
   { method: "bash", params: { command: "echo hello" }, reply: { success: true, command: "bash", data: { output: "hello\n", exitCode: 0 } } },
   { method: "abort_bash", params: { bashId: "some-id" }, reply: { success: true, command: "abort_bash" } },
 ];
+
+const realPiTest = HAS_PI_BINARY ? test : test.skip;
 
 describe("integration: raw RPC pass-through (library + real Pi subprocess)", () => {
   test("library: bridge forwards each raw RPC method unchanged and records pi.rpc.response", async () => {
@@ -112,7 +115,7 @@ describe("integration: raw RPC pass-through (library + real Pi subprocess)", () 
     }
   });
 
-  test("real subprocess: direct Pi accepts all 13 RPC methods and produces responses", async () => {
+  realPiTest("real subprocess: direct Pi accepts all 13 RPC methods and produces responses", async () => {
     const ws = createWorkspace("pi-mob-raw-rpc-direct-");
     const direct = await spawnDirectPi({
       cwd: ws,
@@ -140,7 +143,7 @@ describe("integration: raw RPC pass-through (library + real Pi subprocess)", () 
     }
   }, 60_000);
 
-  test("real subprocess: bridge-managed Pi accepts all 13 RPC methods and produces responses", async () => {
+  realPiTest("real subprocess: bridge-managed Pi accepts all 13 RPC methods and produces responses", async () => {
     const ws = createWorkspace("pi-mob-raw-rpc-bridge-");
     const bridge = await spawnBridgePi({
       cwd: ws,

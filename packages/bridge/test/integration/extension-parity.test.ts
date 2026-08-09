@@ -20,7 +20,7 @@
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, test } from "bun:test";
-import { createWorkspace, spawnBridgePi, spawnDirectPi } from "./harness";
+import { createWorkspace, HAS_PI_BINARY, spawnBridgePi, spawnDirectPi } from "./harness";
 
 const EXTENSION_SOURCE = `
 export default function(pi) {
@@ -56,7 +56,9 @@ const envForWorkspace = (): Record<string, string> => ({
   PATH: process.env.PATH ?? "/usr/bin:/bin",
 });
 
-describe("integration: extension parity", () => {
+const realPiDescribe = HAS_PI_BINARY ? describe : describe.skip;
+
+realPiDescribe("integration: extension parity", () => {
   test("direct Pi loads a fixture extension that registers a command", async () => {
     const { extensionPath } = createExtensionSource();
     const ws = createWorkspace("pi-mob-ext-direct-");

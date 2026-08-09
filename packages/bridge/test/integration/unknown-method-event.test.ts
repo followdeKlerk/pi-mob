@@ -20,8 +20,10 @@
  */
 
 import { describe, expect, test } from "bun:test";
-import { createWorkspace, spawnBridgeAdapter, spawnBridgePi, spawnDirectPi } from "./harness";
+import { createWorkspace, HAS_PI_BINARY, spawnBridgeAdapter, spawnBridgePi, spawnDirectPi } from "./harness";
 import { normalizePiEvent } from "../../src/pi/normalize";
+
+const realPiTest = HAS_PI_BINARY ? test : test.skip;
 
 describe("integration: unknown method / event behavior", () => {
   test("library: bridge forwards unknown method type and returns Pi's own error", async () => {
@@ -121,7 +123,7 @@ describe("integration: unknown method / event behavior", () => {
     expect(normalized).toEqual([]);
   });
 
-  test("real subprocess: direct Pi returns error for unknown command (parity sanity)", async () => {
+  realPiTest("real subprocess: direct Pi returns error for unknown command (parity sanity)", async () => {
     const ws = createWorkspace("pi-mob-unknown-real-direct-");
     const direct = await spawnDirectPi({
       cwd: ws,
@@ -137,7 +139,7 @@ describe("integration: unknown method / event behavior", () => {
     }
   }, 30_000);
 
-  test("real subprocess: bridge Pi surfaces failure for unknown command (parity sanity)", async () => {
+  realPiTest("real subprocess: bridge Pi surfaces failure for unknown command (parity sanity)", async () => {
     const ws = createWorkspace("pi-mob-unknown-real-bridge-");
     const bridge = await spawnBridgePi({
       cwd: ws,

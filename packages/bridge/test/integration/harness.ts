@@ -47,6 +47,8 @@ export const PI_EXECUTABLE = process.env.PI_MOB_PI_RPC_BIN
   ?? Bun.which("pi")
   ?? "";
 
+export const HAS_PI_BINARY = PI_EXECUTABLE !== "" && fs.existsSync(PI_EXECUTABLE);
+
 export class PiBinaryMissingError extends Error {
   override readonly name = "PiBinaryMissingError";
   constructor(path: string) {
@@ -55,7 +57,7 @@ export class PiBinaryMissingError extends Error {
 }
 
 export function requirePiBinary(): string {
-  if (!PI_EXECUTABLE || !fs.existsSync(PI_EXECUTABLE)) {
+  if (!HAS_PI_BINARY) {
     throw new PiBinaryMissingError(PI_EXECUTABLE);
   }
   return PI_EXECUTABLE;

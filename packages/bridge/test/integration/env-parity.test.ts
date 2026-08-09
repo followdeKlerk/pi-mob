@@ -18,6 +18,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   createWorkspace,
+  HAS_PI_BINARY,
   normalizeForParity,
   semanticDiff,
   spawnBridgePi,
@@ -60,7 +61,9 @@ describe("integration: env parity — models gate regression", () => {
   });
 });
 
-describe("integration: env parity (direct vs bridge-managed Pi, same workspace)", () => {
+const realPiDescribe = HAS_PI_BINARY ? describe : describe.skip;
+
+realPiDescribe("integration: env parity (direct vs bridge-managed Pi, same workspace)", () => {
   test("get_state returns structurally equivalent shapes", async () => {
     const ws = createWorkspace("pi-mob-parity-env-");
     const direct = await spawnDirectPi({ cwd: ws, env: envForWorkspace(ws) });
