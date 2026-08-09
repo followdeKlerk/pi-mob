@@ -60,10 +60,15 @@ describe("bounded workspace file service", () => {
     const content = service.contentSearch({ workspaceId: id, query: "needle" }); expect(content.items.map((x) => [x.path, x.line])).toEqual([["README.md", 1], ["src/alpha.ts", 3], ["src/long.txt", 1]]); expect(content.items[2]!.lineText).toContain("needle"); expect(content.items[2]!.matchStart + content.items[2]!.matchLength).toBeLessThanOrEqual(Buffer.byteLength(content.items[2]!.lineText)); expect(content.isTruncated).toBe(false);
   });
 
-  test("bounds huge traversal before building an unbounded response", () => {
-    const root = mkdtempSync(join(tmpdir(), "pi-r3-huge-")); roots.push(root);
-    for (let i = 0; i <= 10_000; i++) writeFileSync(join(root, `file-${i.toString().padStart(5, '0')}.txt`), "x\n");
-    const service = new WorkspaceFileService([{ workspaceId: id, canonicalPath: realpathSync(root) }], () => 1_700_000_000_000);
+  test("bounds traversal before building an unbounded response", () => {
+    const root = mkdtempSync(join(tmpdir(), "pi-r3-bounded-")); roots.push(root);
+    for (let i = 0; i < 3; i++) writeFileSync(join(root, `file-${i}.txt`), "x\n");
+    const service = new WorkspaceFileService(
+      [{ workspaceId: id, canonicalPath: realpathSync(root) }],
+      () => 1_700_000_000_000,
+      undefined,
+      2,
+    );
     code(() => service.treePage({ workspaceId: id, pageSize: 1, pageToken: null }), "path_oversize");
   });
 

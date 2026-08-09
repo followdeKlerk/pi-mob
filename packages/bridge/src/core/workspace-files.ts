@@ -145,6 +145,7 @@ export class WorkspaceFileService {
     roots: readonly WorkspaceFileRoot[],
     private readonly now: () => number = Date.now,
     private readonly afterOpenForTest?: (path: string) => void,
+    private readonly traversalEntryLimitForTest = MAX_TRAVERSAL_ENTRIES,
   ) {
     for (const root of roots) {
       let canonical: string;
@@ -264,7 +265,7 @@ export class WorkspaceFileService {
     const baseDepth = under == null ? 0 : under.split("/").length;
     const output: Entry[] = [];
     const walk = (absolute: string, depth: number) => {
-      if (output.length >= MAX_TRAVERSAL_ENTRIES) throw new WorkspaceFileError("path_oversize", "Workspace traversal exceeded the bounded limit");
+      if (output.length >= this.traversalEntryLimitForTest) throw new WorkspaceFileError("path_oversize", "Workspace traversal exceeded the bounded limit");
       if (depth > LIMITS.maxTreeDepth) return;
       let names: string[];
       try { names = readdirSync(absolute).sort((a, b) => a.localeCompare(b)); } catch { throw new WorkspaceFileError("path_denied", "Directory cannot be read"); }
@@ -277,7 +278,7 @@ export class WorkspaceFileService {
         const childDepth = rel.split("/").length - baseDepth;
         if (stat.isDirectory()) { output.push({ path: rel, absolute: child, kind: "directory", depth: childDepth }); walk(child, depth + 1); }
         else if (stat.isFile()) output.push({ path: rel, absolute: child, kind: "file", depth: childDepth });
-        if (output.length >= MAX_TRAVERSAL_ENTRIES) throw new WorkspaceFileError("path_oversize", "Workspace traversal exceeded the bounded limit");
+        if (output.length >= this.traversalEntryLimitForTest) throw new WorkspaceFileError("path_oversize", "Workspace traversal exceeded the bounded limit");
       }
     };
     if (!statSync(start.absolute).isDirectory()) throw new WorkspaceFileError("path_invalid", "Tree path must be a directory");

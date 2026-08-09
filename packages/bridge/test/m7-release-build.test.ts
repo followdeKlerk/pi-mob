@@ -112,27 +112,27 @@ const SECRET_MARKERS: readonly RegExp[] = [
 // ---------------------------------------------------------------------------
 
 const SUITE_ROOT = mkdtempSync(join(tmpdir(), "pi-mob-m7-release-build-"));
+
+function ensureCompiled(
+  path: string,
+  label: string,
+  compile: () => number,
+): void {
+  if (existsSync(path)) return;
+  const code = compile();
+  if (code !== 0) throw new Error(`${label} compilation failed with exit ${code}`);
+  if (!existsSync(path)) throw new Error(`${label} binary missing after compilation: ${path}`);
+}
+
+// Compilation is fixture discovery, not a timed test hook. On a clean CI
+// checkout the two Bun compile subprocesses can legitimately take longer than
+// Bun's five-second hook deadline under shared runner load.
+ensureCompiled(DAEMON_BINARY, "daemon", compileDaemon);
+ensureCompiled(SMOKE_BINARY, "smoke", compileSmoke);
+
 let daemonSha = "";
 
 beforeAll(() => {
-  // Compile the supervised daemon if it is not already present. The
-  // build script always produces this artefact first, so on a freshly
-  // bootstrapped machine the test compiles once and every test below
-  // reuses the binary.
-  if (!existsSync(DAEMON_BINARY)) {
-    const code = compileDaemon();
-    expect(code).toBe(0);
-  }
-  if (!existsSync(DAEMON_BINARY)) {
-    throw new Error(`daemon binary missing after compileDaemon: ${DAEMON_BINARY}`);
-  }
-  // Compile the smoke binary too so the hostile-fixture proof has the
-  // canonical autoload-disabled harness to drive. This mirrors the
-  // build-script top-level flow.
-  if (!existsSync(SMOKE_BINARY)) {
-    const code = compileSmoke();
-    expect(code).toBe(0);
-  }
   daemonSha = sha256Of(readFileSync(DAEMON_BINARY));
 });
 
