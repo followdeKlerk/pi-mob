@@ -1,19 +1,17 @@
 # Project status
 
-Pi Mob is an unsupported alpha preview. This file is the canonical capability and scope map.
+Pi Mob is an unsupported alpha preview. This file is the capability and scope map.
 
-Use these terms precisely:
+## Terms
 
-- **Production-wired** — the normal daemon constructs it, the handshake advertises it, the mobile app exercises it, and a focused integration test covers the construction path.
-- **Implemented, not production-wired** — code or UI exists, but the normal daemon does not supply or advertise it.
-- **Planned** — accepted future work.
-- **Out of scope** — work that is intentionally not planned.
+- **Production-wired**: the daemon constructs it, the handshake advertises it, the app uses it, and an integration test covers the path.
+- **Implemented, not production-wired**: code exists, but the normal daemon does not provide or advertise it.
+- **Planned**: accepted future work.
+- **Out of scope**: intentionally unsupported work.
 
 A schema, class, widget, or isolated test does not prove production wiring.
 
-## Normal daemon capability matrix
-
-This is the exact `hello.accepted.capabilities` contract from `runDaemon`.
+## Normal daemon capabilities
 
 | Configuration | `hello.accepted.capabilities` |
 | --- | --- |
@@ -23,46 +21,30 @@ This is the exact `hello.accepted.capabilities` contract from `runDaemon`.
 ## Production-wired in `v0.0.3-alpha.1`
 
 - Manual pairing with an HTTPS endpoint and one-time passcode.
-- Per-installation authentication for the WebSocket, attachments, exports, and device registration.
-- Durable stream replay and live delivery.
-- Session list, rename, create, delete, activation, and supervised OMP ownership; inactive catalogue entries older than seven days are hidden while durable state is retained.
-- Bounded OMP session references and canonical event replay.
-- Session-scoped controller leases.
-- Prompt routing to the live OMP session owner.
-- Restoration of the recent chat, drafts, and attachments after reconnect.
-- Host diagnostics with bounded, sanitized errors.
-- Canonical session-event v2 replay, live delivery, reduction, and rendering.
-- FCM registration and background notifications when `notifications.v1` is available.
+- Per-installation authentication for WebSocket, attachments, exports, and device registration.
+- Durable replay and live delivery for streams and canonical session events.
+- Session list, rename, create, delete, activation, and supervised OMP ownership.
+- Session-scoped controller leases and prompt routing.
+- Restoration of recent chat, drafts, and attachments after reconnect.
+- Bounded host diagnostics and background FCM notifications when available.
 
-The normal daemon stores canonical session events in `CanonicalSessionStore` before delivery.
-
-Internal raw OMP RPC remains host-internal. The released mobile client does not receive `raw_rpc.v1`.
-
-The normal daemon requires OMP, creates one supervised `OmpSession` per bridge session, and resumes persisted OMP JSONL sessions through a host-private backend reference. Bridge session IDs remain the durable mobile-facing identity. The legacy-named modules under `packages/bridge/src/pi/` are internal adapter and compatibility code; the normal daemon does not construct a Pi subprocess.
-
-Physical-device evidence covers background FCM delivery. Notification tap routing and deduplication remain best-effort.
+The normal daemon stores canonical session events before delivery. Raw OMP RPC remains host-internal, and the released client does not receive `raw_rpc.v1`.
 
 ## Release facts
 
-- The Android application ID is `com.example.pi_mob`.
-- Release signing is fail-closed and uses credentials outside the repository.
-- Artifact checks verify version `0.0.3-alpha.1` / code `3`, identity, signer type, permissions, and deep links.
-- The released bridge target is macOS x64. The bridge is not code-signed or notarized.
+- Android application ID: `com.example.pi_mob`.
+- Release signing fails closed and uses credentials outside the repository.
+- version `0.0.3-alpha.1` / code `3`.
+- Released bridge target: macOS x64. The bridge is unsigned and not notarized.
 
 ## Planned
 
-- Code-signed and notarized macOS bridge distribution.
+- Code-signed and notarized macOS distribution.
 - iOS distribution.
 - Stable release notes after `1.0.0`.
 - Biometric unlock.
-- A foreground-opt-in background synchronization scheduler.
+- Foreground-opt-in background synchronization.
 
 ## Out of scope
 
-- Public listeners, public Internet exposure, and Tailscale Funnel.
-- Multi-user tenancy, accounts, billing, and shared workspaces.
-- A cloud-hosted bridge.
-- Git status, commit, push, CI summaries, and repository actions.
-- Voice, video, and behavior outside OMP's normal execution model.
-- Server-side chat rendering.
-- Third-party analytics, telemetry, and crash reporting.
+Public listeners, Tailscale Funnel, multi-user tenancy, cloud hosting, Git product actions, voice, video, server-side chat rendering, analytics, telemetry, and crash reporting.

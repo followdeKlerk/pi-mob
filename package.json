@@ -2,7 +2,7 @@
   "name": "pi-mob",
   "version": "0.0.3-alpha.1",
   "private": true,
-  "description": "pi-mob monorepo: Flutter mobile control surface + Bun/TypeScript bridge for Pi coding-agent sessions over Tailscale.",
+  "description": "Reconnectable Android client for local OMP sessions through a private Tailscale bridge.",
   "type": "module",
   "workspaces": [
     "packages/*"

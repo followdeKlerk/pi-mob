@@ -1,44 +1,22 @@
 # Contributing
 
-Pi Mob is an unsupported alpha preview. Keep changes small and preserve the product boundaries in [AGENTS.md](AGENTS.md).
-
-Read these files first:
-
-1. [Project status](docs/PROJECT_STATUS.md)
-2. [Architecture](docs/ARCHITECTURE.md)
-3. [Protocol](docs/PROTOCOL.md)
-
-## Scope
-
-The host owns repositories, credentials, OMP processes, and durable state. The Android app is a control and presentation surface. Private Tailscale Serve is the supported remote path.
-
-Do not add public exposure, multi-user tenancy, or Git product actions. Update `docs/PROJECT_STATUS.md` when production wiring or accepted scope changes.
+Pi Mob is an unsupported alpha preview. Keep changes small and preserve the boundaries in [AGENTS.md](AGENTS.md).
 
 ## Setup
 
-Use the pinned tool versions in the repository.
+Use the pinned tool versions:
 
 ```sh
 bun install --frozen-lockfile
 cd apps/mobile && flutter pub get
 ```
 
-## Validation
+## Checks
 
-Run the checks that apply to your change.
+Run the checks for your change:
 
 ```sh
 bun run all
-```
-
-For bridge or protocol changes:
-
-```sh
-bun run typecheck
-bun run schema:check
-bun run fixtures:check
-bun test
-bun run build
 ```
 
 For mobile changes:
@@ -55,26 +33,17 @@ For documentation changes:
 bun run docs
 ```
 
-Record unavailable tools or host checks. Do not claim that an unrun check passed.
+Record unavailable checks. Do not claim that an unrun check passed.
 
-## Generated protocol files
+## Rules
 
-Change the source definitions and generators. Do not edit generated schemas or fixtures by hand.
-
-## Sensitive data
-
-Do not commit credentials, keys, device tokens, private paths, production logs, databases, transcripts, or raw tool output. Report vulnerabilities through [SECURITY.md](SECURITY.md).
+- Change source definitions and generators, not generated schemas or fixtures.
+- Do not commit credentials, keys, device tokens, private paths, logs, databases, transcripts, or raw tool output.
+- Do not add public exposure, multi-user tenancy, or Git product actions.
+- Update `docs/PROJECT_STATUS.md` when production wiring or accepted scope changes.
 
 ## Preview releases
 
-Set the release version in `VERSION`. Increase the Android version code for each APK release.
+Set the version in `VERSION` and increase the Android version code. Build the bridge and APK from the same revision.
 
-Build the bridge and APK from the same revision. Supply Android signing values through an external properties file with `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Do not store that file or its keystore in the repository.
-
-Preview artifacts include an APK and a macOS bridge bundle. The bridge bundle includes `checksums.txt`; from the unpacked bundle root, verify it with:
-
-```sh
-shasum -a 256 -c checksums.txt
-```
-
-The APK build fails when signing values are absent. The preview bridge remains unsigned and is not notarized.
+Keep `storeFile`, `storePassword`, `keyAlias`, and `keyPassword` in an external properties file. Keep the keystore outside the repository. The bridge preview remains unsigned and is not notarized.

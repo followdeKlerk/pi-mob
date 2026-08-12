@@ -1,6 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1440" height="560" viewBox="0 0 1440 560" role="img" aria-labelledby="title desc">
-  <title id="title">pi-mob — command your coding agents from anywhere</title>
-  <desc id="desc">A neon mobile device connected through a private encrypted network to a host running Pi coding agents.</desc>
+  <title id="title">pi-mob — control local OMP sessions from your phone</title>
+  <desc id="desc">An Android phone connected through private Tailscale Serve to a host running local OMP sessions.</desc>
   <defs>
     <linearGradient id="space" x1="0" y1="0" x2="1" y2="1">
       <stop offset="0" stop-color="#050816"/>
@@ -66,13 +66,13 @@
       <circle cx="15" cy="14" r="9" fill="#34d399" filter="url(#glow)"/>
       <text x="33" y="20" fill="#d1fae5" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="17" font-weight="700">CONNECTED</text>
       <rect y="47" width="162" height="61" rx="13" fill="#1e1b4b" stroke="#8b5cf6" stroke-opacity=".7"/>
-      <text x="15" y="71" fill="#c4b5fd" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">agent / feature-ui</text>
+      <text x="15" y="71" fill="#c4b5fd" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">session / feature-ui</text>
       <text x="15" y="93" fill="#fff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">Building… ✦</text>
       <rect y="122" width="162" height="61" rx="13" fill="#082f49" stroke="#06b6d4" stroke-opacity=".7"/>
       <text x="15" y="147" fill="#a5f3fc" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="12">tests</text>
       <text x="15" y="169" fill="#fff" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="14">559 passed ✓</text>
       <rect y="201" width="162" height="42" rx="21" fill="url(#neon)"/>
-      <text x="81" y="228" text-anchor="middle" fill="#090b20" font-family="system-ui, sans-serif" font-size="15" font-weight="800">STEER AGENT</text>
+      <text x="81" y="228" text-anchor="middle" fill="#090b20" font-family="system-ui, sans-serif" font-size="15" font-weight="800">STEER SESSION</text>
     </g>
   </g>
 
@@ -93,7 +93,7 @@
   <g transform="translate(655 267)">
     <text x="0" y="0" text-anchor="middle" fill="#ffffff" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="76" font-weight="900" letter-spacing="-4">pi-mob</text>
     <rect x="-152" y="18" width="304" height="5" rx="2.5" fill="url(#neon)" filter="url(#glow)"/>
-    <text x="0" y="66" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20" font-weight="600" letter-spacing="2">YOUR AGENTS. YOUR HOST. ANYWHERE.</text>
+    <text x="0" y="66" text-anchor="middle" fill="#cbd5e1" font-family="system-ui, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif" font-size="20" font-weight="600" letter-spacing="2">YOUR SESSIONS. YOUR HOST. ANYWHERE.</text>
     <g transform="translate(-116 94)" font-family="ui-monospace, SFMono-Regular, Menlo, monospace" font-size="13">
       <rect width="232" height="36" rx="18" fill="#ffffff" fill-opacity=".055" stroke="#ffffff" stroke-opacity=".16"/>
       <text x="116" y="23" text-anchor="middle" fill="#a5f3fc">PRIVATE • DURABLE • MOBILE</text>

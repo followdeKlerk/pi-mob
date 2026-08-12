@@ -1,22 +1,6 @@
 # Pi Mob Android app
 
-This Flutter app connects through private Tailscale Serve to the bridge's supervised OMP sessions. It consumes bridge-owned canonical events and never parses raw OMP RPC. See [Project status](../../docs/PROJECT_STATUS.md) for current capabilities.
-
-## Layout
-
-```text
-lib/main.dart          production composition
-lib/src/
-  connection/         transport and coordination
-  domain/             state and reducers
-  session_events/     canonical replay and synchronization
-  transcript/         canonical transcript reduction and rendering
-  notifications/      FCM and Android notifications
-  pairing/            manual pairing
-  ui/                 screens and supported controls
-test/                  focused tests
-android/               Android project
-```
+This Flutter app connects to the bridge through private Tailscale Serve. It displays bridge-owned canonical events and does not parse raw OMP RPC.
 
 ## Build
 
@@ -27,19 +11,15 @@ cd android
   -PreleaseProperties=/absolute/path/to/external-release.properties
 ```
 
-The external properties file must contain `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. The release build fails when these values are absent. Use an ephemeral keystore in `/tmp` for local checks.
+The properties file must contain `storeFile`, `storePassword`, `keyAlias`, and `keyPassword`. Keep it and the keystore outside the repository.
 
-The APK is written to the repository path `apps/mobile/build/app/outputs/flutter-apk/app-release.apk` (equivalently `../build/app/outputs/flutter-apk/app-release.apk` after `cd apps/mobile/android`).
+The APK is written to `build/app/outputs/flutter-apk/app-release.apk`.
 
-## Check changes
+## Test
 
 ```sh
 flutter analyze --no-fatal-infos
 flutter test
 ```
 
-## Permissions
-
-The app requests Internet access and Android notification service permissions. It does not request camera, location, contacts, microphone, or general storage access.
-
-Pairing uses a manually entered HTTPS endpoint and one-time passcode from `pi-mob pair`. QR and JSON pairing flows are unsupported.
+The app requests Internet access and Android notification permission. Pairing uses a manually entered HTTPS endpoint and one-time passcode.

@@ -1,23 +1,12 @@
 # Pi Mob protocol schema and fixtures
 
-This package contains TypeBox schemas, TypeScript types, command metadata, capability names, limits, and generated JSON Schema.
+This package contains TypeBox schemas, TypeScript types, command metadata, capability names, limits, and generated JSON Schema. The shared fixtures are in `packages/protocol-fixtures`.
 
-The shared fixture corpus is in `packages/protocol-fixtures`. It checks TypeScript and Flutter acceptance of the same protocol shapes.
+Schemas and fixtures define valid messages. They do not prove that the normal daemon constructs an optional provider or that the mobile release uses it. Check daemon construction, `hello.accepted`, integration tests, and [Project status](../../docs/PROJECT_STATUS.md).
 
-## Authority boundary
+Raw OMP RPC is host-internal. The mobile protocol remains backend-neutral, and Git integration is out of scope.
 
-Schemas and fixtures define and check valid messages. They do not prove that the normal daemon constructs an optional provider or that the mobile release can use it.
-
-Use these sources for availability:
-
-1. providers constructed by `packages/bridge/src/daemon.ts`;
-2. capabilities in `hello.accepted`;
-3. production-wiring integration tests;
-4. [Project status](../../docs/PROJECT_STATUS.md).
-
-Raw OMP RPC is host-internal. `pi.rpc.request` and `raw_rpc.v1` remain legacy compatibility identifiers, but the normal daemon does not advertise `raw_rpc.v1` and the released mobile client does not use it. The mobile protocol remains backend-neutral, and Git integration is out of product scope.
-
-## Development
+## Checks
 
 ```sh
 bun run --cwd packages/protocol-schema test
@@ -26,8 +15,4 @@ bun run schema:check
 bun run fixtures:check
 ```
 
-Change source definitions and generators. Do not edit generated schemas or fixtures by hand.
-
-Protocol changes must preserve closed envelopes, explicit bounds, command idempotency metadata, decimal cursors, event ownership, and explicit capability absence.
-
-When a shape changes, add valid and invalid fixtures as applicable. Run TypeScript validation and Flutter fixture parity checks. Update [Project status](../../docs/PROJECT_STATUS.md) only when the production capability boundary changes.
+Change source definitions and generators. Do not edit generated schemas or fixtures by hand. Add valid and invalid fixtures when a message shape changes.

@@ -1,11 +1,11 @@
 # Quick start
 
-This guide covers `0.0.3-alpha.1`. The released bridge target is macOS x64. The mobile release is an Android APK.
+This guide covers `0.0.3-alpha.1`. The preview supports a macOS x64 bridge and an Android APK.
 
-## Set up the host
+## Host
 
-1. Install OMP and ensure `omp` is available on the host's `PATH`.
-2. Install Tailscale on the host and phone. Sign in to the same tailnet and enable MagicDNS.
+1. Install OMP and make sure `omp` is on `PATH`.
+2. Install Tailscale on the host and phone. Sign in to the same tailnet.
 3. Download and unpack the bridge release.
 4. Configure the bridge:
 
@@ -13,44 +13,32 @@ This guide covers `0.0.3-alpha.1`. The released bridge target is macOS x64. The 
    ./bin/pi-mob setup --workspace /absolute/path/to/your/projects
    ```
 
-   To enable notifications, provide the owner-only Firebase service-account file:
+   Add `--fcm-service-account /absolute/path/to/service-account.json` to enable notifications. Keep this file outside the repository.
 
-   ```sh
-   ./bin/pi-mob setup \
-     --workspace /absolute/path/to/your/projects \
-     --fcm-service-account /absolute/path/to/service-account.json
-   ```
-
-   The configuration stores the file path. Keep the service-account file outside the repository.
-
-5. Start the bridge and check its status:
+5. Start the bridge:
 
    ```sh
    ./bin/pi-mob start
    ./bin/pi-mob status
    ```
 
-6. Create an expiring pairing passcode:
+6. Create a pairing passcode:
 
    ```sh
    ./bin/pi-mob pair
    ```
 
-## Pair the phone
+## Phone
 
 1. Install the APK from the GitHub release.
 2. Open Pi Mob and tap **Pair**.
-3. Enter the HTTPS endpoint and six-digit passcode from `./bin/pi-mob pair`.
-4. Grant notification permission if the bridge supports notifications.
+3. Enter the HTTPS endpoint and six-digit passcode.
+4. Grant notification permission when notifications are enabled.
 
-Pairing is manual. QR and JSON pairing flows are unsupported.
+Pairing is manual. QR and JSON import are unsupported.
 
-## Use and diagnose
+## Troubleshoot
 
-The phone talks only to the bridge. OMP sessions, provider credentials, raw RPC, and persisted backend references remain on the host.
-Open a chat and send a prompt. Use `/model` for the host-driven model picker. The `/commands` catalogue is not available from the normal daemon.
+Both devices must use the same tailnet. Run `./bin/pi-mob pair` again when the passcode expires.
 
-If the phone cannot connect, make sure that both devices use the same tailnet. Then run `./bin/pi-mob pair` again.
-If the listener is not ready, run `./bin/pi-mob start`. Then inspect `./bin/pi-mob status`, its OMP probe, and the LaunchAgent logs.
-
-If notifications are unavailable, check the service-account path and Android notification permission.
+If the phone cannot connect, run `./bin/pi-mob status` and inspect the OMP probe and LaunchAgent logs. Check the service-account path and Android permission when notifications fail.
