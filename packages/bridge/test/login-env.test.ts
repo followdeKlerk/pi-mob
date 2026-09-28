@@ -9,7 +9,7 @@ describe("login-shell environment capture", () => {
   test("captures and sanitizes a login-shell environment", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-login-shell-"));
     const shell = join(root, "login-shell");
-    writeFileSync(shell, "#!/bin/zsh\nprintf 'HOME=/opt/pi-mob-owner\\0PATH=/opt/homebrew/bin:/usr/bin\\0PWD=/tmp\\0OLDPWD=/old\\0SHLVL=1\\0_=env\\0'\n");
+    writeFileSync(shell, "#!/bin/bash\nprintf 'HOME=/opt/pi-mob-owner\\0PATH=/opt/homebrew/bin:/usr/bin\\0PWD=/tmp\\0OLDPWD=/old\\0SHLVL=1\\0_=env\\0'\n");
     chmodSync(shell, 0o700);
     const env = await captureLoginEnv({ shell });
 
@@ -28,7 +28,7 @@ describe("login-shell environment capture", () => {
     writeFileSync(
       shell,
       [
-        "#!/bin/zsh",
+        "#!/bin/bash",
         "printf 'HOME=/opt/pi-mob-owner\\0'",
         "printf 'USER=owner\\0'",
         "printf 'PATH=/opt/homebrew/bin:/usr/bin\\0'",
@@ -92,7 +92,7 @@ describe("login-shell environment capture", () => {
   test("rejects an invalid login-shell environment key", async () => {
     const root = mkdtempSync(join(tmpdir(), "pi-mob-login-shell-invalid-"));
     const shell = join(root, "login-shell");
-    writeFileSync(shell, "#!/bin/zsh\nprintf 'invalid-key=value\\0'\n");
+    writeFileSync(shell, "#!/bin/bash\nprintf 'invalid-key=value\\0'\n");
     chmodSync(shell, 0o700);
 
     await expect(captureLoginEnv({ shell })).rejects.toBeInstanceOf(LoginEnvCaptureError);

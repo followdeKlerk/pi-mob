@@ -38,7 +38,7 @@ export class LoginEnvCaptureError extends Error {
 }
 
 export async function captureLoginEnv(opts: { shell?: string; cwd?: string } = {}): Promise<Record<string, string>> {
-  const shell = opts.shell ?? "/bin/zsh";
+  const shell = opts.shell ?? (process.platform === "darwin" ? "/bin/zsh" : "/bin/bash");
   try {
     const process = Bun.spawn({
       cmd: [shell, "-ilc", "env -0"],

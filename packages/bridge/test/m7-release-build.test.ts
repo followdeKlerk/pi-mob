@@ -57,6 +57,8 @@ import {
 } from "../src/ops/release-manifest";
 import { BRIDGE_VERSION as CANONICAL_BRIDGE_VERSION } from "../src/version";
 
+const macOsReleaseDescribe = process.platform === "linux" ? describe.skip : describe;
+
 // ---------------------------------------------------------------------------
 // Constants — kept in lock-step with scripts/build.ts.
 // ---------------------------------------------------------------------------
@@ -127,13 +129,15 @@ function ensureCompiled(
 // Compilation is fixture discovery, not a timed test hook. On a clean CI
 // checkout the two Bun compile subprocesses can legitimately take longer than
 // Bun's five-second hook deadline under shared runner load.
-ensureCompiled(DAEMON_BINARY, "daemon", compileDaemon);
-ensureCompiled(SMOKE_BINARY, "smoke", compileSmoke);
+if (process.platform !== "linux") {
+  ensureCompiled(DAEMON_BINARY, "daemon", compileDaemon);
+  ensureCompiled(SMOKE_BINARY, "smoke", compileSmoke);
+}
 
 let daemonSha = "";
 
 beforeAll(() => {
-  daemonSha = sha256Of(readFileSync(DAEMON_BINARY));
+  if (process.platform !== "linux") daemonSha = sha256Of(readFileSync(DAEMON_BINARY));
 });
 
 afterAll(() => {
@@ -144,7 +148,7 @@ afterAll(() => {
 // Mach-O architecture detection (ground truth for the manifest).
 // ---------------------------------------------------------------------------
 
-describe("Mach-O architecture detection", () => {
+macOsReleaseDescribe("Mach-O architecture detection", () => {
   test("detectMachOArch recognises the compiled daemon as x86_64", () => {
     const detected = detectMachOArch(DAEMON_BINARY);
     expect(detected.arch).toBe("x64");
@@ -188,6 +192,7 @@ let manifest: ReturnType<typeof JSON.parse> = {};
 let manifestRaw = "";
 
 beforeAll(() => {
+  if (process.platform === "linux") return;
   const bundle = buildReleaseBundle({ daemonBinary: DAEMON_BINARY, releaseDir: RELEASE_DIR });
   manifestPath = join(RELEASE_DIR, "manifest.json");
   if (!existsSync(manifestPath)) {
@@ -210,7 +215,7 @@ beforeAll(() => {
   void bundle;
 });
 
-describe("release bundle: layout", () => {
+macOsReleaseDescribe("release bundle: layout", () => {
   test("produces every required file with the correct ownership", () => {
     const expectedFiles: ReadonlyArray<{ path: string; mode: number }> = [
       { path: RELEASE_DIR, mode: 0o700 },
@@ -289,7 +294,7 @@ describe("release bundle: layout", () => {
 // Manifest content (extensions + ground-truth architecture).
 // ---------------------------------------------------------------------------
 
-describe("release bundle: manifest fields", () => {
+macOsReleaseDescribe("release bundle: manifest fields", () => {
   test("architecture is x64 and never arm64", () => {
     expect(manifest.architecture).toBe("x64");
     expect(manifest.architecture).not.toBe("arm64");
@@ -368,7 +373,7 @@ describe("release bundle: manifest fields", () => {
 // Checksums cross-validation.
 // ---------------------------------------------------------------------------
 
-describe("release bundle: checksums", () => {
+macOsReleaseDescribe("release bundle: checksums", () => {
   test("checksum paths are normalized and traversal is rejected", () => {
     const lines = readFileSync(checksumsPath, "utf8").trim().split("\n");
     for (const line of lines) {
@@ -443,7 +448,7 @@ describe("release bundle: checksums", () => {
 // Secret and fault-marker audit.
 // ---------------------------------------------------------------------------
 
-describe("release bundle: secret and fault audit", () => {
+macOsReleaseDescribe("release bundle: secret and fault audit", () => {
   test("no fault-injection markers appear in any shipped file", () => {
     const allFiles = listFiles(RELEASE_DIR);
     for (const file of allFiles) {
@@ -499,7 +504,7 @@ describe("release bundle: secret and fault audit", () => {
 // LaunchAgent template.
 // ---------------------------------------------------------------------------
 
-describe("release bundle: LaunchAgent plist", () => {
+macOsReleaseDescribe("release bundle: LaunchAgent plist", () => {
   test("plist declares the canonical Label, RunAtLoad, KeepAlive, Background", () => {
     const xml = readFileSync(plistPath, "utf8");
     expect(xml).toContain(`<key>Label</key><string>${DEFAULT_LAUNCH_AGENT_LABEL}</string>`);

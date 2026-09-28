@@ -827,18 +827,18 @@ function main(): number {
   code = compileDaemon();
   if (code !== 0 || !existsSync(DAEMON_EXEC)) return code || 1;
   process.stdout.write(
-    `build: compiled executable ${EXEC} (Mach-O x86_64, ~${(Bun.file(EXEC).size ?? 0) / 1024 / 1024} MiB)\n`,
+    `build: compiled executable ${DAEMON_EXEC} (${process.platform}/${process.arch}, ~${(Bun.file(DAEMON_EXEC).size ?? 0) / 1024 / 1024} MiB)\n`,
   );
 
-  // M7: assemble the release bundle. The function validates the daemon
-  // arch, copies the binary, and writes every shipped file with the
-  // correct mode/owner.
-  const bundle = buildReleaseBundle({ daemonBinary: DAEMON_EXEC });
-  if (bundle.architecture !== "x64") {
+  // Linux source builds can run the compiled daemon, but release installation
+  // and service supervision are still macOS-only. Do not emit a misleading
+  // LaunchAgent bundle on Linux.
+  const bundle = process.platform === "linux" ? null : buildReleaseBundle({ daemonBinary: DAEMON_EXEC });
+  if (bundle && bundle.architecture !== "x64") {
     process.stderr.write(`build: refusing to ship architecture ${bundle.architecture} (M7 is x64-only)\n`);
     return 1;
   }
-  auditReleaseBundle(bundle.releaseDir);
+  if (bundle) auditReleaseBundle(bundle.releaseDir);
 
   // M7 hostile-fixture proof: the bundle daemon must also refuse hostile
   // adjacent .env / bunfig.toml. We copy the compiled daemon into the
@@ -874,7 +874,9 @@ function main(): number {
   process.stdout.write("build: explicit config environment=release honoured\n");
   process.stdout.write("build: hostile payload did not reach bridge output\n");
   process.stdout.write(
-    `build: release bundle at ${bundle.releaseDir} (arch=${bundle.architecture}, ${bundle.artifacts.length} artifacts, ${bundle.licenses.length} licenses, daemon sha256=${bundle.daemonSha256.slice(0, 16)}…)\n`,
+    bundle
+      ? `build: release bundle at ${bundle.releaseDir} (arch=${bundle.architecture}, ${bundle.artifacts.length} artifacts, ${bundle.licenses.length} licenses, daemon sha256=${bundle.daemonSha256.slice(0, 16)}…)\n`
+      : "build: Linux daemon built; release installer/service integration is not available yet\n",
   );
   process.stdout.write("build ok\n");
   return 0;
