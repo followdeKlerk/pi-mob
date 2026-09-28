@@ -1,12 +1,12 @@
 # Quick start
 
-This guide covers `0.0.3-alpha.1`. The preview supports a macOS x64 bridge and an Android APK.
+This guide covers the main-branch `0.0.3-alpha.1` source build on macOS x64. No matching bridge/APK release has been published. Do not mix older preview downloads with these OMP instructions.
 
 ## Host
 
 1. Install OMP and make sure `omp` is on `PATH`.
 2. Install Tailscale on the host and phone. Sign in to the same tailnet.
-3. Download and unpack the bridge release.
+3. On a macOS x64 host, run `bun install --frozen-lockfile && bun run build` from the repository root, then use `packages/bridge/dist/release` as your bundle directory (see [bridge build instructions](../packages/bridge/README.md)).
 4. Configure the bridge:
 
    ```sh
@@ -30,7 +30,7 @@ This guide covers `0.0.3-alpha.1`. The preview supports a macOS x64 bridge and a
 
 ## Phone
 
-1. Install the APK from the GitHub release.
+1. Build and install the matching Android app from this checkout using the [Android build instructions](../apps/mobile/README.md); the older GitHub release APKs are not built for this main-branch backend.
 2. Open Pi Mob and tap **Pair**.
 3. Enter the HTTPS endpoint and six-digit passcode.
 4. Grant notification permission when notifications are enabled.
