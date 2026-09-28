@@ -62,9 +62,9 @@ extension TranscriptStatusPresentation on TranscriptToolStatus {
   /// colour so users immediately notice failure states.
   Color resolveColor(ColorScheme scheme) => switch (this) {
     TranscriptToolStatus.running => scheme.primary,
-    TranscriptToolStatus.completed => scheme.primary,
+    TranscriptToolStatus.completed => scheme.secondary,
     TranscriptToolStatus.error => scheme.error,
-    TranscriptToolStatus.cancelled => scheme.outline,
+    TranscriptToolStatus.cancelled => scheme.onSurfaceVariant,
     TranscriptToolStatus.policyDenied => scheme.error,
   };
 

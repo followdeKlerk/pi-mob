@@ -441,6 +441,41 @@ final class ConnectionCoordinator extends ChangeNotifier
     return _promptSendBySession[sessionId] ?? const PromptSendStatus.ready();
   }
 
+  /// The newest non-terminal public tool name for the selected session.
+  ///
+  /// This is intentionally only a tool name, never arguments, output, or
+  /// reasoning content. Canonical events are preferred; the legacy stream is
+  /// a compatibility fallback for hosts that have not advertised v2 events.
+  String? get selectedActiveToolName {
+    final sessionId = selectedSessionId;
+    if (sessionId == null) return null;
+    final canonical = canonicalTranscriptStateFor(sessionId);
+    if (canonical != null) {
+      final active =
+          canonical.toolCalls.values
+              .where((tool) => !tool.isTerminal)
+              .toList(growable: false)
+            ..sort((a, b) => b.startedAt.compareTo(a.startedAt));
+      if (active.isNotEmpty) return active.first.toolName;
+    }
+
+    final events = _streams['session:$sessionId']?.events;
+    if (events == null || events.isEmpty) return null;
+    final terminal = <String>{};
+    for (final event in events.reversed) {
+      final toolCallId = event.payload['toolCallId']?.toString();
+      if (toolCallId == null || toolCallId.isEmpty) continue;
+      if (event.type == 'tool.completed' || event.type == 'tool.failed') {
+        terminal.add(toolCallId);
+      } else if (event.type == 'tool.started' &&
+          !terminal.contains(toolCallId)) {
+        final name = event.payload['toolName']?.toString().trim();
+        if (name != null && name.isNotEmpty) return name;
+      }
+    }
+    return null;
+  }
+
   bool get isReady => phase == ConnectionPhase.ready && _socket != null;
   bool supportsCapability(String capability) =>
       _capabilities.contains(capability);
@@ -554,6 +589,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     }
     return state;
   }
+
+  /// Runtime state corrected by the authoritative turn-event tail.
+  /// UI surfaces must use this instead of the cached session snapshot so a
+  /// completed turn cannot leave a working indicator stuck on screen.
+  String? get selectedEffectiveRuntimeState => _effectiveRuntimeState;
 
   DeliveryMode get _effectiveDeliveryMode {
     if (_effectiveRuntimeState != 'running') return DeliveryMode.immediate;
@@ -1974,6 +2014,22 @@ final class ConnectionCoordinator extends ChangeNotifier
     );
   }
 
+  Future<Uint8List> downloadAttachmentBytes(String attachmentId) async {
+    final origin = endpoint;
+    if (origin == null)
+      throw StateError('Connect to the bridge to view attachments.');
+    final credential = await _secureCredentialStore?.read();
+    if (credential == null || credential.isEmpty) {
+      throw StateError('Re-pair your phone with the bridge to continue.');
+    }
+    return PrivateBinaryTransport().downloadAttachment(
+      hostOrigin: origin,
+      attachmentId: attachmentId,
+      installationId: await _database.installationIdentifier(),
+      installationCredential: credential,
+    );
+  }
+
   Future<String> downloadLatestExport() async {
     final origin = endpoint;
     final exportId = latestExportId;
@@ -2560,21 +2616,8 @@ final class ConnectionCoordinator extends ChangeNotifier
           deliveryModeFromWire(saved.selectedDeliveryMode) ??
           DeliveryMode.immediate,
       updatedAt: _now(),
-      localAttachmentRefsJson: _decodeAttachmentIds(
-        saved.localAttachmentRefsJson,
-      ),
+      localAttachmentRefsJson: const <String>[],
     );
-  }
-
-  static List<String> _decodeAttachmentIds(String encoded) {
-    try {
-      final decoded = jsonDecode(encoded);
-      return decoded is List
-          ? decoded.whereType<String>().toList(growable: false)
-          : const <String>[];
-    } on FormatException {
-      return const <String>[];
-    }
   }
 
   static String _cleanError(Object error, String fallback) {
@@ -4292,6 +4335,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         pendingCommandId == prompt.commandId) {
       final submittedText = prompt.payload['message'];
       if (draft == submittedText) draft = '';
+      _attachmentsBySession.remove(prompt.sessionId);
       pendingCommandId = null;
       pendingPayload = null;
       pendingState = null;
@@ -4306,6 +4350,11 @@ final class ConnectionCoordinator extends ChangeNotifier
     if (currentHost == null) return;
     final saved = await _database.draft(currentHost, prompt.sessionId);
     if (saved == null || saved.pendingCommandId != prompt.commandId) return;
+    await _database.removeLocalAttachmentsForSession(
+      hostId: currentHost,
+      sessionId: prompt.sessionId,
+    );
+    _attachmentsBySession.remove(prompt.sessionId);
     await _database.saveDraft(
       hostId: currentHost,
       sessionId: prompt.sessionId,
@@ -4317,9 +4366,7 @@ final class ConnectionCoordinator extends ChangeNotifier
           deliveryModeFromWire(saved.selectedDeliveryMode) ??
           DeliveryMode.immediate,
       updatedAt: _now(),
-      localAttachmentRefsJson: _decodeAttachmentIds(
-        saved.localAttachmentRefsJson,
-      ),
+      localAttachmentRefsJson: const <String>[],
     );
   }
 
@@ -4851,13 +4898,19 @@ final class ConnectionCoordinator extends ChangeNotifier
       PlatformImagePicker(),
     ).pickAndSanitize();
     if (image == null) return;
+    final credential = await _secureCredentialStore?.read();
+    if (credential == null || credential.isEmpty) {
+      throw StateError(
+        'Re-pair your phone with the bridge before attaching an image',
+      );
+    }
     final uploaded = await PrivateBinaryTransport().upload(
       hostOrigin: origin,
       installationId: await _database.installationIdentifier(),
       clientUploadId: _uuid.v4(),
       image: image,
       intendedSessionId: sessionId,
-      installationCredential: await _secureCredentialStore?.read(),
+      installationCredential: credential,
     );
     final ref = AttachmentRef(
       id: uploaded.attachmentId,

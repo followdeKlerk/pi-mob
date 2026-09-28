@@ -50,20 +50,20 @@ class PiSpacing {
 
 /// Corner radius scale.
 ///
-/// Pi Mob aims for calm, low-chrome surfaces; the radius scale is short on
+/// Pi Mob uses soft, expressive surfaces; the radius scale is short on
 /// purpose. Most cards and inputs use [md]; pills and chip-like surfaces use
 /// [pill].
 class PiRadius {
   const PiRadius._();
 
-  /// 6 logical pixels — inline chips and status pills.
-  static const double sm = 6;
+  /// 12 logical pixels — inline chips and compact tool surfaces.
+  static const double sm = 12;
 
-  /// 10 logical pixels — cards, dialogs, inputs (the default).
-  static const double md = 10;
+  /// 20 logical pixels — cards and inputs (the default).
+  static const double md = 20;
 
-  /// 16 logical pixels — bottom sheets and prominent containers.
-  static const double lg = 16;
+  /// 28 logical pixels — bottom sheets and prominent containers.
+  static const double lg = 28;
 
   /// Fully rounded — used for circular avatars and pill badges.
   static const double pill = 999;

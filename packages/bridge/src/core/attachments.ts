@@ -824,6 +824,13 @@ export class AttachmentStore {
     })();
   }
 
+  isOwnedByInstallation(id: string, installationId: string): boolean {
+    this.ensureOpen();
+    if (!isPublicId(id)) return false;
+    const row = this.db.query("SELECT 1 AS found FROM attachments WHERE public_id=? AND client_upload_id LIKE ? LIMIT 1").get(id, `${installationId}:%`) as { found?: number } | null;
+    return row?.found === 1;
+  }
+
   resolve(reference: AttachmentReference | string): AttachmentResolution {
     this.ensureOpen();
     const id = typeof reference === "string" ? reference : reference.attachmentId;

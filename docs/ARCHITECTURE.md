@@ -3,20 +3,20 @@
 Pi Mob has three parts:
 
 ```text
-Android app → private Tailscale Serve → bridge on the host → local OMP
+Android app → private Tailscale Serve → bridge on the host → local Pi
 ```
 
 ## Ownership
 
-- **Host:** repositories, provider credentials, OMP processes, and durable session state.
-- **Bridge:** OMP supervision, authentication, commands, streams, leases, attachments, exports, and notifications.
+- **Host:** repositories, provider credentials, Pi processes, and durable session state.
+- **Bridge:** Pi supervision, authentication, commands, streams, leases, attachments, exports, and notifications.
 - **Android app:** chat display, controls, drafts, local cache, and pairing credentials.
 
-The bridge maps each stable mobile session ID to a host-private OMP session. It stores canonical session events before delivery, so replay and live updates use the same data path.
+The bridge maps each stable mobile session ID to a host-private Pi session. It stores canonical session events before delivery, so replay and live updates use the same data path.
 
-## OMP boundary
+## Pi boundary
 
-The normal daemon starts OMP in local RPC mode. OMP IDs, JSONL paths, raw RPC payloads, and provider credentials stay on the host. The mobile protocol uses bridge IDs and canonical events.
+The normal daemon starts Pi in local RPC mode. Pi IDs, JSONL paths, raw RPC payloads, and provider credentials stay on the host. The mobile protocol uses bridge IDs and canonical events.
 
 ## Network boundary
 

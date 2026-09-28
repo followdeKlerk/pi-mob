@@ -137,6 +137,7 @@ class UserTurn extends Turn {
     super.startedAt,
     super.endedAt,
     this.message,
+    this.attachmentIds = const <String>[],
     this.respondingToTurnId,
   });
 
@@ -154,6 +155,9 @@ class UserTurn extends Turn {
 
   /// Prompt text durably associated with this turn.
   final String? message;
+
+  /// Attachment IDs durably associated with this prompt.
+  final List<String> attachmentIds;
 
   /// Identifier of the turn this user prompt steers or follows up to.
   /// `null` when the prompt was a fresh `immediate` submission.
@@ -179,6 +183,7 @@ class UserTurn extends Turn {
     DateTime? startedAt,
     DateTime? endedAt,
     String? message,
+    List<String>? attachmentIds,
     String? respondingToTurnId,
   }) => UserTurn(
     turnId: turnId,
@@ -188,6 +193,7 @@ class UserTurn extends Turn {
     startedAt: startedAt ?? this.startedAt,
     endedAt: endedAt ?? this.endedAt,
     message: message ?? this.message,
+    attachmentIds: attachmentIds ?? this.attachmentIds,
     respondingToTurnId: respondingToTurnId ?? this.respondingToTurnId,
   );
 
@@ -201,6 +207,7 @@ class UserTurn extends Turn {
       other.startedAt == startedAt &&
       other.endedAt == endedAt &&
       other.message == message &&
+      _stringListEquals(other.attachmentIds, attachmentIds) &&
       other.respondingToTurnId == respondingToTurnId;
 
   @override
@@ -212,8 +219,19 @@ class UserTurn extends Turn {
     startedAt,
     endedAt,
     message,
+    Object.hashAll(attachmentIds),
     respondingToTurnId,
   );
+}
+
+bool _stringListEquals(List<String> a, List<String> b) {
+  if (identical(a, b) || a.length == b.length) {
+    for (var i = 0; i < a.length; i++) {
+      if (a[i] != b[i]) return false;
+    }
+    return true;
+  }
+  return false;
 }
 
 /// The model response. One [AssistantTurn] per bridge `turnId`. Items

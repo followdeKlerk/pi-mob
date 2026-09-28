@@ -18,10 +18,8 @@
 /// Widgets are immutable from the outside: the only state we keep is
 /// `expanded`, which the user toggles by tapping the header.
 ///
-/// Presentation: the card is rendered edge-to-edge with restrained chrome:
-/// hairline top/bottom borders, no card elevation, and a compact single-line
-/// header so a stack of tool calls reads as a list rather than as nested
-/// boxes.
+/// Compact rounded rows keep execution details secondary to the conversation.
+/// Headers reflow at large text sizes; only disclosure icons animate.
 library;
 
 import 'dart:convert';
@@ -29,6 +27,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../../ui/theme/pi_theme.dart';
+import '../../ui/shell/motion_primitives.dart';
 import '../widgets/transcript_status.dart';
 import 'view_data/tool_call_view_data.dart';
 
@@ -77,6 +76,8 @@ class _ToolCardState extends State<ToolCard> {
     final muted = scheme.onSurfaceVariant;
     return Semantics(
       container: true,
+      button: true,
+      expanded: _expanded,
       label: 'Tool $toolLabel, ${_status.semanticLabel}',
       child: Card(
         margin: const EdgeInsets.symmetric(
@@ -87,14 +88,14 @@ class _ToolCardState extends State<ToolCard> {
         color: scheme.surfaceContainerLow,
         surfaceTintColor: Colors.transparent,
         shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(PiRadius.md),
+          borderRadius: BorderRadius.circular(PiRadius.sm),
         ),
         child: DecoratedBox(
           decoration: BoxDecoration(
             border: Border.all(
               color: scheme.outlineVariant.withValues(alpha: 0.65),
             ),
-            borderRadius: BorderRadius.circular(PiRadius.md),
+            borderRadius: BorderRadius.circular(PiRadius.sm),
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -102,42 +103,90 @@ class _ToolCardState extends State<ToolCard> {
             children: [
               InkWell(
                 onTap: () => setState(() => _expanded = !_expanded),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: PiSpacing.md,
-                    vertical: PiSpacing.sm,
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(_status.icon, color: statusColor, size: 16),
-                      const SizedBox(width: 10),
-                      Expanded(
-                        child: Text(
-                          toolLabel,
-                          style: _text.titleSmall?.copyWith(
-                            fontFeatures: const [FontFeature.tabularFigures()],
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: PiSpacing.md,
+                      vertical: PiSpacing.sm,
+                    ),
+                    child: Row(
+                      children: [
+                        MotionCrossfade(
+                          child: Row(
+                            key: ValueKey(_status),
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              if (_status == TranscriptToolStatus.running)
+                                MotionSpinner(
+                                  dimension: 16,
+                                  strokeWidth: 1.8,
+                                  color: statusColor,
+                                  label: 'Tool running',
+                                )
+                              else
+                                Icon(
+                                  _status.icon,
+                                  color: statusColor,
+                                  size: 16,
+                                ),
+                              const SizedBox(width: 10),
+                            ],
                           ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
                         ),
-                      ),
-                      const SizedBox(width: 8),
-                      // Status text + icon: redundant on purpose, so the
-                      // affordance never relies on colour alone.
-                      Text(
-                        _status.label,
-                        style: _text.labelMedium?.copyWith(
-                          color: statusColor,
-                          fontWeight: FontWeight.w600,
+                        Expanded(
+                          child: LayoutBuilder(
+                            builder: (context, constraints) {
+                              final title = Text(
+                                toolLabel,
+                                style: _text.titleSmall?.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              );
+                              final status = MotionCrossfade(
+                                child: Text(
+                                  _status.label,
+                                  key: ValueKey(_status),
+                                  style: _text.labelMedium?.copyWith(
+                                    color: statusColor,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              );
+                              if (constraints.maxWidth < 220 ||
+                                  MediaQuery.textScalerOf(context).scale(14) >
+                                      20) {
+                                return Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [title, status],
+                                );
+                              }
+                              return Row(
+                                children: [
+                                  Expanded(child: title),
+                                  const SizedBox(width: PiSpacing.sm),
+                                  status,
+                                ],
+                              );
+                            },
+                          ),
                         ),
-                      ),
-                      const SizedBox(width: 6),
-                      Icon(
-                        _expanded ? Icons.expand_less : Icons.expand_more,
-                        size: 18,
-                        color: muted,
-                      ),
-                    ],
+                        const SizedBox(width: 6),
+                        AnimatedRotation(
+                          turns: _expanded ? .5 : 0,
+                          duration: PiMotion.resolve(context, PiDuration.short),
+                          curve: PiCurve.decelerate,
+                          child: Icon(
+                            Icons.expand_more,
+                            size: 20,
+                            color: muted,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -577,6 +626,7 @@ class _ToolCardState extends State<ToolCard> {
               vertical: PiSpacing.xs,
             ), // PiSpacing.xs keeps arg rows calm and dense
             child: RichText(
+              textScaler: MediaQuery.textScalerOf(context),
               text: TextSpan(
                 style: _text.bodySmall,
                 children: [

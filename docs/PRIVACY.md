@@ -6,7 +6,7 @@ Pi Mob has no cloud backend. The bridge runs on the host, and the phone connects
 
 The host can store:
 
-- OMP conversation history and host-private session references;
+- Pi conversation history and host-private session references;
 - bridge events, commands, leases, and device rows;
 - bounded attachments and expiring HTML exports;
 - the path to an optional Firebase service-account file.
@@ -25,7 +25,7 @@ When notifications are enabled, the bridge sends bounded status data to Firebase
 
 Pairing identifies the endpoint. Enrollment creates a 256-bit installation credential. The bridge stores its SHA-256 hash, and the phone stores the plaintext credential in Android Keystore-backed storage.
 
-Uninstalling the app removes app-owned data. The default bridge uninstall mode keeps the state directory. Use `--mode=remove_state` or `--mode=full` to remove it. OMP session data needs the separate `--remove-omp-session-dir=true` option.
+Uninstalling the app removes app-owned data. The default bridge uninstall mode keeps the state directory. Use `--mode=remove_state` or `--mode=full` to remove it. Pi session data needs the separate `--remove-pi-session-dir=true` option.
 
 ## Report a concern
 

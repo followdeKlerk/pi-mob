@@ -538,7 +538,8 @@ CanonicalTranscriptState _handleUserMessageCreated(
   }
   final text = event.payload['text'];
   final textStr = text is String ? text : '';
-  final rawAttachments = event.payload['attachments'];
+  final rawAttachments =
+      event.payload['attachmentIds'] ?? event.payload['attachments'];
   final attachments = <String>[];
   if (rawAttachments is List) {
     for (final entry in rawAttachments) {

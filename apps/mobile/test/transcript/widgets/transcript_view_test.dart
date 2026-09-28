@@ -152,6 +152,30 @@ void main() {
     expect(find.textContaining('settled'), findsNothing);
   });
 
+  testWidgets('user prompt is selectable without a persistent copy button', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      _app(
+        TranscriptView(
+          document: _document([
+            const UserTurn(
+              turnId: 'copy-user',
+              commandId: 'command-copy',
+              deliveryMode: 'immediate',
+              status: UserTurnStatus.settled,
+              message: 'Copy this prompt',
+            ),
+          ]),
+        ),
+      ),
+    );
+
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byKey(const Key('copy-user-message-copy-user')), findsNothing);
+    expect(find.byIcon(Icons.copy_outlined), findsNothing);
+  });
+
   testWidgets('unconfirmed user messages show no delivery text', (
     tester,
   ) async {

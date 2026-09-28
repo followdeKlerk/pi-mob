@@ -235,6 +235,30 @@ void main() {
     });
   });
 
+  test('brand actions, containers and reading text meet AA in both themes', () {
+    for (final theme in [piLightTheme(), piDarkTheme()]) {
+      final c = theme.colorScheme;
+      for (final pair in [
+        (c.onPrimary, c.primary),
+        (c.onSecondary, c.secondary),
+        (c.onTertiary, c.tertiary),
+        (c.onPrimaryContainer, c.primaryContainer),
+        (c.onSecondaryContainer, c.secondaryContainer),
+        (c.onTertiaryContainer, c.tertiaryContainer),
+        (c.onSurface, c.surface),
+        (c.onSurfaceVariant, c.surfaceContainerLow),
+        (c.primary, c.surface),
+        (c.secondary, c.surfaceContainerLow),
+      ]) {
+        expect(
+          _contrastRatio(pair.$1, pair.$2),
+          greaterThanOrEqualTo(4.5),
+          reason: '${theme.brightness}: ${pair.$1} on ${pair.$2}',
+        );
+      }
+    }
+  });
+
   group('PiSemanticColors contrast', () {
     test('light solid pairs (onColor over color) meet WCAG AA', () {
       const s = PiSemanticColors.light;

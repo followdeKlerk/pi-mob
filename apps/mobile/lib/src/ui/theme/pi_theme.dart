@@ -1,13 +1,8 @@
 /// Material 3 theme foundation for Pi Mob.
 ///
-/// Provides [piLightTheme] and [piDarkTheme] built on top of an indigo-seeded
-/// [ColorScheme] with a warm terracotta accent and paper-like neutral
-/// surfaces. Component themes (cards, inputs, buttons, navigation bars) are
-/// configured to keep the surface visually quiet so transcript content and
-/// controls carry the focus.
-///
-/// The semantic status colors are exposed via [PiSemanticColors], a
-/// [ThemeExtension] consumed through [BuildContext.piSemanticColors].
+/// Orchid, mint and apricot accents on softly tinted surfaces. Strong action
+/// contrast and rounded native Material controls keep the personality useful.
+/// Status colors remain independent from the brand palette.
 library;
 
 import 'package:flutter/cupertino.dart';
@@ -19,10 +14,9 @@ import 'pi_tokens.dart';
 export 'pi_semantic_colors.dart';
 export 'pi_tokens.dart';
 
-/// Warm clay accent and supporting neutrals, inspired by editorial paper
-/// interfaces rather than the default cool-blue developer palette.
-const Color _piSeed = Color(0xFFC96442);
-const Color _piAccent = Color(0xFF7D6757);
+/// Saturated orchid with a cool mint counterpoint.
+const Color _piSeed = Color(0xFF6541C8);
+const Color _piAccent = Color(0xFF006B60);
 
 /// Constructs the light Material 3 theme for Pi Mob.
 ThemeData piLightTheme() {
@@ -32,20 +26,23 @@ ThemeData piLightTheme() {
         secondary: _piAccent,
         brightness: Brightness.light,
       ).copyWith(
-        primary: const Color(0xFFC96442),
-        onPrimary: const Color(0xFFFAF9F5),
-        primaryContainer: const Color(0xFFFCE4D8),
-        onPrimaryContainer: const Color(0xFF3A1D10),
-        secondary: const Color(0xFF7D6757),
-        onSecondary: const Color(0xFFFAF9F5),
-        secondaryContainer: const Color(0xFFEFE0D2),
-        onSecondaryContainer: const Color(0xFF2A1F17),
-        tertiary: const Color(0xFF6F7F4F),
-        surface: const Color(0xFFFAF9F5),
-        onSurface: const Color(0xFF141413),
-        onSurfaceVariant: const Color(0xFF5E5D59),
-        outline: const Color(0xFF87867F),
-        outlineVariant: const Color(0xFFE8E6DC),
+        primary: const Color(0xFF6541C8),
+        onPrimary: const Color(0xFFFFFFFF),
+        primaryContainer: const Color(0xFFEADDFF),
+        onPrimaryContainer: const Color(0xFF261052),
+        secondary: const Color(0xFF006B60),
+        onSecondary: const Color(0xFFFCF8FF),
+        secondaryContainer: const Color(0xFFB6F2DE),
+        onSecondaryContainer: const Color(0xFF002E27),
+        tertiary: const Color(0xFF934522),
+        onTertiary: const Color(0xFFFFFFFF),
+        tertiaryContainer: const Color(0xFFFFDBCA),
+        onTertiaryContainer: const Color(0xFF351000),
+        surface: const Color(0xFFFCF8FF),
+        onSurface: const Color(0xFF211A2C),
+        onSurfaceVariant: const Color(0xFF62596F),
+        outline: const Color(0xFF80758E),
+        outlineVariant: const Color(0xFFE5DCEE),
         error: const Color(0xFFB53333),
         errorContainer: const Color(0xFFFADDD7),
       );
@@ -63,20 +60,23 @@ ThemeData piDarkTheme() {
         secondary: _piAccent,
         brightness: Brightness.dark,
       ).copyWith(
-        primary: const Color(0xFFD97757),
-        onPrimary: const Color(0xFF2A1208),
-        primaryContainer: const Color(0xFF7A3D23),
-        onPrimaryContainer: const Color(0xFFFCE4D8),
-        secondary: const Color(0xFFCFC0B1),
-        onSecondary: const Color(0xFF3A2F25),
-        secondaryContainer: const Color(0xFF5E4D40),
-        onSecondaryContainer: const Color(0xFFEFE0D2),
-        tertiary: const Color(0xFFBCC99A),
-        surface: const Color(0xFF1F1E1B),
-        onSurface: const Color(0xFFEAE6DA),
-        onSurfaceVariant: const Color(0xFFB0AEA5),
-        outline: const Color(0xFF73726C),
-        outlineVariant: const Color(0xFF3D3D3A),
+        primary: const Color(0xFFCFB6FF),
+        onPrimary: const Color(0xFF351370),
+        primaryContainer: const Color(0xFF4D2CA0),
+        onPrimaryContainer: const Color(0xFFEADDFF),
+        secondary: const Color(0xFF82D8C1),
+        onSecondary: const Color(0xFF00382F),
+        secondaryContainer: const Color(0xFF005044),
+        onSecondaryContainer: const Color(0xFFB6F2DE),
+        tertiary: const Color(0xFFFFB596),
+        onTertiary: const Color(0xFF542008),
+        tertiaryContainer: const Color(0xFF733318),
+        onTertiaryContainer: const Color(0xFFFFDBCA),
+        surface: const Color(0xFF201A29),
+        onSurface: const Color(0xFFF0E7F7),
+        onSurfaceVariant: const Color(0xFFC8BCD4),
+        outline: const Color(0xFF94879F),
+        outlineVariant: const Color(0xFF493F55),
         error: const Color(0xFFE8836F),
         errorContainer: const Color(0xFF7A2018),
       );
@@ -90,11 +90,11 @@ ThemeData _buildTheme({
   final brightness = colorScheme.brightness;
   final isDark = brightness == Brightness.dark;
 
-  // Warm paper in light mode and warm near-black in dark mode.
+  // Tinted canvas separates floating controls from the reading surface.
   final surfaceTint = isDark
-      ? const Color(0xFF1F1E1B)
-      : const Color(0xFFFAF9F5);
-  final canvas = isDark ? const Color(0xFF141413) : const Color(0xFFF5F4ED);
+      ? const Color(0xFF201A29)
+      : const Color(0xFFFCF8FF);
+  final canvas = isDark ? const Color(0xFF211A2C) : const Color(0xFFF4EEFA);
 
   final textTheme =
       Typography.material2021(
@@ -119,23 +119,23 @@ ThemeData _buildTheme({
     colorScheme: colorScheme.copyWith(
       surface: surfaceTint,
       surfaceContainerLowest: isDark
-          ? const Color(0xFF0F0F0E)
+          ? const Color(0xFF120E19)
           : const Color(0xFFFFFFFF),
       surfaceContainerLow: isDark
-          ? const Color(0xFF1A1917)
-          : const Color(0xFFF5F4ED),
+          ? const Color(0xFF1B1524)
+          : const Color(0xFFF4EEFA),
       surfaceContainer: isDark
-          ? const Color(0xFF1E1D1A)
-          : const Color(0xFFF0EEE5),
+          ? const Color(0xFF251E30)
+          : const Color(0xFFEFE6F7),
       surfaceContainerHigh: isDark
-          ? const Color(0xFF272621)
-          : const Color(0xFFEBE8DE),
+          ? const Color(0xFF30273C)
+          : const Color(0xFFEAE0F3),
       surfaceContainerHighest: isDark
-          ? const Color(0xFF322F2A)
-          : const Color(0xFFE5E2D7),
+          ? const Color(0xFF3B3147)
+          : const Color(0xFFE3D7ED),
       outlineVariant: isDark
-          ? const Color(0xFF3D3D3A)
-          : const Color(0xFFE8E6DC),
+          ? const Color(0xFF493F55)
+          : const Color(0xFFE5DCEE),
     ),
     scaffoldBackgroundColor: canvas,
     textTheme: isDark ? darkTextTheme : textTheme,
@@ -157,11 +157,11 @@ ThemeData _buildTheme({
       centerTitle: false,
       titleTextStyle: (isDark ? darkTextTheme : textTheme).titleLarge?.copyWith(
         color: colorScheme.onSurface,
-        fontWeight: FontWeight.w600,
+        fontWeight: FontWeight.w700,
       ),
     ),
     cardTheme: CardThemeData(
-      color: isDark ? const Color(0xFF1F1E1B) : const Color(0xFFFAF9F5),
+      color: isDark ? const Color(0xFF201A29) : const Color(0xFFFCF8FF),
       surfaceTintColor: Colors.transparent,
       elevation: 0,
       margin: EdgeInsets.zero,
@@ -173,7 +173,7 @@ ThemeData _buildTheme({
     ),
     inputDecorationTheme: InputDecorationTheme(
       filled: true,
-      fillColor: isDark ? const Color(0xFF1A1917) : const Color(0xFFFAF9F5),
+      fillColor: isDark ? const Color(0xFF1B1524) : const Color(0xFFFCF8FF),
       contentPadding: const EdgeInsets.symmetric(
         horizontal: PiSpacing.md,
         vertical: PiSpacing.md,
@@ -210,11 +210,15 @@ ThemeData _buildTheme({
           horizontal: PiSpacing.lg,
           vertical: PiSpacing.md,
         ),
-        textStyle: const TextStyle(fontWeight: FontWeight.w600),
+        minimumSize: const Size(48, 48),
+        textStyle: (isDark ? darkTextTheme : textTheme).labelLarge?.copyWith(
+          fontWeight: FontWeight.w700,
+        ),
       ),
     ),
     outlinedButtonTheme: OutlinedButtonThemeData(
       style: OutlinedButton.styleFrom(
+        minimumSize: const Size(48, 48),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(PiRadius.md),
         ),
@@ -227,6 +231,7 @@ ThemeData _buildTheme({
     ),
     textButtonTheme: TextButtonThemeData(
       style: TextButton.styleFrom(
+        minimumSize: const Size(48, 48),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(PiRadius.md),
         ),
@@ -238,6 +243,7 @@ ThemeData _buildTheme({
     ),
     iconButtonTheme: IconButtonThemeData(
       style: IconButton.styleFrom(
+        minimumSize: const Size(48, 48),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(PiRadius.md),
         ),

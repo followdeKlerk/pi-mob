@@ -29,7 +29,7 @@ export class OmpRpcError extends Error {
 export type OmpNotificationHandler = (record: Record<string, unknown>, raw: string) => void;
 export type OmpExitHandler = (info: RpcProcessExitInfo) => void;
 
-const MAX_REQUEST_BYTES = 64 * 1024;
+const DEFAULT_REQUEST_BYTES = 64 * 1024;
 const MAX_FRAME_BYTES = 1_048_576;
 const MAX_READY_BYTES = 16 * 1024;
 
@@ -96,6 +96,7 @@ export class OmpRpcClient {
           this.rejectReady(new OmpRpcError("OMP ready frame limit is invalid"));
           return;
         }
+        this.rpc.setMaxRequestBytes(ready.maxFrameBytes ?? DEFAULT_REQUEST_BYTES);
         this.readyRecord = ready;
         this.readyResolve?.(ready);
         this.readyResolve = null;
@@ -138,7 +139,10 @@ export class OmpRpcClient {
     if (!this.started || this.closed) throw new OmpRpcError("OMP client is not running");
     const requestId = options.id ?? id();
     const payload = JSON.stringify({ id: requestId, type: method, ...params });
-    if (payload.length > MAX_REQUEST_BYTES) throw new OmpRpcError("OMP request exceeds 64 KiB");
+    const maxRequestBytes = this.readyRecord?.maxFrameBytes ?? DEFAULT_REQUEST_BYTES;
+    if (Buffer.byteLength(payload) + 1 > maxRequestBytes) {
+      throw new OmpRpcError(`OMP request exceeds ${maxRequestBytes} bytes`);
+    }
     try {
       const requestOptions = {
         id: requestId,

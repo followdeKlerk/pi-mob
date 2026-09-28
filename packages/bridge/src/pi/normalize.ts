@@ -443,11 +443,11 @@ switch (raw.type) {
   case "message_end": {
     const message = object(raw.message);
     if (message.role !== "assistant") return [];
-    const failure = normalizeAssistantFailure(message, sessionId);
-    if (failure) return [failure];
     if (message.stopReason === "aborted") {
       return [event("turn.aborted", sessionId, { reason: "aborted" })];
     }
+    const failure = normalizeAssistantFailure(message, sessionId);
+    if (failure) return [failure];
     // text_end already closes the streamed content block. Reuse its stable
     // first-block identity instead of creating a second `:assistant` card.
     return [event("assistant.completed", sessionId, {

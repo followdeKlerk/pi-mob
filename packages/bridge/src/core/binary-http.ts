@@ -152,6 +152,26 @@ export function createBinaryHttpHandler(options: BinaryHttpOptions): (request: R
         return jsonError("invalid_message", "malformed multipart upload", 400);
       }
     }
+    if (url.pathname.startsWith("/v1/attachments/")) {
+      if (request.method !== "GET") return jsonError("invalid_message", "GET required", 405);
+      const attachmentId = url.pathname.slice("/v1/attachments/".length);
+      if (!UUID.test(attachmentId)) return jsonError("invalid_message", "invalid attachment ID", 400);
+      const installationId = request.headers.get("x-installation-id") ?? "";
+      const installationCredential = request.headers.get("x-installation-credential") ?? "";
+      if (!UUID.test(installationId) || installationCredential.length === 0) return authErrorResponse(installationId, installationCredential);
+      const verifier = options.credentials;
+      if (!verifier || verifier.verify(installationId, installationCredential).kind !== "valid") {
+        return new Response(JSON.stringify({ code: "invalid_auth", message: "Credential is not valid.", retryable: false, details: {} }), { status: 401, headers: { "content-type": "application/json" } });
+      }
+      if (!options.attachments.isOwnedByInstallation(attachmentId, installationId)) return jsonError("attachment_unavailable", "attachment is unavailable", 404);
+      const attachment = options.attachments.resolve(attachmentId);
+      if (!attachment.available || (attachment.contentType !== "image/jpeg" && attachment.contentType !== "image/png") || attachment.bytes === undefined) return jsonError("attachment_unavailable", "attachment is unavailable", 404);
+      try {
+        return new Response(Readable.toWeb(Readable.from(options.attachments.openReadStream(attachmentId))) as ReadableStream, { headers: { "content-type": attachment.contentType, "content-length": String(attachment.bytes), "cache-control": "private, no-store" } });
+      } catch {
+        return jsonError("attachment_unavailable", "attachment is unavailable", 404);
+      }
+    }
     const match = /^\/v1\/exports\/([0-9a-f-]{36})$/.exec(url.pathname);
     if (match) {
       if (request.method !== "GET") return jsonError("invalid_message", "GET required", 405);

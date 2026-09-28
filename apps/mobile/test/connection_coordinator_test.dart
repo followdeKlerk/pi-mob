@@ -1707,7 +1707,7 @@ void main() {
     expect(find.byKey(const Key('delivery-mode-selector')), findsNothing);
     expect(find.text('Pi is responding'), findsNothing);
     expect(find.byKey(const Key('send-button')), findsOneWidget);
-    expect(find.byIcon(Icons.stop), findsOneWidget);
+    expect(find.byIcon(Icons.stop_rounded), findsOneWidget);
     expect(find.byKey(const Key('open-extension-dialog')), findsOneWidget);
     expect(find.byKey(const Key('extension-option-Approve')), findsOneWidget);
     expect(find.byKey(const Key('extension-option-Decline')), findsOneWidget);
@@ -2100,6 +2100,13 @@ void main() {
       );
       expect(prompt['payload'], containsPair('attachmentIds', [ref.id]));
       expect(coordinator.draftAttachments.single.id, ref.id);
+      socket.server(
+        response('command.receipt', {
+          'state': 'accepted',
+          'duplicate': false,
+        }, commandId: prompt['commandId'] as String),
+      );
+      await eventually(() => coordinator.draftAttachments.isEmpty);
     },
   );
 

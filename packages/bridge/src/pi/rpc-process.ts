@@ -130,6 +130,8 @@ export interface RpcProcessOptions {
   readonly defaultRequestTimeoutMs?: number;
   /** Grace period for `close()` before escalating to SIGKILL. Default 5 s. */
   readonly closeGracePeriodMs?: number;
+  /** Maximum UTF-8 JSON request frame bytes. Default 64 KiB. */
+  readonly maxRequestBytes?: number;
 }
 
 export interface RpcProcessLaunchOptions {
@@ -142,6 +144,8 @@ export interface RpcProcessLaunchOptions {
   readonly stderrMaxBytes?: number;
   readonly defaultRequestTimeoutMs?: number;
   readonly closeGracePeriodMs?: number;
+  /** Maximum UTF-8 JSON request frame bytes. Default 64 KiB. */
+  readonly maxRequestBytes?: number;
 }
 
 export type RpcProcessConfiguration = RpcProcessOptions | RpcProcessLaunchOptions;
@@ -212,6 +216,7 @@ const DEFAULT_STDERR_MAX_BYTES = 256 * 1024;
 const DEFAULT_REQUEST_TIMEOUT_MS = 30_000;
 const DEFAULT_CLOSE_GRACE_MS = 5_000;
 const STDERR_LINE_MAX = 64 * 1024; // per-line budget before truncation
+const DEFAULT_MAX_REQUEST_BYTES = 64 * 1024;
 
 const ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -260,6 +265,15 @@ interface RpcInternalOptions {
   readonly stderrMaxBytes: number;
   readonly defaultRequestTimeoutMs: number;
   readonly closeGracePeriodMs: number;
+  readonly maxRequestBytes: number;
+}
+
+function validateMaxRequestBytes(value: number | undefined): number {
+  const limit = value ?? DEFAULT_MAX_REQUEST_BYTES;
+  if (!Number.isInteger(limit) || limit < 1) {
+    throw new RpcInvalidOptionsError("maxRequestBytes must be a positive integer");
+  }
+  return limit;
 }
 
 function normaliseOptions(options: RpcProcessConfiguration): RpcInternalOptions {
@@ -307,6 +321,7 @@ function normaliseOptions(options: RpcProcessConfiguration): RpcInternalOptions 
     defaultRequestTimeoutMs:
       options.defaultRequestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
     closeGracePeriodMs: options.closeGracePeriodMs ?? DEFAULT_CLOSE_GRACE_MS,
+    maxRequestBytes: validateMaxRequestBytes(options.maxRequestBytes),
   };
 }
 
@@ -342,7 +357,7 @@ export interface RpcProcessListeners {
  * reusable after `close()` resolves; create a fresh one to reconnect.
  */
 export class RpcProcess {
-  private readonly options: RpcInternalOptions;
+  private options: RpcInternalOptions;
   readonly launchConfig: PiLaunchConfig | undefined;
   private proc: Bun.Subprocess<"pipe", "pipe", "pipe"> | null = null;
   private readonly jsonl = new JsonlDecoder();
@@ -529,6 +544,11 @@ export class RpcProcess {
     return this.readyPromise;
   }
 
+  /** Raises the outbound request-frame ceiling for a negotiated peer limit. */
+  setMaxRequestBytes(maxRequestBytes: number): void {
+    this.options = { ...this.options, maxRequestBytes: validateMaxRequestBytes(maxRequestBytes) };
+  }
+
   // ---------------- Request / response ----------------
 
   /** Send Pi's reverse extension UI response without awaiting a command response. */
@@ -566,12 +586,12 @@ export class RpcProcess {
       Object.assign(payload, opts.params);
     }
     const json = JSON.stringify(payload);
-    if (!id.includes(":") && json.length > 64 * 1024) {
+    const line = new TextEncoder().encode(`${json}\n`);
+    if (!id.includes(":") && line.byteLength > this.options.maxRequestBytes) {
       throw new RpcInvalidOptionsError(
-        "request payload exceeds 64 KiB (Pi wire limit)",
+        `request payload exceeds ${this.options.maxRequestBytes} bytes (RPC wire limit)`,
       );
     }
-    const line = new TextEncoder().encode(`${json}\n`);
 
     return await new Promise<unknown>((resolve, reject) => {
       const timeoutMs = opts.timeoutMs ?? this.options.defaultRequestTimeoutMs;

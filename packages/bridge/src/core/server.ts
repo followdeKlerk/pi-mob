@@ -187,7 +187,7 @@ export function createBridgeServer(options: BridgeServerOptions): BridgeServer {
         try { const ready = options.runtime.ready(); return Response.json({ status: ready.ready ? "ready" : "not_ready", ...(ready.reason ? { reason: ready.reason } : {}) }, { status: ready.ready ? 200 : 503 }); }
         catch { return Response.json({ status: "not_ready", reason: "runtime unavailable" }, { status: 503 }); }
       }
-      if (options.httpHandler && (url.pathname === "/v1/attachments" || url.pathname.startsWith("/v1/exports/"))) {
+      if (options.httpHandler && (url.pathname === "/v1/attachments" || url.pathname.startsWith("/v1/attachments/") || url.pathname.startsWith("/v1/exports/"))) {
         const response = await options.httpHandler(request);
         if (response) return response;
       }

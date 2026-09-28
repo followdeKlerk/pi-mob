@@ -12,6 +12,8 @@ import 'src/pairing/pairing_enrollment.dart';
 import 'src/pairing/pairing_screen.dart';
 import 'src/security/secure_credential_store.dart';
 import 'src/ui/shell/app_shell.dart';
+import 'src/ui/shell/pi_brand_mark.dart';
+import 'src/ui/shell/motion_primitives.dart';
 import 'src/ui/theme/pi_theme.dart';
 import 'src/version.dart';
 
@@ -107,7 +109,7 @@ class _BootPlaceholderScreen extends StatelessWidget {
               child: Column(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.terminal_rounded, size: 56, color: colors.primary),
+                  const PiBrandMark(size: 72),
                   const SizedBox(height: 16),
                   Text(
                     'Pi Mob',
@@ -129,7 +131,11 @@ class _BootPlaceholderScreen extends StatelessWidget {
                   const SizedBox(
                     width: 28,
                     height: 28,
-                    child: CircularProgressIndicator(strokeWidth: 2.4),
+                    child: MotionSpinner(
+                      dimension: 28,
+                      strokeWidth: 2.4,
+                      label: 'Preparing Pi Mob',
+                    ),
                   ),
                 ],
               ),

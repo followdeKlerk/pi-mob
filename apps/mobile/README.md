@@ -1,6 +1,6 @@
 # Pi Mob Android app
 
-This Flutter app connects to the bridge through private Tailscale Serve. It displays bridge-owned canonical events and does not parse raw OMP RPC.
+This Flutter app connects to the bridge through private Tailscale Serve. It displays bridge-owned canonical events and does not parse raw Pi RPC.
 
 ## Build
 

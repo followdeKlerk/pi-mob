@@ -139,10 +139,9 @@ void main() {
         ),
       ),
     );
-    expect(
-      find.byType(SelectionArea),
-      findsNothing,
-    ); // parent transcript owns selection
+    expect(find.byType(SelectionArea), findsOneWidget);
+    expect(find.byKey(const ValueKey('copy-answer-answer')), findsNothing);
+    expect(find.byKey(const ValueKey('share-answer-answer')), findsNothing);
     expect(find.byType(RichText), findsWidgets);
     expect(find.textContaining('void main'), findsOneWidget);
     final spans = find

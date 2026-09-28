@@ -125,6 +125,7 @@ export async function spawnDirectPi(opts: {
   const sessionDir = createSessionDir(opts.cwd);
   const args = [
     "--mode", "rpc",
+    "--no-extensions",
     "--session-dir", sessionDir,
     ...(opts.args ?? []),
   ];
@@ -286,6 +287,7 @@ export async function spawnBridgePi(opts: {
   const sessionDir = createSessionDir(opts.cwd);
   const args = [
     "--mode", "rpc",
+    "--no-extensions",
     "--session-dir", sessionDir,
     ...(opts.args ?? []),
   ];

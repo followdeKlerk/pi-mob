@@ -128,6 +128,7 @@ Turn _buildUserTurn(
         ? message.occurredAt
         : null,
     message: message.text,
+    attachmentIds: message.attachmentRefs,
     respondingToTurnId: null,
   );
 }

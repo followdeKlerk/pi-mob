@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../ui/theme/pi_tokens.dart';
+import '../ui/shell/pi_brand_mark.dart';
+import '../ui/shell/motion_primitives.dart';
 import 'pairing_flow.dart';
 import 'pairing_payload.dart';
 
@@ -65,7 +67,7 @@ class _PairingScreenState extends State<PairingScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(
-        title: const Text('Pair host'),
+        title: const Text('Pi Mob'),
         actions: [
           if (widget.allowForgetWhenUnpaired)
             IconButton(
@@ -120,62 +122,115 @@ class _PairFormState extends State<_PairForm> {
   Widget build(BuildContext context) {
     final flow = widget.flow;
     final theme = Theme.of(context);
-    return ListView(
-      key: const Key('pairing-form'),
-      padding: const EdgeInsets.all(PiSpacing.lg),
-      children: [
-        Text('Connect to your bridge', style: theme.textTheme.headlineSmall),
-        const SizedBox(height: 8),
-        Text(
-          'Enter the HTTPS endpoint and the short passcode shown by `pi-mob pair`.',
-          style: theme.textTheme.bodyMedium,
-        ),
-        const SizedBox(height: 20),
-        Semantics(
-          label: 'Bridge endpoint',
-          textField: true,
-          child: TextField(
-            key: const Key('manual-endpoint-field'),
-            controller: _endpoint,
-            autocorrect: false,
-            enableSuggestions: false,
-            keyboardType: TextInputType.url,
-            onChanged: flow.updateTypedEndpoint,
-            decoration: InputDecoration(
-              labelText: 'Bridge endpoint',
-              hintText: 'https://host.tailnet.ts.net:8788',
-              errorText: flow.typedEndpointError,
-              border: const OutlineInputBorder(),
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 560),
+        child: ListView(
+          key: const Key('pairing-form'),
+          padding: const EdgeInsets.all(PiSpacing.lg),
+          children: [
+            Container(
+              padding: const EdgeInsets.all(PiSpacing.xl),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.primaryContainer,
+                borderRadius: BorderRadius.circular(PiRadius.lg),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const PiBrandMark(),
+                  const SizedBox(height: PiSpacing.xl),
+                  Text(
+                    'Your Pi.\nAnywhere.',
+                    style: theme.textTheme.headlineLarge?.copyWith(
+                      color: theme.colorScheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: -1,
+                    ),
+                  ),
+                  const SizedBox(height: PiSpacing.sm),
+                  Text(
+                    'Big ideas. Pocket-sized access.',
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: theme.colorScheme.onPrimaryContainer,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ),
-        const SizedBox(height: 16),
-        Semantics(
-          label: 'Six-digit passcode',
-          textField: true,
-          child: TextField(
-            key: const Key('pairing-passcode-field'),
-            controller: _passcode,
-            autocorrect: false,
-            enableSuggestions: false,
-            keyboardType: TextInputType.number,
-            maxLength: 6,
-            onChanged: flow.updateTypedPasscode,
-            decoration: InputDecoration(
-              labelText: 'Six-digit passcode',
-              errorText: flow.typedPasscodeError,
-              border: const OutlineInputBorder(),
+            const SizedBox(height: PiSpacing.xl),
+            Text(
+              'Connect to your bridge',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
             ),
-          ),
+            const SizedBox(height: PiSpacing.sm),
+            Text(
+              'Enter the HTTPS endpoint and the short passcode shown by `pi-mob pair`.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: PiSpacing.xl),
+            Semantics(
+              label: 'Bridge endpoint',
+              textField: true,
+              child: TextField(
+                key: const Key('manual-endpoint-field'),
+                controller: _endpoint,
+                autocorrect: false,
+                enableSuggestions: false,
+                keyboardType: TextInputType.url,
+                onChanged: flow.updateTypedEndpoint,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.link_rounded),
+                  labelText: 'Bridge endpoint',
+                  hintText: 'https://host.tailnet.ts.net:8788',
+                  errorText: flow.typedEndpointError,
+                ),
+              ),
+            ),
+            const SizedBox(height: 16),
+            Semantics(
+              label: 'Six-digit passcode',
+              textField: true,
+              child: TextField(
+                key: const Key('pairing-passcode-field'),
+                controller: _passcode,
+                autocorrect: false,
+                enableSuggestions: false,
+                keyboardType: TextInputType.number,
+                maxLength: 6,
+                onChanged: flow.updateTypedPasscode,
+                decoration: InputDecoration(
+                  prefixIcon: const Icon(Icons.key_rounded),
+                  labelText: 'Six-digit passcode',
+                  errorText: flow.typedPasscodeError,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              key: const Key('pairing-submit'),
+              onPressed: widget.busy ? null : widget.onPair,
+              icon: widget.busy
+                  ? const MotionSpinner(label: 'Connecting')
+                  : const Icon(Icons.arrow_forward_rounded),
+              label: Text(widget.busy ? 'Connecting…' : 'Pair'),
+            ),
+            const SizedBox(height: PiSpacing.lg),
+            Text(
+              'Private connection via Tailscale. Your repositories and provider credentials stay on your host.',
+              textAlign: TextAlign.center,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: PiSpacing.xl),
+          ],
         ),
-        const SizedBox(height: 12),
-        FilledButton.icon(
-          key: const Key('pairing-submit'),
-          onPressed: widget.busy ? null : widget.onPair,
-          icon: const Icon(Icons.link),
-          label: Text(widget.busy ? 'Connecting…' : 'Pair'),
-        ),
-      ],
+      ),
     );
   }
 }
@@ -184,7 +239,7 @@ class _RejectionPanel extends StatelessWidget {
   const _RejectionPanel({required this.flow});
   final PairingFlowController flow;
   @override
-  Widget build(BuildContext context) => Padding(
+  Widget build(BuildContext context) => SingleChildScrollView(
     padding: const EdgeInsets.all(PiSpacing.lg),
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -199,7 +254,7 @@ class _RejectionPanel extends StatelessWidget {
           flow.rejection?.technicalReason ?? 'Pairing input was rejected',
           key: const Key('pairing-rejection-message'),
         ),
-        const Spacer(),
+        const SizedBox(height: PiSpacing.xl),
         FilledButton(
           key: const Key('pairing-rejection-retry'),
           onPressed: flow.reset,

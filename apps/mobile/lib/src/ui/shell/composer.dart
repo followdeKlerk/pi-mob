@@ -17,7 +17,7 @@ import 'motion_primitives.dart';
 /// Prompt composer with delivery-mode selector, follow-up queue, extension
 /// dialog opener, and the persistent draft `TextField`.
 ///
-/// The composer is intentionally a single fixed-height surface anchored at the
+/// The composer is a flexible writing surface anchored at the
 /// bottom of the Activity destination. It owns its own `LiveRegion`
 /// semantics node so screen-readers announce state transitions, and exposes
 /// stable keys (`draft-field`, `send-button`, `prompt-send-action`,
@@ -215,6 +215,44 @@ class Composer extends StatelessWidget {
     }
   }
 
+  Future<void> _openThinkingPicker(BuildContext context) async {
+    const levels = <String>['off', 'minimal', 'low', 'medium', 'high', 'xhigh'];
+    final current = coordinator.selectedControls?.thinkingLevel;
+    final selected = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: const Text('Thinking level'),
+        children: [
+          for (final level in levels)
+            RadioListTile<String>(
+              value: level,
+              groupValue: current,
+              title: Text(level),
+              onChanged: (value) => Navigator.of(dialogContext).pop(value),
+            ),
+        ],
+      ),
+    );
+    if (selected == null || selected == current) return;
+    try {
+      await coordinator.setThinking(selected);
+    } on Object catch (error) {
+      if (!context.mounted) return;
+      final detail = error.toString().replaceFirst(
+        RegExp(r'^(StateError|Exception):\s*'),
+        '',
+      );
+      final message =
+          detail.contains('requires a session between turns') ||
+              detail.contains('requires an idle session')
+          ? 'Finish or stop the current response before changing thinking.'
+          : 'Could not change thinking level: $detail';
+      ScaffoldMessenger.maybeOf(
+        context,
+      )?.showSnackBar(SnackBar(content: Text(message)));
+    }
+  }
+
   Future<void> _submitOrRunCommand(BuildContext context) async {
     if (coordinator.canAbort && coordinator.draft.trim().isEmpty) {
       await coordinator.abort();
@@ -227,6 +265,9 @@ class Composer extends StatelessWidget {
         return;
       case '/model':
         await _openModelPicker(context);
+        return;
+      case '/thinking':
+        await _openThinkingPicker(context);
         return;
       case '/compact':
         await _clearDraft();
@@ -292,6 +333,7 @@ class Composer extends StatelessWidget {
         'Control',
       ),
       const _SlashCommand('/model', 'Open the model picker', 'Control'),
+      const _SlashCommand('/thinking', 'Change the thinking level', 'Control'),
       const _SlashCommand(
         '/compact',
         'Compact this session context',
@@ -411,6 +453,13 @@ class Composer extends StatelessWidget {
         },
         child: Card(
           key: const Key('composer-card'),
+          color: Theme.of(context).colorScheme.surfaceContainerLowest,
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(PiRadius.lg),
+            side: BorderSide(
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
           child: Padding(
             padding: const EdgeInsets.all(PiSpacing.md),
             child: Column(
@@ -528,6 +577,28 @@ class Composer extends StatelessWidget {
                   ),
                   const SizedBox(height: PiSpacing.sm),
                 ],
+                TextField(
+                  key: const Key('draft-field'),
+                  controller: draftController,
+                  minLines: 1,
+                  maxLines: 5,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  decoration: const InputDecoration(
+                    hintText: 'Message Pi',
+                    filled: false,
+                    border: InputBorder.none,
+                    enabledBorder: InputBorder.none,
+                    focusedBorder: InputBorder.none,
+                    contentPadding: EdgeInsets.symmetric(
+                      horizontal: PiSpacing.sm,
+                      vertical: PiSpacing.md,
+                    ),
+                  ),
+                  onChanged: (value) =>
+                      unawaited(coordinator.updateDraft(value)),
+                ),
+                const SizedBox(height: PiSpacing.sm),
                 Row(
                   crossAxisAlignment: CrossAxisAlignment.end,
                   children: [
@@ -557,19 +628,14 @@ class Composer extends StatelessWidget {
                     ),
                     const SizedBox(width: PiSpacing.sm),
                     Expanded(
-                      child: TextField(
-                        key: const Key('draft-field'),
-                        controller: draftController,
-                        minLines: 1,
-                        maxLines: 5,
-                        keyboardType: TextInputType.multiline,
-                        textInputAction: TextInputAction.newline,
-                        decoration: const InputDecoration(
-                          hintText: 'Message Pi',
-                          border: OutlineInputBorder(),
-                        ),
-                        onChanged: (value) =>
-                            unawaited(coordinator.updateDraft(value)),
+                      child: Text(
+                        'Use / for commands',
+                        style: Theme.of(context).textTheme.labelMedium
+                            ?.copyWith(
+                              color: Theme.of(
+                                context,
+                              ).colorScheme.onSurfaceVariant,
+                            ),
                       ),
                     ),
                     const SizedBox(width: PiSpacing.sm),
@@ -591,7 +657,15 @@ class Composer extends StatelessWidget {
                             onPressed: aborting || coordinator.canAttemptSend
                                 ? () => _submitOrRunCommand(context)
                                 : null,
-                            child: Icon(aborting ? Icons.stop : Icons.send),
+                            child: MotionCrossfade(
+                              duration: PiDuration.short,
+                              child: Icon(
+                                aborting
+                                    ? Icons.stop_rounded
+                                    : Icons.arrow_upward_rounded,
+                                key: ValueKey(aborting),
+                              ),
+                            ),
                           ),
                         ),
                       ),
@@ -653,55 +727,62 @@ class _PromptSendFeedback extends StatelessWidget {
           color: failed ? colors.errorContainer : colors.secondaryContainer,
           borderRadius: BorderRadius.circular(PiRadius.sm),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
           children: [
-            if (status.isBusy)
-              MotionSpinner(strokeWidth: 2, dimension: 18, label: title)
-            else
-              Icon(
-                failed ? Icons.error_outline : Icons.check_circle_outline,
-                size: 18,
-                color: failed
-                    ? colors.onErrorContainer
-                    : colors.onSecondaryContainer,
-              ),
-            const SizedBox(width: PiSpacing.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    title,
-                    style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: failed
-                          ? colors.onErrorContainer
-                          : colors.onSecondaryContainer,
-                    ),
+            Row(
+              children: [
+                if (status.isBusy)
+                  MotionSpinner(strokeWidth: 2, dimension: 18, label: title)
+                else
+                  Icon(
+                    failed ? Icons.error_outline : Icons.check_circle_outline,
+                    size: 18,
+                    color: failed
+                        ? colors.onErrorContainer
+                        : colors.onSecondaryContainer,
                   ),
-                  if (failure != null)
-                    Text(
-                      failure.message,
-                      key: const Key('prompt-send-failure-message'),
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: colors.onErrorContainer,
+                const SizedBox(width: PiSpacing.sm),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        title,
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: failed
+                              ? colors.onErrorContainer
+                              : colors.onSecondaryContainer,
+                        ),
                       ),
-                    ),
-                ],
-              ),
+                      if (failure != null)
+                        Text(
+                          failure.message,
+                          key: const Key('prompt-send-failure-message'),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(color: colors.onErrorContainer),
+                        ),
+                    ],
+                  ),
+                ),
+              ],
             ),
             if (failure != null)
-              TextButton(
-                key: const Key('prompt-send-action'),
-                onPressed: () => unawaited(onAction(failure)),
-                child: Text(switch (failure.action) {
-                  PromptFailureAction.retry => 'Retry',
-                  PromptFailureAction.takeControl => 'Take control',
-                  PromptFailureAction.reconnect => 'Reconnect',
-                  PromptFailureAction.approveWorkspace => 'Review workspace',
-                  PromptFailureAction.discardUncertain => 'Discard',
-                }),
+              Align(
+                alignment: Alignment.centerRight,
+                child: TextButton(
+                  key: const Key('prompt-send-action'),
+                  onPressed: () => unawaited(onAction(failure)),
+                  child: Text(switch (failure.action) {
+                    PromptFailureAction.retry => 'Retry',
+                    PromptFailureAction.takeControl => 'Take control',
+                    PromptFailureAction.reconnect => 'Reconnect',
+                    PromptFailureAction.approveWorkspace => 'Review workspace',
+                    PromptFailureAction.discardUncertain => 'Discard',
+                  }),
+                ),
               ),
           ],
         ),

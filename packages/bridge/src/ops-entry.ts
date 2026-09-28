@@ -83,10 +83,10 @@ export async function main(argv: readonly string[]): Promise<number> {
     setupDefaults = {
       installRoot: paths.installRoot,
       launchAgentsRoot: paths.launchAgentsRoot,
-      ompExecutable: Bun.which("omp"),
+      piExecutable: Bun.which("pi"),
       sourceCliExecutable: process.execPath,
       sourceBridgeExecutable: join(executableDir, "bridge-daemon"),
-      ompSessionDir: join(paths.installRoot, "release", "sessions"),
+      piSessionDir: join(paths.installRoot, "release", "sessions"),
       bridgeVersion: process.env.PI_MOB_BRIDGE_VERSION ?? BRIDGE_VERSION,
       protocolVersion: "1.0",
       port: 8788,

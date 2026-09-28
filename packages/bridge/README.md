@@ -1,6 +1,6 @@
 # Pi Mob bridge
 
-The bridge supervises local OMP sessions and connects them to the Android app. See [Project status](../../docs/PROJECT_STATUS.md) for capabilities.
+The bridge supervises local Pi sessions and connects them to the Android app. See [Project status](../../docs/PROJECT_STATUS.md) for capabilities.
 
 ## Build
 
@@ -22,7 +22,7 @@ The released target is macOS x64. The `pi-mob` CLI installs and supervises the d
 ./bin/pi-mob pair
 ```
 
-Setup requires an `omp` executable on `PATH` and stores its absolute path. Pairing prints an HTTPS endpoint, passcode, and expiry for manual entry in the Android app.
+Setup requires the Pi executable to be on `PATH` and stores its absolute path. Pairing prints an HTTPS endpoint, passcode, and expiry for manual entry in the Android app.
 
 Public listeners, Tailscale Funnel, QR pairing, and JSON import are unsupported.
 
