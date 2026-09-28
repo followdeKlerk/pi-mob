@@ -56,10 +56,14 @@ class AppShell extends StatefulWidget {
 class _AppShellState extends State<AppShell> {
   final _scaffoldKey = GlobalKey<ScaffoldState>();
   final _shortcutFocus = FocusNode(debugLabel: 'app-shell-shortcuts');
+  bool _historyAvailable = false;
+  String? _selectedSessionId;
+  String? _selectedSessionName;
 
   @override
   void initState() {
     super.initState();
+    _syncShellState();
     widget.coordinator.addListener(_onCoordinatorChanged);
   }
 
@@ -69,6 +73,7 @@ class _AppShellState extends State<AppShell> {
     if (oldWidget.coordinator != widget.coordinator) {
       oldWidget.coordinator.removeListener(_onCoordinatorChanged);
       widget.coordinator.addListener(_onCoordinatorChanged);
+      _syncShellState();
     }
   }
 
@@ -80,7 +85,24 @@ class _AppShellState extends State<AppShell> {
   }
 
   void _onCoordinatorChanged() {
-    if (mounted) setState(() {});
+    if (mounted && _syncShellState()) setState(() {});
+  }
+
+  bool _syncShellState() {
+    final coordinator = widget.coordinator;
+    final historyAvailable =
+        coordinator.historyGateComplete || !coordinator.isReady;
+    final selectedId = coordinator.selectedSessionId;
+    final selectedName = coordinator.selectedSession?.name;
+    if (_historyAvailable == historyAvailable &&
+        _selectedSessionId == selectedId &&
+        _selectedSessionName == selectedName) {
+      return false;
+    }
+    _historyAvailable = historyAvailable;
+    _selectedSessionId = selectedId;
+    _selectedSessionName = selectedName;
+    return true;
   }
 
   void _openChats() => _scaffoldKey.currentState?.openDrawer();
@@ -116,16 +138,8 @@ class _AppShellState extends State<AppShell> {
 
   @override
   Widget build(BuildContext context) {
-    final historyAvailable =
-        widget.coordinator.historyGateComplete || !widget.coordinator.isReady;
-    final chatOpen =
-        historyAvailable && widget.coordinator.selectedSessionId != null;
-    final selectedId = widget.coordinator.selectedSessionId;
-    final selected = selectedId == null
-        ? null
-        : widget.coordinator.sessions
-              .where((session) => session.sessionId == selectedId)
-              .firstOrNull;
+    final historyAvailable = _historyAvailable;
+    final chatOpen = historyAvailable && _selectedSessionId != null;
     return Shortcuts(
       shortcuts: buildChatShellShortcuts(),
       child: Actions(
@@ -187,7 +201,7 @@ class _AppShellState extends State<AppShell> {
                 titleSpacing: 0,
                 title: chatOpen
                     ? Text(
-                        selected?.name ?? 'Chat',
+                        _selectedSessionName ?? 'Chat',
                         key: const Key('shell-app-bar-title'),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,

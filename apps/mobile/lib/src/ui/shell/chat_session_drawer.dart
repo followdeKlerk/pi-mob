@@ -38,6 +38,8 @@ class ChatSessionDrawer extends StatefulWidget {
 }
 
 class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
+  Object? _lastRefreshKey;
+
   /// True when the coordinator has demoted to a phase where the bridge
   /// is unreachable, the protocol is incompatible, or the host is
   /// degraded. The drawer surfaces a sanitized error and a Retry action
@@ -65,6 +67,7 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
   @override
   void initState() {
     super.initState();
+    _lastRefreshKey = _currentRefreshKey();
     widget.coordinator.addListener(_refresh);
   }
 
@@ -73,6 +76,7 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.coordinator != widget.coordinator) {
       oldWidget.coordinator.removeListener(_refresh);
+      _lastRefreshKey = _currentRefreshKey();
       widget.coordinator.addListener(_refresh);
     }
   }
@@ -83,8 +87,30 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     super.dispose();
   }
 
+  Object _currentRefreshKey() {
+    final coordinator = widget.coordinator;
+    final selectedId = coordinator.selectedSessionId;
+    final creation = coordinator.sessionCreation;
+    return (
+      coordinator.sessionListRevision,
+      coordinator.phase,
+      coordinator.errorMessage,
+      coordinator.historyGateComplete,
+      selectedId,
+      coordinator.selectedWorkspaceId,
+      creation.phase,
+      creation.error,
+      selectedId != null && coordinator.isHistorySyncing(selectedId),
+selectedId == null ? 0 : coordinator.historyEventCount(selectedId),
+    );
+  }
+
   void _refresh() {
-    if (mounted) setState(() {});
+    if (!mounted) return;
+    final next = _currentRefreshKey();
+    if (next == _lastRefreshKey) return;
+    _lastRefreshKey = next;
+    setState(() {});
   }
 
   WorkspaceEntry? _workspaceFor(String? workspaceId) {

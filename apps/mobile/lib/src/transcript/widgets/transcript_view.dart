@@ -203,7 +203,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     if (!_controller.hasClients) return;
     final generation = ++_followGeneration;
     final reduceMotion = MediaQuery.disableAnimationsOf(context);
-    if (_initialPosition || reduceMotion) {
+    if (_initialPosition || reduceMotion || !userInitiated) {
       _controller.jumpTo(_controller.position.maxScrollExtent);
       _initialPosition = false;
     } else {
@@ -221,6 +221,9 @@ class _TranscriptViewState extends State<TranscriptView> {
             curve: userInitiated ? Curves.easeOutCubic : Curves.easeOut,
           );
           await WidgetsBinding.instance.endOfFrame;
+          if (!_controller.hasClients || generation != _followGeneration) {
+            return;
+          }
           if (_controller.position.extentAfter < 1) break;
         }
       } finally {
@@ -613,6 +616,7 @@ class _TurnView extends StatelessWidget {
                 else if (item is FinalAnswerItem)
                   FinalAnswerView.forViewData(
                     item.viewData,
+                    isStreaming: !assistant.isTerminal,
                     key: ValueKey(item.widgetKey),
                   )
                 else if (item is UnknownItem)

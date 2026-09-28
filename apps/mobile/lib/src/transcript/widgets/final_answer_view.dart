@@ -26,9 +26,10 @@ import 'view_data/final_answer_view_data.dart';
 import 'view_data/safe_markdown.dart';
 
 /// Final-answer widget. Use [FinalAnswerView.forViewData] to build it.
-class FinalAnswerView extends StatelessWidget {
+class FinalAnswerView extends StatefulWidget {
   const FinalAnswerView._({
     required this.data,
+    required this.isStreaming,
     required this.onLinkTap,
     super.key,
   });
@@ -39,15 +40,18 @@ class FinalAnswerView extends StatelessWidget {
   factory FinalAnswerView.forViewData(
     FinalAnswerViewData data, {
     Key? key,
+    bool isStreaming = false,
     SafeMarkdownLinkTap? onLinkTap,
   }) => FinalAnswerView._(
     key: key ?? ValueKey('final-answer-${data.answerId}'),
     data: data,
+    isStreaming: isStreaming,
     onLinkTap: onLinkTap,
   );
 
   /// View-data describing this final answer. Immutable.
   final FinalAnswerViewData data;
+  final bool isStreaming;
 
   /// Optional link-tap callback. Wired through to the safe-Markdown
   /// renderer; the URL is guaranteed to be http/https with a non-empty
@@ -66,8 +70,26 @@ class FinalAnswerView extends StatelessWidget {
   static const double _blockVerticalPadding = 12;
 
   @override
+  State<FinalAnswerView> createState() => _FinalAnswerViewState();
+}
+
+class _FinalAnswerViewState extends State<FinalAnswerView> {
+  String? _parsedMarkdown;
+  SafeMarkdownDocument? _document;
+
+  SafeMarkdownDocument _parseCompleted(String markdown) {
+    if (_parsedMarkdown != markdown) {
+      _document = parseSafeMarkdown(markdown);
+      _parsedMarkdown = markdown;
+    }
+    return _document!;
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final document = parseSafeMarkdown(data.markdown);
+    final data = widget.data;
+    final onLinkTap = widget.onLinkTap;
+    final document = widget.isStreaming ? null : _parseCompleted(data.markdown);
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     // Calm, readable body type. `bodyLarge` is the primary reading size
@@ -84,14 +106,16 @@ class FinalAnswerView extends StatelessWidget {
       decoration: TextDecoration.underline,
       decorationColor: scheme.primary,
     );
-    final widgets = buildSafeMarkdownWidgets(
-      document,
-      baseStyle: baseStyle,
-      codeStyle: codeStyle,
-      linkStyle: linkStyle,
-      blockBackground: scheme.surfaceContainerHighest,
-      onLinkTap: onLinkTap,
-    );
+    final widgets = document == null
+        ? <Widget>[Text(data.markdown, style: baseStyle)]
+        : buildSafeMarkdownWidgets(
+            document,
+            baseStyle: baseStyle,
+            codeStyle: codeStyle,
+            linkStyle: linkStyle,
+            blockBackground: scheme.surfaceContainerHighest,
+            onLinkTap: onLinkTap,
+          );
     return Semantics(
       container: true,
       label: 'Assistant answer',
@@ -103,8 +127,8 @@ class FinalAnswerView extends StatelessWidget {
         shape: const RoundedRectangleBorder(),
         child: Padding(
           padding: const EdgeInsets.symmetric(
-            horizontal: _contentInset,
-            vertical: _blockVerticalPadding,
+            horizontal: FinalAnswerView._contentInset,
+            vertical: FinalAnswerView._blockVerticalPadding,
           ),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,

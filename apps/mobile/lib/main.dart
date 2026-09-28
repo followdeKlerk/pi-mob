@@ -183,41 +183,40 @@ class _HomeRouter extends StatefulWidget {
 
 class _HomeRouterState extends State<_HomeRouter> {
   late bool _paired;
+  String? _notificationBridgeKey;
 
   @override
   void initState() {
     super.initState();
     _paired = widget.coordinator.hostId != null;
     widget.coordinator.addListener(_onCoordinatorChanged);
-    if (widget.coordinator.isReady && widget.notifications != null) {
-      unawaited(
-        widget.notifications!.onBridgeReady(
-          notificationsSupported: widget.coordinator.supportsCapability(
-            'notifications.v1',
-          ),
-        ),
-      );
-    }
+    _syncNotificationBridge();
   }
 
   void _onCoordinatorChanged() {
     if (!mounted) return;
-    final notifications = widget.notifications;
-    if (widget.coordinator.isReady && notifications != null) {
-      unawaited(
-        notifications.onBridgeReady(
-          notificationsSupported: widget.coordinator.supportsCapability(
-            'notifications.v1',
-          ),
-        ),
-      );
-    }
+    _syncNotificationBridge();
     final nextPaired = widget.coordinator.hostId != null;
     if (nextPaired != _paired) {
       setState(() {
         _paired = nextPaired;
       });
     }
+  }
+
+  void _syncNotificationBridge() {
+    final notifications = widget.notifications;
+    if (notifications == null) return;
+    final coordinator = widget.coordinator;
+    if (!coordinator.isReady) {
+      _notificationBridgeKey = null;
+      return;
+    }
+    final supported = coordinator.supportsCapability('notifications.v1');
+    final key = '${coordinator.hostId}:$supported';
+    if (_notificationBridgeKey == key) return;
+    _notificationBridgeKey = key;
+    unawaited(notifications.onBridgeReady(notificationsSupported: supported));
   }
 
   @override
@@ -303,6 +302,7 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
   late final TextEditingController _endpointController;
   late final TextEditingController _draftController;
   String? _presentedDialogId;
+  String? _lastObservedDialogId;
 
   @override
   void initState() {
@@ -354,10 +354,15 @@ class _DiagnosticHomeState extends State<DiagnosticHome> {
         );
       }
     }
-    setState(() {});
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => _presentDialogIfNeeded(),
-    );
+    final nextDialogId = widget.coordinator.selectedDialog?.dialogId;
+    if (nextDialogId != _lastObservedDialogId) {
+      _lastObservedDialogId = nextDialogId;
+      if (nextDialogId != null) {
+        WidgetsBinding.instance.addPostFrameCallback(
+          (_) => _presentDialogIfNeeded(),
+        );
+      }
+    }
   }
 
   Future<void> _presentDialogIfNeeded({bool force = false}) async {

@@ -66,6 +66,92 @@ TranscriptDocument projectCanonicalToDocument(CanonicalTranscriptState state) {
   );
 }
 
+/// Reuses projected turns whose canonical entity and turn status are unchanged.
+class CanonicalTranscriptProjection {
+  CanonicalTranscriptState? _previousState;
+  List<String>? _orderedKeys;
+  final Map<String, Turn> _turns = <String, Turn>{};
+
+  void reset() {
+    _previousState = null;
+    _orderedKeys = null;
+    _turns.clear();
+  }
+
+  TranscriptDocument project(CanonicalTranscriptState state) {
+    final previous = _previousState;
+    if (previous != null && previous.sessionId != state.sessionId) reset();
+    final prior = _previousState;
+    if (prior == null || !identical(prior.entityOrder, state.entityOrder)) {
+      _orderedKeys = _orderedEntityKeys(state);
+    }
+    final turns = <Turn>[];
+    String? lastSettledTurnId;
+    for (final key in _orderedKeys!) {
+      final cached = _turns[key];
+      final turn =
+          cached != null &&
+              prior != null &&
+              _sameProjectedEntity(prior, state, key)
+          ? cached
+          : _buildTurnForKey(state, key);
+      if (turn == null) {
+        _turns.remove(key);
+        continue;
+      }
+      _turns[key] = turn;
+      turns.add(turn);
+      if (turn is AssistantTurn && turn.isTerminal) {
+        lastSettledTurnId = turn.widgetKey;
+      }
+    }
+    _previousState = state;
+    return TranscriptDocument(
+      streamId: 'session:${state.sessionId}',
+      turns: List<Turn>.unmodifiable(turns),
+      diagnostics: _cappedDiagnostics(state.diagnostics),
+      lastSettledTurnId: lastSettledTurnId,
+    );
+  }
+}
+
+bool _sameProjectedEntity(
+  CanonicalTranscriptState previous,
+  CanonicalTranscriptState current,
+  String key,
+) {
+  final separator = key.indexOf(':');
+  if (separator < 0) return false;
+  final kind = key.substring(0, separator);
+  final id = key.substring(separator + 1);
+  final String? turnId;
+  switch (kind) {
+    case 'user':
+      final before = previous.userMessages[id];
+      final after = current.userMessages[id];
+      if (before == null || !identical(before, after)) return false;
+      turnId = before.turnId;
+    case 'assistant':
+      final before = previous.assistantMessages[id];
+      final after = current.assistantMessages[id];
+      if (before == null || !identical(before, after)) return false;
+      turnId = before.turnId;
+    case 'tool':
+      final before = previous.toolCalls[id];
+      final after = current.toolCalls[id];
+      if (before == null ||
+          !identical(before, after) ||
+          previous.turnToMessage[before.turnId] !=
+              current.turnToMessage[before.turnId]) {
+        return false;
+      }
+      turnId = before.turnId;
+    default:
+      return false;
+  }
+  return previous.turnStatuses[turnId] == current.turnStatuses[turnId];
+}
+
 List<String> _orderedEntityKeys(CanonicalTranscriptState state) {
   // The reducer records the first canonical sequence for each entity. Sort
   // one combined list so interleaved user and assistant messages stay

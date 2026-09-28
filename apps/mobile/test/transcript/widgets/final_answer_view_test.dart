@@ -183,6 +183,18 @@ void main() {
     );
     expect(tapped, isEmpty);
   });
+  testWidgets('streaming answers skip markdown parsing', (tester) async {
+    const markdown = '**formatted after completion**';
+    await tester.pumpWidget(
+      _app(
+        FinalAnswerView.forViewData(
+          const FinalAnswerViewData(answerId: 'streaming', markdown: markdown),
+          isStreaming: true,
+        ),
+      ),
+    );
+    expect(find.text(markdown), findsOneWidget);
+  });
 
   testWidgets('answer has an accessible semantic label', (tester) async {
     await tester.pumpWidget(

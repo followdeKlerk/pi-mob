@@ -7,6 +7,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/session_events/canonical_event.dart';
 import 'package:pi_mob/src/session_events/canonical_session_manager.dart';
 import 'package:pi_mob/src/session_events/canonical_transcript_document.dart';
+import 'package:pi_mob/src/session_events/canonical_transcript_view.dart';
 import 'package:pi_mob/src/transcript/domain/transcript_document.dart';
 import 'package:pi_mob/src/transcript/domain/transcript_turn.dart';
 import 'package:pi_mob/src/transcript/widgets/transcript_view.dart';
@@ -95,11 +96,13 @@ void main() {
       await tester.pump();
       final state = manager.snapshotFor(sessionId);
       expect(state, isNotNull);
-      final document = projectCanonicalToDocument(state!);
+      final projection = CanonicalTranscriptProjection();
+      final document = projection.project(state!);
       expect(document.streamId, 'session:$sessionId');
       expect(document.turns.length, greaterThanOrEqualTo(2));
       final userTurns = document.turns.whereType<UserTurn>();
       expect(userTurns.length, 1);
+      final originalUser = userTurns.first;
       expect(userTurns.first.message, 'Hello there');
       expect(userTurns.first.attachmentIds, [
         'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
@@ -135,9 +138,11 @@ void main() {
         ]),
       );
       await tester.pump();
-      final ordered = projectCanonicalToDocument(
-        manager.snapshotFor(sessionId)!,
-      ).turns;
+      final ordered = projection.project(manager.snapshotFor(sessionId)!).turns;
+      expect(
+        identical(ordered.whereType<UserTurn>().first, originalUser),
+        isTrue,
+      );
       expect(ordered.whereType<UserTurn>().map((turn) => turn.message), [
         'Hello there',
         'Second question',
@@ -153,6 +158,87 @@ void main() {
       await tester.runAsync(() => manager.resetAll());
     },
   );
+
+  testWidgets('streamed transcript coalesces rapid redraws', (tester) async {
+    const sessionId = 'sess-stream-cadence';
+    final manager = (await tester.runAsync(() => _buildManager(sessionId)))!;
+    await tester.pump();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: CanonicalTranscriptView(sessionId: sessionId, manager: manager),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    await tester.runAsync(
+      () => manager.ingestWireEvents(sessionId, <CanonicalSessionEvent>[
+        CanonicalSessionEvent(
+          eventId: '00000000-0000-4000-8000-000000000007',
+          sessionId: sessionId,
+          sequence: 7,
+          type: CanonicalEventType.userMessageCreated,
+          occurredAt: DateTime.utc(2026, 8, 14, 12, 6),
+          payload: <String, Object?>{
+            'turnId': 'turn-2',
+            'messageId': 'msg-2',
+            'text': 'Second question',
+          },
+        ),
+        CanonicalSessionEvent(
+          eventId: '00000000-0000-4000-8000-000000000008',
+          sessionId: sessionId,
+          sequence: 8,
+          type: CanonicalEventType.assistantStarted,
+          occurredAt: DateTime.utc(2026, 8, 14, 12, 7),
+          payload: <String, Object?>{'turnId': 'turn-2', 'messageId': 'asst-2'},
+        ),
+        CanonicalSessionEvent(
+          eventId: '00000000-0000-4000-8000-000000000009',
+          sessionId: sessionId,
+          sequence: 9,
+          type: CanonicalEventType.assistantContentReplaced,
+          occurredAt: DateTime.utc(2026, 8, 14, 12, 8),
+          payload: <String, Object?>{
+            'turnId': 'turn-2',
+            'messageId': 'asst-2',
+            'content': <Map<String, Object?>>[
+              <String, Object?>{'kind': 'text', 'text': 'first chunk'},
+            ],
+          },
+        ),
+      ]),
+    );
+    await tester.pump();
+    expect(find.text('first chunk'), findsOneWidget);
+
+    await tester.runAsync(
+      () => manager.ingestWireEvents(sessionId, <CanonicalSessionEvent>[
+        CanonicalSessionEvent(
+          eventId: '00000000-0000-4000-8000-000000000010',
+          sessionId: sessionId,
+          sequence: 10,
+          type: CanonicalEventType.assistantContentReplaced,
+          occurredAt: DateTime.utc(2026, 8, 14, 12, 9),
+          payload: <String, Object?>{
+            'turnId': 'turn-2',
+            'messageId': 'asst-2',
+            'content': <Map<String, Object?>>[
+              <String, Object?>{'kind': 'text', 'text': 'latest full text'},
+            ],
+          },
+        ),
+      ]),
+    );
+    await tester.pump();
+    expect(find.text('first chunk'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 32));
+    expect(find.text('first chunk'), findsOneWidget);
+    await tester.pump(const Duration(milliseconds: 1));
+    expect(find.text('latest full text'), findsOneWidget);
+    await tester.runAsync(() => manager.resetAll());
+  });
 
   testWidgets('TranscriptView renders user attachment bytes once', (
     tester,

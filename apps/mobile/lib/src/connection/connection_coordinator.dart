@@ -288,6 +288,7 @@ final class ConnectionCoordinator extends ChangeNotifier
   final Map<String, SnapshotAssembler> _snapshots = {};
   final Map<String, String> _snapshotStreams = {};
   final Map<String, SessionState> _sessions = {};
+  int _sessionListRevision = 0;
   final Set<String> _locallyDeletedSessionIds = {};
   final Map<String, SessionControlState> _sessionControls = {};
   final List<ModelOption> _models = [];
@@ -799,7 +800,10 @@ final class ConnectionCoordinator extends ChangeNotifier
       .toList(growable: false);
 
   List<SessionState> get sessions => List.unmodifiable(_activeChats);
+  int get sessionListRevision => _sessionListRevision;
   GlobalSearchController get globalSearchController => _globalSearchController;
+  SessionState? get selectedSession =>
+      selectedSessionId == null ? null : _sessions[selectedSessionId];
   SearchIndexer get searchIndexer => _searchIndexer;
   List<FollowUpItem> get selectedFollowUps =>
       List.unmodifiable(_followUpsBySession[selectedSessionId] ?? const []);
@@ -2057,6 +2061,7 @@ final class ConnectionCoordinator extends ChangeNotifier
     // deleting the last chat must leave a healthy host-only subscription.
     final wasSelected = selectedSessionId == sessionId;
     _locallyDeletedSessionIds.add(sessionId);
+    _sessionListRevision += 1;
     _notify();
     try {
       await _sendSessionLifecycle(
@@ -2067,6 +2072,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       );
     } on Object {
       _locallyDeletedSessionIds.remove(sessionId);
+      _sessionListRevision += 1;
       _notify();
       rethrow;
     }
@@ -2844,13 +2850,6 @@ final class ConnectionCoordinator extends ChangeNotifier
         (message['requestId'] != null || message['eventId'] != null)) {
       ProtocolEnvelope.fromJson(message);
     }
-    if (isDurableEvent) {
-      debugPrint(
-        '[pi-mob][conn] durable event type=${message['type']} '
-        'streamId=${message['streamId']} cursor=${message['cursor']} '
-        '— skipping strict ProtocolEnvelope.fromJson payload validation',
-      );
-    }
     final type = message['type'];
     final payloadValue = message['payload'];
     if (type is! String || payloadValue is! Map) {
@@ -3514,6 +3513,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       final id = payload['sessionId'];
       if (id is String) {
         _locallyDeletedSessionIds.add(id);
+        _sessionListRevision += 1;
         if (payload['permanent'] == true) {
           _sessions.remove(id);
           _sessionTree.remove(id);
@@ -3539,6 +3539,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       final id = payload['sessionId'];
       if (id is String) {
         _locallyDeletedSessionIds.remove(id);
+        _sessionListRevision += 1;
         final existing = _sessionTree[id];
         final node = SessionTreeNode.fromWire(<String, Object?>{
           if (existing != null) ...existing.toWire(),
@@ -3558,6 +3559,7 @@ final class ConnectionCoordinator extends ChangeNotifier
       final id = payload['sessionId'];
       if (id is String) {
         _locallyDeletedSessionIds.remove(id);
+        _sessionListRevision += 1;
         final existing = _sessionTree[id];
         final node = SessionTreeNode.fromWire(<String, Object?>{
           if (existing != null) ...existing.toWire(),
@@ -3773,6 +3775,7 @@ final class ConnectionCoordinator extends ChangeNotifier
           payload['controllerState'] as String? ?? old?.controllerState,
     );
     _sessions[id] = state;
+    _sessionListRevision += 1;
     unawaited(_database.upsertSessionState(state));
     unawaited(_searchIndexer.indexSessionMeta(state));
   }
@@ -5660,6 +5663,7 @@ final class ConnectionCoordinator extends ChangeNotifier
         controllerState: _controllers.forSession(sessionId).mode.name,
       );
     }
+    _sessionListRevision += 1;
     _notify();
     final currentHost = hostId;
     if (currentHost == null) return;
