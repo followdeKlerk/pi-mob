@@ -22,7 +22,3 @@ Read the [quick start](docs/QUICKSTART.md) for main-branch source builds. `0.0.3
 - [Changelog](CHANGELOG.md)
 
 Package guides: [Android](apps/mobile/README.md), [bridge](packages/bridge/README.md), and [protocol schema](packages/protocol-schema/README.md).
-
-## Boundary
-
-The supported path is a loopback bridge exposed through private Tailscale Serve. Public listeners, Tailscale Funnel, multi-user tenancy, and Git product actions are out of scope.
