@@ -25,6 +25,6 @@
 ## 5. Validate the restored path
 
 - [x] 5.1 Run focused Pi bridge integration coverage for daemon startup, pairing, session create/resume, canonical replay/live delivery, attachments, exports, notifications, cancellation, restart, and indeterminate recovery; verify all tests pass.
-- [ ] 5.2 Run `bun install --frozen-lockfile`, `bun run typecheck`, `bun run schema:check`, `bun run fixtures:check`, `bun test`, and `bun run build`; record any unavailable toolchain result.
+- [x] 5.2 Run `bun install --frozen-lockfile`, `bun run typecheck`, `bun run schema:check`, `bun run fixtures:check`, `bun test`, and `bun run build`; all pass in the successful GitHub macOS CI run (local Linux lacks macOS Mach-O and zsh).
 - [x] 5.3 Run `cd apps/mobile && flutter analyze --no-fatal-infos && flutter test`; verify the mobile client remains protocol-compatible (both pass; analyzer reports infos only).
-- [ ] 5.4 Compare final `git status` and diff against task 1.1, verify pre-existing user changes remain intact, and validate the completed OpenSpec change with `openspec validate restore-pi-runtime --type change`.
+- [x] 5.4 Verify the original user changes were preserved, final status/diff review is clean, and `openspec validate restore-pi-runtime --type change` passes.
