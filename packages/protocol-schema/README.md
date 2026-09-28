@@ -4,7 +4,7 @@ This package contains TypeBox schemas, TypeScript types, command metadata, capab
 
 Schemas and fixtures define valid messages. They do not prove that the normal daemon constructs an optional provider or that the mobile release uses it. Check daemon construction, `hello.accepted`, integration tests, and [Project status](../../docs/PROJECT_STATUS.md).
 
-Raw OMP RPC is host-internal. The mobile protocol remains backend-neutral, and Git integration is out of scope.
+Raw Pi RPC stays host-internal. The mobile protocol uses bridge-owned IDs and canonical events; Git integration is out of scope.
 
 ## Checks
 

@@ -28,7 +28,7 @@ A schema, class, widget, or isolated test does not prove production wiring.
 - Restoration of recent chat, drafts, and attachments after reconnect.
 - Bounded host diagnostics and background FCM notifications when available.
 
-The normal daemon stores canonical session events before delivery. Raw Pi RPC remains host-internal, and the released client does not receive `raw_rpc.v1`.
+The normal daemon stores canonical session events before delivery. Raw Pi RPC stays host-internal; mobile clients receive bridge IDs and canonical events only.
 
 ## Release facts
 

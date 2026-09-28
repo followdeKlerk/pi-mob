@@ -17,14 +17,14 @@ The dated rectification and daemon-incident reports under `docs/` are historical
 
 ## Product status
 
-Pi Mob is a public repository with unsupported alpha preview binaries. Treat `docs/PROJECT_STATUS.md` as the authority for capabilities, planned work, and release scope. Do not add mutable roadmap priorities to this file.
+Pi Mob is an unsupported alpha preview. The latest main-branch runtime is not yet available in a published binary; downloadable previews are older. Treat `docs/PROJECT_STATUS.md` as the authority for capabilities, planned work, and release scope. Do not add mutable roadmap priorities to this file.
 
 ## Product boundaries
 
-- The host owns repositories, provider credentials, OMP processes, and durable session state.
+- The host owns repositories, provider credentials, Pi processes, and durable session state.
 - The Android app is a reconnectable mobile control and presentation surface.
 - The bridge owns durable delivery, controller leases, bounded host operations, and process supervision.
-- OMP retains its normal execution model; the bridge does not impose a default host policy extension.
+- The normal daemon runs Pi in its standard execution model; the bridge does not inject a default policy extension.
 - Private Tailscale Serve exposure is supported. Public listeners and Funnel are not.
 - Multi-user tenancy is not part of the product.
 

@@ -1,30 +1,19 @@
-## 1. Protect the working tree and inventory the cutover
+## Runtime and state
 
-- [x] 1.1 Capture the existing `git status` and `git diff --stat` before implementation, and verify all pre-existing uncommitted paths are recorded and unchanged.
-- [x] 1.2 Inventory OMP-only references across daemon composition, CLI/install configuration, store/backend identity, diagnostics, tests, fixtures, reports, and docs; verify the inventory names each intended replacement or deliberate retention.
+- [x] Configure the normal daemon and operator CLI to launch supervised Pi RPC sessions.
+- [x] Preserve bridge session IDs, durable state, leases, replay, attachments, exports, and configured notifications.
+- [x] Keep Pi process details, credentials, and raw RPC host-side; bound transport and output.
+- [x] Reconcile Pi history on restart and require explicit recovery when a turn outcome is indeterminate.
 
-## 2. Restore Pi production composition
+## Mobile and capability contract
 
-- [x] 2.1 Change the normal daemon options, CLI parsing, and install configuration from OMP executable/session inputs to the existing Pi launch configuration; verify Pi path validation and `--help` output.
-- [x] 2.2 Reconnect `SupervisedRpcClient`, `resolvePiLaunchConfig`, `OneSessionPiAdapter`, Pi history reconciliation, and Pi diagnostics to the current daemon composition; verify the production-wiring integration test constructs Pi without OMP.
-- [x] 2.3 Preserve current bridge session IDs, durable store state, leases, stream setup, attachment/export services, and notification construction while swapping only the execution provider; verify focused bridge runtime and session lifecycle tests.
+- [x] Preserve the existing mobile protocol and canonical transcript/event path.
+- [x] Update pairing, connection recovery, transcript rendering, activity navigation, composer, and theme.
+- [x] Verify production wiring and advertise only implemented capabilities.
+- [x] Align project, build, release, and privacy documentation with the Pi runtime and actual release state.
 
-## 3. Align backend state and behavior
+## Validation
 
-- [x] 3.1 Replace OMP-only backend identity and session-reference assumptions with Pi-compatible durable values without destructive database changes; verify fresh and existing store migration tests.
-- [x] 3.2 Carry current bounded request-frame, timeout, shutdown, output, redaction, and indeterminate-state safeguards into the Pi path, including the pre-existing working-tree transport edits; verify RPC boundary and fault-path tests.
-- [x] 3.3 Review Pi event normalization, canonical persistence, history reconciliation, model/catalogue operations, extension responses, cancellation, and restart handling against the current mobile contract; verify focused adapter and canonical-event tests.
-- [x] 3.4 Return bounded unsupported/unavailable results for operations without a Pi equivalent and ensure they are absent from capability advertisements; verify capability-report and unsupported-operation tests.
-
-## 4. Update production proof and documentation
-
-- [x] 4.1 Replace OMP assumptions in daemon, operations, lifecycle, capability, fixture, and release-consistency tests; verify the affected bridge test subset passes.
-- [x] 4.2 Update project status, architecture, protocol, quick-start, package README, privacy, and release metadata to describe only verified Pi behavior; verify `bun run docs:check` or the repository's equivalent docs validation.
-- [x] 4.3 Preserve `openspec/changes/replace-pi-runtime-with-omp` as historical evidence and verify this change's artifacts do not modify it.
-
-## 5. Validate the restored path
-
-- [x] 5.1 Run focused Pi bridge integration coverage for daemon startup, pairing, session create/resume, canonical replay/live delivery, attachments, exports, notifications, cancellation, restart, and indeterminate recovery; verify all tests pass.
-- [x] 5.2 Run `bun install --frozen-lockfile`, `bun run typecheck`, `bun run schema:check`, `bun run fixtures:check`, `bun test`, and `bun run build`; all pass in the successful GitHub macOS CI run (local Linux lacks macOS Mach-O and zsh).
-- [x] 5.3 Run `cd apps/mobile && flutter analyze --no-fatal-infos && flutter test`; verify the mobile client remains protocol-compatible (both pass; analyzer reports infos only).
-- [x] 5.4 Verify the original user changes were preserved, final status/diff review is clean, and `openspec validate restore-pi-runtime --type change` passes.
+- [x] `bun install --frozen-lockfile`, typecheck, schema, fixture, test, build, and docs checks pass on the project CI platform.
+- [x] Flutter analyze and tests pass.
+- [x] Validate this change with `openspec validate restore-pi-runtime --type change`.

@@ -15,7 +15,7 @@ The executable is written to `packages/bridge/dist/bridge-daemon`.
 
 ## Run
 
-The released target is macOS x64. The `pi-mob` CLI installs and supervises the daemon with `launchd`.
+The current main-branch bundle targets macOS x64. Version `0.0.3-alpha.1` is not yet published. The `pi-mob` CLI installs and supervises the daemon with `launchd`.
 
 ```sh
 ./bin/pi-mob setup --workspace /path/to/your/projects

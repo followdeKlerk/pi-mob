@@ -1,33 +1,15 @@
-## Why
+## Purpose
 
-The current branch preserves the bridge and mobile work but production-wires OMP as the execution backend. The project previously ran through Pi directly, and restoring Pi is needed to retain the current product behavior while returning execution to the established Pi runtime and session format.
+Document the supported Pi-backed runtime and preserve the bridge/mobile contract.
 
-## What Changes
+## Delivered
 
-- Restore Pi subprocess supervision and session operations as the normal daemon's production execution path.
-- Preserve the current mobile-facing protocol, durable bridge state, leases, replay/live delivery, canonical events, attachments, exports, notifications, and reconnect behavior.
-- Reuse the surviving Pi RPC, adapter, normalization, history, and process-supervision implementation where it covers the required behavior.
-- Replace OMP-specific daemon, install, lifecycle, backend-reference, and diagnostics wiring with Pi equivalents.
-- Keep bridge session IDs stable and keep backend-private session details out of the mobile protocol.
-- Define bounded behavior for capabilities or lifecycle operations that differ between the current OMP path and Pi.
-- Update tests, fixtures, documentation, and capability reporting to prove the Pi production construction path.
-- Do not add concurrent Pi/OMP runtime selection; the normal daemon will construct Pi only.
+- The normal daemon supervises Pi subprocesses and uses Pi's session and history model.
+- Mobile clients use stable bridge session identifiers and canonical events.
+- The bridge provides durable commands, replay, leases, attachments, exports, and configured notifications.
+- Backend-private paths, RPC payloads, and credentials remain host-side.
+- Production construction, capability reporting, lifecycle, recovery, and protocol behavior have integration coverage.
 
-## Capabilities
+## Release state
 
-### New Capabilities
-
-- `pi-runtime`: Production daemon execution through supervised Pi subprocesses while preserving the existing bridge/mobile contract.
-
-### Modified Capabilities
-
-<!-- No existing main capability specs are present; the new capability captures the restored runtime contract. -->
-
-## Impact
-
-- Bridge composition root: `packages/bridge/src/daemon.ts`.
-- Pi and OMP backend/session contracts, process supervision, normalization, history, and durable store references.
-- Operations/install configuration and CLI flags currently named for OMP.
-- Bridge integration tests, fixtures, capability reports, and project documentation.
-- Mobile code should remain protocol-compatible; only behavior exposed by backend differences may require bounded handling.
-- Existing uncommitted working-tree changes must be preserved and must not be overwritten by this change.
+The current main-branch version is `0.0.3-alpha.1` and has no published matching bridge or Android assets. See [Project status](../../../docs/PROJECT_STATUS.md) and [Quick start](../../../docs/QUICKSTART.md) before installing a preview.
