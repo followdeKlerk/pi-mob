@@ -17,6 +17,7 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:pi_mob/src/transcript/widgets/reasoning_block.dart';
+import 'package:pi_mob/src/transcript/widgets/reasoning_orb.dart';
 import 'package:pi_mob/src/transcript/widgets/view_data/reasoning_view_data.dart';
 
 ReasoningViewData _reasoning({
@@ -48,7 +49,7 @@ void main() {
       ),
     );
     expect(find.text('Thinking…'), findsOneWidget);
-    expect(find.byType(CircularProgressIndicator), findsOneWidget);
+    expect(find.byType(ReasoningOrb), findsOneWidget);
     expect(find.text('inspect code'), findsNothing);
     expect(find.byKey(const Key('reasoning-header')), findsOneWidget);
   });
@@ -61,8 +62,8 @@ void main() {
     );
     expect(find.text('Thinking'), findsOneWidget);
     expect(find.text('inspect code'), findsNothing);
-    // No spinner in completed phase.
-    expect(find.byType(CircularProgressIndicator), findsNothing);
+    // The completed phase keeps the orb as a calm, deterministic check state.
+    expect(find.byType(ReasoningOrb), findsOneWidget);
     // Expand on tap.
     await tester.tap(find.byKey(const Key('reasoning-header')));
     await tester.pump();
@@ -128,7 +129,7 @@ void main() {
       // Active begins collapsed; the user can disclose it explicitly.
       await tester.tap(find.byKey(const Key('reasoning-header')));
       await tester.pump();
-      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      expect(find.byType(ReasoningOrb), findsOneWidget);
 
       // Phase flips to completed -> expansion re-anchors to default.
       await tester.pumpWidget(
@@ -141,7 +142,8 @@ void main() {
           ),
         ),
       );
-      expect(find.byType(CircularProgressIndicator), findsNothing);
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(ReasoningOrb), findsOneWidget);
       expect(find.text('final'), findsNothing);
     },
   );
@@ -162,4 +164,50 @@ void main() {
     expect(find.bySemanticsLabel(RegExp(r'Thinking complete')), findsOneWidget);
     handle.dispose();
   });
+
+  testWidgets(
+    'empty completed reasoning visibly transitions before disappearing',
+    (tester) async {
+      final key = GlobalKey();
+      Widget build(ReasoningPhase phase, {bool reducedMotion = false}) =>
+          MaterialApp(
+            home: MediaQuery(
+              data: MediaQueryData(disableAnimations: reducedMotion),
+              child: Scaffold(
+                body: ReasoningBlock.forViewData(
+                  ReasoningViewData(
+                    reasoningId: 'transition',
+                    phase: phase,
+                    summary: '',
+                  ),
+                  key: key,
+                ),
+              ),
+            ),
+          );
+
+      await tester.pumpWidget(build(ReasoningPhase.active));
+      expect(find.byType(ReasoningOrb), findsOneWidget);
+
+      await tester.pumpWidget(build(ReasoningPhase.completed));
+      await tester.pump();
+      expect(find.byType(AnimatedSwitcher), findsOneWidget);
+      expect(find.byType(ReasoningOrb), findsWidgets);
+      expect(find.byKey(const Key('reasoning-header')), findsOneWidget);
+
+      await tester.pump(const Duration(milliseconds: 500));
+      expect(find.byKey(const Key('reasoning-header')), findsNothing);
+
+      await tester.pumpWidget(
+        build(ReasoningPhase.active, reducedMotion: true),
+      );
+      await tester.pumpWidget(
+        build(ReasoningPhase.completed, reducedMotion: true),
+      );
+      final switcher = tester.widget<AnimatedSwitcher>(
+        find.byType(AnimatedSwitcher),
+      );
+      expect(switcher.duration, Duration.zero);
+    },
+  );
 }

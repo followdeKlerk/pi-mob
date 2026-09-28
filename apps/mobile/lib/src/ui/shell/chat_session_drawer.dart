@@ -452,376 +452,420 @@ class _ChatSessionDrawerState extends State<ChatSessionDrawer> {
     return Drawer(
       key: const Key('chat-session-drawer'),
       width: MediaQuery.sizeOf(context).width.clamp(280, 360).toDouble(),
-      backgroundColor: colors.surfaceContainerLow,
+      backgroundColor: colors.surface,
       child: SafeArea(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(
-                PiSpacing.md,
-                PiSpacing.sm,
-                PiSpacing.md,
-                PiSpacing.md,
-              ),
-              child: Row(
+        child: CustomScrollView(
+          key: const Key('saved-chat-list'),
+          slivers: [
+            SliverToBoxAdapter(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: [
-                  Expanded(
-                    child: Text(
-                      'Chats',
-                      style: theme.textTheme.titleLarge?.copyWith(
-                        fontWeight: FontWeight.w700,
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      PiSpacing.md,
+                      PiSpacing.sm,
+                      PiSpacing.md,
+                      PiSpacing.md,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            'Your chats',
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: PiSpacing.xs),
+                        IconButton(
+                          key: const Key('drawer-settings'),
+                          tooltip: 'Settings',
+                          onPressed: _openSettings,
+                          icon: const Icon(Icons.settings_outlined),
+                        ),
+                        IconButton(
+                          key: const Key('close-chat-drawer'),
+                          tooltip: 'Close',
+                          onPressed: () => Navigator.of(context).pop(),
+                          icon: const Icon(Icons.close),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(
+                      PiSpacing.lg,
+                      PiSpacing.none,
+                      PiSpacing.lg,
+                      PiSpacing.lg,
+                    ),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: Semantics(
+                        label: connectionLabel == 'Issue'
+                            ? 'Connection issue: ${coordinator.errorMessage ?? coordinator.phase.name}'
+                            : connectionLabel,
+                        child: Container(
+                          key: const Key('drawer-connection-indicator'),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: PiSpacing.sm,
+                            vertical: PiSpacing.xs,
+                          ),
+                          decoration: BoxDecoration(
+                            color: colors.surfaceContainerHighest,
+                            borderRadius: BorderRadius.circular(PiRadius.pill),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 8,
+                                height: 8,
+                                decoration: BoxDecoration(
+                                  color: connectionHealthy
+                                      ? semantic.connectionReady
+                                      : connectionBusy
+                                      ? semantic.connectionDegraded
+                                      : semantic.connectionOffline,
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: PiSpacing.xs),
+                              Flexible(
+                                child: Text(
+                                  connectionLabel,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: colors.onSurfaceVariant,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),
-                  Semantics(
-                    label: connectionLabel == 'Issue'
-                        ? 'Connection issue: ${coordinator.errorMessage ?? coordinator.phase.name}'
-                        : connectionLabel,
-                    child: Container(
-                      key: const Key('drawer-connection-indicator'),
+                  if (_isOffRailConnection(coordinator.phase))
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(
+                        PiSpacing.md,
+                        PiSpacing.none,
+                        PiSpacing.md,
+                        PiSpacing.md,
+                      ),
+                      child: Container(
+                        key: const Key('drawer-connection-issue-card'),
+                        padding: const EdgeInsets.all(PiSpacing.md),
+                        decoration: BoxDecoration(
+                          color: colors.errorContainer,
+                          borderRadius: BorderRadius.circular(PiRadius.md),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Row(
+                              children: [
+                                Icon(
+                                  Icons.error_outline,
+                                  size: 18,
+                                  color: colors.onErrorContainer,
+                                ),
+                                const SizedBox(width: PiSpacing.xs),
+                                Expanded(
+                                  child: Text(
+                                    'Connection issue',
+                                    style: theme.textTheme.labelLarge?.copyWith(
+                                      color: colors.onErrorContainer,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                            const SizedBox(height: PiSpacing.xs),
+                            SelectableText(
+                              ConnectionCoordinator.sanitizeErrorMessage(
+                                coordinator.errorMessage,
+                              ),
+                              key: const Key('drawer-connection-error'),
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: colors.onErrorContainer,
+                              ),
+                            ),
+                            const SizedBox(height: PiSpacing.sm),
+                            Align(
+                              alignment: Alignment.centerRight,
+                              child: TextButton.icon(
+                                key: const Key('drawer-connection-retry'),
+                                onPressed: coordinator.retryConnection,
+                                icon: const Icon(Icons.refresh),
+                                label: const Text('Retry connection'),
+                                style: TextButton.styleFrom(
+                                  foregroundColor: colors.onErrorContainer,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  if (coordinator.phase == ConnectionPhase.synchronizing ||
+                      (coordinator.phase == ConnectionPhase.ready &&
+                          !coordinator.historyGateComplete))
+                    Padding(
                       padding: const EdgeInsets.symmetric(
-                        horizontal: PiSpacing.sm,
+                        horizontal: PiSpacing.md,
                         vertical: PiSpacing.xs,
                       ),
-                      decoration: BoxDecoration(
-                        color: colors.surfaceContainerHighest,
-                        borderRadius: BorderRadius.circular(PiRadius.pill),
-                      ),
-                      child: Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Container(
-                            width: 8,
-                            height: 8,
-                            decoration: BoxDecoration(
-                              color: connectionHealthy
-                                  ? semantic.connectionReady
-                                  : connectionBusy
-                                  ? semantic.connectionDegraded
-                                  : semantic.connectionOffline,
-                              shape: BoxShape.circle,
+                      child: Container(
+                        key: const Key('drawer-history-sync-indicator'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: PiSpacing.md,
+                          vertical: PiSpacing.sm,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.primaryContainer,
+                          borderRadius: BorderRadius.circular(PiRadius.md),
+                        ),
+                        child: Row(
+                          children: [
+                            SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: MotionSpinner(
+                                strokeWidth: 2,
+                                dimension: 14,
+                                label: 'Syncing chats',
+                              ),
                             ),
-                          ),
-                          const SizedBox(width: PiSpacing.xs),
-                          Text(
-                            connectionLabel,
-                            style: theme.textTheme.labelSmall?.copyWith(
-                              color: colors.onSurfaceVariant,
-                              fontWeight: FontWeight.w600,
+                            const SizedBox(width: PiSpacing.sm),
+                            Expanded(
+                              child: Text(
+                                coordinator.phase ==
+                                        ConnectionPhase.synchronizing
+                                    ? 'Syncing chat history…'
+                                    : 'Loading saved chats\u2026',
+                                style: theme.textTheme.labelSmall,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: PiSpacing.md,
+                    ),
+                    child: FilledButton.icon(
+                      key: const Key('new-chat-button'),
+                      onPressed: coordinator.isReady && !creation.isCreating
+                          ? _newChat
+                          : null,
+                      icon: const Icon(Icons.edit_square, size: 19),
+                      label: const Text('New chat'),
+                    ),
                   ),
-                  const SizedBox(width: PiSpacing.xs),
-                  IconButton(
-                    key: const Key('drawer-settings'),
-                    tooltip: 'Settings',
-                    onPressed: _openSettings,
-                    icon: const Icon(Icons.settings_outlined),
-                  ),
-                  IconButton(
-                    key: const Key('close-chat-drawer'),
-                    tooltip: 'Close',
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
+                  if (creation.isCreating)
+                    const Padding(
+                      padding: EdgeInsets.only(
+                        left: PiSpacing.md,
+                        top: PiSpacing.sm,
+                        right: PiSpacing.md,
+                      ),
+                      child: Row(
+                        key: Key('creating-chat-indicator'),
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          SizedBox(
+                            width: 14,
+                            height: 14,
+                            child: MotionSpinner(
+                              strokeWidth: 2,
+                              dimension: 14,
+                              label: 'Creating chat',
+                            ),
+                          ),
+                          SizedBox(width: PiSpacing.sm),
+                          Text('Creating chat…'),
+                        ],
+                      ),
+                    )
+                  else if (creation.phase == SessionCreationPhase.failed)
+                    Padding(
+                      padding: const EdgeInsets.only(
+                        left: PiSpacing.md,
+                        top: PiSpacing.sm,
+                        right: PiSpacing.md,
+                      ),
+                      child: Text(
+                        creation.error ?? 'Could not create chat.',
+                        key: const Key('creating-chat-error'),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: colors.error,
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: PiSpacing.sm),
+                  if (transcriptSyncing)
+                    Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: PiSpacing.md,
+                      ),
+                      child: Container(
+                        key: const Key('drawer-transcript-sync-indicator'),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: PiSpacing.md,
+                          vertical: PiSpacing.sm,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.primaryContainer,
+                          borderRadius: BorderRadius.circular(PiRadius.md),
+                        ),
+                        child: Row(
+                          children: [
+                            const SizedBox(
+                              width: 14,
+                              height: 14,
+                              child: MotionSpinner(
+                                strokeWidth: 2,
+                                dimension: 14,
+                                label: 'Syncing chat history',
+                              ),
+                            ),
+                            const SizedBox(width: PiSpacing.sm),
+                            Expanded(
+                              child: Text(
+                                'Syncing open chat · ${coordinator.historyEventCount(selectedSessionId)} events',
+                                style: theme.textTheme.labelSmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  const SizedBox(height: PiSpacing.sm),
                 ],
               ),
             ),
-            if (_isOffRailConnection(coordinator.phase))
-              Padding(
-                padding: const EdgeInsets.fromLTRB(
-                  PiSpacing.md,
-                  PiSpacing.none,
-                  PiSpacing.md,
-                  PiSpacing.md,
-                ),
-                child: Container(
-                  key: const Key('drawer-connection-issue-card'),
-                  padding: const EdgeInsets.all(PiSpacing.md),
-                  decoration: BoxDecoration(
-                    color: colors.errorContainer,
-                    borderRadius: BorderRadius.circular(PiRadius.md),
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Row(
-                        children: [
-                          Icon(
-                            Icons.error_outline,
-                            size: 18,
-                            color: colors.onErrorContainer,
-                          ),
-                          const SizedBox(width: PiSpacing.xs),
-                          Expanded(
-                            child: Text(
-                              'Connection issue',
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                color: colors.onErrorContainer,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: PiSpacing.xs),
-                      SelectableText(
-                        ConnectionCoordinator.sanitizeErrorMessage(
-                          coordinator.errorMessage,
+            if (sessions.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(
+                  child: Padding(
+                    padding: const EdgeInsets.all(PiSpacing.xl),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          Icons.forum_rounded,
+                          size: 40,
+                          color: colors.secondary,
                         ),
-                        key: const Key('drawer-connection-error'),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: colors.onErrorContainer,
-                        ),
-                      ),
-                      const SizedBox(height: PiSpacing.sm),
-                      Align(
-                        alignment: Alignment.centerRight,
-                        child: TextButton.icon(
-                          key: const Key('drawer-connection-retry'),
-                          onPressed: coordinator.retryConnection,
-                          icon: const Icon(Icons.refresh),
-                          label: const Text('Retry connection'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: colors.onErrorContainer,
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            if (coordinator.phase == ConnectionPhase.synchronizing ||
-                (coordinator.phase == ConnectionPhase.ready &&
-                    !coordinator.historyGateComplete))
-              Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: PiSpacing.md,
-                  vertical: PiSpacing.xs,
-                ),
-                child: Container(
-                  key: const Key('drawer-history-sync-indicator'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: PiSpacing.md,
-                    vertical: PiSpacing.sm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colors.primaryContainer,
-                    borderRadius: BorderRadius.circular(PiRadius.md),
-                  ),
-                  child: Row(
-                    children: [
-                      SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: MotionSpinner(
-                          strokeWidth: 2,
-                          dimension: 14,
-                          label: 'Syncing chats',
-                        ),
-                      ),
-                      const SizedBox(width: PiSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          coordinator.phase == ConnectionPhase.synchronizing
-                              ? 'Syncing chat history…'
-                              : 'Loading saved chats\u2026',
-                          style: theme.textTheme.labelSmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md),
-              child: FilledButton.icon(
-                key: const Key('new-chat-button'),
-                onPressed: coordinator.isReady && !creation.isCreating
-                    ? _newChat
-                    : null,
-                icon: const Icon(Icons.edit_square, size: 19),
-                label: const Text('New chat'),
-              ),
-            ),
-            if (creation.isCreating)
-              const Padding(
-                padding: EdgeInsets.only(
-                  left: PiSpacing.md,
-                  top: PiSpacing.sm,
-                  right: PiSpacing.md,
-                ),
-                child: Row(
-                  key: Key('creating-chat-indicator'),
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: MotionSpinner(
-                        strokeWidth: 2,
-                        dimension: 14,
-                        label: 'Creating chat',
-                      ),
-                    ),
-                    SizedBox(width: PiSpacing.sm),
-                    Text('Creating chat…'),
-                  ],
-                ),
-              )
-            else if (creation.phase == SessionCreationPhase.failed)
-              Padding(
-                padding: const EdgeInsets.only(
-                  left: PiSpacing.md,
-                  top: PiSpacing.sm,
-                  right: PiSpacing.md,
-                ),
-                child: Text(
-                  creation.error ?? 'Could not create chat.',
-                  key: const Key('creating-chat-error'),
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: colors.error,
-                  ),
-                ),
-              ),
-            const SizedBox(height: PiSpacing.sm),
-            if (transcriptSyncing)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md),
-                child: Container(
-                  key: const Key('drawer-transcript-sync-indicator'),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: PiSpacing.md,
-                    vertical: PiSpacing.sm,
-                  ),
-                  decoration: BoxDecoration(
-                    color: colors.primaryContainer,
-                    borderRadius: BorderRadius.circular(PiRadius.md),
-                  ),
-                  child: Row(
-                    children: [
-                      const SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: MotionSpinner(
-                          strokeWidth: 2,
-                          dimension: 14,
-                          label: 'Syncing chat history',
-                        ),
-                      ),
-                      const SizedBox(width: PiSpacing.sm),
-                      Expanded(
-                        child: Text(
-                          'Syncing open chat · ${coordinator.historyEventCount(selectedSessionId)} events',
-                          style: theme.textTheme.labelSmall,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            const SizedBox(height: PiSpacing.sm),
-            Expanded(
-              child: sessions.isEmpty
-                  ? Center(
-                      child: Padding(
-                        padding: const EdgeInsets.all(PiSpacing.xl),
-                        child: Text(
+                        const SizedBox(height: PiSpacing.md),
+                        Text(
                           'No saved chats yet',
+                          style: theme.textTheme.titleMedium,
+                        ),
+                        const SizedBox(height: PiSpacing.sm),
+                        Text(
+                          'Start a new chat in a folder on your host.',
+                          textAlign: TextAlign.center,
                           style: theme.textTheme.bodyMedium?.copyWith(
                             color: colors.onSurfaceVariant,
                           ),
                         ),
-                      ),
-                    )
-                  : ListView.builder(
-                      key: const Key('saved-chat-list'),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: PiSpacing.sm,
-                      ),
-                      itemCount: groupedEntries.length,
-                      itemBuilder: (context, index) {
-                        final entry = groupedEntries[index];
-                        if (entry is String) {
-                          return Padding(
-                            padding: const EdgeInsets.fromLTRB(
-                              PiSpacing.sm,
-                              PiSpacing.md,
-                              PiSpacing.sm,
-                              PiSpacing.xs,
-                            ),
+                      ],
+                    ),
+                  ),
+                ),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.symmetric(horizontal: PiSpacing.md),
+                sliver: SliverList.builder(
+                  itemCount: groupedEntries.length,
+                  itemBuilder: (context, index) {
+                    final entry = groupedEntries[index];
+                    if (entry is String) {
+                      return Padding(
+                        padding: const EdgeInsets.fromLTRB(
+                          PiSpacing.sm,
+                          PiSpacing.md,
+                          PiSpacing.sm,
+                          PiSpacing.xs,
+                        ),
+                        child: Text(
+                          entry,
+                          style: theme.textTheme.labelLarge?.copyWith(
+                            color: colors.onSurfaceVariant,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      );
+                    }
+                    final session = entry as SessionState;
+                    final selected =
+                        session.sessionId == coordinator.selectedSessionId;
+                    return Padding(
+                      padding: const EdgeInsets.only(bottom: PiSpacing.sm),
+                      child: ListTile(
+                        key: Key('saved-chat-${session.sessionId}'),
+                        selected: selected,
+                        selectedTileColor: colors.primaryContainer,
+                        selectedColor: colors.onPrimaryContainer,
+                        tileColor: colors.surfaceContainerLow,
+                        minVerticalPadding: PiSpacing.md,
+                        minTileHeight: 64,
+                        contentPadding: const EdgeInsets.symmetric(
+                          horizontal: PiSpacing.sm,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(PiRadius.md),
+                        ),
+                        leading: Icon(
+                          selected
+                              ? Icons.chat_bubble_rounded
+                              : Icons.chat_bubble_outline_rounded,
+                          size: 22,
+                          color: selected ? colors.primary : colors.secondary,
+                        ),
+                        title: Text(
+                          _title(session),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        subtitle: switch (_context(session)) {
+                          final context? => Padding(
+                            padding: const EdgeInsets.only(top: PiSpacing.xs),
                             child: Text(
-                              entry,
-                              style: theme.textTheme.labelLarge?.copyWith(
-                                color: colors.onSurfaceVariant,
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                          );
-                        }
-                        final session = entry as SessionState;
-                        final selected =
-                            session.sessionId == coordinator.selectedSessionId;
-                        return Padding(
-                          padding: const EdgeInsets.only(bottom: PiSpacing.xs),
-                          child: ListTile(
-                            key: Key('saved-chat-${session.sessionId}'),
-                            selected: selected,
-                            selectedTileColor: colors.secondaryContainer,
-                            dense: true,
-                            visualDensity: const VisualDensity(vertical: -1),
-                            contentPadding: const EdgeInsets.symmetric(
-                              horizontal: PiSpacing.sm,
-                            ),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(PiRadius.md),
-                            ),
-                            leading: Icon(
-                              Icons.chat_bubble_outline,
-                              size: 20,
-                              color: colors.onSurfaceVariant,
-                            ),
-                            title: Text(
-                              _title(session),
+                              context,
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                            subtitle: switch (_context(session)) {
-                              final context? => Padding(
-                                padding: const EdgeInsets.only(
-                                  top: PiSpacing.xs,
-                                ),
-                                child: Text(
-                                  context,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              null => null,
-                            },
-                            trailing: IconButton(
-                              key: Key('chat-actions-${session.sessionId}'),
-                              tooltip: 'Chat actions',
-                              onPressed: coordinator.isReady
-                                  ? () => unawaited(_openChatActions(session))
-                                  : null,
-                              icon: const Icon(Icons.more_horiz),
-                            ),
-                            onTap: () =>
-                                unawaited(_selectSession(session.sessionId)),
                           ),
-                        );
-                      },
-                    ),
-            ),
-            const Divider(height: 1),
+                          null => null,
+                        },
+                        trailing: IconButton(
+                          key: Key('chat-actions-${session.sessionId}'),
+                          tooltip: 'Chat actions',
+                          onPressed: coordinator.isReady
+                              ? () => unawaited(_openChatActions(session))
+                              : null,
+                          icon: const Icon(Icons.more_horiz),
+                        ),
+                        onTap: () =>
+                            unawaited(_selectSession(session.sessionId)),
+                      ),
+                    );
+                  },
+                ),
+              ),
           ],
         ),
       ),

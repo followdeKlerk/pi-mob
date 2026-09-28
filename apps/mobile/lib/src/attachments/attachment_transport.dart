@@ -97,7 +97,20 @@ class PrivateBinaryTransport {
     final response = await request.close();
     final body = await utf8.decoder.bind(response).join();
     if (response.statusCode < 200 || response.statusCode >= 300) {
-      throw HttpException('Attachment upload failed (${response.statusCode})');
+      String? message;
+      try {
+        final decoded = jsonDecode(body);
+        if (decoded is Map && decoded['message'] is String) {
+          message = decoded['message'] as String;
+        }
+      } on FormatException {
+        // Keep the HTTP status when the bridge did not return JSON.
+      }
+      throw HttpException(
+        message == null
+            ? 'Attachment upload failed (${response.statusCode})'
+            : 'Attachment upload failed (${response.statusCode}): $message',
+      );
     }
     final json = jsonDecode(body) as Map<String, Object?>;
     return UploadedAttachment(
@@ -108,6 +121,38 @@ class PrivateBinaryTransport {
       width: json['width'] as int,
       height: json['height'] as int,
       expiresAt: DateTime.parse(json['expiresAt'] as String).toUtc(),
+    );
+  }
+
+  Future<Uint8List> downloadAttachment({
+    required Uri hostOrigin,
+    required String attachmentId,
+    required String installationId,
+    required String installationCredential,
+  }) async {
+    _requirePrivateOrigin(hostOrigin);
+    if (!RegExp(
+      r'^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$',
+    ).hasMatch(attachmentId)) {
+      throw const FormatException('Invalid attachment ID');
+    }
+    final request = await _client.getUrl(
+      hostOrigin.resolve('/v1/attachments/$attachmentId'),
+    );
+    request.headers
+      ..set('x-installation-id', installationId)
+      ..set('x-installation-credential', installationCredential);
+    final response = await request.close();
+    if (response.statusCode != HttpStatus.ok ||
+        (response.headers.contentType?.mimeType != 'image/jpeg' &&
+            response.headers.contentType?.mimeType != 'image/png')) {
+      throw HttpException('Attachment unavailable (${response.statusCode})');
+    }
+    return Uint8List.fromList(
+      await response.fold<List<int>>(
+        <int>[],
+        (bytes, chunk) => bytes..addAll(chunk),
+      ),
     );
   }
 

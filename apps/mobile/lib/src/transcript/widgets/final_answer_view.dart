@@ -17,8 +17,9 @@
 /// paragraph happen in the parser.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 import 'view_data/final_answer_view_data.dart';
@@ -71,7 +72,9 @@ class FinalAnswerView extends StatelessWidget {
     final scheme = theme.colorScheme;
     // Calm, readable body type. `bodyLarge` is the primary reading size
     // in M3; it scales predictably with the system text scaler.
-    final baseStyle = theme.textTheme.bodyLarge ?? const TextStyle();
+    final baseStyle = (theme.textTheme.bodyLarge ?? const TextStyle()).copyWith(
+      height: 1.55,
+    );
     final codeStyle = baseStyle.copyWith(
       fontFamily: 'monospace',
       fontSize: (baseStyle.fontSize ?? 14) - 1,
@@ -109,32 +112,36 @@ class FinalAnswerView extends StatelessWidget {
             // 100% and 200% without forcing a horizontal scroll.
             mainAxisSize: MainAxisSize.min,
             children: [
-              Align(
-                alignment: Alignment.centerRight,
-                child: Wrap(
-                  spacing: 4,
-                  children: [
-                    IconButton(
-                      key: ValueKey('copy-answer-${data.answerId}'),
-                      tooltip: 'Copy answer',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () =>
-                          Clipboard.setData(ClipboardData(text: data.markdown)),
-                      icon: const Icon(Icons.copy_outlined, size: 18),
-                    ),
-                    IconButton(
-                      key: ValueKey('share-answer-${data.answerId}'),
-                      tooltip: 'Share answer',
-                      visualDensity: VisualDensity.compact,
-                      onPressed: () => SharePlus.instance.share(
-                        ShareParams(text: data.markdown),
-                      ),
-                      icon: const Icon(Icons.share_outlined, size: 18),
-                    ),
-                  ],
+              SelectionArea(
+                contextMenuBuilder: (context, state) {
+                  final items =
+                      List<ContextMenuButtonItem>.of(
+                        state.contextMenuButtonItems,
+                      )..add(
+                        ContextMenuButtonItem(
+                          label: 'Share',
+                          onPressed: () {
+                            final selected = state.textEditingValue.text;
+                            state.hideToolbar();
+                            unawaited(
+                              SharePlus.instance.share(
+                                ShareParams(text: selected),
+                              ),
+                            );
+                          },
+                        ),
+                      );
+                  return AdaptiveTextSelectionToolbar.buttonItems(
+                    anchors: state.contextMenuAnchors,
+                    buttonItems: items,
+                  );
+                },
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: widgets,
                 ),
               ),
-              ...widgets,
             ],
           ),
         ),

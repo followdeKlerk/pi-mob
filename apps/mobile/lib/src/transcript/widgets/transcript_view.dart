@@ -1,8 +1,12 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../../ui/theme/pi_tokens.dart';
-import 'package:flutter/rendering.dart';
-import 'package:flutter/services.dart';
+import '../../ui/shell/pi_brand_mark.dart';
+import '../../ui/shell/motion_primitives.dart';
 
 import '../../domain/mobile_state.dart';
 import '../domain/transcript_document.dart';
@@ -27,6 +31,7 @@ class TranscriptView extends StatefulWidget {
   const TranscriptView({
     required this.document,
     this.onEditUserMessage,
+    this.attachmentLoader,
     this.onScrollPersist,
     this.initialScrollOffset,
     this.initialFollowMode,
@@ -35,6 +40,7 @@ class TranscriptView extends StatefulWidget {
 
   final TranscriptDocument document;
   final ValueChanged<String>? onEditUserMessage;
+  final Future<Uint8List> Function(String attachmentId)? attachmentLoader;
 
   /// R12 — Persisted scroll observer. Invoked on every user-initiated
   /// scroll change with the latest stable pixel offset and the resolved
@@ -283,10 +289,33 @@ class _TranscriptViewState extends State<TranscriptView> {
                   Expanded(
                     child: turns.isEmpty
                         ? Center(
-                            child: Text(
-                              'No transcript yet',
-                              style: text.bodyMedium?.copyWith(
-                                color: scheme.onSurfaceVariant,
+                            child: SingleChildScrollView(
+                              padding: const EdgeInsets.all(PiSpacing.xl),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  const PiBrandMark(size: 48),
+                                  const SizedBox(height: PiSpacing.lg),
+                                  Text(
+                                    'A fresh page.',
+                                    style: text.headlineSmall?.copyWith(
+                                      fontWeight: FontWeight.w800,
+                                    ),
+                                  ),
+                                  const SizedBox(height: PiSpacing.sm),
+                                  Text(
+                                    'No transcript yet',
+                                    style: text.titleSmall,
+                                  ),
+                                  const SizedBox(height: PiSpacing.xs),
+                                  Text(
+                                    'Send a message to get things moving.',
+                                    textAlign: TextAlign.center,
+                                    style: text.bodyMedium?.copyWith(
+                                      color: scheme.onSurfaceVariant,
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           )
@@ -294,6 +323,11 @@ class _TranscriptViewState extends State<TranscriptView> {
                             onNotification: _onUserScroll,
                             child: ListView.builder(
                               key: const Key('transcript-list'),
+                              padding: EdgeInsets.symmetric(
+                                horizontal: ((constraints.maxWidth - 760) / 2)
+                                    .clamp(0, double.infinity),
+                                vertical: PiSpacing.md,
+                              ),
                               controller: _controller,
                               itemCount: turns.length,
                               itemBuilder: (context, index) => RepaintBoundary(
@@ -301,6 +335,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                                 child: _TurnView(
                                   turn: turns[index],
                                   onEditUserMessage: widget.onEditUserMessage,
+                                  attachmentLoader: widget.attachmentLoader,
                                 ),
                               ),
                             ),
@@ -312,7 +347,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                 Positioned(
                   right: 12,
                   bottom: 12,
-                  child: FloatingActionButton.small(
+                  child: FloatingActionButton(
                     key: const Key('jump-to-latest'),
                     onPressed: () => _scrollToLatest(userInitiated: true),
                     tooltip:
@@ -332,11 +367,89 @@ class _TranscriptViewState extends State<TranscriptView> {
   }
 }
 
+class _UserAttachment extends StatefulWidget {
+  const _UserAttachment({super.key, required this.attachmentId, this.loader});
+  final String attachmentId;
+  final Future<Uint8List> Function(String attachmentId)? loader;
+
+  @override
+  State<_UserAttachment> createState() => _UserAttachmentState();
+}
+
+class _UserAttachmentState extends State<_UserAttachment> {
+  late Future<Uint8List>? _bytes = widget.loader?.call(widget.attachmentId);
+
+  @override
+  void didUpdateWidget(covariant _UserAttachment oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.attachmentId != widget.attachmentId) {
+      _bytes = widget.loader?.call(widget.attachmentId);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final future = _bytes;
+    if (future == null)
+      return const _AttachmentFallback(label: 'Image unavailable');
+    return FutureBuilder<Uint8List>(
+      future: future,
+      builder: (context, snapshot) {
+        if (snapshot.hasError)
+          return const _AttachmentFallback(label: 'Image unavailable');
+        if (!snapshot.hasData) {
+          return const SizedBox(
+            height: 96,
+            child: Center(
+              child: MotionSpinner(dimension: 24, label: 'Loading image'),
+            ),
+          );
+        }
+        return Padding(
+          padding: const EdgeInsets.only(bottom: PiSpacing.sm),
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(PiRadius.md),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 280),
+              child: Image.memory(
+                snapshot.data!,
+                key: ValueKey('user-attachment-image-${widget.attachmentId}'),
+                fit: BoxFit.contain,
+                errorBuilder: (_, _, _) =>
+                    const _AttachmentFallback(label: 'Image unavailable'),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _AttachmentFallback extends StatelessWidget {
+  const _AttachmentFallback({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(bottom: PiSpacing.sm),
+    child: Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.broken_image_outlined),
+        const SizedBox(width: PiSpacing.xs),
+        Text(label),
+      ],
+    ),
+  );
+}
+
 class TranscriptEventView extends StatefulWidget {
   const TranscriptEventView({
     required this.streamId,
     required this.events,
     this.onEditUserMessage,
+    this.attachmentLoader,
     this.onScrollPersist,
     this.initialScrollOffset,
     this.initialFollowMode,
@@ -346,6 +459,7 @@ class TranscriptEventView extends StatefulWidget {
   final String streamId;
   final List<StreamEventState> events;
   final ValueChanged<String>? onEditUserMessage;
+  final Future<Uint8List> Function(String attachmentId)? attachmentLoader;
 
   /// R12 — Threaded through to the inner TranscriptView.
   final void Function(int offset, bool followMode)? onScrollPersist;
@@ -417,6 +531,7 @@ class _TranscriptEventViewState extends State<TranscriptEventView> {
   Widget build(BuildContext context) => TranscriptView(
     document: _state.document,
     onEditUserMessage: widget.onEditUserMessage,
+    attachmentLoader: widget.attachmentLoader,
     onScrollPersist: widget.onScrollPersist,
     initialScrollOffset: widget.initialScrollOffset,
     initialFollowMode: widget.initialFollowMode,
@@ -424,45 +539,18 @@ class _TranscriptEventViewState extends State<TranscriptEventView> {
 }
 
 class _TurnView extends StatelessWidget {
-  const _TurnView({required this.turn, this.onEditUserMessage});
+  const _TurnView({
+    required this.turn,
+    this.onEditUserMessage,
+    this.attachmentLoader,
+  });
   final Turn turn;
   final ValueChanged<String>? onEditUserMessage;
+  final Future<Uint8List> Function(String attachmentId)? attachmentLoader;
 
   /// Horizontal inset shared with the inner widgets so system / user rows
   /// align with the rest of the transcript.
   static const double _contentInset = 16;
-
-  Future<void> _showUserActions(BuildContext context, String message) async {
-    await showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (sheetContext) => SafeArea(
-        child: Wrap(
-          children: [
-            ListTile(
-              leading: const Icon(Icons.copy_outlined),
-              title: const Text('Copy prompt'),
-              onTap: () async {
-                await Clipboard.setData(ClipboardData(text: message));
-                if (sheetContext.mounted) Navigator.of(sheetContext).pop();
-              },
-            ),
-            if (onEditUserMessage != null)
-              ListTile(
-                key: const Key('edit-user-message-as-draft'),
-                leading: const Icon(Icons.edit_outlined),
-                title: const Text('Edit as new draft'),
-                subtitle: const Text('Nothing is sent automatically'),
-                onTap: () {
-                  Navigator.of(sheetContext).pop();
-                  onEditUserMessage!(message);
-                },
-              ),
-          ],
-        ),
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
@@ -486,6 +574,31 @@ class _TurnView extends StatelessWidget {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(
+                  _contentInset,
+                  PiSpacing.sm,
+                  _contentInset,
+                  PiSpacing.xs,
+                ),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.auto_awesome_rounded,
+                      size: 18,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: PiSpacing.sm),
+                    Text(
+                      'Pi',
+                      style: text.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        color: scheme.primary,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
               for (final item in assistant.items)
                 if (item is ReasoningItem)
                   ReasoningBlock.forViewData(
@@ -561,24 +674,73 @@ class _TurnView extends StatelessWidget {
             child: Semantics(
               container: true,
               label: 'Your message',
-              child: InkWell(
-                borderRadius: BorderRadius.circular(PiRadius.lg),
-                onLongPress: () => _showUserActions(context, message),
+              child: SelectionArea(
+                contextMenuBuilder: (context, state) {
+                  final items =
+                      List<ContextMenuButtonItem>.of(
+                        state.contextMenuButtonItems,
+                      )..add(
+                        ContextMenuButtonItem(
+                          label: 'Share',
+                          onPressed: () {
+                            final selected = state.textEditingValue.text;
+                            state.hideToolbar();
+                            SharePlus.instance.share(
+                              ShareParams(text: selected),
+                            );
+                          },
+                        ),
+                      );
+                  if (onEditUserMessage != null) {
+                    items.add(
+                      ContextMenuButtonItem(
+                        label: 'Edit as new draft',
+                        onPressed: () {
+                          state.hideToolbar();
+                          onEditUserMessage!(message);
+                        },
+                      ),
+                    );
+                  }
+                  return AdaptiveTextSelectionToolbar.buttonItems(
+                    anchors: state.contextMenuAnchors,
+                    buttonItems: items,
+                  );
+                },
                 child: Container(
                   padding: const EdgeInsets.symmetric(
-                    horizontal: PiSpacing.md,
-                    vertical: PiSpacing.sm,
+                    horizontal: PiSpacing.lg,
+                    vertical: PiSpacing.md,
                   ),
                   decoration: BoxDecoration(
-                    color: scheme.primary.withValues(alpha: 0.22),
-                    border: Border.all(
-                      color: scheme.primary.withValues(alpha: 0.5),
+                    color: scheme.primaryContainer,
+                    borderRadius: const BorderRadius.only(
+                      topLeft: Radius.circular(PiRadius.lg),
+                      topRight: Radius.circular(PiRadius.lg),
+                      bottomLeft: Radius.circular(PiRadius.lg),
+                      bottomRight: Radius.circular(PiRadius.sm),
                     ),
-                    borderRadius: BorderRadius.circular(PiRadius.lg),
                   ),
-                  child: Text(
-                    message,
-                    style: text.bodyLarge?.copyWith(color: scheme.onSurface),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      if (user.attachmentIds.isNotEmpty)
+                        for (final attachmentId in user.attachmentIds)
+                          _UserAttachment(
+                            key: ValueKey('user-attachment-$attachmentId'),
+                            attachmentId: attachmentId,
+                            loader: attachmentLoader,
+                          ),
+                      if (user.attachmentIds.isNotEmpty)
+                        const SizedBox(height: PiSpacing.sm),
+                      Text(
+                        message,
+                        style: text.bodyLarge?.copyWith(
+                          color: scheme.onPrimaryContainer,
+                          height: 1.5,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
               ),

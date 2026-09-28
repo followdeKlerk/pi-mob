@@ -8,12 +8,13 @@
  *   - `remove_state`: same as `retain_data`, plus delete state, secrets,
  *     logs, and backups.
  *   - `full`: same as `remove_state`, plus delete everything else
- *     associated with the install. The OMP session directory is **always**
+ *     associated with the install. The Pi session directory is **always**
  *     preserved unless the caller explicitly opts in via
- *     {@link UninstallOptions.removeOmpSessionDir}.
+ *     {@link UninstallOptions.removePiSessionDir}.
  *
- * The uninstall flow never removes the OMP session directory by default,
- * even in `full` mode.
+ * The uninstall flow never removes the Pi session directory by default,
+ * even in `full` mode. This matches the M7 exit criterion: "Uninstall
+ * preserves Pi sessions by default."
  */
 
 import {
@@ -28,8 +29,8 @@ import type { ClockPort, FileSystemPort } from "./ports";
 export type UninstallMode = "retain_data" | "remove_state" | "full";
 
 export interface UninstallPaths extends InstallPaths {
-  /** OMP session directory; never removed unless explicitly opted in. */
-  readonly ompSessionDir: string;
+  /** Pi session directory; never removed unless explicitly opted in. */
+  readonly piSessionDir: string;
 }
 
 export interface UninstallOptions {
@@ -38,11 +39,11 @@ export interface UninstallOptions {
   readonly fs: FileSystemPort;
   readonly clock: ClockPort;
   /**
-   * When true, the OMP session directory is included in the removal set.
-   * Default `false`. Even `full` mode preserves the OMP session directory
+   * When true, the Pi session directory is included in the removal set.
+   * Default `false`. Even `full` mode preserves the Pi session directory
    * unless this flag is set.
    */
-  readonly removeOmpSessionDir?: boolean;
+  readonly removePiSessionDir?: boolean;
   /**
    * Optional safety guard. When true, refuses to remove anything that
    * resolves to a path outside `paths.installRoot`. Defaults to `true`.
@@ -54,8 +55,8 @@ export interface UninstallPlan {
   readonly mode: UninstallMode;
   readonly remove: readonly string[];
   readonly preserve: readonly string[];
-  readonly ompSessionDir: string;
-  readonly ompSessionDirRemoved: boolean;
+  readonly piSessionDir: string;
+  readonly piSessionDirRemoved: boolean;
   readonly timestamp: string;
 }
 
@@ -64,7 +65,7 @@ export interface UninstallResult {
   readonly plan: UninstallPlan;
   readonly removed: readonly string[];
   readonly preserved: readonly string[];
-  readonly ompSessionDirRemoved: boolean;
+  readonly piSessionDirRemoved: boolean;
   readonly timestamp: string;
 }
 
@@ -80,8 +81,8 @@ export class UninstallPlanError extends Error {
  * Computes the uninstall plan without performing any filesystem I/O. The
  * plan records which paths will be removed and which will be preserved.
  *
- * The OMP session directory is always preserved unless
- * {@link UninstallOptions.removeOmpSessionDir} is explicitly set.
+ * The Pi session directory is always preserved unless
+ * {@link UninstallOptions.removePiSessionDir} is explicitly set.
  */
 export function planUninstall(options: UninstallOptions): UninstallPlan {
   validateUninstallOptions(options);
@@ -150,20 +151,20 @@ export function planUninstall(options: UninstallOptions): UninstallPlan {
     toPreserve.push(options.paths.installRoot);
   }
 
-  // OMP session directory: always preserved unless explicit opt-in.
-  const ompSessionDirRemoved = options.removeOmpSessionDir === true;
-  if (ompSessionDirRemoved) {
-    toRemove.push(options.paths.ompSessionDir);
+  // Pi session directory: always preserved unless explicit opt-in.
+  const piSessionDirRemoved = options.removePiSessionDir === true;
+  if (piSessionDirRemoved) {
+    toRemove.push(options.paths.piSessionDir);
   } else {
-    toPreserve.push(options.paths.ompSessionDir);
+    toPreserve.push(options.paths.piSessionDir);
   }
 
   return {
     mode: options.mode,
     remove: dedupe(toRemove),
     preserve: dedupe(toPreserve),
-    ompSessionDir: options.paths.ompSessionDir,
-    ompSessionDirRemoved,
+    piSessionDir: options.paths.piSessionDir,
+    piSessionDirRemoved,
     timestamp: options.clock.iso(),
   };
 }
@@ -198,13 +199,13 @@ export function executeUninstall(options: UninstallOptions): UninstallResult {
     plan,
     removed,
     preserved,
-    ompSessionDirRemoved: plan.ompSessionDirRemoved,
+    piSessionDirRemoved: plan.piSessionDirRemoved,
     timestamp: options.clock.iso(),
   };
 }
 
 function validateUninstallOptions(options: UninstallOptions): void {
-  for (const [name, path] of [["installRoot", options.paths.installRoot], ["ompSessionDir", options.paths.ompSessionDir]] as const) {
+  for (const [name, path] of [["installRoot", options.paths.installRoot], ["piSessionDir", options.paths.piSessionDir]] as const) {
     const segments = path.split("/").filter(Boolean);
     if (path === "/" || segments.length < 2) {
       throw new UninstallPlanError("unsafe_removal_root", `${name} is too broad for recursive removal`);
@@ -212,7 +213,7 @@ function validateUninstallOptions(options: UninstallOptions): void {
   }
   for (const path of [options.paths.installRoot, options.paths.configFile, options.paths.stateRoot,
     options.paths.logRoot, options.paths.backupRoot, options.paths.secretsRoot, options.paths.binRoot,
-    options.paths.plistPath, options.paths.envFile, options.paths.ompSessionDir]) {
+    options.paths.plistPath, options.paths.envFile, options.paths.piSessionDir]) {
     assertAbsolute(`paths.${describePath(options.paths, path)}`, path);
     assertNoTraversal(`paths.${describePath(options.paths, path)}`, path);
   }
@@ -228,7 +229,7 @@ function describePath(paths: UninstallPaths, path: string): string {
   if (path === paths.binRoot) return "binRoot";
   if (path === paths.plistPath) return "plistPath";
   if (path === paths.envFile) return "envFile";
-  if (path === paths.ompSessionDir) return "ompSessionDir";
+  if (path === paths.piSessionDir) return "piSessionDir";
   return "unknown";
 }
 

@@ -5,7 +5,9 @@ import 'package:flutter/material.dart';
 import '../../connection/connection_coordinator.dart';
 import '../../domain/prompt_send_lifecycle.dart';
 import '../../notifications/notification_controller.dart';
+import '../theme/pi_tokens.dart';
 import 'activity_destination.dart';
+import 'pi_brand_mark.dart';
 import 'chat_session_drawer.dart';
 import 'global_search_sheet.dart';
 import 'session_sync_screen.dart';
@@ -167,16 +169,22 @@ class _AppShellState extends State<AppShell> {
                   : null,
               appBar: AppBar(
                 automaticallyImplyLeading: false,
-                leadingWidth: 52,
+                leadingWidth: 56,
                 leading: chatOpen
                     ? IconButton(
                         key: const Key('open-chat-drawer'),
                         tooltip: 'Open chats',
                         onPressed: _openChats,
-                        icon: const Icon(Icons.menu_rounded, size: 22),
+                        icon: const Icon(
+                          Icons.space_dashboard_outlined,
+                          size: 24,
+                        ),
                       )
-                    : null,
-                titleSpacing: chatOpen ? 0 : 16,
+                    : const Padding(
+                        padding: EdgeInsets.all(PiSpacing.sm),
+                        child: PiBrandMark(size: 28),
+                      ),
+                titleSpacing: 0,
                 title: chatOpen
                     ? Text(
                         selected?.name ?? 'Chat',

@@ -14,8 +14,8 @@ Include the smallest reproduction that proves the problem. Use synthetic data wh
 
 Pi Mob is for one owner on a private Tailscale network. The bridge binds to loopback, authenticates installations, validates bounded payloads, and records state-changing commands before dispatch.
 
-Pi Mob does not provide public Internet or Funnel hardening, multi-user authorization, an operating-system sandbox around OMP, or protection from a compromised owner device, tailnet, extension, or credential.
+Pi Mob does not provide public Internet or Funnel hardening, multi-user authorization, an operating-system sandbox around Pi, or protection from a compromised owner device, tailnet, extension, or credential.
 
-OMP uses the owner's normal execution model and login environment. Extensions run with the host user's authority. Exactly-once execution inside OMP or external tools is not guaranteed.
+Pi uses the owner's normal execution model and login environment. Extensions run with the host user's authority. Exactly-once execution inside Pi or external tools is not guaranteed.
 
 See [Privacy](docs/PRIVACY.md) and [Project status](docs/PROJECT_STATUS.md).

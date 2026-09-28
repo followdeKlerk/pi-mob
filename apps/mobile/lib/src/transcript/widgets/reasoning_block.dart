@@ -6,11 +6,14 @@
 /// private or complete chain-of-thought.
 library;
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../ui/theme/pi_theme.dart';
 import '../../ui/shell/motion_primitives.dart';
 import 'view_data/reasoning_view_data.dart';
+import 'reasoning_orb.dart';
 
 class ReasoningBlock extends StatefulWidget {
   const ReasoningBlock._({required this.data, super.key});
@@ -29,6 +32,8 @@ class ReasoningBlock extends StatefulWidget {
 
 class _ReasoningBlockState extends State<ReasoningBlock> {
   late bool _expanded;
+  bool _showTerminalTransition = false;
+  Timer? _terminalTransitionTimer;
 
   @override
   void initState() {
@@ -41,14 +46,33 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.data.phase != widget.data.phase) {
       _expanded = widget.data.isExpandedByDefault;
+      if (oldWidget.data.phase == ReasoningPhase.active &&
+          widget.data.phase != ReasoningPhase.active &&
+          widget.data.summary.trim().isEmpty &&
+          widget.data.steps.isEmpty) {
+        _showTerminalTransition = true;
+        _terminalTransitionTimer?.cancel();
+        _terminalTransitionTimer = Timer(PiDuration.medium, () {
+          if (mounted) setState(() => _showTerminalTransition = false);
+        });
+      }
     }
+  }
+
+  @override
+  void dispose() {
+    _terminalTransitionTimer?.cancel();
+    super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final data = widget.data;
     final active = data.phase == ReasoningPhase.active;
-    if (!active && data.summary.trim().isEmpty && data.steps.isEmpty) {
+    if (!active &&
+        !_showTerminalTransition &&
+        data.summary.trim().isEmpty &&
+        data.steps.isEmpty) {
       return const SizedBox.shrink();
     }
     final colors = Theme.of(context).colorScheme;
@@ -67,55 +91,55 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
         ),
         child: Material(
           color: colors.surfaceContainerLow,
-          borderRadius: BorderRadius.circular(PiRadius.md),
+          borderRadius: BorderRadius.circular(PiRadius.sm),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: [
               InkWell(
                 key: const Key('reasoning-header'),
-                borderRadius: BorderRadius.circular(PiRadius.md),
+                borderRadius: BorderRadius.circular(PiRadius.sm),
                 onTap: () => setState(() => _expanded = !_expanded),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: PiSpacing.md,
-                    vertical: PiSpacing.sm,
-                  ),
-                  child: Row(
-                    children: [
-                      if (active) ...[
-                        MotionSpinner(
-                          strokeWidth: 1.8,
-                          dimension: 14,
-                          color: colors.primary,
-                          label: 'Reasoning in progress',
-                        ),
-                        const SizedBox(width: PiSpacing.sm),
-                      ] else ...[
-                        Icon(
-                          Icons.check_rounded,
-                          size: 16,
-                          color: colors.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: PiSpacing.sm),
-                      ],
-                      Expanded(
-                        child: Text(
-                          label,
-                          style: text.labelLarge?.copyWith(
-                            color: colors.onSurfaceVariant,
-                            fontWeight: FontWeight.w500,
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(minHeight: 48),
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: PiSpacing.md,
+                      vertical: PiSpacing.sm,
+                    ),
+                    child: Row(
+                      children: [
+                        MotionCrossfade(
+                          child: Row(
+                            key: ValueKey(active),
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              ReasoningOrb(active: active, size: 30),
+                              const SizedBox(width: PiSpacing.sm),
+                            ],
                           ),
                         ),
-                      ),
-                      Icon(
-                        _expanded
-                            ? Icons.keyboard_arrow_up_rounded
-                            : Icons.keyboard_arrow_down_rounded,
-                        size: 20,
-                        color: colors.onSurfaceVariant,
-                      ),
-                    ],
+                        Expanded(
+                          child: Text(
+                            label,
+                            style: text.labelLarge?.copyWith(
+                              color: colors.onSurfaceVariant,
+                              fontWeight: FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                        AnimatedRotation(
+                          turns: _expanded ? .5 : 0,
+                          duration: PiMotion.resolve(context, PiDuration.short),
+                          curve: PiCurve.decelerate,
+                          child: Icon(
+                            Icons.keyboard_arrow_down_rounded,
+                            size: 20,
+                            color: colors.onSurfaceVariant,
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -161,8 +185,11 @@ class _ReasoningBlockState extends State<ReasoningBlock> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Container(
-                    width: 18,
-                    height: 18,
+                    constraints: const BoxConstraints(
+                      minWidth: 24,
+                      minHeight: 24,
+                    ),
+                    padding: const EdgeInsets.all(PiSpacing.xs),
                     alignment: Alignment.center,
                     decoration: BoxDecoration(
                       color: colors.surfaceContainerHighest,

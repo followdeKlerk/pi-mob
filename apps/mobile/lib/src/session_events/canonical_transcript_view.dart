@@ -1,3 +1,5 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 
 import '../transcript/domain/transcript_diagnostics.dart';
@@ -20,6 +22,7 @@ class CanonicalTranscriptView extends StatefulWidget {
     required this.sessionId,
     required this.manager,
     this.onEditUserMessage,
+    this.attachmentLoader,
     this.onScrollPersist,
     this.initialScrollOffset,
     this.initialFollowMode,
@@ -29,6 +32,7 @@ class CanonicalTranscriptView extends StatefulWidget {
   final String sessionId;
   final CanonicalSessionManager manager;
   final ValueChanged<String>? onEditUserMessage;
+  final Future<Uint8List> Function(String attachmentId)? attachmentLoader;
   final void Function(int offset, bool followMode)? onScrollPersist;
   final int? initialScrollOffset;
   final bool? initialFollowMode;
@@ -103,6 +107,7 @@ class _CanonicalTranscriptViewState extends State<CanonicalTranscriptView> {
   Widget build(BuildContext context) => TranscriptView(
     document: _document,
     onEditUserMessage: widget.onEditUserMessage,
+    attachmentLoader: widget.attachmentLoader,
     onScrollPersist: widget.onScrollPersist,
     initialScrollOffset: widget.initialScrollOffset,
     initialFollowMode: widget.initialFollowMode,

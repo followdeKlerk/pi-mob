@@ -15,27 +15,27 @@ A schema, class, widget, or isolated test does not prove production wiring.
 
 | Configuration | `hello.accepted.capabilities` |
 | --- | --- |
-| without-FCM | `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
-| with-FCM | `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
+| without-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `session_events.v2`, `streams.v1` |
+| with-FCM | `catalogue.v1`, `commands.v1`, `controller_leases.v1`, `notifications.v1`, `session_events.v2`, `streams.v1` |
 
 ## Production-wired on main (`v0.0.3-alpha.1` target; not published)
 
 - Manual pairing with an HTTPS endpoint and one-time passcode.
 - Per-installation authentication for WebSocket, attachments, exports, and device registration.
 - Durable replay and live delivery for streams and canonical session events.
-- Session list, rename, create, delete, activation, and supervised OMP ownership.
+- Session list, rename, create, delete, activation, and supervised Pi ownership.
 - Session-scoped controller leases and prompt routing.
 - Restoration of recent chat, drafts, and attachments after reconnect.
 - Bounded host diagnostics and background FCM notifications when available.
 
-The normal daemon stores canonical session events before delivery. Raw OMP RPC remains host-internal, and the released client does not receive `raw_rpc.v1`.
+The normal daemon stores canonical session events before delivery. Raw Pi RPC remains host-internal, and the released client does not receive `raw_rpc.v1`.
 
 ## Release facts
 
 - Android application ID: `com.example.pi_mob`.
 - Release signing fails closed and uses credentials outside the repository.
 - Main-branch version `0.0.3-alpha.1` / code `3` has no published release assets.
-- Published assets: a macOS x64 bridge in [`v0.0.1-alpha.1`](https://github.com/followdeKlerk/pi-mob/releases/tag/v0.0.1-alpha.1), and an Android APK in [`v0.0.2-alpha.1`](https://github.com/followdeKlerk/pi-mob/releases/tag/v0.0.2-alpha.1). These predate the main-branch OMP migration; do not mix them with main-branch setup instructions. The bridge is unsigned and not notarized.
+- Published assets: a macOS x64 bridge in [`v0.0.1-alpha.1`](https://github.com/followdeKlerk/pi-mob/releases/tag/v0.0.1-alpha.1), and an Android APK in [`v0.0.2-alpha.1`](https://github.com/followdeKlerk/pi-mob/releases/tag/v0.0.2-alpha.1). These predate the current Pi runtime; do not mix them with main-branch setup instructions. The bridge is unsigned and not notarized.
 
 ## Planned
 

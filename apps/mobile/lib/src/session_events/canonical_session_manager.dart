@@ -32,6 +32,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqlite3/sqlite3.dart';
@@ -103,6 +104,7 @@ class CanonicalSessionManager extends ChangeNotifier {
   final Map<String, int> _lastSequenceBySession = {};
   String? _hostGeneration;
   bool _enabled = false;
+  bool _notificationScheduled = false;
 
   /// Set of sessionIds the manager is currently subscribed to via
   /// `session.events.subscribe`. The coordinator uses this to know
@@ -255,7 +257,7 @@ class CanonicalSessionManager extends ChangeNotifier {
     if (sequence > (_lastSequenceBySession[sessionId] ?? 0)) {
       _lastSequenceBySession[sessionId] = sequence;
     }
-    notifyListeners();
+    _notifyAfterFrame();
     return CanonicalIngestSummary(
       applied: applied,
       duplicates: duplicates,
@@ -263,6 +265,18 @@ class CanonicalSessionManager extends ChangeNotifier {
       conflicts: conflicts,
       wrongSession: wrongSession,
     );
+  }
+
+  /// Delays UI invalidation until the next frame so consecutive completed
+  /// ingests produce one rebuild. Event application and SQLite persistence have
+  /// already completed when this is called.
+  void _notifyAfterFrame() {
+    if (_notificationScheduled) return;
+    _notificationScheduled = true;
+    SchedulerBinding.instance.scheduleFrameCallback((_) {
+      _notificationScheduled = false;
+      notifyListeners();
+    });
   }
 
   /// Decodes and ingests one bounded `session.events.replay.result`

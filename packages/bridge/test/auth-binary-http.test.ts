@@ -162,6 +162,21 @@ describe("Phase 4 POST /v1/attachments authorization", () => {
     expect(json).toMatchObject({ mimeType: "image/png", width: 1, height: 1, bytes: PNG.length, sha256: digest(PNG) });
   });
 
+  test("authenticated attachment download returns only the owner's image bytes", async () => {
+    const boot = bootServer(); sessions.push(boot);
+    const owner = bindCredential(boot.store);
+    const other = { installationId: "99999999-9999-4999-8999-999999999999", plain: generateInstallationCredential() };
+    boot.store.upsertInstallationCredential({ installationId: other.installationId, credentialHash: hashCredential(other.plain), enrollmentSecretHash: "2".repeat(64), enrollmentSource: "seed", createdAt: 1, lastSeenAt: 1 });
+    const server = await boot.whenReady();
+    const uploaded = await fetch(`http://127.0.0.1:${server.port}/v1/attachments`, { method: "POST", body: form(owner.installationId), headers: { "X-Installation-Id": owner.installationId, "X-Installation-Credential": owner.plain } });
+    const { attachmentId } = await uploaded.json() as { attachmentId: string };
+    const ownerResponse = await fetch(`http://127.0.0.1:${server.port}/v1/attachments/${attachmentId}`, { headers: { "X-Installation-Id": owner.installationId, "X-Installation-Credential": owner.plain } });
+    expect(ownerResponse.status).toBe(200); expect(ownerResponse.headers.get("content-type")).toBe("image/png"); expect(new Uint8Array(await ownerResponse.arrayBuffer())).toEqual(PNG);
+    const otherResponse = await fetch(`http://127.0.0.1:${server.port}/v1/attachments/${attachmentId}`, { headers: { "X-Installation-Id": other.installationId, "X-Installation-Credential": other.plain } });
+    expect(otherResponse.status).toBe(404);
+    expect((await fetch(`http://127.0.0.1:${server.port}/v1/attachments/not-an-id`)).status).toBe(400);
+  });
+
   test("revoked credential returns 401", async () => {
     const boot = bootServer();
     sessions.push(boot);

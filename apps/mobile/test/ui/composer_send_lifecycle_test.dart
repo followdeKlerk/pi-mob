@@ -104,6 +104,17 @@ void main() {
       ),
       findsOneWidget,
     );
+
+    await tester.enterText(find.byKey(const Key('draft-field')), '/thinking');
+    await tester.pump(const Duration(milliseconds: 50));
+    expect(
+      find.descendant(
+        of: find.byKey(const Key('slash-command-results')),
+        matching: find.text('/thinking'),
+      ),
+      findsOneWidget,
+    );
+    expect(find.textContaining('Change the thinking level'), findsOneWidget);
   });
 }
 

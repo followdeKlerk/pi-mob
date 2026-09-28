@@ -90,6 +90,16 @@ void main() {
     );
     expect(find.byKey(const Key('manual-endpoint-field')), findsOneWidget);
     expect(find.byKey(const Key('pairing-passcode-field')), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('pairing-submit')),
+      180,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('pairing-form')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
     expect(find.byKey(const Key('pairing-submit')), findsOneWidget);
     expect(find.text('Camera'), findsNothing);
     expect(find.textContaining('QR'), findsNothing);
@@ -115,6 +125,16 @@ void main() {
     await tester.enterText(
       find.byKey(const Key('pairing-passcode-field')),
       '123456',
+    );
+    await tester.scrollUntilVisible(
+      find.byKey(const Key('pairing-submit')),
+      180,
+      scrollable: find
+          .descendant(
+            of: find.byKey(const Key('pairing-form')),
+            matching: find.byType(Scrollable),
+          )
+          .first,
     );
     await tester.tap(find.byKey(const Key('pairing-submit')));
     await tester.pumpAndSettle();

@@ -161,6 +161,19 @@ describe("session.history.page durable bridge integration", () => {
     client.ws.close();
   });
 
+  test("retains historical text above 60 KiB within the page budget", async () => {
+    const { store, server } = start();
+    const text = "x".repeat(128 * 1024);
+    store.appendEvent(`session:${SESSION_ID}`, "assistant.delta", { text }, "large-event");
+    const { client, connectionId } = await connect(server);
+
+    const result = await history(client, connectionId, { pageSize: 100, pageToken: null });
+    const [item] = itemsOf(result);
+    expect((item!.payload as Record<string, unknown>).text).toBe(text);
+    expect(Buffer.byteLength(JSON.stringify(payloadOf(result)))).toBeLessThan(700 * 1024);
+    client.ws.close();
+  });
+
   test("bumps snapshotRevision after a journal append", async () => {
     const { store, server } = start();
     store.appendEvent(`session:${SESSION_ID}`, "assistant.delta", { index: 1 }, "event-1");

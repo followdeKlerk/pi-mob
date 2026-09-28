@@ -1,12 +1,12 @@
 # Quick start
 
-This guide covers the main-branch `0.0.3-alpha.1` source build on macOS x64. No matching bridge/APK release has been published. Do not mix older preview downloads with these OMP instructions.
+This guide covers the `0.0.3-alpha.1` main-branch source build on macOS x64. No matching bridge/APK release has been published; older preview binaries predate the current Pi runtime.
 
 ## Host
 
-1. Install OMP and make sure `omp` is on `PATH`.
+1. Install Pi and make sure `pi` is on `PATH`.
 2. Install Tailscale on the host and phone. Sign in to the same tailnet.
-3. On a macOS x64 host, run `bun install --frozen-lockfile && bun run build` from the repository root, then use `packages/bridge/dist/release` as your bundle directory (see [bridge build instructions](../packages/bridge/README.md)).
+3. On a macOS x64 host, run `bun install --frozen-lockfile && bun run build` from the repository root, then `cd packages/bridge/dist/release` to use the bundle (see [bridge build instructions](../packages/bridge/README.md)).
 4. Configure the bridge:
 
    ```sh
@@ -30,7 +30,7 @@ This guide covers the main-branch `0.0.3-alpha.1` source build on macOS x64. No 
 
 ## Phone
 
-1. Build and install the matching Android app from this checkout using the [Android build instructions](../apps/mobile/README.md); the older GitHub release APKs are not built for this main-branch backend.
+1. Build and install the matching Android app from this checkout using the [Android build instructions](../apps/mobile/README.md); the older GitHub release APKs do not match this main-branch backend.
 2. Open Pi Mob and tap **Pair**.
 3. Enter the HTTPS endpoint and six-digit passcode.
 4. Grant notification permission when notifications are enabled.
@@ -41,4 +41,4 @@ Pairing is manual. QR and JSON import are unsupported.
 
 Both devices must use the same tailnet. Run `./bin/pi-mob pair` again when the passcode expires.
 
-If the phone cannot connect, run `./bin/pi-mob status` and inspect the OMP probe and LaunchAgent logs. Check the service-account path and Android permission when notifications fail.
+If the phone cannot connect, run `./bin/pi-mob status` and inspect the Pi probe and LaunchAgent logs. Check the service-account path and Android permission when notifications fail.

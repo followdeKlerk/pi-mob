@@ -50,11 +50,12 @@ interface SessionListToken {
 
 function canonicalDecimal(value: unknown): value is string { return typeof value === "string" && /^(0|[1-9][0-9]*)$/.test(value); }
 
-/** Preserve structural identifiers while placing one shared UTF-8 budget over
- * large historical text/arguments. Live events remain untouched. */
+/** Preserve structural identifiers while bounding one event below the
+ * 700 KiB history-page budget. Live and canonical events remain untouched. */
+const MAX_HISTORY_EVENT_BYTES = 512 * 1024;
 function boundHistoryPayload(payload: Record<string, unknown>): Record<string, unknown> {
-  if (Buffer.byteLength(JSON.stringify(payload)) <= 64 * 1024) return payload;
-  const budget = { remaining: 60 * 1024 };
+  if (Buffer.byteLength(JSON.stringify(payload)) <= MAX_HISTORY_EVENT_BYTES) return payload;
+  const budget = { remaining: MAX_HISTORY_EVENT_BYTES };
   const visit = (value: unknown): unknown => {
     if (typeof value === "string") {
       const bytes = Buffer.from(value);

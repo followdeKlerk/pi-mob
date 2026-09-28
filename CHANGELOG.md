@@ -4,7 +4,7 @@ This file records user-visible preview changes. It does not promise compatibilit
 
 ## 0.0.3-alpha.1 (main branch; unreleased)
 
-- Replaced the normal daemon's Pi subprocess backend with supervised, resumable OMP sessions while preserving stable bridge session IDs.
+- Restored the normal daemon's supervised Pi subprocess backend while preserving stable bridge session IDs.
 - Added the selected-session `/commands` catalogue UI (not production-wired by the normal daemon) and the host-driven `/model` picker.
 - Made canonical session events the main-branch transcript path.
 - Improved bounded legacy cleanup, tool-result handling, and diagnostics.

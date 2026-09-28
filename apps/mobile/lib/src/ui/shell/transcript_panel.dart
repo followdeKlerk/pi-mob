@@ -38,24 +38,6 @@ class _TranscriptPanelState extends State<TranscriptPanel> {
   bool _restoredLoaded = false;
 
   @override
-  void initState() {
-    super.initState();
-    widget.coordinator.canonicalSessionManager.addListener(_onCanonicalChanged);
-  }
-
-  @override
-  void dispose() {
-    widget.coordinator.canonicalSessionManager.removeListener(
-      _onCanonicalChanged,
-    );
-    super.dispose();
-  }
-
-  void _onCanonicalChanged() {
-    if (mounted) setState(() {});
-  }
-
-  @override
   void didChangeDependencies() {
     super.didChangeDependencies();
     _loadPersisted();
@@ -117,6 +99,7 @@ class _TranscriptPanelState extends State<TranscriptPanel> {
             sessionId: sessionId,
             manager: coordinator.canonicalSessionManager,
             onEditUserMessage: coordinator.updateDraft,
+            attachmentLoader: coordinator.downloadAttachmentBytes,
             onScrollPersist: _onPersist,
             initialScrollOffset: restoreOffset,
             initialFollowMode: restoreFollow,

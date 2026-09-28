@@ -132,11 +132,15 @@ void main() {
         ),
       );
       expect(find.text(status.label), findsOneWidget);
-      expect(
-        find.byIcon(status.icon),
-        findsOneWidget,
-        reason: 'status icon for $status missing',
-      );
+      if (status == TranscriptToolStatus.running) {
+        expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      } else {
+        expect(
+          find.byIcon(status.icon),
+          findsOneWidget,
+          reason: 'status icon for $status missing',
+        );
+      }
       if (status.isFailure) {
         expect(find.byKey(const Key('tool-error-banner')), findsOneWidget);
       }
@@ -337,4 +341,41 @@ void main() {
     expect(find.byKey(const Key('tool-inline-preview-cap')), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'tool status transitions crossfade and disable motion when requested',
+    (tester) async {
+      const key = ValueKey('stable-tool');
+      Widget build(TranscriptToolStatus status, {bool reducedMotion = false}) =>
+          _wrap(
+            MediaQuery(
+              data: MediaQueryData(disableAnimations: reducedMotion),
+              child: ToolCard.forViewData(
+                ToolCallViewData(
+                  toolCallId: 'stable-tool',
+                  toolName: BuiltInToolName.read,
+                  arguments: const <String, Object?>{'path': '/tmp/x'},
+                  status: status,
+                ),
+                key: key,
+              ),
+            ),
+          );
+
+      await tester.pumpWidget(build(TranscriptToolStatus.running));
+      expect(find.byType(CircularProgressIndicator), findsOneWidget);
+      await tester.pumpWidget(build(TranscriptToolStatus.completed));
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(find.byType(CircularProgressIndicator), findsNothing);
+      expect(find.byIcon(Icons.check_circle), findsOneWidget);
+      expect(find.byType(AnimatedSwitcher), findsNWidgets(2));
+
+      await tester.pumpWidget(
+        build(TranscriptToolStatus.error, reducedMotion: true),
+      );
+      for (final finder in find.byType(AnimatedSwitcher).evaluate()) {
+        expect((finder.widget as AnimatedSwitcher).duration, Duration.zero);
+      }
+    },
+  );
 }
