@@ -1,5 +1,7 @@
 # Pi Mob
 
+> **Archived:** Pi Mob has been archived following the release of **Pi Durable**, which supersedes this project. Development has moved to Pi Durable; this repository is retained as a read-only record of Pi Mob’s code and history.
+
 > **Alpha software:** Pi Mob is an unsupported preview. Compatibility and distribution can change.
 
 Pi Mob lets you control local Pi sessions from an Android phone. The bridge runs on macOS or Linux; Linux currently supports direct loopback daemon runs only. macOS adds managed installation and private Tailscale Serve.
